@@ -1,0 +1,33 @@
+{
+  "name": "pi-container-sandbox",
+  "version": "0.1.0",
+  "description": "pi coding-agent extension that runs every read/write/edit/bash op inside a per-session Docker container",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "index.ts",
+    "src/",
+    "docker/"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "build-image": "docker build -t pi-container-sandbox:latest -f docker/Dockerfile docker",
+    "clean": "rm -rf dist"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.74.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.74.0",
+    "@types/node": "^22.0.0",
+    "typescript": "~5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
