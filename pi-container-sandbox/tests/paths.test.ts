@@ -1,0 +1,148 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
+import { tmpdir } from "node:os";
+import { toRemote, shq, isInsideCwd, isReadOnlyMount, resolveExtraMountPath,
+         getExternalPath, isAllowedExternalResource, PathApprovalStore } from "../src/paths";
+
+const testDir = resolvePath(tmpdir(), "pi-paths-test-" + Date.now());
+
+beforeEach(() => {
+  if (!existsSync(testDir)) mkdirSync(testDir, { recursive: true });
+});
+afterEach(() => {
+  if (existsSync(testDir)) rmSync(testDir, { recursive: true });
+});
+
+describe("shq", () => {
+  it("wraps string in single quotes", () => {
+    expect(shq("hello")).toBe("'hello'");
+  });
+  it("escapes embedded single quotes", () => {
+    expect(shq("it's")).toBe("'it'\\''s'");
+  });
+});
+
+describe("toRemote", () => {
+  it("converts relative path inside cwd to /workspace path", () => {
+    expect(toRemote("src/index.ts", testDir)).toBe("/workspace/src/index.ts");
+  });
+  it("returns /workspace for cwd itself", () => {
+    expect(toRemote(".", testDir)).toBe("/workspace");
+  });
+  it("passes through paths already under /workspace", () => {
+    expect(toRemote("/workspace/src/file.ts", testDir)).toBe("/workspace/src/file.ts");
+  });
+  it("throws for paths outside cwd", () => {
+    expect(() => toRemote("/etc/passwd", testDir)).toThrow("outside of project cwd");
+  });
+  it("passes through paths under a mount target", () => {
+    const mounts = [{ source: "/host/skills", target: "/skills/my-skill" }];
+    expect(toRemote("/skills/my-skill/SKILL.md", testDir, mounts)).toBe("/skills/my-skill/SKILL.md");
+  });
+});
+
+describe("isInsideCwd", () => {
+  it("returns true for relative path inside cwd", () => {
+    expect(isInsideCwd("src/file.ts", testDir)).toBe(true);
+  });
+  it("returns true for /workspace paths", () => {
+    expect(isInsideCwd("/workspace/src/file.ts", testDir)).toBe(true);
+  });
+  it("returns false for paths outside cwd", () => {
+    expect(isInsideCwd("/etc/passwd", testDir)).toBe(false);
+  });
+});
+
+describe("isReadOnlyMount", () => {
+  const mounts = [{ source: "/host/skills", target: "/skills/my-skill" }];
+  it("returns true for exact mount target match", () => {
+    expect(isReadOnlyMount("/skills/my-skill", mounts)).toBe(true);
+  });
+  it("returns true for path under mount target", () => {
+    expect(isReadOnlyMount("/skills/my-skill/SKILL.md", mounts)).toBe(true);
+  });
+  it("returns false for unrelated path", () => {
+    expect(isReadOnlyMount("/workspace/src/file.ts", mounts)).toBe(false);
+  });
+});
+
+describe("resolveExtraMountPath", () => {
+  const mounts = [{ source: "/h/a", target: "/mnt/a" }];
+  it("returns path if it matches a mount target", () => {
+    expect(resolveExtraMountPath("/mnt/a", mounts)).toBe("/mnt/a");
+    expect(resolveExtraMountPath("/mnt/a/file.txt", mounts)).toBe("/mnt/a/file.txt");
+  });
+  it("returns null for unrelated path", () => {
+    expect(resolveExtraMountPath("/other/path", mounts)).toBeNull();
+  });
+});
+
+describe("getExternalPath", () => {
+  it("returns null for paths inside cwd", () => {
+    expect(getExternalPath("src/file.ts", testDir, [])).toBeNull();
+  });
+  it("returns absolute path for paths outside cwd", () => {
+    expect(getExternalPath("/etc/hosts", testDir, [])).toBe("/etc/hosts");
+  });
+  it("returns null for /workspace paths", () => {
+    expect(getExternalPath("/workspace/src/file.ts", testDir, [])).toBeNull();
+  });
+});
+
+describe("isAllowedExternalResource", () => {
+  it("allows pi-clipboard files", () => {
+    expect(isAllowedExternalResource("/tmp/pi-clipboard-12345.txt", [])).toBe(true);
+  });
+  it("allows paths matching a prefix", () => {
+    expect(isAllowedExternalResource("/home/user/downloads/file.txt", ["/home/user/downloads"])).toBe(true);
+  });
+  it("denies unrelated paths", () => {
+    expect(isAllowedExternalResource("/etc/passwd", [])).toBe(false);
+  });
+});
+
+describe("PathApprovalStore", () => {
+  it("starts with no records", () => {
+    const store = new PathApprovalStore(testDir);
+    expect(store.list()).toEqual([]);
+  });
+  it("adds and finds records", () => {
+    const store = new PathApprovalStore(testDir);
+    store.add("/tmp/foo", Infinity);
+    const found = store.find("/tmp/foo");
+    expect(found).toBeDefined();
+    expect(found!.path).toBe("/tmp/foo");
+  });
+  it("revokes records", () => {
+    const store = new PathApprovalStore(testDir);
+    store.add("/tmp/foo", Infinity);
+    expect(store.revoke("/tmp/foo")).toBe(true);
+    expect(store.find("/tmp/foo")).toBeUndefined();
+  });
+  it("lists active records", () => {
+    const store = new PathApprovalStore(testDir);
+    store.add("/tmp/a", Infinity);
+    store.add("/tmp/b", 30);
+    expect(store.list().length).toBe(2);
+  });
+  it("prefix matching finds child paths", () => {
+    const store = new PathApprovalStore(testDir);
+    store.add("/tmp/approved-dir", Infinity);
+    const found = store.find("/tmp/approved-dir/sub/file.txt");
+    expect(found).toBeDefined();
+    expect(found!.path).toBe("/tmp/approved-dir");
+  });
+  it("expired records are not returned", () => {
+    const store = new PathApprovalStore(testDir);
+    store.add("/tmp/expired", -1);
+    expect(store.find("/tmp/expired")).toBeUndefined();
+    expect(store.list()).toEqual([]);
+  });
+  it("persists and reloads from disk", () => {
+    const store1 = new PathApprovalStore(testDir);
+    store1.add("/tmp/persisted", Infinity);
+    const store2 = new PathApprovalStore(testDir);
+    expect(store2.find("/tmp/persisted")).toBeDefined();
+  });
+});
