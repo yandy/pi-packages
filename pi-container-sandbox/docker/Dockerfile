@@ -7,9 +7,9 @@
 #   - no SSH, no sudo, no setuid binaries beyond what debian-slim ships
 #   - every downloaded binary is SHA256-verified at build time
 #
-# Built with either:
+# Built with:
+#   npm run build-image
 #   docker build -t pi-container-sandbox:latest -f docker/Dockerfile docker
-#   container build -t pi-container-sandbox:latest -f docker/Dockerfile docker
 FROM debian:12-slim
 
 ARG DEBIAN_FRONTEND=noninteractive
