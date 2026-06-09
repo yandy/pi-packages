@@ -160,7 +160,7 @@ export async function requestPathApproval(
 	absPath: string,
 	sessionPrefixes: string[],
 	store: PathApprovalStore,
-	ui: { select: (title: string, options: string[]) => Promise<string | undefined>; notify: (msg: string, level: string) => void },
+	ui: { select: (title: string, options: string[]) => Promise<string | undefined>; notify: (msg: string, level?: "info" | "warning" | "error") => void },
 ): Promise<boolean> {
 	for (const prefix of sessionPrefixes) {
 		if (absPath === prefix || absPath.startsWith(prefix + "/")) return true;
@@ -212,7 +212,7 @@ export async function ensureExternalReadApproved(
 	absPath: string,
 	sessionPrefixes: string[],
 	store: PathApprovalStore,
-	ui: { select: (title: string, options: string[]) => Promise<string | undefined>; notify: (msg: string, level: string) => void },
+	ui: { select: (title: string, options: string[]) => Promise<string | undefined>; notify: (msg: string, level?: "info" | "warning" | "error") => void },
 ): Promise<void> {
 	const approved = await requestPathApproval(absPath, sessionPrefixes, store, ui);
 	if (!approved) {

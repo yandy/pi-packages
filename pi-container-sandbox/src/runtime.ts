@@ -180,7 +180,7 @@ export function dockerRuntime(): Runtime {
 	};
 }
 
-export async function detectRuntime(ctx?: { ui?: { notify: (msg: string, level: string) => void } }): Promise<Runtime | null> {
+export async function detectRuntime(ctx?: { ui?: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }): Promise<Runtime | null> {
 	if (!which("docker")) {
 		return null;
 	}

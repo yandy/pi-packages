@@ -2,6 +2,7 @@ export interface TierSpec {
 	memory: string;
 	swap: string;
 	cpus: string;
+	pidsLimit?: number;
 }
 
 export type SizeTier = "small" | "medium" | "large";

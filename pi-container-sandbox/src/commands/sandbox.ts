@@ -13,7 +13,7 @@ export function createSandboxCommandHandlers(localCwd: string, pathApprovals: {
 	find(p: string): { path: string; approvedAt: number; expiresAt: number } | undefined;
 }) {
 	return {
-		status: async (_args: string, ctx: { ui: { notify: (msg: string, level: string) => void } }) => {
+		status: async (_args: string, ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }) => {
 			const sbx = getSbx();
 			if (!sbx) {
 				const cfg = loadSbxConfig(localCwd);
@@ -43,11 +43,11 @@ export function createSandboxCommandHandlers(localCwd: string, pathApprovals: {
 			);
 		},
 
-		start: async (_args: string, ctx: { ui: { notify: (msg: string, level: string) => void } }) => {
+		start: async (_args: string, ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }) => {
 			ctx.ui.notify("/sandbox start requires sandbox initialization via session start. Restart pi with --container.", "info");
 		},
 
-		stop: async (_args: string, ctx: { ui: { notify: (msg: string, level: string) => void } }) => {
+		stop: async (_args: string, ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }) => {
 			const sbx = getSbx();
 			if (!sbx) {
 				ctx.ui.notify("Sandbox is not active.", "info");
@@ -58,7 +58,7 @@ export function createSandboxCommandHandlers(localCwd: string, pathApprovals: {
 			ctx.ui.notify(`Sandbox ${sbx.name} stopped and removed.`, "info");
 		},
 
-		keep: async (args: string, ctx: { ui: { notify: (msg: string, level: string) => void } }) => {
+		keep: async (args: string, ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }) => {
 			const sbx = getSbx();
 			if (!sbx) {
 				ctx.ui.notify("Sandbox is not active.", "info");
@@ -71,7 +71,7 @@ export function createSandboxCommandHandlers(localCwd: string, pathApprovals: {
 			ctx.ui.notify(`Sandbox container "${name}" saved to sandbox.json. It will be reused next session.`, "info");
 		},
 
-		exec: async (args: string, ctx: { ui: { notify: (msg: string, level: string) => void } }) => {
+		exec: async (args: string, ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }) => {
 			const sbx = getSbx();
 			if (!sbx) {
 				ctx.ui.notify("Sandbox is not active.", "info");
@@ -89,7 +89,7 @@ export function createSandboxCommandHandlers(localCwd: string, pathApprovals: {
 			}
 		},
 
-		doctor: async (_args: string, ctx: { ui: { notify: (msg: string, level: string) => void } }) => {
+		doctor: async (_args: string, ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }) => {
 			const sbx = getSbx();
 			if (!sbx) {
 				ctx.ui.notify("Sandbox is not active. Start pi with --container.", "info");
@@ -114,7 +114,7 @@ export function createSandboxCommandHandlers(localCwd: string, pathApprovals: {
 			ctx.ui.notify(`Sandbox doctor:\n${out}`, "info");
 		},
 
-		config: async (_args: string, ctx: { ui: { notify: (msg: string, level: string) => void } }) => {
+		config: async (_args: string, ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }) => {
 			const sbx = getSbx();
 			const hostCwd = sbx?.hostCwd ?? localCwd;
 			const cfg = loadSbxConfig(hostCwd);
@@ -133,7 +133,7 @@ export function createSandboxCommandHandlers(localCwd: string, pathApprovals: {
 			ctx.ui.notify(lines.join("\n"), "info");
 		},
 
-		allow: async (raw: string, ctx: { ui: { notify: (msg: string, level: string) => void } }) => {
+		allow: async (raw: string, ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }) => {
 			const sbx = getSbx();
 			if (!sbx) {
 				ctx.ui.notify("Sandbox is not active.", "info");
@@ -156,7 +156,7 @@ export function createSandboxCommandHandlers(localCwd: string, pathApprovals: {
 			ctx.ui.notify(`Sandbox: read access now allowed for ${abs}`, "info");
 		},
 
-		paths: async (args: string, ctx: { ui: { notify: (msg: string, level: string) => void } }) => {
+		paths: async (args: string, ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }) => {
 			const parts = args.trim().split(/\s+/);
 			if (parts[0] === "revoke" && parts[1]) {
 				const target = parts.slice(1).join(" ");
@@ -183,7 +183,7 @@ export function createSandboxCommandHandlers(localCwd: string, pathApprovals: {
 			);
 		},
 
-		tiers: async (args: string, ctx: { ui: { notify: (msg: string, level: string) => void } }) => {
+		tiers: async (args: string, ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }) => {
 			const parts = args.trim().split(/\s+/);
 			if (parts[0] === "set" && parts[1]) {
 				const tier = parts[1] as SizeTier;
