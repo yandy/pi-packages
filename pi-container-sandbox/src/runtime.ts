@@ -191,7 +191,115 @@ export class DockerRuntime implements Runtime {
     this.state = { kind: "uninit", docker: null };
   }
 
-  async exec(_opts: ExecOpts): Promise<ExecResult> { throw new Error("not implemented"); }
+  async exec(opts: ExecOpts): Promise<ExecResult> {
+    if (this.state.kind !== "ready") throw new Error("Sandbox not ready");
+    const container = this.state.container;
+
+    const exec = await container.exec({
+      Cmd: opts.cmd,
+      AttachStdout: true,
+      AttachStderr: true,
+      AttachStdin: opts.stdin !== undefined,
+      WorkingDir: opts.workDir ?? this.workRoot,
+      Env: opts.env,
+    });
+
+    const controller = new AbortController();
+    let timedOut = false;
+    let timer: NodeJS.Timeout | null = null;
+    if (opts.timeoutMs && opts.timeoutMs > 0) {
+      timer = setTimeout(() => {
+        timedOut = true;
+        controller.abort(new Error("timeout"));
+      }, opts.timeoutMs);
+    }
+    if (opts.signal) {
+      const externalSignal = opts.signal;
+      if (externalSignal.aborted) {
+        controller.abort(externalSignal.reason);
+      } else {
+        externalSignal.addEventListener(
+          "abort",
+          () => controller.abort(externalSignal.reason),
+          { once: true },
+        );
+      }
+    }
+    if (controller.signal.aborted) {
+      if (timer) clearTimeout(timer);
+      return { exitCode: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+    }
+
+    let stream: NodeJS.ReadWriteStream;
+    try {
+      stream = (await exec.start({
+        Detach: false,
+        Tty: false,
+        hijack: true,
+        stdin: opts.stdin !== undefined,
+        abortSignal: controller.signal,
+      })) as NodeJS.ReadWriteStream;
+    } catch {
+      if (timer) clearTimeout(timer);
+      return { exitCode: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+    }
+
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+
+    let pending = Buffer.alloc(0);
+    stream.on("data", (chunk: Buffer) => {
+      pending = Buffer.concat([pending, chunk]);
+      while (pending.length >= 8) {
+        const streamType = pending[0];
+        const size = pending.readUInt32BE(4);
+        if (pending.length < 8 + size) break;
+        const payload = pending.subarray(8, 8 + size);
+        pending = pending.subarray(8 + size);
+        if (streamType === 1) {
+          stdoutChunks.push(payload);
+          opts.onData?.(payload);
+        } else if (streamType === 2) {
+          stderrChunks.push(payload);
+        }
+      }
+    });
+
+    controller.signal.addEventListener("abort", () => {
+      try { (stream as any).destroy(); } catch {}
+    });
+
+    return new Promise<ExecResult>((resolve) => {
+      let settled = false;
+      const finish = async () => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        try {
+          const inspect = await exec.inspect();
+          resolve({
+            exitCode: timedOut ? null : (inspect.ExitCode ?? null),
+            stdout: Buffer.concat(stdoutChunks),
+            stderr: Buffer.concat(stderrChunks),
+          });
+        } catch {
+          resolve({
+            exitCode: null,
+            stdout: Buffer.concat(stdoutChunks),
+            stderr: Buffer.concat(stderrChunks),
+          });
+        }
+      };
+      stream.on("end", finish);
+      stream.on("error", finish);
+      stream.on("close", finish);
+      if (opts.stdin !== undefined && !controller.signal.aborted) {
+        const buf = typeof opts.stdin === "string" ? Buffer.from(opts.stdin) : opts.stdin;
+        (stream as any).write(buf);
+      }
+      (stream as any).end();
+    });
+  }
 
   private async _doInit(): Promise<void> {
     const docker = await this._getDocker();

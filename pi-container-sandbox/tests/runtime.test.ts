@@ -97,3 +97,106 @@ describe.skipIf(!dockerAvailable)("DockerRuntime lifecycle", () => {
     }
   }, 120000);
 });
+
+describe.skipIf(!dockerAvailable)("DockerRuntime exec", () => {
+  const testName = `pi-test-exec-${Date.now()}`;
+
+  afterAll(async () => {
+    const d = new Dockerode({ socketPath: "/var/run/docker.sock" });
+    try { const c = d.getContainer(testName + "-exec1"); await c.remove({ force: true }); } catch {}
+    try { const c = d.getContainer(testName + "-exec2"); await c.remove({ force: true }); } catch {}
+    try { const c = d.getContainer(testName + "-exec3"); await c.remove({ force: true }); } catch {}
+    try { const c = d.getContainer(testName + "-exec4"); await c.remove({ force: true }); } catch {}
+    try { const c = d.getContainer(testName + "-exec5"); await c.remove({ force: true }); } catch {}
+  });
+
+  it("exec returns stdout and exitCode 0", async () => {
+    const runtime = new DockerRuntime({
+      image: "debian:12-slim",
+      hostCwd: "/tmp",
+      name: testName + "-exec1",
+      allowNetwork: false,
+      resources: { memory: "256m", cpus: "0.5" },
+    });
+    await runtime.init();
+    await runtime.withReady();
+    const result = await runtime.exec({ cmd: ["echo", "-n", "hello"] });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe("hello");
+    expect(result.stderr.toString()).toBe("");
+    await runtime.shutdown();
+  }, 120000);
+
+  it("exec returns non-zero exitCode for failing command", async () => {
+    const runtime = new DockerRuntime({
+      image: "debian:12-slim",
+      hostCwd: "/tmp",
+      name: testName + "-exec2",
+      allowNetwork: false,
+      resources: { memory: "256m", cpus: "0.5" },
+    });
+    await runtime.init();
+    await runtime.withReady();
+    const result = await runtime.exec({ cmd: ["sh", "-c", "exit 42"] });
+    expect(result.exitCode).toBe(42);
+    await runtime.shutdown();
+  }, 120000);
+
+  it("exec separates stdout and stderr (demux)", async () => {
+    const runtime = new DockerRuntime({
+      image: "debian:12-slim",
+      hostCwd: "/tmp",
+      name: testName + "-exec3",
+      allowNetwork: false,
+      resources: { memory: "256m", cpus: "0.5" },
+    });
+    await runtime.init();
+    await runtime.withReady();
+    const result = await runtime.exec({
+      cmd: ["sh", "-c", "echo out; echo err >&2"],
+    });
+    expect(result.stdout.toString().trim()).toBe("out");
+    expect(result.stderr.toString().trim()).toBe("err");
+    await runtime.shutdown();
+  }, 120000);
+
+  it("exec honors timeoutMs — returns null exitCode", async () => {
+    const runtime = new DockerRuntime({
+      image: "debian:12-slim",
+      hostCwd: "/tmp",
+      name: testName + "-exec4",
+      allowNetwork: false,
+      resources: { memory: "256m", cpus: "0.5" },
+    });
+    await runtime.init();
+    await runtime.withReady();
+    const result = await runtime.exec({
+      cmd: ["sleep", "10"],
+      timeoutMs: 1000,
+    });
+    expect(result.exitCode).toBe(null);
+    await runtime.shutdown();
+  }, 120000);
+
+  it("exec streams onData for stdout", async () => {
+    const runtime = new DockerRuntime({
+      image: "debian:12-slim",
+      hostCwd: "/tmp",
+      name: testName + "-exec5",
+      allowNetwork: false,
+      resources: { memory: "256m", cpus: "0.5" },
+    });
+    await runtime.init();
+    await runtime.withReady();
+    const chunks: Buffer[] = [];
+    const result = await runtime.exec({
+      cmd: ["sh", "-c", "echo one; sleep 0.1; echo two"],
+      onData: (chunk) => chunks.push(chunk),
+    });
+    expect(result.exitCode).toBe(0);
+    const output = Buffer.concat(chunks).toString().trim().split("\n");
+    expect(output).toContain("one");
+    expect(output).toContain("two");
+    await runtime.shutdown();
+  }, 120000);
+});
