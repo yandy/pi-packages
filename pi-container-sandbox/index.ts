@@ -8,7 +8,7 @@ import {
 	createEditTool,
 	createBashTool,
 } from "@earendil-works/pi-coding-agent";
-import { detectRuntime, deriveContainerName, spawnWithTimeout } from "./src/runtime";
+import { DockerRuntime, deriveContainerName } from "./src/runtime";
 import { loadSbxConfig, imageRefForTag } from "./src/config";
 import { TIER_SPECS, parseSizeTier } from "./src/tiers";
 import { getSbx, setSbx, clearSbx, type SbxSession } from "./src/session";
@@ -198,7 +198,7 @@ export default function (pi: ExtensionAPI) {
 			systemPrompt: event.systemPrompt.replace(
 				`Current working directory: ${localCwd}`,
 				[
-					`Current working directory: ${REMOTE_ROOT} (sandboxed in ${sbx.runtime.kind} container ${sbx.name}, host cwd ${localCwd} mounted read-write)`,
+					`Current working directory: ${REMOTE_ROOT} (sandboxed in docker container ${sbx.name}, host cwd ${localCwd} mounted read-write)`,
 					skillInfo,
 				].join("\n"),
 			),
@@ -210,17 +210,11 @@ export default function (pi: ExtensionAPI) {
 		if (!(pi.getFlag("container") as boolean)) return;
 
 		try {
-			const runtime = await detectRuntime(ctx);
-			if (!runtime) {
-				ctx.ui.notify("Docker not available or timed out. Running without sandbox.", "warning");
-				return;
-			}
-
 			const cfg = loadSbxConfig(localCwd);
 
 			const sizeFlag = pi.getFlag("container-size") as string | undefined;
 			const sizeTier = parseSizeTier(sizeFlag || cfg.tier) || "medium";
-			const tierSpec = TIER_SPECS[sizeTier || "medium"];
+			const tierSpec = TIER_SPECS[sizeTier];
 
 			const flagImage = pi.getFlag("container-image") as string | undefined;
 			const configImageRef = imageRefForTag(cfg.image, cfg.tag);
@@ -240,47 +234,7 @@ export default function (pi: ExtensionAPI) {
 			const cacheFlag = pi.getFlag("sandbox-cache") as string | undefined;
 			const cacheVolume = cacheFlag ?? cfg.cacheVolume ?? undefined;
 
-			if (cacheVolume) {
-				await runtime.createVolume(cacheVolume);
-			}
-
 			const skillMounts = mountSkills ? discoverSkillMounts(extraPaths) : [];
-
-			let isReattached = false;
-			{
-				const running = await runtime.isRunning(sandboxName);
-				if (running) {
-					isReattached = true;
-					ctx.ui.notify(`Reattaching to existing sandbox: ${sandboxName}`, "info");
-				} else {
-					const inspect = await spawnWithTimeout(
-						runtime.bin, ["inspect", "--format", "exists", sandboxName], 5000,
-					);
-					if (inspect.code === 0 && !inspect.timedOut) {
-						if (isReusable || persist) {
-							const started = await runtime.start(sandboxName);
-							if (started) {
-								isReattached = true;
-								ctx.ui.notify(`Restarted existing sandbox: ${sandboxName}`, "info");
-							} else {
-								ctx.ui.notify(`Removing broken container ${sandboxName}, creating fresh...`, "warning");
-								runtime.remove(sandboxName);
-							}
-						} else {
-							ctx.ui.notify(`Cleaning up stale container ${sandboxName} for fresh sandbox`, "info");
-							runtime.remove(sandboxName);
-						}
-					}
-				}
-			}
-
-			if (!(await runtime.exists(image))) {
-				ctx.ui.notify(
-					`Sandbox image "${image}" not found locally.\nBuild it with: npm run build-image`,
-					"error",
-				);
-				return;
-			}
 
 			const allowPathsRaw = pi.getFlag("container-allow-paths") as string | undefined;
 			const allowedExternalPrefixes = allowPathsRaw
@@ -305,22 +259,24 @@ export default function (pi: ExtensionAPI) {
 			if (pidsFlag !== undefined) resources.pidsLimit = pidsFlag;
 			if (swapFlag !== undefined) resources.swap = swapFlag;
 
-			let actualName = sandboxName;
-			if (!isReattached) {
-				actualName = await runtime.run({
-					name: sandboxName,
-					image,
-					hostCwd: localCwd,
-					allowNetwork,
-					extraMounts: skillMounts.length ? skillMounts : undefined,
-					resources,
-					cacheVolume,
-				});
+			const runtime = new DockerRuntime({
+				image,
+				hostCwd: localCwd,
+				name: sandboxName,
+				allowNetwork,
+				resources,
+				extraMounts: skillMounts.length ? skillMounts : undefined,
+				cacheVolume,
+			});
+
+			await runtime.init();
+			if (!runtime.isReady()) {
+				await runtime.withReady();
 			}
 
 			setSbx({
 				runtime,
-				name: actualName,
+				name: sandboxName,
 				hostCwd: localCwd,
 				keep: keep || persist,
 				mounts: skillMounts,
@@ -329,19 +285,19 @@ export default function (pi: ExtensionAPI) {
 				imageRef: image,
 				config: cfg,
 				isReusable,
-				isReattached,
+				isReattached: false,
 			});
 
+			let cleaned = false;
 			const cleanup = () => {
+				if (cleaned) return;
+				cleaned = true;
 				const s = getSbx();
 				if (!s || s.keep) return;
-				try {
-					s.runtime.stop(s.name);
-					s.runtime.remove(s.name);
-				} catch { /* ignore */ }
+				try { s.runtime.shutdown(); } catch { /* ignore */ }
 				clearSbx();
 			};
-			process.once("exit", cleanup);
+			process.on("exit", cleanup);
 			process.once("SIGINT", () => { cleanup(); process.exit(130); });
 			process.once("SIGTERM", () => { cleanup(); process.exit(143); });
 
@@ -356,7 +312,8 @@ export default function (pi: ExtensionAPI) {
 			if (resources.pidsLimit !== undefined) resParts.push(`pids=${resources.pidsLimit}`);
 			const resStr = ` (${resParts.join(", ")})`;
 
-			const statusPrefix = isReattached ? "Reattached" : "Sandbox up";
+			const actualName = runtime.getContainerId()?.slice(0, 12) ?? sandboxName;
+			const statusPrefix = "Sandbox up";
 			ctx.ui.setStatus(
 				"sandbox",
 				ctx.ui.theme.fg("accent", `${statusPrefix}: ${actualName} (net=${allowNetwork ? "on" : "off"})${resStr}`),
@@ -380,8 +337,7 @@ export default function (pi: ExtensionAPI) {
 		const sbx = getSbx();
 		if (!sbx) return;
 		if (!sbx.keep) {
-			sbx.runtime.stop(sbx.name);
-			sbx.runtime.remove(sbx.name);
+			try { await sbx.runtime.shutdown(); } catch { /* ignore */ }
 		}
 		clearSbx();
 	});
