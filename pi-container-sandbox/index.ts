@@ -11,7 +11,7 @@ import {
 import { detectRuntime, deriveContainerName, spawnWithTimeout } from "./src/runtime";
 import { loadSbxConfig, imageRefForTag } from "./src/config";
 import { TIER_SPECS, parseSizeTier } from "./src/tiers";
-import { getSbx, setSbx, clearSbx, type SbxSession } from "./src/sandbox";
+import { getSbx, setSbx, clearSbx, type SbxSession } from "./src/session";
 import {
 	createReadOps,
 	createWriteOps,

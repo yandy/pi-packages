@@ -1,4 +1,4 @@
-import type { Runtime, MountSpec, RunArgs } from "./runtime";
+import type { Runtime, MountSpec, SandboxOptions } from "./runtime";
 import type { SbxConfig } from "./config";
 
 export interface SbxSession {
@@ -8,7 +8,7 @@ export interface SbxSession {
 	keep: boolean;
 	mounts: MountSpec[];
 	allowedExternalPrefixes: string[];
-	resources?: RunArgs["resources"];
+	resources?: SandboxOptions["resources"];
 	imageRef: string;
 	config: SbxConfig;
 	isReusable: boolean;

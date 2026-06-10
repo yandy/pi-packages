@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { getSbx, setSbx, clearSbx, type SbxSession } from "../src/sandbox";
+import { getSbx, setSbx, clearSbx, type SbxSession } from "../src/session";
 
 const mockSession: SbxSession = {
 	runtime: { kind: "docker", bin: "docker", run: async () => "", stop: () => {}, remove: () => {}, exists: async () => false, isRunning: async () => false, start: async () => false, createVolume: async () => false },

@@ -4,7 +4,7 @@ import { resolve as resolvePath } from "node:path";
 import { TIER_SPECS, type SizeTier } from "../tiers";
 import { loadSbxConfig, saveSbxConfig, imageRefForTag, getSbxConfigPath } from "../config";
 import { execCapture } from "../ops";
-import { getSbx } from "../sandbox";
+import { getSbx } from "../session";
 
 export function createSandboxCommandHandlers(localCwd: string, pathApprovals: {
 	list(): { path: string; approvedAt: number; expiresAt: number }[];
