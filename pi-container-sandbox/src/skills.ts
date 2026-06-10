@@ -26,7 +26,10 @@ export function discoverSkillMounts(additionalPaths?: string[]): MountSpec[] {
 					continue;
 				}
 				const target = `/skills/${entry}`;
-				if (mounts.some((m) => m.target === target)) continue;
+				if (mounts.some((m) => m.target === target)) {
+					console.debug(`sandbox: skipping duplicate mount target ${target} (already mounted from another source)`);
+					continue;
+				}
 				mounts.push({ source: full, target });
 			}
 		} catch {
