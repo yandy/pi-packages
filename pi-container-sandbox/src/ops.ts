@@ -1,8 +1,7 @@
-import { spawn } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import type { ReadOperations, WriteOperations, EditOperations, BashOperations } from "@earendil-works/pi-coding-agent";
-import type { Runtime, MountSpec } from "./runtime";
+import type { MountSpec, Runtime } from "./runtime";
 import { toRemote, isReadOnlyMount, isInsideCwd, isAllowedExternalResource, shq } from "./paths";
 
 export interface SbxHandle {
@@ -13,73 +12,31 @@ export interface SbxHandle {
 	allowedExternalPrefixes: string[];
 }
 
-export function execCapture(sbx: SbxHandle, command: string, timeoutMs?: number): Promise<Buffer> {
-	return new Promise((resolve, reject) => {
-		const child = spawn(sbx.runtime.bin, ["exec", sbx.name, "sh", "-c", command], {
-			stdio: ["ignore", "pipe", "pipe"],
-		});
-		const out: Buffer[] = [];
-		const err: Buffer[] = [];
-		let timedOut = false;
-
-		const timer = timeoutMs
-			? setTimeout(() => {
-					timedOut = true;
-					child.kill("SIGKILL");
-				}, timeoutMs)
-			: undefined;
-
-		child.stdout.on("data", (d: Buffer) => out.push(d));
-		child.stderr.on("data", (d: Buffer) => err.push(d));
-		child.on("error", (e) => {
-			if (timer) clearTimeout(timer);
-			reject(e);
-		});
-		child.on("close", (code) => {
-			if (timer) clearTimeout(timer);
-			if (timedOut) {
-				reject(new Error(`exec timed out after ${timeoutMs}ms: ${command}`));
-			} else if (code !== 0) {
-				reject(new Error(`exec failed (${code}): ${Buffer.concat(err).toString()}`));
-			} else {
-				resolve(Buffer.concat(out));
-			}
-		});
+export async function execCapture(sbx: SbxHandle, command: string, timeoutMs?: number): Promise<Buffer> {
+	const result = await sbx.runtime.exec({
+		cmd: ["sh", "-c", command],
+		timeoutMs,
 	});
+	if (result.exitCode !== 0) {
+		throw new Error(
+			`exec failed (${result.exitCode}): ${result.stderr.toString("utf-8").trim().slice(0, 500)}`,
+		);
+	}
+	return result.stdout;
 }
 
-export function execStream(
+export async function execStream(
 	sbx: SbxHandle,
 	command: string,
-	{ onData, signal, timeout }: { onData: (b: Buffer) => void; signal?: AbortSignal; timeout?: number },
+	opts: { onData: (b: Buffer) => void; signal?: AbortSignal; timeout?: number },
 ): Promise<{ exitCode: number | null }> {
-	return new Promise((resolve, reject) => {
-		const child = spawn(sbx.runtime.bin, ["exec", sbx.name, "sh", "-c", command], {
-			stdio: ["ignore", "pipe", "pipe"],
-		});
-		let timedOut = false;
-		const timer = timeout
-			? setTimeout(() => {
-					timedOut = true;
-					child.kill("SIGKILL");
-				}, timeout * 1000)
-			: undefined;
-		child.stdout.on("data", onData);
-		child.stderr.on("data", onData);
-		child.on("error", (e) => {
-			if (timer) clearTimeout(timer);
-			reject(e);
-		});
-		const onAbort = () => child.kill("SIGKILL");
-		signal?.addEventListener("abort", onAbort, { once: true });
-		child.on("close", (code) => {
-			if (timer) clearTimeout(timer);
-			signal?.removeEventListener("abort", onAbort);
-			if (signal?.aborted) reject(new Error("aborted"));
-			else if (timedOut) reject(new Error(`timeout:${timeout}`));
-			else resolve({ exitCode: code });
-		});
+	const result = await sbx.runtime.exec({
+		cmd: ["sh", "-c", command],
+		onData: opts.onData,
+		signal: opts.signal,
+		timeoutMs: opts.timeout,
 	});
+	return { exitCode: result.exitCode };
 }
 
 export function createReadOps(sbx: SbxHandle): ReadOperations {
@@ -134,6 +91,8 @@ export function createWriteOps(sbx: SbxHandle): WriteOperations {
 			if (isReadOnlyMount(remote, sbx.mounts)) {
 				throw new Error(`sandbox: refusing to write to ${remote}: read-only skill mount`);
 			}
+			const parentDir = remote.split("/").slice(0, -1).join("/") || "/";
+			await execCapture(sbx, `mkdir -p ${shq(parentDir)}`);
 			const buf = typeof content === "string" ? Buffer.from(content) : Buffer.from(content);
 			const b64 = buf.toString("base64");
 			await execCapture(sbx, `printf %s ${shq(b64)} | base64 -d > ${shq(remote)}`);
