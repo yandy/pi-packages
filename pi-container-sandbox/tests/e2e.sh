@@ -120,7 +120,11 @@ if [ -n "$CID" ]; then
     check "C5: cwd mount"  "package.json"         "$(docker exec "$CID" sh -c 'ls /workspace/package.json 2>&1' | head -1)"
 
     CAPS=$(docker exec "$CID" sh -c 'cat /proc/1/status 2>/dev/null | grep CapEff' 2>&1) || true
-    [ -n "$CAPS" ] && echo "$CAPS" | grep -q "00000000" && { echo "  ✅ C6: no caps"; PASS=$((PASS + 1)); } || echo "  ⚠️  C6: caps=$CAPS"
+    if [ -n "$CAPS" ] && echo "$CAPS" | grep -q "0000000000000000"; then
+        echo "  ✅ C6: no caps"; PASS=$((PASS + 1))
+    else
+        echo "  ❌ C6: caps check failed ($CAPS)"; FAIL=$((FAIL + 1))
+    fi
 
     NET=$(docker inspect "$CID" --format '{{.HostConfig.NetworkMode}}' 2>/dev/null || echo "?")
     if [ "$NET" != "none" ]; then
