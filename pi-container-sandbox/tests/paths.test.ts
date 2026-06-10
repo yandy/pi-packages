@@ -2,8 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { tmpdir } from "node:os";
-import { toRemote, shq, isInsideCwd, isReadOnlyMount, resolveExtraMountPath,
-         getExternalPath, isAllowedExternalResource, PathApprovalStore } from "../src/paths";
+import { toRemote, toContainerPath, shq, isInsideCwd, isReadOnlyMount,
+         resolveExtraMountPath, getExternalPath, isAllowedExternalResource,
+         PathApprovalStore, REMOTE_ROOT, SKILLS_ROOT } from "../src/paths";
+import type { MountSpec } from "../src/runtime";
 
 const testDir = resolvePath(tmpdir(), "pi-paths-test-" + Date.now());
 
@@ -144,5 +146,55 @@ describe("PathApprovalStore", () => {
     store1.add("/tmp/persisted", Infinity);
     const store2 = new PathApprovalStore(testDir);
     expect(store2.find("/tmp/persisted")).toBeDefined();
+  });
+});
+
+describe("toContainerPath", () => {
+  const hostCwd = "/home/user/project";
+  const mounts: MountSpec[] = [
+    { source: "/home/user/.agents/skills/my-skill", target: "/skills/my-skill" },
+  ];
+
+  it("maps host cwd path to /workspace", () => {
+    const result = toContainerPath("src/file.ts", hostCwd, []);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.path).toBe("/workspace/src/file.ts");
+  });
+
+  it("maps a skill mount path", () => {
+    const result = toContainerPath("/home/user/.agents/skills/my-skill/SKILL.md", hostCwd, mounts);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.path).toBe("/skills/my-skill/SKILL.md");
+  });
+
+  it("rejects path outside cwd and mounts", () => {
+    const result = toContainerPath("/etc/passwd", hostCwd, mounts);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("escapes sandbox");
+  });
+
+  it("passes through paths already in /workspace or /skills", () => {
+    expect(toContainerPath("/workspace/foo", hostCwd, []).ok).toBe(true);
+    expect(toContainerPath("/skills/x", hostCwd, []).ok).toBe(true);
+  });
+});
+
+describe("PathApprovalStore merge-on-conflict", () => {
+  it("merges external additions on save", () => {
+    const dir = `${tmpdir()}/pi-test-approvals-${Date.now()}`;
+    mkdirSync(dir, { recursive: true });
+
+    const store1 = new PathApprovalStore(dir);
+    store1.add("/foo", Infinity);
+
+    const store2 = new PathApprovalStore(dir);
+    store2.add("/bar", Infinity);
+
+    const store3 = new PathApprovalStore(dir);
+    const found = store3.find("/bar");
+    expect(found).toBeDefined();
+    expect(found!.path).toBe("/bar");
+
+    rmSync(dir, { recursive: true, force: true });
   });
 });

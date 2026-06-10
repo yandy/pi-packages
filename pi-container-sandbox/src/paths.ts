@@ -5,6 +5,35 @@ import type { MountSpec } from "./runtime";
 export const REMOTE_ROOT = "/workspace";
 export const SKILLS_ROOT = "/skills";
 
+export function toContainerPath(
+	hostPath: string,
+	hostCwd: string,
+	mounts: MountSpec[],
+): { ok: true; path: string } | { ok: false; reason: string } {
+	if (hostPath.startsWith(`${REMOTE_ROOT}/`) || hostPath === REMOTE_ROOT) {
+		return { ok: true, path: hostPath };
+	}
+	if (hostPath.startsWith(`${SKILLS_ROOT}/`) || hostPath === SKILLS_ROOT) {
+		return { ok: true, path: hostPath };
+	}
+
+	const abs = resolvePath(hostCwd, hostPath);
+
+	if (abs === hostCwd || abs.startsWith(`${hostCwd}/`)) {
+		const rel = abs === hostCwd ? "" : abs.slice(hostCwd.length + 1);
+		return { ok: true, path: rel ? `${REMOTE_ROOT}/${rel}` : REMOTE_ROOT };
+	}
+
+	for (const m of mounts) {
+		if (abs === m.source || abs.startsWith(`${m.source}/`)) {
+			const rel = abs === m.source ? "" : abs.slice(m.source.length + 1);
+			return { ok: true, path: rel ? `${m.target}/${rel}` : m.target };
+		}
+	}
+
+	return { ok: false, reason: `Path escapes sandbox: ${hostPath}` };
+}
+
 export function shq(s: string): string {
 	return `'${s.replace(/'/g, `'\\''`)}'`;
 }
@@ -78,6 +107,7 @@ interface PathApprovalRecord {
 export class PathApprovalStore {
 	private path: string;
 	private records: Map<string, PathApprovalRecord> = new Map();
+	private lastSaveTime: number = 0;
 
 	constructor(hostCwd: string) {
 		this.path = resolvePath(hostCwd, ".pi", "agent", "path-approvals.json");
@@ -89,6 +119,37 @@ export class PathApprovalStore {
 		if (!existsSync(dir)) {
 			try { mkdirSync(dir, { recursive: true }); } catch { return; }
 		}
+
+		let existing: Map<string, PathApprovalRecord> | null = null;
+		try {
+			if (existsSync(this.path)) {
+				const raw = JSON.parse(readFileSync(this.path, "utf-8")) as (Omit<PathApprovalRecord, "expiresAt"> & { expiresAt: number | null })[];
+				existing = new Map();
+				const now = Date.now();
+				for (const r of raw) {
+					const expiresAt = r.expiresAt === null ? Infinity : r.expiresAt;
+					if (expiresAt === Infinity || expiresAt > now) {
+						existing.set(r.path, { ...r, expiresAt });
+					}
+				}
+			}
+		} catch {
+			// corrupt — skip merge
+		}
+
+		if (existing && existing.size > 0) {
+			for (const [p, rec] of existing) {
+				const ours = this.records.get(p);
+				if (!ours) {
+					if (rec.approvedAt > this.lastSaveTime) {
+						this.records.set(p, rec);
+					}
+				} else if (rec.expiresAt > ours.expiresAt) {
+					this.records.set(p, rec);
+				}
+			}
+		}
+
 		const tmpPath = this.path + ".tmp";
 		const data = Array.from(this.records.values()).map((r) => ({
 			...r,
@@ -96,6 +157,7 @@ export class PathApprovalStore {
 		}));
 		writeFileSync(tmpPath, JSON.stringify(data, null, 2));
 		renameSync(tmpPath, this.path);
+		this.lastSaveTime = Date.now();
 	}
 
 	private load(): void {
@@ -112,6 +174,7 @@ export class PathApprovalStore {
 		} catch {
 			// corrupt file - start fresh
 		}
+		this.lastSaveTime = Date.now();
 	}
 
 	find(absPath: string): PathApprovalRecord | undefined {
