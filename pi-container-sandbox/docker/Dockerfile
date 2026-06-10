@@ -7,9 +7,9 @@
 #   - no SSH, no sudo, no setuid binaries beyond what debian-slim ships
 #   - every downloaded binary is SHA256-verified at build time
 #
-# Built with either:
+# Built with:
+#   npm run build-image
 #   docker build -t pi-container-sandbox:latest -f docker/Dockerfile docker
-#   container build -t pi-container-sandbox:latest -f docker/Dockerfile docker
 FROM debian:12-slim
 
 ARG DEBIAN_FRONTEND=noninteractive
@@ -130,9 +130,9 @@ RUN dl-verify \
 
 # ── Python 3.12.13 via uv ──────────────────────────────────────────
 # Replace apt python3 with a uv-managed Python 3.12.13.
-# UV_PYTHON_DIR is set to /opt/uv-python so the installation is
+# UV_PYTHON_INSTALL_DIR is set to /opt/uv-python so the installation is
 # accessible to all users (not just root).
-ENV UV_PYTHON_DIR=/opt/uv-python \
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv-python \
     UV_PYTHON_INSTALL_MIRROR=https://mirrors.ustc.edu.cn/github-release/astral-sh/python-build-standalone/ \
     UV_DEFAULT_INDEX=https://mirrors.ustc.edu.cn/pypi/simple
 RUN uv python install 3.12.13 \
