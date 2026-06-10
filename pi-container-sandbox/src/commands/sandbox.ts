@@ -4,7 +4,7 @@ import { resolve as resolvePath } from "node:path";
 import { TIER_SPECS, type SizeTier } from "../tiers";
 import { loadSbxConfig, saveSbxConfig, imageRefForTag, getSbxConfigPath } from "../config";
 import { execCapture } from "../ops";
-import { getSbx } from "../session";
+import { getSbx, clearSbx } from "../session";
 
 export function createSandboxCommandHandlers(localCwd: string, pathApprovals: {
 	list(): { path: string; approvedAt: number; expiresAt: number }[];
@@ -33,7 +33,7 @@ export function createSandboxCommandHandlers(localCwd: string, pathApprovals: {
 			const reusableStr = sbx.isReusable ? ` [re-usable${sbx.isReattached ? ", reattached" : ""}]` : "";
 			ctx.ui.notify(
 				[
-					`Sandbox: ${sbx.runtime.kind} container ${sbx.name}${reusableStr}`,
+					`Sandbox: docker container ${sbx.name}${reusableStr}`,
 					`host cwd: ${sbx.hostCwd}`,
 					`image: ${sbx.imageRef}`,
 					resStr.trim(),
@@ -53,8 +53,20 @@ export function createSandboxCommandHandlers(localCwd: string, pathApprovals: {
 				ctx.ui.notify("Sandbox is not active.", "info");
 				return;
 			}
-			sbx.runtime.stop(sbx.name);
-			sbx.runtime.remove(sbx.name);
+			if (sbx.keep) {
+				ctx.ui.notify(
+					`Container ${sbx.name} has keep/persist set. Use /sandbox keep with a different name, or clear sandbox.json to disable persistence.`,
+					"warning",
+				);
+				return;
+			}
+			try {
+				sbx.runtime.shutdown();
+			} catch (e) {
+				ctx.ui.notify(`Stop failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+				return;
+			}
+			clearSbx();
 			ctx.ui.notify(`Sandbox ${sbx.name} stopped and removed.`, "info");
 		},
 
