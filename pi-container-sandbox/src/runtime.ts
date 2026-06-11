@@ -148,9 +148,16 @@ export class DockerRuntime implements Runtime {
   }
 
   async rebuildImage(onProgress?: (msg: string) => void): Promise<void> {
+    const prevForceBuild = this.opts.forceBuild;
+    const prevOnProgress = this.opts.onProgress;
     this.opts.forceBuild = true;
     this.opts.onProgress = onProgress;
-    await this.ensureImage();
+    try {
+      await this.ensureImage();
+    } finally {
+      this.opts.forceBuild = prevForceBuild;
+      this.opts.onProgress = prevOnProgress;
+    }
   }
 
   async startContainer(): Promise<void> {
