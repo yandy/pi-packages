@@ -117,7 +117,7 @@ export class DockerRuntime implements Runtime {
       }
     }
 
-    const buildContext = this.opts.buildContext ?? PACKAGE_DOCKER_DIR;
+    const buildContext = this.opts.buildContext ?? (this.opts.dockerfile ? this.opts.hostCwd : PACKAGE_DOCKER_DIR);
     const dockerfile = this.opts.dockerfile ?? "Dockerfile";
     const buildArgs = this.opts.buildArgs;
 
