@@ -118,7 +118,7 @@ describe("/sandbox build", () => {
 
 	it("shows error when sandbox is not active", async () => {
 		const notifications: { msg: string; level: string }[] = [];
-		const ctx = { ui: { notify: (msg: string, level?: string) => notifications.push({ msg, level: level ?? "info" }) } };
+		const ctx = { ui: { notify: (msg: string, level?: string) => notifications.push({ msg, level: level ?? "info" }), setStatus: (_key: string, _msg: string) => {} } };
 		const handlers = createSandboxCommandHandlers("/tmp", mockPathApprovals());
 
 		await handlers.build("", ctx);
