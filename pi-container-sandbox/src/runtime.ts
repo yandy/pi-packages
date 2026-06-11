@@ -176,6 +176,21 @@ export class DockerRuntime implements Runtime {
   async startContainer(): Promise<void> {
     const docker = this._requireDocker();
     const { hostCwd, name, allowNetwork, extraMounts, resources, cacheVolume, image } = this.opts;
+
+    const existing = docker.getContainer(name);
+    try {
+      const info = await existing.inspect();
+      if (info.State.Running) {
+        this.state = { kind: "ready", container: existing, id: info.Id };
+        return;
+      }
+      try { await existing.remove({ force: true }); } catch (err: any) {
+        if (err?.statusCode !== 404 && err?.statusCode !== 409) throw err;
+      }
+    } catch (err: any) {
+      if (err?.statusCode !== 404) throw err;
+    }
+
     const memory = resources?.memory ?? "4g";
     const cpus = resources?.cpus ?? "2";
     const pidsLimit = resources?.pidsLimit ?? 512;
