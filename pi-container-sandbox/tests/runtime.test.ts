@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import Dockerode from "dockerode";
 import { DockerRuntime, deriveContainerName } from "../src/runtime";
+import { PACKAGE_DOCKER_DIR } from "../src/config";
 
 const dockerAvailable = (() => {
   try {
@@ -199,4 +200,33 @@ describe.skipIf(!dockerAvailable)("DockerRuntime exec", () => {
     expect(output).toContain("two");
     await runtime.shutdown();
   }, 120000);
+});
+
+describe("PACKAGE_DOCKER_DIR", () => {
+	it("resolves to a path ending with /docker", () => {
+		expect(PACKAGE_DOCKER_DIR).toMatch(/\/docker$/);
+	});
+});
+
+describe("SandboxOptions new image-build fields", () => {
+	it("accepts dockerfile, buildContext, buildArgs, forceBuild, onProgress", () => {
+		const onProgress = (msg: string) => {};
+		const opts = {
+			image: "test-img:latest",
+			hostCwd: "/tmp",
+			name: "test",
+			allowNetwork: false,
+			resources: { memory: "256m", cpus: "0.5" },
+			dockerfile: "./Dockerfile.custom",
+			buildContext: "/custom/context",
+			buildArgs: { KEY: "value" },
+			forceBuild: true,
+			onProgress,
+		};
+		expect(opts.dockerfile).toBe("./Dockerfile.custom");
+		expect(opts.buildContext).toBe("/custom/context");
+		expect(opts.buildArgs).toEqual({ KEY: "value" });
+		expect(opts.forceBuild).toBe(true);
+		expect(opts.onProgress).toBe(onProgress);
+	});
 });

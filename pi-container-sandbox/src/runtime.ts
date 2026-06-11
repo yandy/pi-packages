@@ -7,19 +7,23 @@ export interface MountSpec {
 }
 
 export interface SandboxOptions {
-  image: string;
-  hostCwd: string;
-  name: string;
-  allowNetwork: boolean;
-  resources: {
-    memory?: string;
-    cpus?: string;
-    swap?: string;
-    pidsLimit?: number;
-  };
-  extraMounts?: MountSpec[];
-  cacheVolume?: string;
-  dockerfileContext?: string;
+	image: string;
+	hostCwd: string;
+	name: string;
+	allowNetwork: boolean;
+	resources: {
+		memory?: string;
+		cpus?: string;
+		swap?: string;
+		pidsLimit?: number;
+	};
+	extraMounts?: MountSpec[];
+	cacheVolume?: string;
+	dockerfile?: string;
+	buildContext?: string;
+	buildArgs?: Record<string, string>;
+	forceBuild?: boolean;
+	onProgress?: (msg: string) => void;
 }
 
 export interface ExecOpts {
