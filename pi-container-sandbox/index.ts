@@ -55,7 +55,7 @@ export default function (pi: ExtensionAPI) {
 		type: "string",
 	});
 	pi.registerFlag("sandbox-persist", {
-		description: "Keep sandbox container running after pi exits",
+		description: `[deprecated: use --container-keep] Keep sandbox container alive after session exit`,
 		type: "boolean",
 		default: false,
 	});
@@ -65,6 +65,19 @@ export default function (pi: ExtensionAPI) {
 	});
 	pi.registerFlag("container-image", {
 		description: "Image to use for the sandbox (default: pi-container-sandbox:latest)",
+		type: "string",
+	});
+	pi.registerFlag("build-image", {
+		description: "Force rebuild the sandbox Docker image even if it already exists",
+		type: "boolean",
+		default: false,
+	});
+	pi.registerFlag("dockerfile", {
+		description: "Path to a custom Dockerfile for the sandbox image (default: extension's built-in Dockerfile)",
+		type: "string",
+	});
+	pi.registerFlag("dockerfile-context", {
+		description: "Build context directory for the custom Dockerfile (default: extension's docker/ dir)",
 		type: "string",
 	});
 	pi.registerFlag("container-net", {
@@ -196,7 +209,7 @@ export default function (pi: ExtensionAPI) {
 
 		return {
 			systemPrompt: event.systemPrompt.replace(
-				`Current working directory: ${localCwd}`,
+				/Current working directory:\s*\S+/,
 				[
 					`Current working directory: ${REMOTE_ROOT} (sandboxed in docker container ${sbx.name}, host cwd ${localCwd} mounted read-write)`,
 					skillInfo,
@@ -226,6 +239,9 @@ export default function (pi: ExtensionAPI) {
 			const mountSkills = pi.getFlag("container-mount-skills") as boolean;
 			const extraPathsRaw = pi.getFlag("container-mount-paths") as string | undefined;
 			const extraPaths = extraPathsRaw ? extraPathsRaw.split(",").map((p: string) => p.trim()).filter(Boolean) : undefined;
+			const buildImageFlag = pi.getFlag("build-image") as boolean;
+			const dockerfileFlag = pi.getFlag("dockerfile") as string | undefined;
+			const dockerfileContextFlag = pi.getFlag("dockerfile-context") as string | undefined;
 
 			const nameFlag = pi.getFlag("sandbox-name") as string | undefined;
 			const sandboxName = nameFlag ?? cfg.containerName ?? deriveContainerName(localCwd);
@@ -267,6 +283,13 @@ export default function (pi: ExtensionAPI) {
 				resources,
 				extraMounts: skillMounts.length ? skillMounts : undefined,
 				cacheVolume,
+				dockerfile: cfg.dockerfile ?? dockerfileFlag,
+				buildContext: cfg.buildContext ?? dockerfileContextFlag,
+				buildArgs: cfg.buildArgs,
+				forceBuild: buildImageFlag || false,
+				onProgress: (msg: string) => {
+					ctx.ui.setStatus("sandbox", `[build] ${msg}`);
+				},
 			});
 
 			await runtime.init();
@@ -289,17 +312,18 @@ export default function (pi: ExtensionAPI) {
 			});
 
 			let cleaned = false;
-			const cleanup = () => {
+			const cleanup = async () => {
 				if (cleaned) return;
 				cleaned = true;
 				const s = getSbx();
-				if (!s || s.keep) return;
-				try { s.runtime.shutdown(); } catch { /* ignore */ }
-				clearSbx();
+				if (s && !s.keep) {
+					try { await s.runtime.shutdown(); } catch { /* ignore */ }
+					clearSbx();
+				}
 			};
-			process.on("exit", cleanup);
-			process.once("SIGINT", () => { cleanup(); process.exit(130); });
-			process.once("SIGTERM", () => { cleanup(); process.exit(143); });
+			process.on("beforeExit", async () => { await cleanup(); });
+			process.once("SIGINT", async () => { await cleanup(); process.exit(130); });
+			process.once("SIGTERM", async () => { await cleanup(); process.exit(143); });
 
 			const ok = (await execCapture(getSbx()!, "id -un && pwd", 10000)).toString().trim();
 
@@ -343,7 +367,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("sandbox", {
-		description: "Sandbox management. Subcommands: status, start, stop, keep, exec, doctor, config, allow, paths, tiers",
+		description: "Sandbox management. Subcommands: status, start, build, stop, keep, exec, doctor, config, allow, paths, tiers",
 		handler: async (args, ctx) => {
 			const parts = args.trim().split(/\s+/);
 			const sub = parts[0]?.toLowerCase() || "status";
@@ -353,9 +377,12 @@ export default function (pi: ExtensionAPI) {
 				case "status":
 				case "info":
 					return handlers.status(rest, ctx);
-				case "start":
-					return handlers.start(rest, ctx);
-				case "stop":
+			case "start":
+				return handlers.start(rest, ctx);
+			case "build":
+			case "rebuild":
+				return handlers.build(rest, ctx);
+			case "stop":
 					return handlers.stop(rest, ctx);
 				case "keep":
 					return handlers.keep(rest, ctx);
@@ -377,7 +404,7 @@ export default function (pi: ExtensionAPI) {
 					ctx.ui.notify(
 						[
 							`Unknown subcommand: ${sub}`,
-							"Available: status, start, stop, keep, exec, doctor, config, allow, paths, tiers",
+							"Available: status, start, build, stop, keep, exec, doctor, config, allow, paths, tiers",
 						].join("\n"),
 						"info",
 					);

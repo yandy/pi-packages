@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import Dockerode from "dockerode";
 import { DockerRuntime, deriveContainerName } from "../src/runtime";
+import { PACKAGE_DOCKER_DIR } from "../src/config";
 
 const dockerAvailable = (() => {
   try {
@@ -24,6 +25,13 @@ describe("deriveContainerName", () => {
   it("falls back to 'project' when cwd is root", () => {
     const name = deriveContainerName("/");
     expect(name).toMatch(/^pi-sbx-project-[a-f0-9]{6}$/);
+  });
+
+  it("truncates long basenames to stay under 128 chars", () => {
+    const longDir = "/" + "a".repeat(200);
+    const name = deriveContainerName(longDir);
+    expect(name.length).toBeLessThanOrEqual(128);
+    expect(name).toMatch(/^pi-sbx-/);
   });
 });
 
@@ -96,6 +104,32 @@ describe.skipIf(!dockerAvailable)("DockerRuntime lifecycle", () => {
       try { await runtime.shutdown(); } catch {}
     }
   }, 120000);
+
+  it("ensureImage with forceBuild and onProgress rebuilds and reports progress", async () => {
+    const buildName = testName + "-forcebuild";
+    const progressMessages: string[] = [];
+    const runtime = new DockerRuntime({
+      image: "debian:12-slim",
+      hostCwd: "/tmp",
+      name: buildName,
+      allowNetwork: false,
+      resources: { memory: "256m", cpus: "0.5" },
+      forceBuild: false,
+      onProgress: (msg: string) => progressMessages.push(msg),
+    });
+    try {
+      await runtime.init();
+      // First call with forceBuild=false — should skip build (image exists)
+      await runtime.ensureImage({ forceBuild: false });
+      expect(progressMessages.length).toBe(0);
+
+      // Now force rebuild
+      await runtime.ensureImage({ forceBuild: true });
+      expect(progressMessages.length).toBeGreaterThan(0);
+    } finally {
+      try { const d = new Dockerode({ socketPath: "/var/run/docker.sock" }); const c = d.getContainer(buildName); await c.remove({ force: true }); } catch {}
+    }
+  }, 300000);
 });
 
 describe.skipIf(!dockerAvailable)("DockerRuntime exec", () => {
@@ -200,3 +234,24 @@ describe.skipIf(!dockerAvailable)("DockerRuntime exec", () => {
     await runtime.shutdown();
   }, 120000);
 });
+
+describe("PACKAGE_DOCKER_DIR", () => {
+	it("resolves to a path ending with /docker", () => {
+		expect(PACKAGE_DOCKER_DIR).toMatch(/\/docker$/);
+	});
+});
+
+describe("DockerRuntime rebuildImage", () => {
+	it("has rebuildImage method", () => {
+		const runtime = new DockerRuntime({
+			image: "debian:12-slim",
+			hostCwd: "/tmp",
+			name: "pi-test-rebuild-" + Date.now(),
+			allowNetwork: false,
+			resources: { memory: "256m", cpus: "0.5" },
+		});
+		expect(typeof runtime.rebuildImage).toBe("function");
+	});
+});
+
+

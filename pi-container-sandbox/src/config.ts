@@ -1,5 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
 import type { SizeTier } from "./tiers";
 
 export interface SbxConfig {
@@ -9,6 +11,9 @@ export interface SbxConfig {
 	tier: SizeTier;
 	persist: boolean;
 	cacheVolume: string | null;
+	dockerfile?: string;
+	buildContext?: string;
+	buildArgs?: Record<string, string>;
 }
 
 export const DEFAULT_SBX_CONFIG: SbxConfig = {
@@ -20,6 +25,9 @@ export const DEFAULT_SBX_CONFIG: SbxConfig = {
 	cacheVolume: null,
 };
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+export const PACKAGE_DOCKER_DIR = resolvePath(__dirname, "..", "docker");
+
 export function getSbxConfigPath(hostCwd: string): string {
 	return resolvePath(hostCwd, ".pi", "agent", "sandbox.json");
 }
@@ -30,16 +38,11 @@ export function loadSbxConfig(hostCwd: string): SbxConfig {
 		return { ...DEFAULT_SBX_CONFIG };
 	}
 	try {
-		const raw = readFileSync(configPath, "utf-8");
-		const parsed = JSON.parse(raw);
+		const raw = JSON.parse(readFileSync(configPath, "utf-8"));
 		return {
-			image: parsed.image ?? DEFAULT_SBX_CONFIG.image,
-			tag: parsed.tag ?? DEFAULT_SBX_CONFIG.tag,
-			containerName: parsed.containerName ?? DEFAULT_SBX_CONFIG.containerName,
-			tier: parsed.tier ?? DEFAULT_SBX_CONFIG.tier,
-			persist: parsed.persist ?? DEFAULT_SBX_CONFIG.persist,
-			cacheVolume: parsed.cacheVolume ?? DEFAULT_SBX_CONFIG.cacheVolume,
-		};
+			...DEFAULT_SBX_CONFIG,
+			...raw,
+		} as SbxConfig;
 	} catch {
 		return { ...DEFAULT_SBX_CONFIG };
 	}

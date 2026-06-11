@@ -1,5 +1,15 @@
 import { createHash } from "node:crypto";
 import Dockerode from "dockerode";
+import { PACKAGE_DOCKER_DIR } from "./config";
+
+function getDockerSocket(): string {
+  const host = process.env.DOCKER_HOST;
+  if (host?.startsWith("unix://")) return host.slice(7);
+  return process.env.DOCKER_SOCKET || "/var/run/docker.sock";
+}
+
+const BUILD_TIMEOUT_MS = parseInt(process.env.SBX_BUILD_TIMEOUT || "600000", 10);
+const MAX_EXEC_BUFFER = 16 * 1024 * 1024; // 16MB
 
 export interface MountSpec {
   source: string;
@@ -7,19 +17,23 @@ export interface MountSpec {
 }
 
 export interface SandboxOptions {
-  image: string;
-  hostCwd: string;
-  name: string;
-  allowNetwork: boolean;
-  resources: {
-    memory?: string;
-    cpus?: string;
-    swap?: string;
-    pidsLimit?: number;
-  };
-  extraMounts?: MountSpec[];
-  cacheVolume?: string;
-  dockerfileContext?: string;
+	image: string;
+	hostCwd: string;
+	name: string;
+	allowNetwork: boolean;
+	resources: {
+		memory?: string;
+		cpus?: string;
+		swap?: string;
+		pidsLimit?: number;
+	};
+	extraMounts?: MountSpec[];
+	cacheVolume?: string;
+	dockerfile?: string;
+	buildContext?: string;
+	buildArgs?: Record<string, string>;
+	forceBuild?: boolean;
+	onProgress?: (msg: string) => void;
 }
 
 export interface ExecOpts {
@@ -42,6 +56,7 @@ export interface Runtime {
   init(): Promise<void>;
   isReady(): boolean;
   ensureImage(): Promise<void>;
+  rebuildImage(onProgress?: (msg: string) => void): Promise<void>;
   startContainer(): Promise<void>;
   withReady(): Promise<void>;
   exec(opts: ExecOpts): Promise<ExecResult>;
@@ -54,7 +69,9 @@ export function deriveContainerName(hostCwd: string): string {
   const normalized = hostCwd.replace(/\/+$/, "");
   const basename = normalized.split("/").filter(Boolean).pop() || "project";
   const hash = createHash("sha256").update(normalized).digest("hex").slice(0, 6);
-  return `pi-sbx-${basename}-${hash}`;
+  const maxBasename = 128 - `pi-sbx--${hash}`.length;
+  const truncated = basename.length > maxBasename ? basename.slice(0, maxBasename) : basename;
+  return `pi-sbx-${truncated}-${hash}`;
 }
 
 type State =
@@ -75,7 +92,7 @@ export class DockerRuntime implements Runtime {
 
   async init(): Promise<void> {
     try {
-      const docker = new Dockerode({ socketPath: "/var/run/docker.sock" });
+      const docker = new Dockerode({ socketPath: getDockerSocket() });
       await docker.ping();
       this.state = { kind: "uninit", docker };
     } catch (err) {
@@ -98,24 +115,62 @@ export class DockerRuntime implements Runtime {
     return this.state.kind === "ready" ? this.state.id : null;
   }
 
-  async ensureImage(): Promise<void> {
+  async ensureImage(opts?: {
+    forceBuild?: boolean;
+    onProgress?: (msg: string) => void;
+  }): Promise<void> {
     const docker = this._requireDocker();
-    try {
-      await docker.getImage(this.opts.image).inspect();
-      return;
-    } catch (err: any) {
-      if (err?.statusCode !== 404) throw err;
+    const image = this.opts.image;
+    const forceBuild = opts?.forceBuild ?? this.opts.forceBuild;
+    const onProgress = opts?.onProgress ?? this.opts.onProgress;
+
+    if (!forceBuild) {
+      try {
+        await docker.getImage(image).inspect();
+        return;
+      } catch (err: any) {
+        if (err?.statusCode !== 404) throw err;
+      }
     }
+
+    const buildContext = this.opts.buildContext ?? (this.opts.dockerfile ? this.opts.hostCwd : PACKAGE_DOCKER_DIR);
+    const dockerfile = this.opts.dockerfile ?? "Dockerfile";
+    const buildArgs = this.opts.buildArgs;
+
+    const report = (msg: string) => onProgress?.(msg);
+    report(`Building image ${image}...`);
+
     const buildStream = await docker.buildImage(
-      this.opts.dockerfileContext ?? this.opts.hostCwd,
-      { t: this.opts.image, dockerfile: "Dockerfile" },
+      { context: buildContext, src: ["."] },
+      { t: image, dockerfile, buildargs: buildArgs },
     );
-    await new Promise<void>((resolve, reject) => {
-      docker.modem.followProgress(buildStream, (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
+
+    const buildPromise = new Promise<void>((resolve, reject) => {
+      docker.modem.followProgress(
+        buildStream,
+        (err: any) => {
+          if (err) reject(err instanceof Error ? err : new Error(String(err)));
+          else resolve();
+        },
+        (event: any) => {
+          if (event.stream) report(event.stream.trim());
+          else if (event.error) report(`ERROR: ${event.error}`);
+          else if (event.status) report(event.status);
+        },
+      );
     });
+
+    const timeoutPromise = new Promise<void>((_, reject) =>
+      setTimeout(() => reject(new Error(`sandbox: image build timed out after ${BUILD_TIMEOUT_MS}ms`)), BUILD_TIMEOUT_MS)
+    );
+
+    await Promise.race([buildPromise, timeoutPromise]);
+
+    report(`Image ${image} built successfully.`);
+  }
+
+  async rebuildImage(onProgress?: (msg: string) => void): Promise<void> {
+    await this.ensureImage({ forceBuild: true, onProgress });
   }
 
   async startContainer(): Promise<void> {
@@ -250,6 +305,10 @@ export class DockerRuntime implements Runtime {
     let pending = Buffer.alloc(0);
     stream.on("data", (chunk: Buffer) => {
       pending = Buffer.concat([pending, chunk]);
+      if (pending.length > MAX_EXEC_BUFFER) {
+        try { (stream as any).destroy(new Error("exec stream buffer exceeded 16MB limit")); } catch {}
+        return;
+      }
       while (pending.length >= 8) {
         const streamType = pending[0];
         const size = pending.readUInt32BE(4);
@@ -265,8 +324,18 @@ export class DockerRuntime implements Runtime {
       }
     });
 
-    controller.signal.addEventListener("abort", () => {
+    controller.signal.addEventListener("abort", async () => {
       try { (stream as any).destroy(); } catch {}
+      try {
+        const info = await exec.inspect();
+        if (info.Pid) {
+          const killExec = await container.exec({
+            Cmd: ["sh", "-c", `kill -9 ${info.Pid} 2>/dev/null; exit 0`],
+            AttachStdout: false, AttachStderr: false,
+          });
+          await killExec.start({ Detach: true }).catch(() => {});
+        }
+      } catch { /* best effort */ }
     });
 
     return new Promise<ExecResult>((resolve) => {
@@ -324,7 +393,7 @@ export class DockerRuntime implements Runtime {
   private _requireDocker(): Dockerode {
     if (this.state.kind === "uninit" && this.state.docker) return this.state.docker;
     if (this.state.kind === "ready") {
-      return new Dockerode({ socketPath: "/var/run/docker.sock" });
+      return new Dockerode({ socketPath: getDockerSocket() });
     }
     throw new Error("Docker not initialized");
   }
@@ -339,7 +408,7 @@ export class DockerRuntime implements Runtime {
 
   private _parseBytes(s: string): number {
     const match = s.match(/^(\d+(?:\.\d+)?)\s*(b|k|m|g|t)?$/i);
-    if (!match) return 0;
+    if (!match) throw new Error(`sandbox: invalid memory size "${s}" — expected format like "4g" or "512m"`);
     const val = parseFloat(match[1]);
     const unit = (match[2] ?? "b").toLowerCase();
     const multipliers: Record<string, number> = {

@@ -1,30 +1,33 @@
 import { describe, it, expect } from "vitest";
-import { createWriteOps } from "../src/ops";
-import type { MountSpec, Runtime, ExecOpts, ExecResult } from "../src/runtime";
+import { createWriteOps, createEditOps, execCapture } from "../src/ops";
+import type { MountSpec } from "../src/runtime";
+import { mockRuntime } from "./_helpers";
 
-function mockRuntime(execResults: Record<string, ExecResult>): Runtime {
-  return {
-    init: async () => {},
-    isReady: () => true,
-    ensureImage: async () => {},
-    startContainer: async () => {},
-    withReady: async () => {},
-    shutdown: async () => {},
-    getContainerId: () => "mock-id",
-    getWorkRoot: () => "/workspace",
-    async exec(opts: ExecOpts): Promise<ExecResult> {
-      const key = opts.cmd.join(" ");
-      if (execResults[key]) return execResults[key];
-      return { exitCode: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
-    },
-  };
-}
+describe("execCapture", () => {
+  it("throws when exec returns non-zero exitCode", async () => {
+    const runtime = mockRuntime({
+      exec: async () => ({ exitCode: 1, stdout: Buffer.alloc(0), stderr: Buffer.from("command not found") }),
+    });
+    const sbx = { runtime, name: "test", hostCwd: "/tmp", mounts: [], allowedExternalPrefixes: [] };
+
+    await expect(execCapture(sbx, "nonexistent-cmd")).rejects.toThrow("exec failed (1): command not found");
+  });
+
+  it("returns stdout when exitCode is 0", async () => {
+    const runtime = mockRuntime({
+      exec: async () => ({ exitCode: 0, stdout: Buffer.from("hello world"), stderr: Buffer.alloc(0) }),
+    });
+    const sbx = { runtime, name: "test", hostCwd: "/tmp", mounts: [], allowedExternalPrefixes: [] };
+
+    const result = await execCapture(sbx, "echo hello");
+    expect(result.toString()).toBe("hello world");
+  });
+});
 
 describe("createWriteOps.writeFile", () => {
   it("calls mkdir -p before writing to create parent dirs", async () => {
     const calls: string[] = [];
-    const runtime = mockRuntime({});
-    const origExec = runtime.exec.bind(runtime);
+    const runtime = mockRuntime();
     runtime.exec = async (opts) => {
       calls.push(opts.cmd.join(" "));
       return { exitCode: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
@@ -46,5 +49,47 @@ describe("createWriteOps.writeFile", () => {
     expect(mkdirCall).toContain("/workspace/sub/deep");
     expect(writeCall).toBeDefined();
     expect(writeCall).toContain("/workspace/sub/deep/file.txt");
+  });
+
+  it("rejects write to read-only mount", async () => {
+    const mounts: MountSpec[] = [{ source: "/host/skills", target: "/skills/my-skill" }];
+    const runtime = mockRuntime();
+    const ops = createWriteOps({
+      runtime, name: "test", hostCwd: "/home/user/project", mounts, allowedExternalPrefixes: [],
+    });
+
+    await expect(ops.writeFile("/skills/my-skill/SKILL.md", "data"))
+      .rejects.toThrow("refusing to write");
+  });
+});
+
+describe("createWriteOps.mkdir", () => {
+  it("rejects mkdir in read-only mount", async () => {
+    const mounts: MountSpec[] = [{ source: "/host/skills", target: "/skills/my-skill" }];
+    const runtime = mockRuntime();
+    const ops = createWriteOps({
+      runtime, name: "test", hostCwd: "/home/user/project", mounts, allowedExternalPrefixes: [],
+    });
+
+    await expect(ops.mkdir("/skills/my-skill/subdir"))
+      .rejects.toThrow("refusing to mkdir");
+  });
+});
+
+describe("createEditOps.writeFile", () => {
+  it("rejects write to read-only mount with createWriteOps error message", async () => {
+    const mounts: MountSpec[] = [{ source: "/host/skills", target: "/skills/my-skill" }];
+    const runtime = mockRuntime();
+    const ops = createEditOps({
+      runtime,
+      name: "test",
+      hostCwd: "/home/user/project",
+      mounts,
+      allowedExternalPrefixes: [],
+    });
+
+    await expect(
+      ops.writeFile("/skills/my-skill/SKILL.md", "content")
+    ).rejects.toThrow("refusing to write");
   });
 });
