@@ -97,6 +97,33 @@ describe.skipIf(!dockerAvailable)("DockerRuntime lifecycle", () => {
       try { await runtime.shutdown(); } catch {}
     }
   }, 120000);
+
+  it("ensureImage with forceBuild and onProgress rebuilds and reports progress", async () => {
+    const buildName = testName + "-forcebuild";
+    const progressMessages: string[] = [];
+    const runtime = new DockerRuntime({
+      image: "debian:12-slim",
+      hostCwd: "/tmp",
+      name: buildName,
+      allowNetwork: false,
+      resources: { memory: "256m", cpus: "0.5" },
+      forceBuild: false,
+      onProgress: (msg: string) => progressMessages.push(msg),
+    });
+    try {
+      await runtime.init();
+      // First call with forceBuild=false — should skip build (image exists)
+      await runtime.ensureImage();
+      expect(progressMessages.length).toBe(0);
+
+      // Now force rebuild
+      (runtime as any).opts.forceBuild = true;
+      await runtime.ensureImage();
+      expect(progressMessages.length).toBeGreaterThan(0);
+    } finally {
+      try { const d = new Dockerode({ socketPath: "/var/run/docker.sock" }); const c = d.getContainer(buildName); await c.remove({ force: true }); } catch {}
+    }
+  }, 300000);
 });
 
 describe.skipIf(!dockerAvailable)("DockerRuntime exec", () => {

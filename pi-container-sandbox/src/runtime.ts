@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import Dockerode from "dockerode";
+import { PACKAGE_DOCKER_DIR } from "./config";
 
 export interface MountSpec {
   source: string;
@@ -104,22 +105,45 @@ export class DockerRuntime implements Runtime {
 
   async ensureImage(): Promise<void> {
     const docker = this._requireDocker();
-    try {
-      await docker.getImage(this.opts.image).inspect();
-      return;
-    } catch (err: any) {
-      if (err?.statusCode !== 404) throw err;
+    const image = this.opts.image;
+
+    if (!this.opts.forceBuild) {
+      try {
+        await docker.getImage(image).inspect();
+        return;
+      } catch (err: any) {
+        if (err?.statusCode !== 404) throw err;
+      }
     }
+
+    const buildContext = this.opts.buildContext ?? PACKAGE_DOCKER_DIR;
+    const dockerfile = this.opts.dockerfile ?? "Dockerfile";
+    const buildArgs = this.opts.buildArgs;
+
+    const report = (msg: string) => this.opts.onProgress?.(msg);
+    report(`Building image ${image}...`);
+
     const buildStream = await docker.buildImage(
-      this.opts.dockerfileContext ?? this.opts.hostCwd,
-      { t: this.opts.image, dockerfile: "Dockerfile" },
+      { context: buildContext, src: ["."] },
+      { t: image, dockerfile, buildargs: buildArgs },
     );
+
     await new Promise<void>((resolve, reject) => {
-      docker.modem.followProgress(buildStream, (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
+      docker.modem.followProgress(
+        buildStream,
+        (err) => {
+          if (err) reject(err);
+          else resolve();
+        },
+        (event: any) => {
+          if (event.stream) report(event.stream.trim());
+          else if (event.error) report(`ERROR: ${event.error}`);
+          else if (event.status) report(event.status);
+        },
+      );
     });
+
+    report(`Image ${image} built successfully.`);
   }
 
   async startContainer(): Promise<void> {
