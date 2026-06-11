@@ -2,6 +2,12 @@ import { createHash } from "node:crypto";
 import Dockerode from "dockerode";
 import { PACKAGE_DOCKER_DIR } from "./config";
 
+function getDockerSocket(): string {
+  const host = process.env.DOCKER_HOST;
+  if (host?.startsWith("unix://")) return host.slice(7);
+  return process.env.DOCKER_SOCKET || "/var/run/docker.sock";
+}
+
 export interface MountSpec {
   source: string;
   target: string;
@@ -60,7 +66,9 @@ export function deriveContainerName(hostCwd: string): string {
   const normalized = hostCwd.replace(/\/+$/, "");
   const basename = normalized.split("/").filter(Boolean).pop() || "project";
   const hash = createHash("sha256").update(normalized).digest("hex").slice(0, 6);
-  return `pi-sbx-${basename}-${hash}`;
+  const maxBasename = 128 - `pi-sbx--${hash}`.length;
+  const truncated = basename.length > maxBasename ? basename.slice(0, maxBasename) : basename;
+  return `pi-sbx-${truncated}-${hash}`;
 }
 
 type State =
@@ -81,7 +89,7 @@ export class DockerRuntime implements Runtime {
 
   async init(): Promise<void> {
     try {
-      const docker = new Dockerode({ socketPath: "/var/run/docker.sock" });
+      const docker = new Dockerode({ socketPath: getDockerSocket() });
       await docker.ping();
       this.state = { kind: "uninit", docker };
     } catch (err) {
@@ -366,7 +374,7 @@ export class DockerRuntime implements Runtime {
   private _requireDocker(): Dockerode {
     if (this.state.kind === "uninit" && this.state.docker) return this.state.docker;
     if (this.state.kind === "ready") {
-      return new Dockerode({ socketPath: "/var/run/docker.sock" });
+      return new Dockerode({ socketPath: getDockerSocket() });
     }
     throw new Error("Docker not initialized");
   }
@@ -381,7 +389,7 @@ export class DockerRuntime implements Runtime {
 
   private _parseBytes(s: string): number {
     const match = s.match(/^(\d+(?:\.\d+)?)\s*(b|k|m|g|t)?$/i);
-    if (!match) return 0;
+    if (!match) throw new Error(`sandbox: invalid memory size "${s}" — expected format like "4g" or "512m"`);
     const val = parseFloat(match[1]);
     const unit = (match[2] ?? "b").toLowerCase();
     const multipliers: Record<string, number> = {

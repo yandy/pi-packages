@@ -26,6 +26,13 @@ describe("deriveContainerName", () => {
     const name = deriveContainerName("/");
     expect(name).toMatch(/^pi-sbx-project-[a-f0-9]{6}$/);
   });
+
+  it("truncates long basenames to stay under 128 chars", () => {
+    const longDir = "/" + "a".repeat(200);
+    const name = deriveContainerName(longDir);
+    expect(name.length).toBeLessThanOrEqual(128);
+    expect(name).toMatch(/^pi-sbx-/);
+  });
 });
 
 describe.skipIf(!dockerAvailable)("DockerRuntime", () => {
