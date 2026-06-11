@@ -248,25 +248,4 @@ describe("DockerRuntime rebuildImage", () => {
 	});
 });
 
-describe("SandboxOptions new image-build fields", () => {
-	it("accepts dockerfile, buildContext, buildArgs, forceBuild, onProgress", () => {
-		const onProgress = (msg: string) => {};
-		const opts = {
-			image: "test-img:latest",
-			hostCwd: "/tmp",
-			name: "test",
-			allowNetwork: false,
-			resources: { memory: "256m", cpus: "0.5" },
-			dockerfile: "./Dockerfile.custom",
-			buildContext: "/custom/context",
-			buildArgs: { KEY: "value" },
-			forceBuild: true,
-			onProgress,
-		};
-		expect(opts.dockerfile).toBe("./Dockerfile.custom");
-		expect(opts.buildContext).toBe("/custom/context");
-		expect(opts.buildArgs).toEqual({ KEY: "value" });
-		expect(opts.forceBuild).toBe(true);
-		expect(opts.onProgress).toBe(onProgress);
-	});
-});
+

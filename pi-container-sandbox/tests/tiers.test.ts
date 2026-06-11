@@ -20,15 +20,11 @@ describe("TIER_SPECS", () => {
     expect(Object.keys(TIER_SPECS).sort()).toEqual(["large", "medium", "small"].sort());
   });
 
-  it("small tier has expected values", () => {
-    expect(TIER_SPECS.small).toEqual({ memory: "1g", swap: "512m", cpus: "1" });
-  });
-
-  it("medium tier has expected values", () => {
-    expect(TIER_SPECS.medium).toEqual({ memory: "4g", swap: "2g", cpus: "2" });
-  });
-
-  it("large tier has expected values", () => {
-    expect(TIER_SPECS.large).toEqual({ memory: "8g", swap: "4g", cpus: "4" });
+  it.each([
+    ["small", { memory: "1g", swap: "512m", cpus: "1" }],
+    ["medium", { memory: "4g", swap: "2g", cpus: "2" }],
+    ["large", { memory: "8g", swap: "4g", cpus: "4" }],
+  ])("%s tier has expected values", (tier: string, expected: object) => {
+    expect(TIER_SPECS[tier as keyof typeof TIER_SPECS]).toEqual(expected);
   });
 });

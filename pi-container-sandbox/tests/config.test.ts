@@ -23,11 +23,8 @@ describe("getSbxConfigPath", () => {
 });
 
 describe("imageRefForTag", () => {
-  it("combines image and tag", () => {
+  it("combines image and tag with optional slash prefix", () => {
     expect(imageRefForTag("pi-sandbox", "latest")).toBe("pi-sandbox:latest");
-  });
-
-  it("handles images with slashes", () => {
     expect(imageRefForTag("org/pi-sandbox", "v1.0")).toBe("org/pi-sandbox:v1.0");
   });
 });
