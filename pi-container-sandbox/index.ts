@@ -67,6 +67,19 @@ export default function (pi: ExtensionAPI) {
 		description: "Image to use for the sandbox (default: pi-container-sandbox:latest)",
 		type: "string",
 	});
+	pi.registerFlag("build-image", {
+		description: "Force rebuild the sandbox Docker image even if it already exists",
+		type: "boolean",
+		default: false,
+	});
+	pi.registerFlag("dockerfile", {
+		description: "Path to a custom Dockerfile for the sandbox image (default: extension's built-in Dockerfile)",
+		type: "string",
+	});
+	pi.registerFlag("dockerfile-context", {
+		description: "Build context directory for the custom Dockerfile (default: extension's docker/ dir)",
+		type: "string",
+	});
 	pi.registerFlag("container-net", {
 		description: "Allow outbound network from the sandbox (default: on)",
 		type: "boolean",
@@ -226,6 +239,9 @@ export default function (pi: ExtensionAPI) {
 			const mountSkills = pi.getFlag("container-mount-skills") as boolean;
 			const extraPathsRaw = pi.getFlag("container-mount-paths") as string | undefined;
 			const extraPaths = extraPathsRaw ? extraPathsRaw.split(",").map((p: string) => p.trim()).filter(Boolean) : undefined;
+			const buildImageFlag = pi.getFlag("build-image") as boolean;
+			const dockerfileFlag = pi.getFlag("dockerfile") as string | undefined;
+			const dockerfileContextFlag = pi.getFlag("dockerfile-context") as string | undefined;
 
 			const nameFlag = pi.getFlag("sandbox-name") as string | undefined;
 			const sandboxName = nameFlag ?? cfg.containerName ?? deriveContainerName(localCwd);
@@ -267,6 +283,13 @@ export default function (pi: ExtensionAPI) {
 				resources,
 				extraMounts: skillMounts.length ? skillMounts : undefined,
 				cacheVolume,
+				dockerfile: cfg.dockerfile ?? dockerfileFlag,
+				buildContext: cfg.buildContext ?? dockerfileContextFlag,
+				buildArgs: cfg.buildArgs,
+				forceBuild: buildImageFlag || false,
+				onProgress: (msg: string) => {
+					ctx.ui.setStatus("sandbox", `[build] ${msg}`);
+				},
 			});
 
 			await runtime.init();
@@ -343,7 +366,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("sandbox", {
-		description: "Sandbox management. Subcommands: status, start, stop, keep, exec, doctor, config, allow, paths, tiers",
+		description: "Sandbox management. Subcommands: status, start, build, stop, keep, exec, doctor, config, allow, paths, tiers",
 		handler: async (args, ctx) => {
 			const parts = args.trim().split(/\s+/);
 			const sub = parts[0]?.toLowerCase() || "status";
@@ -353,9 +376,12 @@ export default function (pi: ExtensionAPI) {
 				case "status":
 				case "info":
 					return handlers.status(rest, ctx);
-				case "start":
-					return handlers.start(rest, ctx);
-				case "stop":
+			case "start":
+				return handlers.start(rest, ctx);
+			case "build":
+			case "rebuild":
+				return handlers.build(rest, ctx);
+			case "stop":
 					return handlers.stop(rest, ctx);
 				case "keep":
 					return handlers.keep(rest, ctx);
@@ -377,7 +403,7 @@ export default function (pi: ExtensionAPI) {
 					ctx.ui.notify(
 						[
 							`Unknown subcommand: ${sub}`,
-							"Available: status, start, stop, keep, exec, doctor, config, allow, paths, tiers",
+							"Available: status, start, build, stop, keep, exec, doctor, config, allow, paths, tiers",
 						].join("\n"),
 						"info",
 					);
