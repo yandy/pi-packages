@@ -357,7 +357,8 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("session_shutdown", async () => {
+	pi.on("session_shutdown", async (event) => {
+		if (event.reason !== "quit") return;
 		const sbx = getSbx();
 		if (!sbx) return;
 		if (!sbx.keep) {
