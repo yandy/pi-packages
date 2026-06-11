@@ -55,7 +55,7 @@ export default function (pi: ExtensionAPI) {
 		type: "string",
 	});
 	pi.registerFlag("sandbox-persist", {
-		description: "Keep sandbox container running after pi exits",
+		description: `[deprecated: use --container-keep] Keep sandbox container alive after session exit`,
 		type: "boolean",
 		default: false,
 	});
@@ -209,7 +209,7 @@ export default function (pi: ExtensionAPI) {
 
 		return {
 			systemPrompt: event.systemPrompt.replace(
-				`Current working directory: ${localCwd}`,
+				/Current working directory:\s*\S+/,
 				[
 					`Current working directory: ${REMOTE_ROOT} (sandboxed in docker container ${sbx.name}, host cwd ${localCwd} mounted read-write)`,
 					skillInfo,
@@ -312,17 +312,18 @@ export default function (pi: ExtensionAPI) {
 			});
 
 			let cleaned = false;
-			const cleanup = () => {
+			const cleanup = async () => {
 				if (cleaned) return;
 				cleaned = true;
 				const s = getSbx();
-				if (!s || s.keep) return;
-				try { s.runtime.shutdown(); } catch { /* ignore */ }
-				clearSbx();
+				if (s && !s.keep) {
+					try { await s.runtime.shutdown(); } catch { /* ignore */ }
+					clearSbx();
+				}
 			};
-			process.on("exit", cleanup);
-			process.once("SIGINT", () => { cleanup(); process.exit(130); });
-			process.once("SIGTERM", () => { cleanup(); process.exit(143); });
+			process.on("beforeExit", async () => { await cleanup(); });
+			process.once("SIGINT", async () => { await cleanup(); process.exit(130); });
+			process.once("SIGTERM", async () => { await cleanup(); process.exit(143); });
 
 			const ok = (await execCapture(getSbx()!, "id -un && pwd", 10000)).toString().trim();
 
