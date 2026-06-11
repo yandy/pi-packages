@@ -1,158 +1,122 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { createSandboxCommandHandlers } from "../src/commands/sandbox";
-import { setSbx, clearSbx, type SbxSession } from "../src/session";
-import type { Runtime } from "../src/runtime";
-
-function mockRuntime(): Runtime {
-	return {
-		init: async () => {},
-		isReady: () => true,
-		ensureImage: async () => {},
-		rebuildImage: async () => {},
-		startContainer: async () => {},
-		withReady: async () => {},
-		shutdown: async () => {},
-		getContainerId: () => "mock-id",
-		getWorkRoot: () => "/workspace",
-		exec: async () => ({ exitCode: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }),
-	};
-}
+import { clearSbx } from "../src/session";
+import { mockRuntime, mockSbx } from "./_helpers";
 
 function mockPathApprovals() {
-	return {
-		list: () => [],
-		revoke: () => false,
-		add: () => {},
-		find: () => undefined,
-	};
+  return {
+    list: () => [],
+    revoke: () => false,
+    add: () => {},
+    find: () => undefined,
+  };
 }
 
+function notifyCtx() {
+  const notifications: { msg: string; level: string }[] = [];
+  return {
+    notifications,
+    ui: {
+      notify: (msg: string, level?: string) => notifications.push({ msg, level: level ?? "info" }),
+      setStatus: (_key: string, _msg: string) => {},
+    },
+  };
+}
+
+afterEach(() => clearSbx());
+
 describe("/sandbox stop", () => {
-	it("blocks stop when keep is true", async () => {
-		const notifications: { msg: string; level: string }[] = [];
-		const ctx = { ui: { notify: (msg: string, level?: string) => notifications.push({ msg, level: level ?? "info" }) } };
-		const handlers = createSandboxCommandHandlers("/tmp", mockPathApprovals());
+  it("blocks stop when keep is true", async () => {
+    const ctx = notifyCtx();
+    const handlers = createSandboxCommandHandlers("/tmp", mockPathApprovals());
+    mockSbx({ keep: true });
 
-		const rt = mockRuntime();
-		setSbx({
-			runtime: rt,
-			name: "test-box",
-			hostCwd: "/tmp",
-			keep: true,
-			mounts: [],
-			allowedExternalPrefixes: [],
-			imageRef: "img:latest",
-			config: {} as any,
-			isReusable: false,
-			isReattached: false,
-		});
+    await handlers.stop("", ctx);
+    expect(ctx.notifications.some((n) => n.msg.includes("keep/persist"))).toBe(true);
+  });
 
-		await handlers.stop("", ctx);
-		expect(notifications.some((n) => n.msg.includes("keep/persist"))).toBe(true);
-		clearSbx();
-	});
+  it("executes shutdown when keep is false", async () => {
+    const ctx = notifyCtx();
+    const handlers = createSandboxCommandHandlers("/tmp", mockPathApprovals());
 
-	it("executes shutdown when keep is false", async () => {
-		const notifications: { msg: string; level: string }[] = [];
-		const ctx = { ui: { notify: (msg: string, level?: string) => notifications.push({ msg, level: level ?? "info" }) } };
-		const handlers = createSandboxCommandHandlers("/tmp", mockPathApprovals());
+    let shutdownCalled = false;
+    const rt = mockRuntime({ shutdown: async () => { shutdownCalled = true; } });
+    mockSbx({ keep: false, runtime: rt });
 
-		let shutdownCalled = false;
-		const rt = mockRuntime();
-		rt.shutdown = async () => { shutdownCalled = true; };
-
-		setSbx({
-			runtime: rt,
-			name: "test-box",
-			hostCwd: "/tmp",
-			keep: false,
-			mounts: [],
-			allowedExternalPrefixes: [],
-			imageRef: "img:latest",
-			config: {} as any,
-			isReusable: false,
-			isReattached: false,
-		});
-
-		await handlers.stop("", ctx);
-		expect(shutdownCalled).toBe(true);
-		expect(notifications.some((n) => n.msg.includes("stopped and removed"))).toBe(true);
-		clearSbx();
-	});
+    await handlers.stop("", ctx);
+    expect(shutdownCalled).toBe(true);
+    expect(ctx.notifications.some((n) => n.msg.includes("stopped and removed"))).toBe(true);
+  });
 });
 
 describe("/sandbox build", () => {
-	it("calls rebuildImage on the runtime with progress callback", async () => {
-		const notifications: { msg: string; level: string }[] = [];
-		const ctx = {
-			ui: {
-				notify: (msg: string, level?: string) => notifications.push({ msg, level: level ?? "info" }),
-				setStatus: (_key: string, _msg: string) => {},
-			},
-		};
-		const handlers = createSandboxCommandHandlers("/tmp", mockPathApprovals());
+  it("calls rebuildImage on the runtime with progress callback", async () => {
+    const ctx = notifyCtx();
+    const handlers = createSandboxCommandHandlers("/tmp", mockPathApprovals());
 
-		let rebuildCalled = false;
-		let progressFn: ((msg: string) => void) | undefined;
-		const rt = mockRuntime();
-		rt.rebuildImage = async (onProgress) => { rebuildCalled = true; progressFn = onProgress; };
+    let rebuildCalled = false;
+    let progressFn: ((msg: string) => void) | undefined;
+    const rt = mockRuntime({
+      rebuildImage: async (onProgress) => { rebuildCalled = true; progressFn = onProgress; },
+    });
+    mockSbx({ runtime: rt });
 
-		setSbx({
-			runtime: rt,
-			name: "test-box",
-			hostCwd: "/tmp",
-			keep: false,
-			mounts: [],
-			allowedExternalPrefixes: [],
-			imageRef: "img:latest",
-			config: {} as any,
-			isReusable: false,
-			isReattached: false,
-		});
+    await handlers.build("", ctx);
+    expect(rebuildCalled).toBe(true);
+    expect(typeof progressFn).toBe("function");
+  });
 
-		await handlers.build("", ctx);
-		expect(rebuildCalled).toBe(true);
-		expect(typeof progressFn).toBe("function");
-		clearSbx();
-	});
+  it("shows error when sandbox is not active", async () => {
+    const ctx = notifyCtx();
+    const handlers = createSandboxCommandHandlers("/tmp", mockPathApprovals());
 
-	it("shows error when sandbox is not active", async () => {
-		const notifications: { msg: string; level: string }[] = [];
-		const ctx = { ui: { notify: (msg: string, level?: string) => notifications.push({ msg, level: level ?? "info" }), setStatus: (_key: string, _msg: string) => {} } };
-		const handlers = createSandboxCommandHandlers("/tmp", mockPathApprovals());
+    await handlers.build("", ctx);
+    expect(ctx.notifications.some((n) => n.msg.includes("not active"))).toBe(true);
+  });
 
-		await handlers.build("", ctx);
-		expect(notifications.some((n) => n.msg.includes("not active"))).toBe(true);
-	});
+  it("shows error on build failure", async () => {
+    const ctx = notifyCtx();
+    const handlers = createSandboxCommandHandlers("/tmp", mockPathApprovals());
 
-	it("shows error on build failure", async () => {
-		const notifications: { msg: string; level: string }[] = [];
-		const ctx = {
-			ui: {
-				notify: (msg: string, level?: string) => notifications.push({ msg, level: level ?? "info" }),
-				setStatus: (_key: string, _msg: string) => {},
-			},
-		};
-		const handlers = createSandboxCommandHandlers("/tmp", mockPathApprovals());
+    const rt = mockRuntime({ rebuildImage: async () => { throw new Error("build failed"); } });
+    mockSbx({ runtime: rt });
 
-		const rt = mockRuntime();
-		rt.rebuildImage = async () => { throw new Error("build failed"); };
+    await handlers.build("", ctx);
+    expect(ctx.notifications.some((n) => n.msg.includes("Build failed"))).toBe(true);
+  });
+});
 
-		setSbx({
-			runtime: rt,
-			name: "test-box",
-			hostCwd: "/tmp",
-			keep: false,
-			mounts: [],
-			allowedExternalPrefixes: [],
-			imageRef: "img:latest",
-			config: {} as any,
-			isReusable: false,
-			isReattached: false,
-		});
+describe("/sandbox exec", () => {
+  it("executes command and shows output", async () => {
+    const ctx = notifyCtx();
+    const handlers = createSandboxCommandHandlers("/tmp", mockPathApprovals());
 
-		await handlers.build("", ctx);
-		expect(notifications.some((n) => n.msg.includes("Build failed"))).toBe(true);
-		clearSbx();
-	});
+    const rt = mockRuntime({
+      exec: async () => ({ exitCode: 0, stdout: Buffer.from("hello"), stderr: Buffer.alloc(0) }),
+    });
+    mockSbx({ runtime: rt });
+
+    await handlers.exec("echo hello", ctx);
+    expect(ctx.notifications.some((n) => n.msg.includes("hello"))).toBe(true);
+  });
+
+  it("shows error for empty command", async () => {
+    const ctx = notifyCtx();
+    const handlers = createSandboxCommandHandlers("/tmp", mockPathApprovals());
+    mockSbx();
+
+    await handlers.exec("", ctx);
+    expect(ctx.notifications.some((n) => n.msg.includes("Usage"))).toBe(true);
+  });
+});
+
+describe("/sandbox keep", () => {
+  it("updates config with container name", async () => {
+    const ctx = notifyCtx();
+    const handlers = createSandboxCommandHandlers("/tmp", mockPathApprovals());
+    mockSbx({ name: "my-container" });
+
+    await handlers.keep("my-container", ctx);
+    expect(ctx.notifications.some((n) => n.msg.includes("saved to sandbox.json"))).toBe(true);
+  });
 });
