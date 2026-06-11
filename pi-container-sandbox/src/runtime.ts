@@ -8,6 +8,9 @@ function getDockerSocket(): string {
   return process.env.DOCKER_SOCKET || "/var/run/docker.sock";
 }
 
+const BUILD_TIMEOUT_MS = parseInt(process.env.SBX_BUILD_TIMEOUT || "600000", 10);
+const MAX_EXEC_BUFFER = 16 * 1024 * 1024; // 16MB
+
 export interface MountSpec {
   source: string;
   target: string;
@@ -137,11 +140,11 @@ export class DockerRuntime implements Runtime {
       { t: image, dockerfile, buildargs: buildArgs },
     );
 
-    await new Promise<void>((resolve, reject) => {
+    const buildPromise = new Promise<void>((resolve, reject) => {
       docker.modem.followProgress(
         buildStream,
-        (err) => {
-          if (err) reject(err);
+        (err: any) => {
+          if (err) reject(err instanceof Error ? err : new Error(String(err)));
           else resolve();
         },
         (event: any) => {
@@ -151,6 +154,12 @@ export class DockerRuntime implements Runtime {
         },
       );
     });
+
+    const timeoutPromise = new Promise<void>((_, reject) =>
+      setTimeout(() => reject(new Error(`sandbox: image build timed out after ${BUILD_TIMEOUT_MS}ms`)), BUILD_TIMEOUT_MS)
+    );
+
+    await Promise.race([buildPromise, timeoutPromise]);
 
     report(`Image ${image} built successfully.`);
   }
@@ -300,6 +309,10 @@ export class DockerRuntime implements Runtime {
     let pending = Buffer.alloc(0);
     stream.on("data", (chunk: Buffer) => {
       pending = Buffer.concat([pending, chunk]);
+      if (pending.length > MAX_EXEC_BUFFER) {
+        try { (stream as any).destroy(new Error("exec stream buffer exceeded 16MB limit")); } catch {}
+        return;
+      }
       while (pending.length >= 8) {
         const streamType = pending[0];
         const size = pending.readUInt32BE(4);
@@ -315,8 +328,18 @@ export class DockerRuntime implements Runtime {
       }
     });
 
-    controller.signal.addEventListener("abort", () => {
+    controller.signal.addEventListener("abort", async () => {
       try { (stream as any).destroy(); } catch {}
+      try {
+        const info = await exec.inspect();
+        if (info.Pid) {
+          const killExec = await container.exec({
+            Cmd: ["sh", "-c", `kill -9 ${info.Pid} 2>/dev/null; exit 0`],
+            AttachStdout: false, AttachStderr: false,
+          });
+          await killExec.start({ Detach: true }).catch(() => {});
+        }
+      } catch { /* best effort */ }
     });
 
     return new Promise<ExecResult>((resolve) => {
