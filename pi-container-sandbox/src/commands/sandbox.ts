@@ -47,6 +47,21 @@ export function createSandboxCommandHandlers(localCwd: string, pathApprovals: {
 			ctx.ui.notify("/sandbox start requires sandbox initialization via session start. Restart pi with --container.", "info");
 		},
 
+		build: async (_args: string, ctx: { ui: { setStatus: (key: string, msg: string) => void; notify: (msg: string, level?: "info" | "warning" | "error") => void } }) => {
+			const sbx = getSbx();
+			if (!sbx) {
+				ctx.ui.notify("Sandbox is not active. Start pi with --container.", "info");
+				return;
+			}
+			ctx.ui.notify(`Rebuilding image ${sbx.imageRef}...`, "info");
+			try {
+				await sbx.runtime.rebuildImage((msg: string) => ctx.ui.setStatus("sandbox", `[build] ${msg}`));
+				ctx.ui.notify(`Image ${sbx.imageRef} rebuilt successfully.`, "info");
+			} catch (e) {
+				ctx.ui.notify(`Build failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+			}
+		},
+
 		stop: async (_args: string, ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }) => {
 			const sbx = getSbx();
 			if (!sbx) {

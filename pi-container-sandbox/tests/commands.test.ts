@@ -80,3 +80,79 @@ describe("/sandbox stop", () => {
 		clearSbx();
 	});
 });
+
+describe("/sandbox build", () => {
+	it("calls rebuildImage on the runtime with progress callback", async () => {
+		const notifications: { msg: string; level: string }[] = [];
+		const ctx = {
+			ui: {
+				notify: (msg: string, level?: string) => notifications.push({ msg, level: level ?? "info" }),
+				setStatus: (_key: string, _msg: string) => {},
+			},
+		};
+		const handlers = createSandboxCommandHandlers("/tmp", mockPathApprovals());
+
+		let rebuildCalled = false;
+		let progressFn: ((msg: string) => void) | undefined;
+		const rt = mockRuntime();
+		rt.rebuildImage = async (onProgress) => { rebuildCalled = true; progressFn = onProgress; };
+
+		setSbx({
+			runtime: rt,
+			name: "test-box",
+			hostCwd: "/tmp",
+			keep: false,
+			mounts: [],
+			allowedExternalPrefixes: [],
+			imageRef: "img:latest",
+			config: {} as any,
+			isReusable: false,
+			isReattached: false,
+		});
+
+		await handlers.build("", ctx);
+		expect(rebuildCalled).toBe(true);
+		expect(typeof progressFn).toBe("function");
+		clearSbx();
+	});
+
+	it("shows error when sandbox is not active", async () => {
+		const notifications: { msg: string; level: string }[] = [];
+		const ctx = { ui: { notify: (msg: string, level?: string) => notifications.push({ msg, level: level ?? "info" }) } };
+		const handlers = createSandboxCommandHandlers("/tmp", mockPathApprovals());
+
+		await handlers.build("", ctx);
+		expect(notifications.some((n) => n.msg.includes("not active"))).toBe(true);
+	});
+
+	it("shows error on build failure", async () => {
+		const notifications: { msg: string; level: string }[] = [];
+		const ctx = {
+			ui: {
+				notify: (msg: string, level?: string) => notifications.push({ msg, level: level ?? "info" }),
+				setStatus: (_key: string, _msg: string) => {},
+			},
+		};
+		const handlers = createSandboxCommandHandlers("/tmp", mockPathApprovals());
+
+		const rt = mockRuntime();
+		rt.rebuildImage = async () => { throw new Error("build failed"); };
+
+		setSbx({
+			runtime: rt,
+			name: "test-box",
+			hostCwd: "/tmp",
+			keep: false,
+			mounts: [],
+			allowedExternalPrefixes: [],
+			imageRef: "img:latest",
+			config: {} as any,
+			isReusable: false,
+			isReattached: false,
+		});
+
+		await handlers.build("", ctx);
+		expect(notifications.some((n) => n.msg.includes("Build failed"))).toBe(true);
+		clearSbx();
+	});
+});
