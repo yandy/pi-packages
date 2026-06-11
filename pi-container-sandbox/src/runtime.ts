@@ -115,11 +115,16 @@ export class DockerRuntime implements Runtime {
     return this.state.kind === "ready" ? this.state.id : null;
   }
 
-  async ensureImage(): Promise<void> {
+  async ensureImage(opts?: {
+    forceBuild?: boolean;
+    onProgress?: (msg: string) => void;
+  }): Promise<void> {
     const docker = this._requireDocker();
     const image = this.opts.image;
+    const forceBuild = opts?.forceBuild ?? this.opts.forceBuild;
+    const onProgress = opts?.onProgress ?? this.opts.onProgress;
 
-    if (!this.opts.forceBuild) {
+    if (!forceBuild) {
       try {
         await docker.getImage(image).inspect();
         return;
@@ -132,7 +137,7 @@ export class DockerRuntime implements Runtime {
     const dockerfile = this.opts.dockerfile ?? "Dockerfile";
     const buildArgs = this.opts.buildArgs;
 
-    const report = (msg: string) => this.opts.onProgress?.(msg);
+    const report = (msg: string) => onProgress?.(msg);
     report(`Building image ${image}...`);
 
     const buildStream = await docker.buildImage(
@@ -165,16 +170,7 @@ export class DockerRuntime implements Runtime {
   }
 
   async rebuildImage(onProgress?: (msg: string) => void): Promise<void> {
-    const prevForceBuild = this.opts.forceBuild;
-    const prevOnProgress = this.opts.onProgress;
-    this.opts.forceBuild = true;
-    this.opts.onProgress = onProgress;
-    try {
-      await this.ensureImage();
-    } finally {
-      this.opts.forceBuild = prevForceBuild;
-      this.opts.onProgress = prevOnProgress;
-    }
+    await this.ensureImage({ forceBuild: true, onProgress });
   }
 
   async startContainer(): Promise<void> {

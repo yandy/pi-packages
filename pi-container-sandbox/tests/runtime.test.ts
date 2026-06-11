@@ -120,12 +120,11 @@ describe.skipIf(!dockerAvailable)("DockerRuntime lifecycle", () => {
     try {
       await runtime.init();
       // First call with forceBuild=false — should skip build (image exists)
-      await runtime.ensureImage();
+      await runtime.ensureImage({ forceBuild: false });
       expect(progressMessages.length).toBe(0);
 
       // Now force rebuild
-      (runtime as any).opts.forceBuild = true;
-      await runtime.ensureImage();
+      await runtime.ensureImage({ forceBuild: true });
       expect(progressMessages.length).toBeGreaterThan(0);
     } finally {
       try { const d = new Dockerode({ socketPath: "/var/run/docker.sock" }); const c = d.getContainer(buildName); await c.remove({ force: true }); } catch {}
