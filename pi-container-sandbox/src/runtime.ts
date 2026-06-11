@@ -184,7 +184,9 @@ export class DockerRuntime implements Runtime {
         this.state = { kind: "ready", container: existing, id: info.Id };
         return;
       }
-      try { await existing.remove({ force: true }); } catch { /* race: another process removed it */ }
+      try { await existing.remove({ force: true }); } catch (err: any) {
+        if (err?.statusCode !== 404 && err?.statusCode !== 409) throw err;
+      }
     } catch (err: any) {
       if (err?.statusCode !== 404) throw err;
     }
