@@ -38,19 +38,11 @@ export function loadSbxConfig(hostCwd: string): SbxConfig {
 		return { ...DEFAULT_SBX_CONFIG };
 	}
 	try {
-		const raw = readFileSync(configPath, "utf-8");
-		const parsed = JSON.parse(raw);
+		const raw = JSON.parse(readFileSync(configPath, "utf-8"));
 		return {
-			image: parsed.image ?? DEFAULT_SBX_CONFIG.image,
-			tag: parsed.tag ?? DEFAULT_SBX_CONFIG.tag,
-			containerName: parsed.containerName ?? DEFAULT_SBX_CONFIG.containerName,
-			tier: parsed.tier ?? DEFAULT_SBX_CONFIG.tier,
-			persist: parsed.persist ?? DEFAULT_SBX_CONFIG.persist,
-			cacheVolume: parsed.cacheVolume ?? DEFAULT_SBX_CONFIG.cacheVolume,
-			dockerfile: parsed.dockerfile,
-			buildContext: parsed.buildContext,
-			buildArgs: parsed.buildArgs,
-		};
+			...DEFAULT_SBX_CONFIG,
+			...raw,
+		} as SbxConfig;
 	} catch {
 		return { ...DEFAULT_SBX_CONFIG };
 	}

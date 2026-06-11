@@ -107,3 +107,21 @@ describe("loadSbxConfig new fields", () => {
     expect(cfg.buildArgs).toBeUndefined();
   });
 });
+
+describe("loadSbxConfig preserves unknown fields", () => {
+  it("round-trips user-added fields through save/load", () => {
+    const configDir = resolvePath(testDir, ".pi", "agent");
+    mkdirSync(configDir, { recursive: true });
+    const original = { image: "pi-sandbox", custom_user_field: "hello", nested: { foo: 1 } };
+    writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify(original));
+
+    const cfg = loadSbxConfig(testDir);
+    expect((cfg as any).custom_user_field).toBe("hello");
+    expect((cfg as any).nested).toEqual({ foo: 1 });
+
+    saveSbxConfig(testDir, cfg);
+    const cfg2 = loadSbxConfig(testDir);
+    expect((cfg2 as any).custom_user_field).toBe("hello");
+    expect((cfg2 as any).nested).toEqual({ foo: 1 });
+  });
+});

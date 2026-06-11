@@ -113,13 +113,7 @@ export function createEditOps(sbx: SbxHandle): EditOperations {
 	return {
 		readFile: r.readFile,
 		access: r.access,
-		writeFile: async (p, content) => {
-			const remote = toRemote(p, sbx.hostCwd, sbx.mounts);
-			if (isReadOnlyMount(remote, sbx.mounts)) {
-				throw new Error(`sandbox: refusing to edit ${remote}: read-only skill mount`);
-			}
-			return w.writeFile(p, content);
-		},
+		writeFile: (p, content) => w.writeFile(p, content),
 	};
 }
 
