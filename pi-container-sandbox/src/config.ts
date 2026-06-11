@@ -9,6 +9,9 @@ export interface SbxConfig {
 	tier: SizeTier;
 	persist: boolean;
 	cacheVolume: string | null;
+	dockerfile?: string;
+	buildContext?: string;
+	buildArgs?: Record<string, string>;
 }
 
 export const DEFAULT_SBX_CONFIG: SbxConfig = {
@@ -39,6 +42,9 @@ export function loadSbxConfig(hostCwd: string): SbxConfig {
 			tier: parsed.tier ?? DEFAULT_SBX_CONFIG.tier,
 			persist: parsed.persist ?? DEFAULT_SBX_CONFIG.persist,
 			cacheVolume: parsed.cacheVolume ?? DEFAULT_SBX_CONFIG.cacheVolume,
+			dockerfile: parsed.dockerfile,
+			buildContext: parsed.buildContext,
+			buildArgs: parsed.buildArgs,
 		};
 	} catch {
 		return { ...DEFAULT_SBX_CONFIG };

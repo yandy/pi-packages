@@ -80,3 +80,33 @@ describe("saveSbxConfig", () => {
     expect(output).toEqual(input);
   });
 });
+
+describe("loadSbxConfig new fields", () => {
+  it("parses dockerfile, buildContext, buildArgs from config", () => {
+    const configDir = resolvePath(testDir, ".pi", "agent");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify({
+      image: "my-img",
+      tag: "v2",
+      dockerfile: "./Dockerfile.custom",
+      buildContext: ".",
+      buildArgs: { FOO: "bar", BAZ: "1" },
+    }));
+
+    const cfg = loadSbxConfig(testDir);
+    expect(cfg.dockerfile).toBe("./Dockerfile.custom");
+    expect(cfg.buildContext).toBe(".");
+    expect(cfg.buildArgs).toEqual({ FOO: "bar", BAZ: "1" });
+  });
+
+  it("omits optional fields when not present in config", () => {
+    const configDir = resolvePath(testDir, ".pi", "agent");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify({ image: "img" }));
+
+    const cfg = loadSbxConfig(testDir);
+    expect(cfg.dockerfile).toBeUndefined();
+    expect(cfg.buildContext).toBeUndefined();
+    expect(cfg.buildArgs).toBeUndefined();
+  });
+});
