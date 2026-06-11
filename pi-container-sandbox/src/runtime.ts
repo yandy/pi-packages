@@ -47,6 +47,7 @@ export interface Runtime {
   init(): Promise<void>;
   isReady(): boolean;
   ensureImage(): Promise<void>;
+  rebuildImage(onProgress?: (msg: string) => void): Promise<void>;
   startContainer(): Promise<void>;
   withReady(): Promise<void>;
   exec(opts: ExecOpts): Promise<ExecResult>;
@@ -144,6 +145,12 @@ export class DockerRuntime implements Runtime {
     });
 
     report(`Image ${image} built successfully.`);
+  }
+
+  async rebuildImage(onProgress?: (msg: string) => void): Promise<void> {
+    this.opts.forceBuild = true;
+    this.opts.onProgress = onProgress;
+    await this.ensureImage();
   }
 
   async startContainer(): Promise<void> {

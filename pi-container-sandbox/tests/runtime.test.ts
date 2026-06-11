@@ -235,6 +235,19 @@ describe("PACKAGE_DOCKER_DIR", () => {
 	});
 });
 
+describe("DockerRuntime rebuildImage", () => {
+	it("has rebuildImage method", () => {
+		const runtime = new DockerRuntime({
+			image: "debian:12-slim",
+			hostCwd: "/tmp",
+			name: "pi-test-rebuild-" + Date.now(),
+			allowNetwork: false,
+			resources: { memory: "256m", cpus: "0.5" },
+		});
+		expect(typeof runtime.rebuildImage).toBe("function");
+	});
+});
+
 describe("SandboxOptions new image-build fields", () => {
 	it("accepts dockerfile, buildContext, buildArgs, forceBuild, onProgress", () => {
 		const onProgress = (msg: string) => {};

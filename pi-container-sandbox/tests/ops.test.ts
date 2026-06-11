@@ -7,6 +7,7 @@ function mockRuntime(execResults: Record<string, ExecResult>): Runtime {
     init: async () => {},
     isReady: () => true,
     ensureImage: async () => {},
+    rebuildImage: async () => {},
     startContainer: async () => {},
     withReady: async () => {},
     shutdown: async () => {},

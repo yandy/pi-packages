@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { getSbx, setSbx, clearSbx, type SbxSession } from "../src/session";
 
 const mockSession: SbxSession = {
-	runtime: { init: async () => {}, isReady: () => true, ensureImage: async () => {}, startContainer: async () => {}, withReady: async () => {}, exec: async () => ({ exitCode: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }), shutdown: async () => {}, getContainerId: () => null, getWorkRoot: () => "/workspace" },
+	runtime: { init: async () => {}, isReady: () => true, ensureImage: async () => {}, rebuildImage: async () => {}, startContainer: async () => {}, withReady: async () => {}, exec: async () => ({ exitCode: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }), shutdown: async () => {}, getContainerId: () => null, getWorkRoot: () => "/workspace" },
 	name: "test-container",
 	hostCwd: "/tmp/test",
 	keep: false,
