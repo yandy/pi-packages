@@ -131,3 +131,22 @@ describe("extractCommandName", () => {
     expect(extractCommandName("FOO=bar")).toBeNull();
   });
 });
+
+import { createHostBashOps } from "../src/ops";
+
+describe("createHostBashOps", () => {
+  it("returns BashOperations with exec function", () => {
+    const ops = createHostBashOps("/home/user/project", []);
+    expect(typeof ops.exec).toBe("function");
+  });
+
+  it("executes a command on host", async () => {
+    const ops = createHostBashOps(process.cwd(), []);
+    const chunks: Buffer[] = [];
+    const result = await ops.exec("echo hello", process.cwd(), {
+      onData: (b) => chunks.push(b),
+    });
+    expect(result.exitCode).toBe(0);
+    expect(Buffer.concat(chunks).toString().trim()).toBe("hello");
+  });
+});

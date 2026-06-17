@@ -1,8 +1,9 @@
 import { readFileSync, statSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import type { ReadOperations, WriteOperations, EditOperations, BashOperations } from "@earendil-works/pi-coding-agent";
+import { createLocalBashOperations } from "@earendil-works/pi-coding-agent";
 import type { MountSpec, Runtime } from "./runtime";
-import { hostToRemote, isReadOnlyMount, isInsideCwd, isAllowedExternalResource, shq } from "./paths";
+import { hostToRemote, remoteToHost, isReadOnlyMount, isInsideCwd, isAllowedExternalResource, shq } from "./paths";
 
 export interface SbxHandle {
 	runtime: Runtime;
@@ -136,6 +137,16 @@ export function extractCommandName(command: string): string | null {
 	const rest = trimmed.slice(i);
 	const spaceIdx = rest.indexOf(" ");
 	return spaceIdx === -1 ? rest || null : rest.slice(0, spaceIdx);
+}
+
+export function createHostBashOps(hostCwd: string, mounts: MountSpec[]): BashOperations {
+	const local = createLocalBashOperations();
+	return {
+		exec: (command, cwd, opts) => {
+			const mappedCwd = remoteToHost(cwd, hostCwd, mounts);
+			return local.exec(command, mappedCwd, opts);
+		},
+	};
 }
 
 export function createRemoteBashOps(sbx: SbxHandle): BashOperations {
