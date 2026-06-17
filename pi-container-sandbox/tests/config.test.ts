@@ -108,6 +108,25 @@ describe("loadSbxConfig new fields", () => {
   });
 });
 
+describe("loadSbxConfig hostCommands", () => {
+  it("reads hostCommands from config file", () => {
+    const configDir = resolvePath(testDir, ".pi", "agent");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify({
+      image: "my-img",
+      hostCommands: ["git", "docker", "npm"],
+    }));
+
+    const cfg = loadSbxConfig(testDir);
+    expect(cfg.hostCommands).toEqual(["git", "docker", "npm"]);
+  });
+
+  it("returns undefined hostCommands when not in config", () => {
+    const cfg = loadSbxConfig(testDir);
+    expect(cfg.hostCommands).toBeUndefined();
+  });
+});
+
 describe("loadSbxConfig preserves unknown fields", () => {
   it("round-trips user-added fields through save/load", () => {
     const configDir = resolvePath(testDir, ".pi", "agent");

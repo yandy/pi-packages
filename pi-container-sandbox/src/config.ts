@@ -14,6 +14,7 @@ export interface SbxConfig {
 	dockerfile?: string;
 	buildContext?: string;
 	buildArgs?: Record<string, string>;
+	hostCommands?: string[];
 }
 
 export const DEFAULT_SBX_CONFIG: SbxConfig = {
