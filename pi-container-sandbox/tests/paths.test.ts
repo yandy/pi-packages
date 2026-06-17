@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { tmpdir } from "node:os";
-import { toRemote, toContainerPath, shq, isInsideCwd, isReadOnlyMount,
+import { hostToRemote, toContainerPath, shq, isInsideCwd, isReadOnlyMount,
          resolveExtraMountPath, getExternalPath, isAllowedExternalResource,
          PathApprovalStore, REMOTE_ROOT, SKILLS_ROOT } from "../src/paths";
 import type { MountSpec } from "../src/runtime";
@@ -27,20 +27,20 @@ describe("shq", () => {
 
 describe("toRemote", () => {
   it("converts relative path inside cwd to /workspace path", () => {
-    expect(toRemote("src/index.ts", testDir)).toBe("/workspace/src/index.ts");
+    expect(hostToRemote("src/index.ts", testDir)).toBe("/workspace/src/index.ts");
   });
   it("returns /workspace for cwd itself", () => {
-    expect(toRemote(".", testDir)).toBe("/workspace");
+    expect(hostToRemote(".", testDir)).toBe("/workspace");
   });
   it("passes through paths already under /workspace", () => {
-    expect(toRemote("/workspace/src/file.ts", testDir)).toBe("/workspace/src/file.ts");
+    expect(hostToRemote("/workspace/src/file.ts", testDir)).toBe("/workspace/src/file.ts");
   });
   it("throws for paths outside cwd", () => {
-    expect(() => toRemote("/etc/passwd", testDir)).toThrow("outside of project cwd");
+    expect(() => hostToRemote("/etc/passwd", testDir)).toThrow("outside of project cwd");
   });
   it("passes through paths under a mount target", () => {
     const mounts = [{ source: "/host/skills", target: "/skills/my-skill" }];
-    expect(toRemote("/skills/my-skill/SKILL.md", testDir, mounts)).toBe("/skills/my-skill/SKILL.md");
+    expect(hostToRemote("/skills/my-skill/SKILL.md", testDir, mounts)).toBe("/skills/my-skill/SKILL.md");
   });
 });
 

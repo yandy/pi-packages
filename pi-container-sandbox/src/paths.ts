@@ -47,7 +47,7 @@ export function resolveExtraMountPath(containerPath: string, mounts: MountSpec[]
 	return null;
 }
 
-export function toRemote(hostPath: string, hostCwd: string, mounts?: MountSpec[]): string {
+export function hostToRemote(hostPath: string, hostCwd: string, mounts?: MountSpec[]): string {
 	if (hostPath === REMOTE_ROOT || hostPath.startsWith(`${REMOTE_ROOT}/`)) {
 		return hostPath;
 	}
