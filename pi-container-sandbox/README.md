@@ -35,15 +35,21 @@ pi
 | Tool / command | Where it runs |
 |---|---|
 | `bash` (agent)   | inside the container, cwd `/workspace` |
-| `read`           | inside the container |
+| `read`           | inside the container (external paths granted via `allow` are read from host directly) |
 | `write`          | inside the container |
-| `edit`           | inside the container |
+| `edit`           | inside the container (read ops: same as `read`; write ops: inside container) |
 | `!` user bash    | inside the container |
+| `bash` (whitelisted) | on the host (see `hostCommands` in config) |
 | `find`, `grep`, `ls` | pi's host defaults (use `bash` tool to call inside container) |
 
 The project cwd is bind-mounted **read-write** at `/workspace` inside the
 container. Edits the agent makes are visible on the host and vice versa.
 Agent skill directories are mounted **read-only** at `/skills/`.
+
+> **Note:** `/sandbox allow` and `--container-allow-paths` only affect the
+> `read` tool (and `edit`'s read operations). To write to paths outside the
+> project cwd, use `--container-mount-paths` to bind-mount them into the
+> container.
 
 The sandbox container is removed when pi exits, unless you set
 `--sandbox-persist` or `--container-keep`.
@@ -74,9 +80,15 @@ The sandbox container is removed when pi exits, unless you set
   "containerName": null,
   "tier": "medium",
   "persist": false,
-  "cacheVolume": null
+  "cacheVolume": null,
+  "hostCommands": ["git", "docker"]
 }
 ```
+
+`hostCommands` (optional string array): Commands in this list run directly
+on the host instead of inside the container. Matches by command name
+(the first word of the bash command). For example, listing `"git"` means
+`git status`, `git diff`, etc. all execute on the host.
 
 ### Resource Tiers
 
@@ -112,10 +124,32 @@ Use `--container-size` flag or `/sandbox tiers set` to switch.
 
 ## External File Read
 
-When the agent tries to read a file outside the project cwd (e.g. system config
-files), the sandbox prompts for approval. Paths can be pre-approved via
-`--container-allow-paths` flag or `/sandbox allow` command. Approved paths are
-persisted in `.pi/agent/path-approvals.json`.
+When the agent tries to **read** a file outside the project cwd (e.g. system
+config files), the sandbox prompts for interactive approval. Paths can be
+pre-approved via `--container-allow-paths` flag or `/sandbox allow` command.
+Approved paths are persisted in `.pi/agent/path-approvals.json`.
+
+Once a path is allowed, the `read` tool reads it directly from the **host
+filesystem** (bypassing the container). Only the `read` tool and `edit`'s read
+operations are affected — `write`, `edit`'s write operations, and `bash` are
+**not** affected and always run inside the container.
+
+### Mechanism distinction
+
+| Tool | External read | External write |
+|------|--------------|----------------|
+| `read` | `--container-allow-paths` / `/sandbox allow` | — |
+| `edit` (read ops) | `--container-allow-paths` / `/sandbox allow` | — |
+| `edit` (write ops) | — | `--container-mount-paths` |
+| `write` | — | `--container-mount-paths` |
+| `bash` | — | `--container-mount-paths` |
+
+- **allow**: Lightweight read-only access from host. Paths are matched by
+  prefix (e.g., allowing `/etc` permits reading any file under `/etc`).
+- **mount**: Bind-mounts a host directory into the container at the same path,
+  granting full read/write access inside the container. Use for write
+  operations or when the tool needs to operate on external paths inside the
+  container.
 
 ## Resource limits (defaults)
 
