@@ -1,19 +1,25 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve as resolvePath } from "node:path";
-import { TIER_SPECS, type SizeTier } from "../tiers";
-import { loadSbxConfig, saveSbxConfig, imageRefForTag, getSbxConfigPath } from "../config";
+import { getSbxConfigPath, imageRefForTag, loadSbxConfig, saveSbxConfig } from "../config";
 import { execCapture } from "../ops";
-import { getSbx, clearSbx } from "../session";
+import { clearSbx, getSbx } from "../session";
+import { type SizeTier, TIER_SPECS } from "../tiers";
 
-export function createSandboxCommandHandlers(localCwd: string, pathApprovals: {
-	list(): { path: string; approvedAt: number; expiresAt: number }[];
-	revoke(p: string): boolean;
-	add(p: string, days: number | typeof Infinity): void;
-	find(p: string): { path: string; approvedAt: number; expiresAt: number } | undefined;
-}) {
+export function createSandboxCommandHandlers(
+	localCwd: string,
+	pathApprovals: {
+		list(): { path: string; approvedAt: number; expiresAt: number }[];
+		revoke(p: string): boolean;
+		add(p: string, days: number | typeof Infinity): void;
+		find(p: string): { path: string; approvedAt: number; expiresAt: number } | undefined;
+	},
+) {
 	return {
-		status: async (_args: string, ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }) => {
+		status: async (
+			_args: string,
+			ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } },
+		) => {
 			const sbx = getSbx();
 			if (!sbx) {
 				const cfg = loadSbxConfig(localCwd);
@@ -38,16 +44,32 @@ export function createSandboxCommandHandlers(localCwd: string, pathApprovals: {
 					`image: ${sbx.imageRef}`,
 					resStr.trim(),
 					info.trimEnd(),
-				].filter(Boolean).join("\n"),
+				]
+					.filter(Boolean)
+					.join("\n"),
 				"info",
 			);
 		},
 
-		start: async (_args: string, ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }) => {
-			ctx.ui.notify("/sandbox start requires sandbox initialization via session start. Restart pi with --container.", "info");
+		start: async (
+			_args: string,
+			ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } },
+		) => {
+			ctx.ui.notify(
+				"/sandbox start requires sandbox initialization via session start. Restart pi with --container.",
+				"info",
+			);
 		},
 
-		build: async (_args: string, ctx: { ui: { setStatus: (key: string, msg: string) => void; notify: (msg: string, level?: "info" | "warning" | "error") => void } }) => {
+		build: async (
+			_args: string,
+			ctx: {
+				ui: {
+					setStatus: (key: string, msg: string) => void;
+					notify: (msg: string, level?: "info" | "warning" | "error") => void;
+				};
+			},
+		) => {
 			const sbx = getSbx();
 			if (!sbx) {
 				ctx.ui.notify("Sandbox is not active. Start pi with --container.", "info");
@@ -116,7 +138,10 @@ export function createSandboxCommandHandlers(localCwd: string, pathApprovals: {
 			}
 		},
 
-		doctor: async (_args: string, ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }) => {
+		doctor: async (
+			_args: string,
+			ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } },
+		) => {
 			const sbx = getSbx();
 			if (!sbx) {
 				ctx.ui.notify("Sandbox is not active. Start pi with --container.", "info");
@@ -124,7 +149,7 @@ export function createSandboxCommandHandlers(localCwd: string, pathApprovals: {
 			}
 			const script = [
 				"set -u",
-				'for cmd in sh bash git rg fd bat eza jq yq ast-grep uv python python3 bun bunx node npm chromium; do',
+				"for cmd in sh bash git rg fd bat eza jq yq ast-grep uv python python3 bun bunx node npm chromium; do",
 				'  if command -v $cmd >/dev/null 2>&1; then printf "ok   %s -> %s\\n" $cmd $(command -v $cmd); else printf "MISS %s\\n" $cmd; fi',
 				"done",
 				"echo",
@@ -141,7 +166,10 @@ export function createSandboxCommandHandlers(localCwd: string, pathApprovals: {
 			ctx.ui.notify(`Sandbox doctor:\n${out}`, "info");
 		},
 
-		config: async (_args: string, ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }) => {
+		config: async (
+			_args: string,
+			ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } },
+		) => {
 			const sbx = getSbx();
 			const hostCwd = sbx?.hostCwd ?? localCwd;
 			const cfg = loadSbxConfig(hostCwd);
@@ -167,7 +195,10 @@ export function createSandboxCommandHandlers(localCwd: string, pathApprovals: {
 				return;
 			}
 			if (!raw) {
-				ctx.ui.notify("Usage: /sandbox allow <host-path>\nAdds a host path prefix for read access from the sandbox.", "info");
+				ctx.ui.notify(
+					"Usage: /sandbox allow <host-path>\nAdds a host path prefix for read access from the sandbox.",
+					"info",
+				);
 				return;
 			}
 			const abs = raw.startsWith("~") ? resolvePath(homedir(), raw.slice(1)) : resolvePath(raw);
@@ -205,7 +236,12 @@ export function createSandboxCommandHandlers(localCwd: string, pathApprovals: {
 				return `  ${r.path} (${expiry})`;
 			});
 			ctx.ui.notify(
-				[`Persisted path approvals (${records.length}):`, ...lines, "", "Use /sandbox paths revoke <path> to revoke an approval."].join("\n"),
+				[
+					`Persisted path approvals (${records.length}):`,
+					...lines,
+					"",
+					"Use /sandbox paths revoke <path> to revoke an approval.",
+				].join("\n"),
 				"info",
 			);
 		},
@@ -223,7 +259,10 @@ export function createSandboxCommandHandlers(localCwd: string, pathApprovals: {
 				const cfg = loadSbxConfig(hostCwd);
 				cfg.tier = tier;
 				saveSbxConfig(hostCwd, cfg);
-				ctx.ui.notify(`Tier set to ${tier} (mem=${TIER_SPECS[tier].memory}, cpu=${TIER_SPECS[tier].cpus}). Restart pi to apply.`, "info");
+				ctx.ui.notify(
+					`Tier set to ${tier} (mem=${TIER_SPECS[tier].memory}, cpu=${TIER_SPECS[tier].cpus}). Restart pi to apply.`,
+					"info",
+				);
 				return;
 			}
 			const lines = ["Available tiers:", ""];

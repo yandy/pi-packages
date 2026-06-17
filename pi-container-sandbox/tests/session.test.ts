@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { getSbx, setSbx, clearSbx, type SbxSession } from "../src/session";
+import { beforeEach, describe, expect, it } from "vitest";
+import { clearSbx, getSbx, type SbxSession, setSbx } from "../src/session";
 import { mockRuntime } from "./_helpers";
 
 const mockSession: SbxSession = {
@@ -20,16 +20,16 @@ beforeEach(() => {
 });
 
 describe("session state", () => {
-  it("starts with null session", () => {
-    expect(getSbx()).toBeNull();
-  });
-  it("set and get round-trip", () => {
-    setSbx(mockSession);
-    expect(getSbx()).toBe(mockSession);
-  });
-  it("clear resets to null", () => {
-    setSbx(mockSession);
-    clearSbx();
-    expect(getSbx()).toBeNull();
-  });
+	it("starts with null session", () => {
+		expect(getSbx()).toBeNull();
+	});
+	it("set and get round-trip", () => {
+		setSbx(mockSession);
+		expect(getSbx()).toBe(mockSession);
+	});
+	it("clear resets to null", () => {
+		setSbx(mockSession);
+		clearSbx();
+		expect(getSbx()).toBeNull();
+	});
 });

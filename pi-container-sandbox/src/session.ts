@@ -1,5 +1,5 @@
-import type { Runtime, MountSpec, SandboxOptions } from "./runtime";
 import type { SbxConfig } from "./config";
+import type { MountSpec, Runtime, SandboxOptions } from "./runtime";
 
 export interface SbxSession {
 	runtime: Runtime;
