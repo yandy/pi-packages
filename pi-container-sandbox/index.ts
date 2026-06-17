@@ -16,8 +16,10 @@ import {
 	createReadOps,
 	createWriteOps,
 	createEditOps,
-	createBashOps,
+	createRemoteBashOps,
+	createHostBashOps,
 	execCapture,
+	extractCommandName,
 } from "./src/ops";
 import {
 	getExternalPath,
@@ -130,6 +132,7 @@ export default function (pi: ExtensionAPI) {
 	const localWrite = createWriteTool(localCwd);
 	const localEdit = createEditTool(localCwd);
 	const localBash = createBashTool(localCwd);
+	let hostBashTool: ReturnType<typeof createBashTool> | null = null;
 
 	const pathApprovals = new PathApprovalStore(localCwd);
 	const handlers = createSandboxCommandHandlers(localCwd, pathApprovals);
@@ -188,7 +191,19 @@ export default function (pi: ExtensionAPI) {
 		async execute(id, params, signal, onUpdate, _ctx) {
 			const sbx = getSbx();
 			if (!sbx) return localBash.execute(id, params, signal, onUpdate);
-			const tool = createBashTool(localCwd, { operations: createBashOps(sbx) });
+
+			const hostCommands = sbx.config.hostCommands ?? [];
+			const cmdName = extractCommandName(params.command);
+			if (cmdName && hostCommands.includes(cmdName)) {
+				if (!hostBashTool) {
+					hostBashTool = createBashTool(localCwd, {
+						operations: createHostBashOps(sbx.hostCwd, sbx.mounts),
+					});
+				}
+				return hostBashTool.execute(id, params, signal, onUpdate);
+			}
+
+			const tool = createBashTool(localCwd, { operations: createRemoteBashOps(sbx) });
 			return tool.execute(id, params, signal, onUpdate);
 		},
 	});
@@ -196,7 +211,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("user_bash", () => {
 		const sbx = getSbx();
 		if (!sbx) return;
-		return { operations: createBashOps(sbx) };
+		return { operations: createRemoteBashOps(sbx) };
 	});
 
 	pi.on("before_agent_start", async (event) => {
@@ -207,13 +222,27 @@ export default function (pi: ExtensionAPI) {
 			? `Agent skills are mounted read-only at /skills/ (e.g. ${sbx.mounts.map((m) => m.target).join(", ")}). Read skill files via /skills/<name>/SKILL.md. Writing to /skills/ is forbidden.`
 			: "No skill directories are mounted.";
 
+		const hostCommands = sbx.config.hostCommands ?? [];
+		const hostCmdHint = hostCommands.length
+			? [
+				"",
+				`The following commands run directly on the host (not inside the container):`,
+				`  ${hostCommands.join(", ")}`,
+				"",
+				`When using these commands, prefer relative paths (e.g. \`src/foo.ts\`)`,
+				`rather than absolute /workspace paths, because they execute outside the`,
+				`container where /workspace does not exist.`,
+			].join("\n")
+			: "";
+
 		return {
 			systemPrompt: event.systemPrompt.replace(
 				/Current working directory:\s*\S+/,
 				[
 					`Current working directory: ${REMOTE_ROOT} (sandboxed in docker container ${sbx.name}, host cwd ${localCwd} mounted read-write)`,
 					skillInfo,
-				].join("\n"),
+					hostCmdHint,
+				].filter(Boolean).join("\n"),
 			),
 		};
 	});

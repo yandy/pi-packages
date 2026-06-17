@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { createSandboxCommandHandlers } from "../src/commands/sandbox";
 import { clearSbx } from "../src/session";
+import { extractCommandName } from "../src/ops";
 import { mockRuntime, mockSbx } from "./_helpers";
 
 function mockPathApprovals() {
@@ -118,5 +119,21 @@ describe("/sandbox keep", () => {
 
     await handlers.keep("my-container", ctx);
     expect(ctx.notifications.some((n) => n.msg.includes("saved to sandbox.json"))).toBe(true);
+  });
+});
+
+describe("host command whitelist (unit level)", () => {
+  it("extractCommandName matches hostCommands whitelist check", () => {
+    const hostCommands = ["git", "docker"];
+    const cmdName = extractCommandName("git status");
+    expect(cmdName).toBe("git");
+    expect(hostCommands.includes(cmdName!)).toBe(true);
+  });
+
+  it("extractCommandName does not match non-whitelisted command", () => {
+    const hostCommands = ["git", "docker"];
+    const cmdName = extractCommandName("ls -la");
+    expect(cmdName).toBe("ls");
+    expect(hostCommands.includes(cmdName!)).toBe(false);
   });
 });
