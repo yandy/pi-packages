@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { tmpdir } from "node:os";
-import { hostToRemote, toContainerPath, shq, isInsideCwd, isReadOnlyMount,
+import { hostToRemote, remoteToHost, toContainerPath, shq, isInsideCwd, isReadOnlyMount,
          resolveExtraMountPath, getExternalPath, isAllowedExternalResource,
          PathApprovalStore, REMOTE_ROOT, SKILLS_ROOT } from "../src/paths";
 import type { MountSpec } from "../src/runtime";
@@ -176,6 +176,45 @@ describe("toContainerPath", () => {
   it("passes through paths already in /workspace or /skills", () => {
     expect(toContainerPath("/workspace/foo", hostCwd, []).ok).toBe(true);
     expect(toContainerPath("/skills/x", hostCwd, []).ok).toBe(true);
+  });
+});
+
+describe("remoteToHost", () => {
+  const testHostCwd = "/home/user/project";
+
+  it("maps /workspace to hostCwd", () => {
+    expect(remoteToHost("/workspace", testHostCwd, [])).toBe("/home/user/project");
+  });
+
+  it("maps /workspace/src/foo to hostCwd/src/foo", () => {
+    expect(remoteToHost("/workspace/src/foo.ts", testHostCwd, []))
+      .toBe("/home/user/project/src/foo.ts");
+  });
+
+  it("passes through non-container absolute paths unchanged", () => {
+    expect(remoteToHost("/home/user/project/src/foo.ts", testHostCwd, []))
+      .toBe("/home/user/project/src/foo.ts");
+  });
+
+  it("passes through relative paths unchanged", () => {
+    expect(remoteToHost("src/foo.ts", testHostCwd, [])).toBe("src/foo.ts");
+  });
+
+  it("maps /skills/<name>/... to mount source", () => {
+    const mounts = [{ source: "/opt/skills/my-skill", target: "/skills/my-skill" }];
+    expect(remoteToHost("/skills/my-skill/SKILL.md", testHostCwd, mounts))
+      .toBe("/opt/skills/my-skill/SKILL.md");
+  });
+
+  it("maps /skills/<name> to mount source root", () => {
+    const mounts = [{ source: "/opt/skills/my-skill", target: "/skills/my-skill" }];
+    expect(remoteToHost("/skills/my-skill", testHostCwd, mounts))
+      .toBe("/opt/skills/my-skill");
+  });
+
+  it("throws for unmapped /skills path", () => {
+    expect(() => remoteToHost("/skills/unknown/file", "/home/user", []))
+      .toThrow("Cannot map container path");
   });
 });
 

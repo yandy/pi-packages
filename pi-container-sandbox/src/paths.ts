@@ -65,6 +65,27 @@ export function hostToRemote(hostPath: string, hostCwd: string, mounts?: MountSp
 	return rel ? `${REMOTE_ROOT}/${rel}` : REMOTE_ROOT;
 }
 
+export function remoteToHost(
+	containerPath: string,
+	hostCwd: string,
+	mounts: MountSpec[],
+): string {
+	if (!containerPath.startsWith(REMOTE_ROOT) && !containerPath.startsWith(SKILLS_ROOT)) {
+		return containerPath;
+	}
+	if (containerPath === REMOTE_ROOT) return hostCwd;
+	if (containerPath.startsWith(`${REMOTE_ROOT}/`)) {
+		return resolvePath(hostCwd, containerPath.slice(REMOTE_ROOT.length + 1));
+	}
+	for (const m of mounts) {
+		if (containerPath === m.target) return m.source;
+		if (containerPath.startsWith(`${m.target}/`)) {
+			return resolvePath(m.source, containerPath.slice(m.target.length + 1));
+		}
+	}
+	throw new Error(`Cannot map container path to host: ${containerPath}`);
+}
+
 export function isReadOnlyMount(containerPath: string, mounts: MountSpec[]): boolean {
 	for (const m of mounts) {
 		if (containerPath === m.target || containerPath.startsWith(`${m.target}/`)) {
