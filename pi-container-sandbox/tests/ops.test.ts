@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createWriteOps, createEditOps, execCapture } from "../src/ops";
+import { createWriteOps, createEditOps, execCapture, extractCommandName } from "../src/ops";
 import type { MountSpec } from "../src/runtime";
 import { mockRuntime } from "./_helpers";
 
@@ -91,5 +91,43 @@ describe("createEditOps.writeFile", () => {
     await expect(
       ops.writeFile("/skills/my-skill/SKILL.md", "content")
     ).rejects.toThrow("refusing to write");
+  });
+});
+
+describe("extractCommandName", () => {
+  it("extracts simple command", () => {
+    expect(extractCommandName("git status")).toBe("git");
+  });
+
+  it("extracts single word", () => {
+    expect(extractCommandName("npm")).toBe("npm");
+  });
+
+  it("trims leading whitespace", () => {
+    expect(extractCommandName("  git add .")).toBe("git");
+  });
+
+  it("skips env assignments", () => {
+    expect(extractCommandName("GIT_DIR=foo git log")).toBe("git");
+  });
+
+  it("skips multiple env assignments", () => {
+    expect(extractCommandName("A=1 B=2 git log")).toBe("git");
+  });
+
+  it("returns full path commands", () => {
+    expect(extractCommandName("/usr/bin/node --version")).toBe("/usr/bin/node");
+  });
+
+  it("returns null for empty command", () => {
+    expect(extractCommandName("")).toBeNull();
+  });
+
+  it("returns null for whitespace-only command", () => {
+    expect(extractCommandName("   ")).toBeNull();
+  });
+
+  it("returns null for env-only (no command)", () => {
+    expect(extractCommandName("FOO=bar")).toBeNull();
   });
 });

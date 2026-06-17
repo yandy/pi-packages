@@ -117,7 +117,28 @@ export function createEditOps(sbx: SbxHandle): EditOperations {
 	};
 }
 
-export function createBashOps(sbx: SbxHandle): BashOperations {
+export function extractCommandName(command: string): string | null {
+	const trimmed = command.trimStart();
+	if (!trimmed) return null;
+	let i = 0;
+	while (i < trimmed.length) {
+		const eqIdx = trimmed.indexOf("=", i);
+		if (eqIdx === -1) break;
+		const beforeEq = trimmed.slice(i, eqIdx);
+		if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(beforeEq)) {
+			i = trimmed.indexOf(" ", eqIdx);
+			if (i === -1) return null;
+			while (trimmed[i] === " ") i++;
+		} else {
+			break;
+		}
+	}
+	const rest = trimmed.slice(i);
+	const spaceIdx = rest.indexOf(" ");
+	return spaceIdx === -1 ? rest || null : rest.slice(0, spaceIdx);
+}
+
+export function createRemoteBashOps(sbx: SbxHandle): BashOperations {
 	return {
 		exec: (command, cwd, opts) => {
 			const remoteCwd = hostToRemote(cwd, sbx.hostCwd, sbx.mounts);
