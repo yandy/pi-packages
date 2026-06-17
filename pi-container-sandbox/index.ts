@@ -1,35 +1,35 @@
-import { resolve as resolvePath } from "node:path";
 import { homedir } from "node:os";
+import { resolve as resolvePath } from "node:path";
 import {
-	type ExtensionAPI,
-	type ExtensionUIContext,
+	createBashTool,
+	createEditTool,
 	createReadTool,
 	createWriteTool,
-	createEditTool,
-	createBashTool,
+	type ExtensionAPI,
+	type ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
-import { DockerRuntime, deriveContainerName } from "./src/runtime";
-import { loadSbxConfig, imageRefForTag } from "./src/config";
-import { TIER_SPECS, parseSizeTier } from "./src/tiers";
-import { getSbx, setSbx, clearSbx, type SbxSession } from "./src/session";
+import { createSandboxCommandHandlers } from "./src/commands/sandbox";
+import { imageRefForTag, loadSbxConfig } from "./src/config";
 import {
-	createReadOps,
-	createWriteOps,
 	createEditOps,
-	createRemoteBashOps,
 	createHostBashOps,
+	createReadOps,
+	createRemoteBashOps,
+	createWriteOps,
 	execCapture,
 	extractCommandName,
 } from "./src/ops";
 import {
+	ensureExternalReadApproved,
 	getExternalPath,
 	isAllowedExternalResource,
-	ensureExternalReadApproved,
 	PathApprovalStore,
 	REMOTE_ROOT,
 } from "./src/paths";
+import { DockerRuntime, deriveContainerName } from "./src/runtime";
+import { clearSbx, getSbx, type SbxSession, setSbx } from "./src/session";
 import { discoverSkillMounts } from "./src/skills";
-import { createSandboxCommandHandlers } from "./src/commands/sandbox";
+import { parseSizeTier, TIER_SPECS } from "./src/tiers";
 
 export default function (pi: ExtensionAPI) {
 	pi.registerFlag("container", {
@@ -148,7 +148,7 @@ export default function (pi: ExtensionAPI) {
 		if (!ctx.hasUI) {
 			throw new Error(
 				`sandbox: refusing to access ${external}: outside of project cwd ${sbx.hostCwd}. ` +
-				`Use --container-allow-paths or /sandbox allow to grant access.`,
+					`Use --container-allow-paths or /sandbox allow to grant access.`,
 			);
 		}
 		await ensureExternalReadApproved(external, sbx.allowedExternalPrefixes, pathApprovals, ctx.ui);
@@ -225,14 +225,14 @@ export default function (pi: ExtensionAPI) {
 		const hostCommands = sbx.config.hostCommands ?? [];
 		const hostCmdHint = hostCommands.length
 			? [
-				"",
-				`The following commands run directly on the host (not inside the container):`,
-				`  ${hostCommands.join(", ")}`,
-				"",
-				`When using these commands, prefer relative paths (e.g. \`src/foo.ts\`)`,
-				`rather than absolute /workspace paths, because they execute outside the`,
-				`container where /workspace does not exist.`,
-			].join("\n")
+					"",
+					`The following commands run directly on the host (not inside the container):`,
+					`  ${hostCommands.join(", ")}`,
+					"",
+					`When using these commands, prefer relative paths (e.g. \`src/foo.ts\`)`,
+					`rather than absolute /workspace paths, because they execute outside the`,
+					`container where /workspace does not exist.`,
+				].join("\n")
 			: "";
 
 		return {
@@ -242,7 +242,9 @@ export default function (pi: ExtensionAPI) {
 					`Current working directory: ${REMOTE_ROOT} (sandboxed in docker container ${sbx.name}, host cwd ${localCwd} mounted read-write)`,
 					skillInfo,
 					hostCmdHint,
-				].filter(Boolean).join("\n"),
+				]
+					.filter(Boolean)
+					.join("\n"),
 			),
 		};
 	});
@@ -264,10 +266,15 @@ export default function (pi: ExtensionAPI) {
 
 			const allowNetwork = (pi.getFlag("container-net") as boolean) && !(pi.getFlag("no-container-net") as boolean);
 			const keep = pi.getFlag("container-keep") as boolean;
-			const persist = pi.getFlag("sandbox-persist") as boolean || cfg.persist;
+			const persist = (pi.getFlag("sandbox-persist") as boolean) || cfg.persist;
 			const mountSkills = pi.getFlag("container-mount-skills") as boolean;
 			const extraPathsRaw = pi.getFlag("container-mount-paths") as string | undefined;
-			const extraPaths = extraPathsRaw ? extraPathsRaw.split(",").map((p: string) => p.trim()).filter(Boolean) : undefined;
+			const extraPaths = extraPathsRaw
+				? extraPathsRaw
+						.split(",")
+						.map((p: string) => p.trim())
+						.filter(Boolean)
+				: undefined;
 			const buildImageFlag = pi.getFlag("build-image") as boolean;
 			const dockerfileFlag = pi.getFlag("dockerfile") as string | undefined;
 			const dockerfileContextFlag = pi.getFlag("dockerfile-context") as string | undefined;
@@ -283,9 +290,11 @@ export default function (pi: ExtensionAPI) {
 
 			const allowPathsRaw = pi.getFlag("container-allow-paths") as string | undefined;
 			const allowedExternalPrefixes = allowPathsRaw
-				? allowPathsRaw.split(",").map((p: string) => p.trim()).filter(Boolean).map((p: string) =>
-					p.startsWith("~") ? resolvePath(homedir(), p.slice(1)) : resolvePath(p)
-				)
+				? allowPathsRaw
+						.split(",")
+						.map((p: string) => p.trim())
+						.filter(Boolean)
+						.map((p: string) => (p.startsWith("~") ? resolvePath(homedir(), p.slice(1)) : resolvePath(p)))
 				: [];
 
 			const resources: { memory: string; cpus: string; swap: string; pidsLimit?: number } = {
@@ -346,13 +355,25 @@ export default function (pi: ExtensionAPI) {
 				cleaned = true;
 				const s = getSbx();
 				if (s && !s.keep) {
-					try { await s.runtime.shutdown(); } catch { /* ignore */ }
+					try {
+						await s.runtime.shutdown();
+					} catch {
+						/* ignore */
+					}
 					clearSbx();
 				}
 			};
-			process.on("beforeExit", async () => { await cleanup(); });
-			process.once("SIGINT", async () => { await cleanup(); process.exit(130); });
-			process.once("SIGTERM", async () => { await cleanup(); process.exit(143); });
+			process.on("beforeExit", async () => {
+				await cleanup();
+			});
+			process.once("SIGINT", async () => {
+				await cleanup();
+				process.exit(130);
+			});
+			process.once("SIGTERM", async () => {
+				await cleanup();
+				process.exit(143);
+			});
 
 			const ok = (await execCapture(getSbx()!, "id -un && pwd", 10000)).toString().trim();
 
@@ -377,7 +398,9 @@ export default function (pi: ExtensionAPI) {
 					ok,
 					skillMounts.length ? `Skills mounted: ${skillMounts.map((m) => m.target).join(", ")}` : "",
 					cacheVolume ? `Cache volume: ${cacheVolume} at /cache` : "",
-				].filter(Boolean).join("\n"),
+				]
+					.filter(Boolean)
+					.join("\n"),
 				"info",
 			);
 		} catch (e) {
@@ -391,13 +414,18 @@ export default function (pi: ExtensionAPI) {
 		const sbx = getSbx();
 		if (!sbx) return;
 		if (!sbx.keep) {
-			try { await sbx.runtime.shutdown(); } catch { /* ignore */ }
+			try {
+				await sbx.runtime.shutdown();
+			} catch {
+				/* ignore */
+			}
 		}
 		clearSbx();
 	});
 
 	pi.registerCommand("sandbox", {
-		description: "Sandbox management. Subcommands: status, start, build, stop, keep, exec, doctor, config, allow, paths, tiers",
+		description:
+			"Sandbox management. Subcommands: status, start, build, stop, keep, exec, doctor, config, allow, paths, tiers",
 		handler: async (args, ctx) => {
 			const parts = args.trim().split(/\s+/);
 			const sub = parts[0]?.toLowerCase() || "status";
@@ -407,12 +435,12 @@ export default function (pi: ExtensionAPI) {
 				case "status":
 				case "info":
 					return handlers.status(rest, ctx);
-			case "start":
-				return handlers.start(rest, ctx);
-			case "build":
-			case "rebuild":
-				return handlers.build(rest, ctx);
-			case "stop":
+				case "start":
+					return handlers.start(rest, ctx);
+				case "build":
+				case "rebuild":
+					return handlers.build(rest, ctx);
+				case "stop":
 					return handlers.stop(rest, ctx);
 				case "keep":
 					return handlers.keep(rest, ctx);

@@ -1,0 +1,43 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            pi-container-sandbox:
+              - "pi-container-sandbox/**"
+
+  test:
+    needs: changes
+    if: needs.changes.outputs.packages != '[]' && needs.changes.outputs.packages != ''
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        pkg: ${{ fromJSON(needs.changes.outputs.packages) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.pkg }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ${{ matrix.pkg }}/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck --if-present
+      - run: npm run check --if-present || npm run lint --if-present
+      - run: npm test --if-present

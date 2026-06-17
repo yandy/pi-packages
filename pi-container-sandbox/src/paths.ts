@@ -57,19 +57,13 @@ export function hostToRemote(hostPath: string, hostCwd: string, mounts?: MountSp
 	}
 	const abs = resolvePath(hostCwd, hostPath);
 	if (abs !== hostCwd && !abs.startsWith(`${hostCwd}/`)) {
-		throw new Error(
-			`sandbox: refusing to access ${abs}: outside of project cwd ${hostCwd}`,
-		);
+		throw new Error(`sandbox: refusing to access ${abs}: outside of project cwd ${hostCwd}`);
 	}
 	const rel = abs === hostCwd ? "" : abs.slice(hostCwd.length + 1);
 	return rel ? `${REMOTE_ROOT}/${rel}` : REMOTE_ROOT;
 }
 
-export function remoteToHost(
-	containerPath: string,
-	hostCwd: string,
-	mounts: MountSpec[],
-): string {
+export function remoteToHost(containerPath: string, hostCwd: string, mounts: MountSpec[]): string {
 	if (!containerPath.startsWith(REMOTE_ROOT) && !containerPath.startsWith(SKILLS_ROOT)) {
 		return containerPath;
 	}
@@ -138,13 +132,19 @@ export class PathApprovalStore {
 	private save(): void {
 		const dir = this.path.slice(0, this.path.lastIndexOf("/"));
 		if (!existsSync(dir)) {
-			try { mkdirSync(dir, { recursive: true }); } catch { return; }
+			try {
+				mkdirSync(dir, { recursive: true });
+			} catch {
+				return;
+			}
 		}
 
 		let existing: Map<string, PathApprovalRecord> | null = null;
 		try {
 			if (existsSync(this.path)) {
-				const raw = JSON.parse(readFileSync(this.path, "utf-8")) as (Omit<PathApprovalRecord, "expiresAt"> & { expiresAt: number | null })[];
+				const raw = JSON.parse(readFileSync(this.path, "utf-8")) as (Omit<PathApprovalRecord, "expiresAt"> & {
+					expiresAt: number | null;
+				})[];
 				existing = new Map();
 				const now = Date.now();
 				for (const r of raw) {
@@ -184,7 +184,9 @@ export class PathApprovalStore {
 	private load(): void {
 		if (!existsSync(this.path)) return;
 		try {
-			const raw = JSON.parse(readFileSync(this.path, "utf-8")) as (Omit<PathApprovalRecord, "expiresAt"> & { expiresAt: number | null })[];
+			const raw = JSON.parse(readFileSync(this.path, "utf-8")) as (Omit<PathApprovalRecord, "expiresAt"> & {
+				expiresAt: number | null;
+			})[];
 			const now = Date.now();
 			for (const r of raw) {
 				const expiresAt = r.expiresAt === null ? Infinity : r.expiresAt;
@@ -234,9 +236,7 @@ export class PathApprovalStore {
 	}
 
 	list(): PathApprovalRecord[] {
-		return Array.from(this.records.values()).filter(
-			(r) => r.expiresAt === Infinity || r.expiresAt > Date.now(),
-		);
+		return Array.from(this.records.values()).filter((r) => r.expiresAt === Infinity || r.expiresAt > Date.now());
 	}
 }
 
@@ -244,7 +244,10 @@ export async function requestPathApproval(
 	absPath: string,
 	sessionPrefixes: string[],
 	store: PathApprovalStore,
-	ui: { select: (title: string, options: string[]) => Promise<string | undefined>; notify: (msg: string, level?: "info" | "warning" | "error") => void },
+	ui: {
+		select: (title: string, options: string[]) => Promise<string | undefined>;
+		notify: (msg: string, level?: "info" | "warning" | "error") => void;
+	},
 ): Promise<boolean> {
 	for (const prefix of sessionPrefixes) {
 		if (absPath === prefix || absPath.startsWith(prefix + "/")) return true;
@@ -256,13 +259,7 @@ export async function requestPathApproval(
 	const basename = absPath.split("/").pop() || "";
 	if (basename.startsWith("pi-clipboard-")) return true;
 
-	const options = [
-		"Approve once",
-		"Approve always",
-		"Approve for 7 days",
-		"Approve for 30 days",
-		"Deny",
-	];
+	const options = ["Approve once", "Approve always", "Approve for 7 days", "Approve for 30 days", "Deny"];
 
 	let choice: string | undefined;
 	try {
@@ -296,7 +293,10 @@ export async function ensureExternalReadApproved(
 	absPath: string,
 	sessionPrefixes: string[],
 	store: PathApprovalStore,
-	ui: { select: (title: string, options: string[]) => Promise<string | undefined>; notify: (msg: string, level?: "info" | "warning" | "error") => void },
+	ui: {
+		select: (title: string, options: string[]) => Promise<string | undefined>;
+		notify: (msg: string, level?: "info" | "warning" | "error") => void;
+	},
 ): Promise<void> {
 	const approved = await requestPathApproval(absPath, sessionPrefixes, store, ui);
 	if (!approved) {
