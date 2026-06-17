@@ -178,19 +178,9 @@ RUN printf '#!/bin/sh\nexec uv pip "$@"\n' > /usr/local/bin/pip \
  && chmod +x /usr/local/bin/pip /usr/local/bin/pip3
 
 # ── Bash aliases (for interactive use only — `!` commands) ──────────
-RUN cat >> /etc/bash.bashrc << 'BASHRC'
-# Modern tool aliases for pi-container-sandbox (interactive bash only)
-alias ll='eza --icons -l --git'
-alias la='eza --icons -la --git'
-alias lt='eza --icons --tree --level=3'
-BASHRC
+RUN printf "alias ll='eza --icons -l --git'\nalias la='eza --icons -la --git'\nalias lt='eza --icons --tree --level=3'\n" >> /etc/bash.bashrc
 
-RUN cat > /etc/profile.d/sandbox-aliases.sh << 'PROFILE'
-# Modern tool aliases for pi-container-sandbox (login shells)
-alias ll='eza --icons -l --git'
-alias la='eza --icons -la --git'
-alias lt='eza --icons --tree --level=3'
-PROFILE
+RUN printf "alias ll='eza --icons -l --git'\nalias la='eza --icons -la --git'\nalias lt='eza --icons --tree --level=3'\n" > /etc/profile.d/sandbox-aliases.sh
 
 # ── Runtime: bun ────────────────────────────────────────────────────
 # Download the release tarball directly instead of piping install script to sh.
