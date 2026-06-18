@@ -38,5 +38,5 @@ jobs:
         working-directory: ${{ steps.info.outputs.dir }}
 
       - name: Publish to npm
-        run: npm publish --provenance
+        run: unset NODE_AUTH_TOKEN && npm publish --provenance
         working-directory: ${{ steps.info.outputs.dir }}
