@@ -40,8 +40,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         tar \
         tini \
         unzip \
-        xz-utils \
-        pandoc
+        xz-utils
 
 
 # ── Helper: download + verify + install ─────────────────────────────
