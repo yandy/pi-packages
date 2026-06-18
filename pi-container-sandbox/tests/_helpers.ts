@@ -5,13 +5,14 @@ export function mockRuntime(overrides?: Partial<Runtime>): Runtime {
 	return {
 		init: async () => {},
 		isReady: () => true,
-		ensureImage: async () => {},
-		rebuildImage: async () => {},
+		imageExists: async () => true,
+		buildImage: async () => {},
 		startContainer: async () => {},
 		withReady: async () => {},
 		shutdown: async () => {},
 		getContainerId: () => "mock-id",
 		getWorkRoot: () => "/workspace",
+		getImage: () => "img:latest",
 		exec: async (_opts: ExecOpts): Promise<ExecResult> => ({
 			exitCode: 0,
 			stdout: Buffer.alloc(0),
