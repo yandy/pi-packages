@@ -15,6 +15,9 @@
 		"check": "biome check ."
 	},
 	"pi": { "extensions": ["./index.ts"] },
+	"dependencies": {
+		"openai": "^6.26.0"
+	},
 	"peerDependencies": { "@earendil-works/pi-coding-agent": ">=0.74.0" },
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.0",
