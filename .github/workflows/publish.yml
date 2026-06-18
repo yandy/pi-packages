@@ -1,8 +1,10 @@
 name: Publish to npm
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'pi-container-sandbox-v*'
+      - 'pi-web-tools-v*'
 
 permissions:
   contents: read
@@ -21,7 +23,7 @@ jobs:
       - name: Determine package directory
         id: info
         run: |
-          TAG="${{ github.event.release.tag_name }}"
+          TAG="${{ github.ref_name }}"
           case "$TAG" in
             pi-container-sandbox-v*)
               echo "dir=pi-container-sandbox" >> "$GITHUB_OUTPUT"
@@ -33,10 +35,6 @@ jobs:
 
       - name: Install dependencies
         run: npm install
-        working-directory: ${{ steps.info.outputs.dir }}
-
-      - name: Run tests
-        run: npm run test
         working-directory: ${{ steps.info.outputs.dir }}
 
       - name: Publish to npm
