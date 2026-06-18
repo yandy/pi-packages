@@ -28,6 +28,7 @@
 | `tests/deep_search.test.ts` | Rewrite | mock openai sdk，测试 Chat Completions 调用 |
 | `tests/image_search.test.ts` | Rewrite | mock openai sdk，测试 Responses API 调用 |
 | `README.md` | Modify | 更新配置、环境变量、参数文档 |
+| `README-zh.md` | Modify | 同步更新中文文档 |
 
 ---
 
@@ -937,10 +938,11 @@ cd /home/yandy/workspace/pri/pi-packages/pi-web-tools && git add index.ts && git
 
 ---
 
-## Task 8: 更新 README.md 文档
+## Task 8: 更新 README.md 与 README-zh.md 文档
 
 **Files:**
 - Modify: `README.md`
+- Modify: `README-zh.md`
 
 - [ ] **Step 1: 更新工具表格与前置条件**
 
@@ -1014,10 +1016,76 @@ cd /home/yandy/workspace/pri/pi-packages/pi-web-tools && git add index.ts && git
 > Requires `ALIYUN_API_KEY` or `aliyunProviderKey` config. Uses Chat Completions API with forced search (turbo strategy). Sources are not returned.
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: 同步更新 `README-zh.md`**
+
+对 `README-zh.md` 执行与 `README.md` 对应的中文更新：
+
+1. 工具表格中 deep_search 的来源列从 `阿里云百炼 Responses API` 改为 `阿里云百炼 Chat Completions API`。
+
+2. 环境变量表格更新为：
+
+```markdown
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `EXA_API_KEY` | Exa API key，不设则走 MCP 免费层（150次/天） | — |
+| `ALIYUN_API_KEY` | 阿里云百炼 API key | — |
+| `ALIYUN_BASE_URL` | 阿里云 API 地址 | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| `ALIYUN_DEEP_SEARCH_MODEL` | deep_search 模型 | `deepseek-v4-flash` |
+| `ALIYUN_IMAGE_SEARCH_MODEL` | image_search 模型 | `qwen3.7-plus` |
+```
+
+3. 配置文件 JSON 示例替换为：
+
+```json
+{
+  "aliyun": {
+    "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "aliyunProviderKey": "aliyun",
+    "deepSearchModel": "deepseek-v4-flash",
+    "imageSearchModel": "qwen3.7-plus"
+  }
+}
+```
+
+4. 配置表格替换为：
+
+```markdown
+| 配置项 | 环境变量（覆盖） | 默认值 | 说明 |
+|--------|-----------------|--------|------|
+| `aliyun.baseUrl` | `ALIYUN_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 阿里云 API 地址 |
+| `aliyun.aliyunProviderKey` | — | — | pi provider 名称，从中抽取 apiKey/baseUrl |
+| `aliyun.deepSearchModel` | `ALIYUN_DEEP_SEARCH_MODEL` | `deepseek-v4-flash` | deep_search 模型 |
+| `aliyun.imageSearchModel` | `ALIYUN_IMAGE_SEARCH_MODEL` | `qwen3.7-plus` | image_search 模型 |
+```
+
+在配置表格后添加说明段落：
+
+```markdown
+**aliyunProviderKey：** 设置后，deep_search 和 image_search 会从对应的 pi provider（通过 `modelRegistry`）抽取 apiKey 和 baseUrl。环境变量优先于 provider 值。若未找到对应 provider，回退到 `aliyun.baseUrl` 配置或默认值。
+
+> **注意：** deep_search 使用 Chat Completions API，不返回结构化来源。image_search 使用 Responses API。
+```
+
+5. deep_search 参数表替换为：
+
+```markdown
+**参数：**
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `query` | string | 是 | — | 研究问题 |
+| `enableSearchExtension` | boolean | 否 | false | 开启垂域搜索 |
+| `freshness` | number | 否 | — | 时效性：7/30/180/365 天 |
+| `assignedSiteList` | string[] | 否 | — | 限定搜索来源站点 |
+| `enableImageOutput` | boolean | 否 | false | 图文混合输出 |
+
+> 需要 `ALIYUN_API_KEY` 或 `aliyunProviderKey` 配置。使用 Chat Completions API，强制搜索（turbo 策略）。不返回结构化来源。
+```
+
+- [ ] **Step 6: Commit**
 
 ```bash
-cd /home/yandy/workspace/pri/pi-packages/pi-web-tools && git add README.md && git commit -m "docs: update README for config split and Chat Completions migration"
+cd /home/yandy/workspace/pri/pi-packages/pi-web-tools && git add README.md README-zh.md && git commit -m "docs: update README and README-zh for config split and Chat Completions migration"
 ```
 
 ---
