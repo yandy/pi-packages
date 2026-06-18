@@ -9,7 +9,7 @@ import {
 	type ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
 import { createSandboxCommandHandlers } from "./src/commands/sandbox";
-import { discoverDockerfiles, DOCKERFILE_SKIP, imageRefForTag, loadSbxConfig, PACKAGE_DOCKER_DIR } from "./src/config";
+import { discoverDockerfiles, imageRefForTag, loadSbxConfig, PACKAGE_DOCKER_DIR } from "./src/config";
 import {
 	createEditOps,
 	createHostBashOps,
@@ -341,9 +341,18 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 
-				const options = [...dockerfiles.map((f) => `${f} (内置)`), "跳过 - 我自己构建"];
+				const skipLabel = "跳过 - 我自己构建";
+				const labelMap = new Map<string, string>();
+				const options: string[] = [];
+				for (const f of dockerfiles) {
+					const label = `${f} (内置)`;
+					labelMap.set(label, f);
+					options.push(label);
+				}
+				options.push(skipLabel);
+
 				const selected = await ctx.ui.select("Docker 镜像不存在，选择 Dockerfile 构建", options);
-				if (!selected || selected.startsWith("跳过")) {
+				if (!selected || selected === skipLabel) {
 					ctx.ui.notify(
 						`镜像 ${image} 不存在。请手动构建，例如：\n  docker build -t ${image} -f docker/cn.Dockerfile docker`,
 						"warning",
@@ -351,8 +360,8 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 
-				const dockerfile = selected.split(" ")[0] + ".Dockerfile";
-				const buildCtx = dockerfileFlag ? (dockerfileContextFlag ?? localCwd) : PACKAGE_DOCKER_DIR;
+				const dockerfile = labelMap.get(selected!) + ".Dockerfile";
+				const buildCtx = PACKAGE_DOCKER_DIR;
 
 				try {
 					await runtime.buildImage({
