@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import OpenAI from "openai";
+import type OpenAI from "openai";
 import { resolveSetting } from "../config";
 import { createAliyunClient } from "../openai_client";
 import { resolveAliyunProvider } from "../provider";
