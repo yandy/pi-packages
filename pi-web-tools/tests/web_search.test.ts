@@ -3,10 +3,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
-beforeEach(() => {
+let duckduckgoSearch: typeof import("../src/web_search/duckduckgo.js").duckduckgoSearch;
+
+beforeEach(async () => {
 	vi.resetModules();
 	mockFetch.mockReset();
 	vi.unstubAllEnvs();
+
+	const ddgMod = await import("../src/web_search/duckduckgo.js");
+	duckduckgoSearch = ddgMod.duckduckgoSearch;
 });
 
 describe("exaSearch", () => {
@@ -110,5 +115,39 @@ describe("exaSearch", () => {
 
 		expect(result.sources).toHaveLength(0);
 		expect(result.answer).toContain("No results found");
+	});
+});
+
+describe("duckduckgoSearch", () => {
+	it("returns formatted results from DDG API", async () => {
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					Abstract: "Abstract text",
+					AbstractText: "Abstract description",
+					AbstractURL: "https://example.com",
+					RelatedTopics: [
+						{ Text: "Topic 1 - Description", FirstURL: "https://one.com" },
+						{ Text: "Topic 2", FirstURL: "https://two.com" },
+					],
+				}),
+		});
+
+		const result = await duckduckgoSearch("test query", 5);
+
+		expect(result.sourceLabel).toBe("duckduckgo");
+		expect(result.sources.length).toBeGreaterThan(0);
+		expect(result.answer).toContain("example.com");
+	});
+
+	it("handles empty response", async () => {
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () => Promise.resolve({}),
+		});
+
+		const result = await duckduckgoSearch("rare query", 5);
+		expect(result.answer).toContain("No results");
 	});
 });
