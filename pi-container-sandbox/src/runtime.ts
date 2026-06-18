@@ -145,7 +145,7 @@ export class DockerRuntime implements Runtime {
 
 		const buildStream = await docker.buildImage(
 			{ context: buildContext, src: ["."] },
-			{ t: image, dockerfile, buildargs: buildArgs },
+			{ t: image, dockerfile, buildargs: buildArgs, version: "2" },
 		);
 
 		const buildPromise = new Promise<void>((resolve, reject) => {
