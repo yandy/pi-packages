@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, resolve as resolvePath } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { basename, dirname, extname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SizeTier } from "./tiers";
 
@@ -61,4 +61,13 @@ export function saveSbxConfig(hostCwd: string, config: SbxConfig): void {
 
 export function imageRefForTag(image: string, tag: string): string {
 	return `${image}:${tag}`;
+}
+
+export const DOCKERFILE_SKIP = "__skip__";
+
+export function discoverDockerfiles(): string[] {
+	if (!existsSync(PACKAGE_DOCKER_DIR)) return [];
+	return readdirSync(PACKAGE_DOCKER_DIR)
+		.filter((f) => f.endsWith(".Dockerfile"))
+		.map((f) => basename(f, extname(f)));
 }
