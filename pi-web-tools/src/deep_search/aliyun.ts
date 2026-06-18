@@ -4,7 +4,7 @@ import { resolveSetting } from "../config";
 
 const DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 const DEFAULT_MODEL = "qwen3.7-plus";
-const TIMEOUT_MS = 60_000;
+const TIMEOUT_MS = 120_000;
 
 export async function aliyunDeepSearch(
 	query: string,
