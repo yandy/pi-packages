@@ -4,6 +4,7 @@ const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
 let duckduckgoSearch: typeof import("../src/web_search/duckduckgo.js").duckduckgoSearch;
+let search: typeof import("../src/web_search/index.js").search;
 
 beforeEach(async () => {
 	vi.resetModules();
@@ -12,6 +13,8 @@ beforeEach(async () => {
 
 	const ddgMod = await import("../src/web_search/duckduckgo.js");
 	duckduckgoSearch = ddgMod.duckduckgoSearch;
+	const wsMod = await import("../src/web_search/index.js");
+	search = wsMod.search;
 });
 
 describe("exaSearch", () => {
@@ -177,5 +180,57 @@ describe("duckduckgoSearch", () => {
 
 		const result = await duckduckgoSearch("rare query", 5);
 		expect(result.answer).toContain("No results");
+	});
+});
+
+describe("search orchestrator", () => {
+	beforeEach(() => {
+		vi.stubEnv("EXA_API_KEY", "");
+	});
+
+	it("falls back from exa to duckduckgo when exa not configured", async () => {
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					RelatedTopics: [{ Text: "Result", FirstURL: "https://example.com" }],
+				}),
+		});
+
+		const result = await search("test", 5);
+		expect(result.sourceLabel).toBe("duckduckgo");
+	});
+
+	it("uses exa when configured", async () => {
+		vi.stubEnv("EXA_API_KEY", "test-key");
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					results: [{ title: "T", url: "https://x.com", text: "content" }],
+				}),
+		});
+
+		const result = await search("test", 5);
+		expect(result.sourceLabel).toBe("exa");
+	});
+
+	it("uses specified source", async () => {
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					RelatedTopics: [{ Text: "R", FirstURL: "https://x.com" }],
+				}),
+		});
+
+		const result = await search("test", 5, undefined, undefined, "duckduckgo");
+		expect(result.sourceLabel).toBe("duckduckgo");
+	});
+
+	it("throws when all sources unavailable", async () => {
+		mockFetch.mockRejectedValue(new Error("network error"));
+
+		await expect(search("test", 5)).rejects.toThrow("All search sources failed");
 	});
 });
