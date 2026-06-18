@@ -28,16 +28,38 @@ pi -e ./index.ts
 
 ## Configuration
 
-All configuration via environment variables:
+Configuration uses two layers: environment variables for API keys, and a project config file for other settings.
+
+### API Keys (environment variables only)
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `EXA_API_KEY` | Exa API key. If not set, uses MCP free tier (150 calls/day) | — |
 | `ALIYUN_API_KEY` | Aliyun (Bailian) API key | — |
-| `ALIYUN_BASE_URL` | Aliyun compatible API base URL | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| `ALIYUN_SEARCH_MODEL` | Aliyun search model | `qwen3.7-plus` |
 
 Aliyun also supports key resolution via pi's `/login` — if you've logged into Aliyun through pi, no env var needed.
+
+### Project Config (`.pi/agent/web-tools.json`)
+
+Create `.pi/agent/web-tools.json` in your project root for per-project settings:
+
+```json
+{
+  "aliyun": {
+    "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "searchModel": "qwen3.7-plus"
+  }
+}
+```
+
+Environment variables take precedence over the config file.
+
+| Config Key | Env Variable (overrides) | Default | Description |
+|------------|--------------------------|---------|-------------|
+| `aliyun.baseUrl` | `ALIYUN_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | Aliyun API base URL |
+| `aliyun.searchModel` | `ALIYUN_SEARCH_MODEL` | `qwen3.7-plus` | Aliyun search model |
+
+> **Security:** API keys are NEVER read from config files — only from environment variables or pi's built-in credential store (`/login`).
 
 ## Tools Reference
 

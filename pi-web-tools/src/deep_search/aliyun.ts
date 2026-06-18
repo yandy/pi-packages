@@ -1,4 +1,5 @@
 import type { DeepSearchResponse } from "./types";
+import { resolveSetting } from "../config";
 
 const DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 const DEFAULT_MODEL = "qwen3.7-plus";
@@ -7,10 +8,11 @@ const TIMEOUT_MS = 60_000;
 export async function aliyunDeepSearch(
 	query: string,
 	signal?: AbortSignal,
+	config?: { baseUrl?: string; searchModel?: string },
 ): Promise<DeepSearchResponse> {
 	const apiKey = resolveApiKey();
-	const baseUrl = process.env.ALIYUN_BASE_URL || DEFAULT_BASE_URL;
-	const model = process.env.ALIYUN_SEARCH_MODEL || DEFAULT_MODEL;
+	const baseUrl = resolveSetting(process.env.ALIYUN_BASE_URL, config?.baseUrl, DEFAULT_BASE_URL);
+	const model = resolveSetting(process.env.ALIYUN_SEARCH_MODEL, config?.searchModel, DEFAULT_MODEL);
 
 	const timeoutSignal = AbortSignal.timeout(TIMEOUT_MS);
 	const s = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;

@@ -28,16 +28,38 @@ pi -e ./index.ts
 
 ## 配置
 
-所有配置通过环境变量：
+配置分两层：API Key 仅通过环境变量，其他设置支持项目配置文件。
+
+### API Key（仅环境变量）
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `EXA_API_KEY` | Exa API key，不设则走 MCP 免费层（150次/天） | — |
 | `ALIYUN_API_KEY` | 阿里云百炼 API key | — |
-| `ALIYUN_BASE_URL` | 阿里云百炼 compatible API base URL | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| `ALIYUN_SEARCH_MODEL` | 阿里云百炼搜索模型 | `qwen3.7-plus` |
 
 阿里云也支持通过 pi 的 `/login` 获取 key——如果在 pi 中登录过阿里云，无需设置环境变量。
+
+### 项目配置（`.pi/agent/web-tools.json`）
+
+在项目根目录创建 `.pi/agent/web-tools.json` 进行项目级配置：
+
+```json
+{
+  "aliyun": {
+    "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "searchModel": "qwen3.7-plus"
+  }
+}
+```
+
+环境变量的优先级高于配置文件。
+
+| 配置项 | 环境变量（覆盖） | 默认值 | 说明 |
+|--------|-----------------|--------|------|
+| `aliyun.baseUrl` | `ALIYUN_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 阿里云 API 地址 |
+| `aliyun.searchModel` | `ALIYUN_SEARCH_MODEL` | `qwen3.7-plus` | 阿里云搜索模型 |
+
+> **安全说明：** API Key 绝不会从配置文件读取——仅从环境变量或 pi 内置凭据存储（`/login`）获取。
 
 ## 工具参考
 

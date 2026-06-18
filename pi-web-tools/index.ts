@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { loadConfig } from "./src/config";
 import { search } from "./src/web_search/index";
 import { deepSearch } from "./src/deep_search/index";
 import { imageSearch } from "./src/image_search/index";
@@ -119,7 +120,7 @@ export default function (pi: ExtensionAPI) {
 			}
 			return new Text(body, 0, 0);
 		},
-		async execute(_toolCallId, params, signal, onUpdate, _ctx) {
+		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			const p = params as { query: string };
 			const query = p.query?.trim();
 			if (!query) {
@@ -129,7 +130,8 @@ export default function (pi: ExtensionAPI) {
 			onUpdate?.({ content: [{ type: "text", text: "Deep searching..." }], details: {} });
 
 			try {
-				const result = await deepSearch(query, signal);
+				const cfg = loadConfig(ctx.cwd);
+				const result = await deepSearch(query, signal, cfg.aliyun);
 				const sourcesText = result.sources.length
 					? `\n\nSources:\n${result.sources.map((s, i) => `${i + 1}. [${s.title}](${s.url})`).join("\n")}`
 					: "";
@@ -198,7 +200,8 @@ export default function (pi: ExtensionAPI) {
 			onUpdate?.({ content: [{ type: "text", text: "Searching images..." }], details: {} });
 
 			try {
-				const result = await imageSearch({ query: p.query, imageUrl: p.imageUrl }, signal, ctx);
+				const cfg = loadConfig(ctx.cwd);
+				const result = await imageSearch({ query: p.query, imageUrl: p.imageUrl }, signal, ctx, cfg.aliyun);
 				const imagesText = result.images.length
 					? "\n\nImages:\n" +
 						result.images.map((img) => `${img.index}. [${img.title}](${img.url})`).join("\n")

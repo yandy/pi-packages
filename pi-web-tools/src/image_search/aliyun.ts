@@ -1,5 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ImageResult, ImageSearchParams, ImageSearchResponse } from "./types";
+import { resolveSetting } from "../config";
 
 const DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 const DEFAULT_MODEL = "qwen3.7-plus";
@@ -9,6 +10,7 @@ export async function aliyunImageSearch(
 	params: ImageSearchParams,
 	signal?: AbortSignal,
 	ctx?: ExtensionContext,
+	config?: { baseUrl?: string; searchModel?: string },
 ): Promise<ImageSearchResponse> {
 	const { query, imageUrl } = params;
 
@@ -16,9 +18,11 @@ export async function aliyunImageSearch(
 		throw new Error("At least one of query or imageUrl must be provided");
 	}
 
+	const textQuery = query;
+
 	const apiKey = await resolveApiKey(ctx);
-	const baseUrl = process.env.ALIYUN_BASE_URL || DEFAULT_BASE_URL;
-	const model = process.env.ALIYUN_SEARCH_MODEL || DEFAULT_MODEL;
+	const baseUrl = resolveSetting(process.env.ALIYUN_BASE_URL, config?.baseUrl, DEFAULT_BASE_URL);
+	const model = resolveSetting(process.env.ALIYUN_SEARCH_MODEL, config?.searchModel, DEFAULT_MODEL);
 
 	const timeoutSignal = AbortSignal.timeout(TIMEOUT_MS);
 	const s = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
@@ -36,7 +40,7 @@ export async function aliyunImageSearch(
 		input = [{ role: "user", content }];
 	} else {
 		tools = [{ type: "web_search_image" }];
-		input = query!;
+		input = textQuery;
 	}
 
 	const resp = await fetch(`${baseUrl}/responses`, {
