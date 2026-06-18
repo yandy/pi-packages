@@ -149,15 +149,30 @@ export class DockerRuntime implements Runtime {
 		);
 
 		const buildPromise = new Promise<void>((resolve, reject) => {
+			let settled = false;
 			docker.modem.followProgress(
 				buildStream,
 				(err: any) => {
+					if (settled) return;
+					settled = true;
 					if (err) reject(err instanceof Error ? err : new Error(String(err)));
 					else resolve();
 				},
 				(event: any) => {
 					if (event.stream) report(event.stream.trim());
-					else if (event.error) report(`ERROR: ${event.error}`);
+					else if (event.errorDetail) {
+						if (!settled) {
+							settled = true;
+							reject(new Error(event.errorDetail.message || event.error || "Build failed"));
+						}
+					}
+					else if (event.error) {
+						report(`ERROR: ${event.error}`);
+						if (!settled) {
+							settled = true;
+							reject(new Error(event.error));
+						}
+					}
 					else if (event.status) report(event.status);
 				},
 			);
