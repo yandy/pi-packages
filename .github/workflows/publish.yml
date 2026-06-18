@@ -3,8 +3,8 @@ name: Publish to npm
 on:
   push:
     tags:
-      - '@yandy0725/pi-container-sandbox@*'
-      - '@yandy0725/pi-web-tools@*'
+      - 'pi-container-sandbox-v*'
+      - 'pi-web-tools-v*'
 
 jobs:
   publish:
@@ -25,10 +25,10 @@ jobs:
         run: |
           TAG="${{ github.ref_name }}"
           case "$TAG" in
-            @yandy0725/pi-container-sandbox@*)
+            pi-container-sandbox-v*)
               echo "dir=pi-container-sandbox" >> "$GITHUB_OUTPUT"
               ;;
-            @yandy0725/pi-web-tools@*)
+            pi-web-tools-v*)
               echo "dir=pi-web-tools" >> "$GITHUB_OUTPUT"
               ;;
           esac
