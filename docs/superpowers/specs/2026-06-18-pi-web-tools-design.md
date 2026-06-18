@@ -2,12 +2,13 @@
 
 ## 概述
 
-`pi-web-tools` 是一个 pi 包，提供三个工具：`web_search`、`deep_search`、`web_fetch`。
+`pi-web-tools` 是一个 pi 包，提供四个工具：`web_search`、`deep_search`、`image_search`、`web_fetch`。
 
 | Tool | 本质 | 源 |
 |------|------|-----|
 | `web_search` | 纯搜索，返回原始结果给 LLM 自行分析 | Exa → DuckDuckGo |
 | `deep_search` | LLM server-side 搜索+合成，返回结构化答案 | Aliyun（百炼） |
+| `image_search` | LLM server-side 图片搜索+分析 | Aliyun（百炼） |
 | `web_fetch` | URL 抓取 | — |
 
 ## 目录结构
@@ -24,6 +25,10 @@ pi-web-tools/
 │   ├── deep_search/
 │   │   ├── types.ts             # 共享类型
 │   │   ├── aliyun.ts            # 阿里云百炼 Responses API
+│   │   └── index.ts             # 入口
+│   ├── image_search/
+│   │   ├── types.ts             # 共享类型
+│   │   ├── aliyun.ts            # 阿里云百炼 Responses API（文搜图 + 图搜图）
 │   │   └── index.ts             # 入口
 │   └── web_fetch.ts             # URL 抓取 + HTML→Markdown 转换
 ├── package.json
@@ -106,7 +111,37 @@ interface DeepSearchSource { title: string; url: string; }
 interface DeepSearchResponse { answer: string; sources: DeepSearchSource[]; }
 ```
 
-## 工具三：web_fetch
+## 工具三：image_search
+
+统一入口，同时支持文搜图和图搜图。
+
+### 参数
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `query` | string | 否 | 文本描述，用于文搜图 |
+| `imageUrl` | string | 否 | 公网图片 URL，用于图搜图 |
+
+> 至少提供 `query` 或 `imageUrl` 之一。两者都提供时，模型结合文本与图片进行搜索。
+
+### 实现 (`src/image_search/aliyun.ts`)
+
+- API: `POST https://dashscope.aliyuncs.com/compatible-mode/v1/responses`（Responses API）
+- Auth：`process.env.ALIYUN_API_KEY` → `ctx.modelRegistry.getApiKeyForProvider("aliyun")`
+- 文搜图（仅 `query`）：`tools: [{ type: "web_search_image" }]`，`input` 为文本
+- 图搜图（有 `imageUrl`）：`tools: [{ type: "image_search" }]`，`input` 为多模态 `[{ input_text }, { input_image }]`
+- 关掉 thinking：`reasoning: { effort: "none" }`
+- 从 `output` 解析：`web_search_image_call` 或 `image_search_call` 的 `output`（JSON 数组 `[{ index, title, url }]`）+ 最终 `message` 文本
+- 函数签名：`aliyunImageSearch(params, signal?, ctx?): Promise<ImageSearchResponse>`
+
+### 共享类型 (`src/image_search/types.ts`)
+
+```typescript
+interface ImageResult { index: number; title: string; url: string; }
+interface ImageSearchResponse { answer: string; images: ImageResult[]; }
+```
+
+## 工具四：web_fetch
 
 ### 参数
 
