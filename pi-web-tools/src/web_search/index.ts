@@ -1,5 +1,5 @@
-import type { SearchResponse } from "./types";
 import { exaSearch } from "./exa";
+import type { SearchResponse } from "./types";
 
 type SearchFn = (query: string, numResults: number, signal?: AbortSignal) => Promise<SearchResponse>;
 

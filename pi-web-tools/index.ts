@@ -2,10 +2,10 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { loadConfig } from "./src/config";
-import { search } from "./src/web_search/index";
 import { deepSearch } from "./src/deep_search/index";
 import { imageSearch } from "./src/image_search/index";
 import { webFetch } from "./src/web_fetch";
+import { search } from "./src/web_search/index";
 
 export default function (pi: ExtensionAPI) {
 	// -------------------------------------------------------------------
