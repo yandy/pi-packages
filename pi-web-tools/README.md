@@ -7,7 +7,7 @@ A [pi](https://pi.dev/docs/latest/packages) package providing web and image sear
 | Tool | Description | Source |
 |------|-------------|--------|
 | `web_search` | Pure web search, returns raw results (titles, URLs, snippets) | Exa (REST + MCP free tier) |
-| `deep_search` | Deep research with LLM-synthesized answers and sources | Aliyun (Bailian) Chat Completions API |
+| `deep_search` | Deep research with LLM-synthesized answers | Aliyun (Bailian) Chat Completions API |
 | `image_search` | Search images by text or find similar images by URL | Aliyun (Bailian) Responses API |
 | `web_fetch` | Fetch and convert web pages to text, markdown, or raw HTML | — |
 
@@ -90,7 +90,7 @@ Search the web with automatic source fallback.
 
 ### deep_search
 
-Deep research using Aliyun's LLM-powered search with web content extraction. The model searches the web, extracts page content, and synthesizes a comprehensive answer with sources.
+Deep research using Aliyun's LLM-powered search with web content extraction. The model searches the web, extracts page content, and synthesizes a comprehensive answer.
 
 **Parameters:**
 

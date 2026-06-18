@@ -7,7 +7,7 @@
 | 工具 | 描述 | 来源 |
 |------|------|------|
 | `web_search` | 纯网页搜索，返回原始结果（标题、URL、摘要） | Exa（REST + MCP 免费层） |
-| `deep_search` | 深度研究，LLM 合成答案并附来源 | 阿里云百炼 Chat Completions API |
+| `deep_search` | 深度研究，LLM 合成答案 | 阿里云百炼 Chat Completions API |
 | `image_search` | 文搜图 / 图搜图 | 阿里云百炼 Responses API |
 | `web_fetch` | 抓取网页并转换为文本、Markdown 或原始 HTML | — |
 
@@ -90,7 +90,7 @@ pi -e ./index.ts
 
 ### deep_search
 
-使用阿里云百炼 LLM 进行深度搜索，结合网页抓取。模型会搜索网页、提取页面内容，并合成带来源的全面答案。
+使用阿里云百炼 LLM 进行深度搜索，结合网页抓取。模型会搜索网页、提取页面内容，并合成全面答案。
 
 **参数：**
 
