@@ -1,7 +1,8 @@
 import type { SearchResponse } from "./types";
 
 const EXA_REST_URL = "https://api.exa.ai/search";
-const EXA_MCP_URL = "https://api.exa.ai/api/mcp";
+const EXA_MCP_URL = "https://mcp.exa.ai/mcp";
+const MCP_TOOL_NAME = "web_search_exa";
 const TIMEOUT_MS = 60_000;
 
 export async function exaSearch(query: string, numResults: number, signal?: AbortSignal): Promise<SearchResponse> {
@@ -58,7 +59,10 @@ async function exaRestSearch(
 async function exaMcpSearch(query: string, numResults: number, signal: AbortSignal): Promise<SearchResponse> {
 	const initResp = await fetch(EXA_MCP_URL, {
 		method: "POST",
-		headers: { "Content-Type": "application/json" },
+		headers: {
+			"Content-Type": "application/json",
+			Accept: "application/json, text/event-stream",
+		},
 		body: JSON.stringify({
 			jsonrpc: "2.0",
 			method: "initialize",
@@ -79,12 +83,15 @@ async function exaMcpSearch(query: string, numResults: number, signal: AbortSign
 
 	const searchResp = await fetch(EXA_MCP_URL, {
 		method: "POST",
-		headers: { "Content-Type": "application/json" },
+		headers: {
+			"Content-Type": "application/json",
+			Accept: "application/json, text/event-stream",
+		},
 		body: JSON.stringify({
 			jsonrpc: "2.0",
 			method: "tools/call",
 			params: {
-				name: "web_search",
+				name: MCP_TOOL_NAME,
 				arguments: { query, numResults, type: "auto", contents: { text: { maxCharacters: 3000 } } },
 			},
 			id: 2,
@@ -122,23 +129,21 @@ function formatAnswer(
 
 function parseMcpResults(text: string): Array<{ title: string; url: string; snippet: string }> {
 	const results: Array<{ title: string; url: string; snippet: string }> = [];
-	const lines = text.split("\n");
-	let current: { title: string; url: string; snippet: string } | null = null;
+	const blocks = text.split(/\n\n---\n\n/);
 
-	for (const line of lines) {
-		const titleMatch = line.match(/^Title:\s*(.+)/);
-		const urlMatch = line.match(/^URL:\s*(.+)/);
-		const textMatch = line.match(/^Text:\s*(.+)/);
+	for (const block of blocks) {
+		const titleMatch = block.match(/^Title:\s*(.+)$/m);
+		const urlMatch = block.match(/^URL:\s*(.+)$/m);
+		const highlightsMatch = block.match(/^Highlights:\s*\n([\s\S]*?)$/m);
 
-		if (titleMatch) {
-			if (current) results.push(current);
-			current = { title: titleMatch[1].trim(), url: "", snippet: "" };
-		} else if (urlMatch && current) {
-			current.url = urlMatch[1].trim();
-		} else if (textMatch && current) {
-			current.snippet = textMatch[1].trim().slice(0, 500);
+		if (urlMatch) {
+			results.push({
+				title: titleMatch?.[1]?.trim() || "Untitled",
+				url: urlMatch[1].trim(),
+				snippet: highlightsMatch?.[1]?.trim().slice(0, 500) || "",
+			});
 		}
 	}
-	if (current?.url) results.push(current);
+
 	return results;
 }

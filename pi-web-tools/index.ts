@@ -15,10 +15,10 @@ export default function (pi: ExtensionAPI) {
 		name: "web_search",
 		label: "Web Search",
 		description:
-			`Search the web and return raw results (titles, URLs, snippets). Sources: Exa (REST/MCP) → DuckDuckGo (free, no key needed). ` +
-			`Use "source" to pick a specific source. The current year is ${new Date().getFullYear()}.`,
+			`Search the web via Exa and return raw results (titles, URLs, snippets). With EXA_API_KEY: full REST API. Without: MCP free tier (150 calls/day). ` +
+			`The current year is ${new Date().getFullYear()}.`,
 		promptSnippet:
-			"web_search: search the web via Exa → DuckDuckGo. Returns raw results with titles, URLs, snippets. LLM synthesizes the answer.",
+			"web_search: search the web via Exa. Returns raw results with titles, URLs, snippets. LLM synthesizes the answer.",
 		promptGuidelines: [
 			"Use web_search when you need current information outside your training data.",
 			"Synthesize a clear answer from the search results and cite sources with markdown hyperlinks.",
@@ -29,7 +29,7 @@ export default function (pi: ExtensionAPI) {
 				Type.Number({ minimum: 1, maximum: 20, default: 10, description: "Number of results (1-20)." }),
 			),
 			source: Type.Optional(
-				Type.String({ enum: ["exa", "duckduckgo"], description: "Specify source, or omit for auto-fallback." }),
+				Type.String({ enum: ["exa"], description: "Search source. Default: exa." }),
 			),
 		}),
 		renderCall(args, theme) {

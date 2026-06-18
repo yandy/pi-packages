@@ -3,7 +3,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
-let duckduckgoSearch: typeof import("../src/web_search/duckduckgo.js").duckduckgoSearch;
 let search: typeof import("../src/web_search/index.js").search;
 
 beforeEach(async () => {
@@ -11,8 +10,6 @@ beforeEach(async () => {
 	mockFetch.mockReset();
 	vi.unstubAllEnvs();
 
-	const ddgMod = await import("../src/web_search/duckduckgo.js");
-	duckduckgoSearch = ddgMod.duckduckgoSearch;
 	const wsMod = await import("../src/web_search/index.js");
 	search = wsMod.search;
 });
@@ -31,7 +28,14 @@ describe("exaSearch", () => {
 			ok: true,
 			json: () =>
 				Promise.resolve({
-					result: { content: [{ text: "Title: Test\nURL: https://example.com\nText: Sample" }] },
+					result: {
+						content: [
+							{
+								type: "text",
+								text: "Title: Test\nURL: https://example.com\nPublished: N/A\nAuthor: N/A\nHighlights:\nSample content",
+							},
+						],
+					},
 				}),
 		});
 
@@ -41,7 +45,7 @@ describe("exaSearch", () => {
 		expect(mockFetch).toHaveBeenCalledTimes(2);
 		expect(mockFetch).toHaveBeenNthCalledWith(
 			1,
-			"https://api.exa.ai/api/mcp",
+			"https://mcp.exa.ai/mcp",
 			expect.objectContaining({ method: "POST" }),
 		);
 	});
@@ -121,92 +125,8 @@ describe("exaSearch", () => {
 	});
 });
 
-describe("duckduckgoSearch", () => {
-	it("returns formatted results from DDG API", async () => {
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			json: () =>
-				Promise.resolve({
-					Abstract: "Abstract text",
-					AbstractText: "Abstract description",
-					AbstractURL: "https://example.com",
-					RelatedTopics: [
-						{ Text: "Topic 1 - Description", FirstURL: "https://one.com" },
-						{ Text: "Topic 2", FirstURL: "https://two.com" },
-					],
-				}),
-		});
-
-		const result = await duckduckgoSearch("test query", 5);
-
-		expect(result.sourceLabel).toBe("duckduckgo");
-		expect(result.sources.length).toBeGreaterThan(0);
-		expect(result.answer).toContain("example.com");
-	});
-
-	it("handles nested RelatedTopics", async () => {
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			json: () =>
-				Promise.resolve({
-					RelatedTopics: [
-						{
-							Text: "Parent Topic - Description",
-							FirstURL: "https://parent.com",
-							Topics: [
-								{ Text: "Child Topic - Details", FirstURL: "https://child.com" },
-								{ Text: "Child 2", FirstURL: "https://child2.com" },
-							],
-						},
-						{ Text: "Flat Topic", FirstURL: "https://flat.com" },
-					],
-				}),
-		});
-
-		const result = await duckduckgoSearch("test query", 10);
-
-		expect(result.sources).toHaveLength(4);
-		expect(result.sources[0].title).toBe("Parent Topic");
-		expect(result.sources[1].title).toBe("Child Topic");
-		expect(result.sources[2].title).toBe("Child 2");
-		expect(result.sources[3].title).toBe("Flat Topic");
-	});
-
-	it("handles empty response", async () => {
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			json: () => Promise.resolve({}),
-		});
-
-		const result = await duckduckgoSearch("rare query", 5);
-		expect(result.answer).toContain("No results");
-	});
-});
-
 describe("search orchestrator", () => {
-	beforeEach(() => {
-		vi.stubEnv("EXA_API_KEY", "");
-	});
-
-	it("falls back from exa to duckduckgo when exa not configured", async () => {
-		// exa MCP initialize fails (no result in response)
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			json: () => Promise.resolve({}),
-		});
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			json: () =>
-				Promise.resolve({
-					RelatedTopics: [{ Text: "Result", FirstURL: "https://example.com" }],
-				}),
-		});
-
-		const result = await search("test", 5);
-		expect(result.sourceLabel).toBe("duckduckgo");
-	});
-
-	it("uses exa when configured", async () => {
+	it("uses exa with API key", async () => {
 		vi.stubEnv("EXA_API_KEY", "test-key");
 		mockFetch.mockResolvedValueOnce({
 			ok: true,
@@ -220,22 +140,52 @@ describe("search orchestrator", () => {
 		expect(result.sourceLabel).toBe("exa");
 	});
 
-	it("uses specified source", async () => {
+	it("uses exa MCP when no API key", async () => {
+		vi.stubEnv("EXA_API_KEY", "");
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () => Promise.resolve({ result: {} }),
+		});
 		mockFetch.mockResolvedValueOnce({
 			ok: true,
 			json: () =>
 				Promise.resolve({
-					RelatedTopics: [{ Text: "R", FirstURL: "https://x.com" }],
+					result: {
+						content: [{ type: "text", text: "Title: X\nURL: https://x.com\nHighlights:\nyes" }],
+					},
 				}),
 		});
 
-		const result = await search("test", 5, undefined, undefined, "duckduckgo");
-		expect(result.sourceLabel).toBe("duckduckgo");
+		const result = await search("test", 5);
+		expect(result.sourceLabel).toBe("exa");
 	});
 
-	it("throws when all sources unavailable", async () => {
-		mockFetch.mockRejectedValue(new Error("network error"));
+	it("uses specified source", async () => {
+		vi.stubEnv("EXA_API_KEY", "test-key");
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					results: [{ title: "R", url: "https://x.com", text: "content" }],
+				}),
+		});
+
+		const result = await search("test", 5, undefined, undefined, "exa");
+		expect(result.sourceLabel).toBe("exa");
+	});
+
+	it("throws when all sources fail", async () => {
+		vi.stubEnv("EXA_API_KEY", "");
+		mockFetch.mockResolvedValueOnce({
+			ok: false,
+			status: 500,
+			text: () => Promise.resolve("Error"),
+		});
 
 		await expect(search("test", 5)).rejects.toThrow("All search sources failed");
+	});
+
+	it("throws for unknown source", async () => {
+		await expect(search("test", 5, undefined, undefined, "unknown")).rejects.toThrow("Unknown source");
 	});
 });

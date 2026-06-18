@@ -6,7 +6,7 @@ A [pi](https://pi.dev/docs/latest/packages) package providing web and image sear
 
 | Tool | Description | Source |
 |------|-------------|--------|
-| `web_search` | Pure web search, returns raw results (titles, URLs, snippets) | Exa (REST + MCP free tier) → DuckDuckGo (free) |
+| `web_search` | Pure web search, returns raw results (titles, URLs, snippets) | Exa (REST + MCP free tier) |
 | `deep_search` | Deep research with LLM-synthesized answers and sources | Aliyun (Bailian) Responses API |
 | `image_search` | Search images by text or find similar images by URL | Aliyun (Bailian) Responses API |
 | `web_fetch` | Fetch and convert web pages to text, markdown, or raw HTML | — |
@@ -23,7 +23,7 @@ pi -e ./index.ts
 
 ### Prerequisites
 
-- `web_search`: No config needed for DuckDuckGo. Set `EXA_API_KEY` for Exa (optional, has MCP free tier fallback).
+- `web_search`: No config needed — Exa MCP free tier (150 calls/day). Set `EXA_API_KEY` for higher limits.
 - `deep_search` / `image_search`: Set `ALIYUN_API_KEY` or use `/login` in pi to authenticate with Aliyun.
 
 ## Configuration
@@ -73,11 +73,9 @@ Search the web with automatic source fallback.
 |-----------|------|----------|---------|-------------|
 | `query` | string | yes | — | Search query |
 | `numResults` | number | no | 10 | Number of results (1-20) |
-| `source` | `"exa"` \| `"duckduckgo"` | no | — | Specify source, or omit for auto-fallback |
+| `source` | `"exa"` | no | — | Search source |
 
-**Sources:**
-1. **Exa** — AI-native search API. With `EXA_API_KEY`: full REST API. Without: MCP free tier (150 calls/day, 3 QPS).
-2. **DuckDuckGo** — Instant Answer API. Always available, no key needed.
+**Source:** **Exa** — AI-native search API. With `EXA_API_KEY`: full REST API. Without: MCP free tier (150 calls/day, 3 QPS). Always available, no key needed for basic usage.
 
 ### deep_search
 

@@ -1,26 +1,17 @@
 import type { SearchResponse } from "./types";
 import { exaSearch } from "./exa";
-import { duckduckgoSearch } from "./duckduckgo";
 
 type SearchFn = (query: string, numResults: number, signal?: AbortSignal) => Promise<SearchResponse>;
 
 interface SourceEntry {
 	name: string;
 	fn: SearchFn;
-	checkConfigured: () => boolean;
 }
 
 const SOURCES: SourceEntry[] = [
 	{
 		name: "exa",
 		fn: exaSearch,
-		// Don't skip exa - it has MCP fallback
-		checkConfigured: () => true,
-	},
-	{
-		name: "duckduckgo",
-		fn: duckduckgoSearch,
-		checkConfigured: () => true,
 	},
 ];
 
@@ -42,10 +33,6 @@ export async function search(
 	}
 
 	for (const source of sources) {
-		if (!source.checkConfigured()) {
-			errors.push(`${source.name}: not configured`);
-			continue;
-		}
 		try {
 			onProgress?.(`Trying ${source.name}...`);
 			const resp = await source.fn(query, numResults, signal);

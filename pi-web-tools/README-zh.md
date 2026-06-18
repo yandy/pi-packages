@@ -6,7 +6,7 @@
 
 | 工具 | 描述 | 来源 |
 |------|------|------|
-| `web_search` | 纯网页搜索，返回原始结果（标题、URL、摘要） | Exa（REST + MCP 免费层）→ DuckDuckGo（免费） |
+| `web_search` | 纯网页搜索，返回原始结果（标题、URL、摘要） | Exa（REST + MCP 免费层） |
 | `deep_search` | 深度研究，LLM 合成答案并附来源 | 阿里云百炼 Responses API |
 | `image_search` | 文搜图 / 图搜图 | 阿里云百炼 Responses API |
 | `web_fetch` | 抓取网页并转换为文本、Markdown 或原始 HTML | — |
@@ -23,7 +23,7 @@ pi -e ./index.ts
 
 ### 前置条件
 
-- `web_search`：DuckDuckGo 无需配置。设置 `EXA_API_KEY` 可使用 Exa（可选，有 MCP 免费层回退）。
+- `web_search`：无需配置——Exa MCP 免费层（150次/天）。设置 `EXA_API_KEY` 可获得更高限额。
 - `deep_search` / `image_search`：设置 `ALIYUN_API_KEY` 或在 pi 中使用 `/login` 认证阿里云。
 
 ## 配置
@@ -73,11 +73,9 @@ pi -e ./index.ts
 |------|------|------|--------|------|
 | `query` | string | 是 | — | 搜索查询 |
 | `numResults` | number | 否 | 10 | 结果数量（1-20） |
-| `source` | `"exa"` \| `"duckduckgo"` | 否 | — | 指定源，不指定则自动回退 |
+| `source` | `"exa"` | 否 | — | 搜索源 |
 
-**搜索源：**
-1. **Exa** — AI 原生搜索 API。有 `EXA_API_KEY`：完整 REST API。无 key：MCP 免费层（150次/天，3 QPS）。
-2. **DuckDuckGo** — Instant Answer API。始终可用，无需 key。
+**搜索源：** **Exa** — AI 原生搜索 API。有 `EXA_API_KEY`：完整 REST API。无 key：MCP 免费层（150次/天，3 QPS）。无需 key 即可使用。
 
 ### deep_search
 
