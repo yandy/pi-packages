@@ -24,6 +24,18 @@ function notifyCtx() {
 	};
 }
 
+function buildCtx(selectResult?: string) {
+	const notifications: { msg: string; level: string }[] = [];
+	return {
+		notifications,
+		ui: {
+			notify: (msg: string, level?: string) => notifications.push({ msg, level: level ?? "info" }),
+			setStatus: (_key: string, _msg: string) => {},
+			select: async (_title: string, _options: string[]) => selectResult ?? "cn",
+		},
+	};
+}
+
 afterEach(() => clearSbx());
 
 describe("/sandbox stop", () => {
@@ -55,46 +67,44 @@ describe("/sandbox stop", () => {
 });
 
 describe("/sandbox build", () => {
-	it("calls rebuildImage on the runtime with progress callback", async () => {
-		const ctx = notifyCtx();
+	it("shows selection and builds with selected dockerfile", async () => {
+		const ctx = buildCtx("cn");
 		const handlers = createSandboxCommandHandlers("/tmp", mockPathApprovals());
 
-		let rebuildCalled = false;
-		let progressFn: ((msg: string) => void) | undefined;
+		let buildDockerfile = "";
 		const rt = mockRuntime({
-			rebuildImage: async (onProgress) => {
-				rebuildCalled = true;
-				progressFn = onProgress;
+			buildImage: async (opts) => {
+				buildDockerfile = opts.dockerfile;
 			},
 		});
 		mockSbx({ runtime: rt });
 
 		await handlers.build("", ctx);
-		expect(rebuildCalled).toBe(true);
-		expect(typeof progressFn).toBe("function");
+		expect(buildDockerfile).toBe("cn.Dockerfile");
 	});
 
-	it("shows error when sandbox is not active", async () => {
-		const ctx = notifyCtx();
+	it("shows message when user skips build", async () => {
+		const ctx = buildCtx("跳过");
 		const handlers = createSandboxCommandHandlers("/tmp", mockPathApprovals());
+		mockSbx();
 
 		await handlers.build("", ctx);
-		expect(ctx.notifications.some((n) => n.msg.includes("not active"))).toBe(true);
+		expect(ctx.notifications.some((n) => n.msg.includes("跳过"))).toBe(true);
 	});
 
 	it("shows error on build failure", async () => {
-		const ctx = notifyCtx();
+		const ctx = buildCtx("cn");
 		const handlers = createSandboxCommandHandlers("/tmp", mockPathApprovals());
 
 		const rt = mockRuntime({
-			rebuildImage: async () => {
-				throw new Error("build failed");
+			buildImage: async () => {
+				throw new Error("build error");
 			},
 		});
 		mockSbx({ runtime: rt });
 
 		await handlers.build("", ctx);
-		expect(ctx.notifications.some((n) => n.msg.includes("Build failed"))).toBe(true);
+		expect(ctx.notifications.some((n) => n.msg.includes("失败"))).toBe(true);
 	});
 });
 
