@@ -4,8 +4,13 @@
 	"description": "pi package providing web_search, deep_search, image_search and web_fetch tools",
 	"license": "MIT",
 	"type": "module",
-	"keywords": ["pi-package"],
-	"files": ["index.ts", "src/"],
+	"keywords": [
+		"pi-package"
+	],
+	"files": [
+		"index.ts",
+		"src/"
+	],
 	"scripts": {
 		"test": "vitest run",
 		"test:watch": "vitest",
@@ -14,8 +19,17 @@
 		"format": "biome format --write .",
 		"check": "biome check ."
 	},
-	"pi": { "extensions": ["./index.ts"] },
-	"peerDependencies": { "@earendil-works/pi-coding-agent": ">=0.74.0" },
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"dependencies": {
+		"openai": "^6.26.0"
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": ">=0.74.0"
+	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.0",
 		"@earendil-works/pi-coding-agent": "^0.74.0",

@@ -1,5 +1,5 @@
-import type { SearchResponse } from "./types";
 import { exaSearch } from "./exa";
+import type { SearchResponse } from "./types";
 
 type SearchFn = (query: string, numResults: number, signal?: AbortSignal) => Promise<SearchResponse>;
 
@@ -24,9 +24,7 @@ export async function search(
 ): Promise<SearchResponse> {
 	const errors: string[] = [];
 
-	const sources = specifiedSource
-		? SOURCES.filter((s) => s.name === specifiedSource)
-		: SOURCES;
+	const sources = specifiedSource ? SOURCES.filter((s) => s.name === specifiedSource) : SOURCES;
 
 	if (specifiedSource && sources.length === 0) {
 		throw new Error(`Unknown source: ${specifiedSource}. Available: ${SOURCES.map((s) => s.name).join(", ")}`);

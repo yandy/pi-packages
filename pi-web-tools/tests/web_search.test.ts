@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
@@ -45,11 +45,7 @@ describe("exaSearch", () => {
 
 		expect(result.sourceLabel).toBe("exa");
 		expect(mockFetch).toHaveBeenCalledTimes(2);
-		expect(mockFetch).toHaveBeenNthCalledWith(
-			1,
-			"https://mcp.exa.ai/mcp",
-			expect.objectContaining({ method: "POST" }),
-		);
+		expect(mockFetch).toHaveBeenNthCalledWith(1, "https://mcp.exa.ai/mcp", expect.objectContaining({ method: "POST" }));
 	});
 
 	it("calls REST API when EXA_API_KEY is set", async () => {

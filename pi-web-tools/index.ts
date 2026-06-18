@@ -2,10 +2,10 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { loadConfig } from "./src/config";
-import { search } from "./src/web_search/index";
 import { deepSearch } from "./src/deep_search/index";
 import { imageSearch } from "./src/image_search/index";
 import { webFetch } from "./src/web_fetch";
+import { search } from "./src/web_search/index";
 
 export default function (pi: ExtensionAPI) {
 	// -------------------------------------------------------------------
@@ -28,9 +28,7 @@ export default function (pi: ExtensionAPI) {
 			numResults: Type.Optional(
 				Type.Number({ minimum: 1, maximum: 20, default: 10, description: "Number of results (1-20)." }),
 			),
-			source: Type.Optional(
-				Type.String({ enum: ["exa"], description: "Search source. Default: exa." }),
-			),
+			source: Type.Optional(Type.String({ enum: ["exa"], description: "Search source. Default: exa." })),
 		}),
 		renderCall(args, theme) {
 			const p = args as { query: string };
@@ -46,8 +44,7 @@ export default function (pi: ExtensionAPI) {
 			const lines = body.split("\n");
 			if (!expanded) {
 				const preview = lines.slice(0, 6);
-				if (lines.length > 6)
-					preview.push(theme.fg("dim", `... ${lines.length - 6} more lines · ctrl+o to expand`));
+				if (lines.length > 6) preview.push(theme.fg("dim", `... ${lines.length - 6} more lines · ctrl+o to expand`));
 				return new Text(preview.join("\n"), 0, 0);
 			}
 			return new Text(body, 0, 0);
@@ -90,15 +87,30 @@ export default function (pi: ExtensionAPI) {
 		name: "deep_search",
 		label: "Deep Search",
 		description:
-			"Deep search powered by Aliyun (Bailian) using web_search + web_extractor. The model searches the web, extracts page content, and synthesizes a comprehensive answer with sources.",
+			"Deep search powered by Aliyun (Bailian) using Chat Completions API with web search. The model searches the web and synthesizes a comprehensive answer. Supports vertical domain search, time range filtering, site restriction, and mixed image output.",
 		promptSnippet:
-			"deep_search: Aliyun-powered deep search that synthesizes web results into a comprehensive answer with sources.",
+			"deep_search: Aliyun-powered deep search that synthesizes web results into a comprehensive answer. Supports vertical domain search, time range filtering, site restriction, and mixed image output.",
 		promptGuidelines: [
-			"Use deep_search for complex research questions that benefit from multi-source synthesis.",
-			"deep_search is powered by Aliyun. Configure ALIYUN_API_KEY or use /login in pi.",
+			"Use deep_search for complex research questions that benefit from web search synthesis.",
+			"deep_search is powered by Aliyun Chat Completions API. Configure ALIYUN_API_KEY or use aliyunProviderKey in config.",
 		],
 		parameters: Type.Object({
 			query: Type.String({ minLength: 2, description: "The search query." }),
+			enableSearchExtension: Type.Optional(
+				Type.Boolean({ description: "Enable vertical domain search for more precise results." }),
+			),
+			freshness: Type.Optional(
+				Type.Number({
+					enum: [7, 30, 180, 365],
+					description: "Time range filter: 7/30/180/365 days. Only effective with turbo strategy.",
+				}),
+			),
+			assignedSiteList: Type.Optional(
+				Type.Array(Type.String(), {
+					description: 'Restrict search to specific sites (e.g. ["baidu.com", "sina.cn"]).',
+				}),
+			),
+			enableImageOutput: Type.Optional(Type.Boolean({ description: "Enable mixed text-image output in the response." })),
 		}),
 		renderCall(args, theme) {
 			const p = args as { query: string };
@@ -114,24 +126,34 @@ export default function (pi: ExtensionAPI) {
 			const lines = body.split("\n");
 			if (!expanded) {
 				const preview = lines.slice(0, 6);
-				if (lines.length > 6)
-					preview.push(theme.fg("dim", `... ${lines.length - 6} more lines · ctrl+o to expand`));
+				if (lines.length > 6) preview.push(theme.fg("dim", `... ${lines.length - 6} more lines · ctrl+o to expand`));
 				return new Text(preview.join("\n"), 0, 0);
 			}
 			return new Text(body, 0, 0);
 		},
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const p = params as { query: string };
+			const p = params as {
+				query: string;
+				enableSearchExtension?: boolean;
+				freshness?: number;
+				assignedSiteList?: string[];
+				enableImageOutput?: boolean;
+			};
 			const query = p.query?.trim();
 			if (!query) {
-				return { content: [{ type: "text", text: "Error: query is required." }], details: {} };
+				return { content: [{ type: "text", text: "Error: query is required." }], details: {}, isError: true };
 			}
 
 			onUpdate?.({ content: [{ type: "text", text: "Deep searching..." }], details: {} });
 
 			try {
 				const cfg = loadConfig(ctx.cwd);
-				const result = await deepSearch(query, signal, cfg.aliyun, ctx);
+				const result = await deepSearch(query, signal, cfg.aliyun, ctx, {
+					enableSearchExtension: p.enableSearchExtension,
+					freshness: p.freshness,
+					assignedSiteList: p.assignedSiteList,
+					enableImageOutput: p.enableImageOutput,
+				});
 				const sourcesText = result.sources.length
 					? `\n\nSources:\n${result.sources.map((s, i) => `${i + 1}. [${s.title}](${s.url})`).join("\n")}`
 					: "";
@@ -154,20 +176,15 @@ export default function (pi: ExtensionAPI) {
 		label: "Image Search",
 		description:
 			"Search for images by text description or find similar images by URL. Powered by Aliyun (Bailian). Returns image results and model analysis.",
-		promptSnippet:
-			"image_search: search images by text or find similar images by URL. Powered by Aliyun (Bailian).",
+		promptSnippet: "image_search: search images by text or find similar images by URL. Powered by Aliyun (Bailian).",
 		promptGuidelines: [
 			"Use image_search to find images matching a text description (provide query).",
 			"Use image_search to find visually similar images (provide imageUrl, the image must be a publicly accessible URL).",
 			"Both query and imageUrl can be provided together for combined search.",
 		],
 		parameters: Type.Object({
-			query: Type.Optional(
-				Type.String({ minLength: 2, description: "Text description of the image to search for." }),
-			),
-			imageUrl: Type.Optional(
-				Type.String({ description: "Public URL of the image to find similar images." }),
-			),
+			query: Type.Optional(Type.String({ minLength: 2, description: "Text description of the image to search for." })),
+			imageUrl: Type.Optional(Type.String({ description: "Public URL of the image to find similar images." })),
 		}),
 		renderCall(args, theme) {
 			const p = args as { query?: string; imageUrl?: string };
@@ -181,8 +198,7 @@ export default function (pi: ExtensionAPI) {
 			const lines = body.split("\n");
 			if (!expanded) {
 				const preview = lines.slice(0, 6);
-				if (lines.length > 6)
-					preview.push(theme.fg("dim", `... ${lines.length - 6} more lines · ctrl+o to expand`));
+				if (lines.length > 6) preview.push(theme.fg("dim", `... ${lines.length - 6} more lines · ctrl+o to expand`));
 				return new Text(preview.join("\n"), 0, 0);
 			}
 			return new Text(body, 0, 0);
@@ -201,10 +217,9 @@ export default function (pi: ExtensionAPI) {
 
 			try {
 				const cfg = loadConfig(ctx.cwd);
-				const result = await imageSearch({ query: p.query, imageUrl: p.imageUrl }, signal, ctx, cfg.aliyun);
+				const result = await imageSearch({ query: p.query, imageUrl: p.imageUrl }, signal, cfg.aliyun, ctx);
 				const imagesText = result.images.length
-					? "\n\nImages:\n" +
-						result.images.map((img) => `${img.index}. [${img.title}](${img.url})`).join("\n")
+					? "\n\nImages:\n" + result.images.map((img) => `${img.index}. [${img.title}](${img.url})`).join("\n")
 					: "";
 				return {
 					content: [{ type: "text", text: result.answer + imagesText }],
@@ -261,8 +276,7 @@ export default function (pi: ExtensionAPI) {
 			const lines = body.split("\n");
 			if (!expanded) {
 				const preview = lines.slice(0, 6);
-				if (lines.length > 6)
-					preview.push(theme.fg("dim", `... ${lines.length - 6} more lines · ctrl+o to expand`));
+				if (lines.length > 6) preview.push(theme.fg("dim", `... ${lines.length - 6} more lines · ctrl+o to expand`));
 				return new Text(preview.join("\n"), 0, 0);
 			}
 			return new Text(body, 0, 0);

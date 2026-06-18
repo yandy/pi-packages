@@ -4,7 +4,9 @@ import { resolve } from "node:path";
 interface WebToolsConfig {
 	aliyun?: {
 		baseUrl?: string;
-		searchModel?: string;
+		aliyunProviderKey?: string;
+		deepSearchModel?: string;
+		imageSearchModel?: string;
 	};
 }
 
