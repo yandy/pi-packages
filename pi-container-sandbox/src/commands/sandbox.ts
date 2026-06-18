@@ -68,7 +68,7 @@ export function createSandboxCommandHandlers(
 				ui: {
 					setStatus: (key: string, msg: string) => void;
 					notify: (msg: string, level?: "info" | "warning" | "error") => void;
-					select: (title: string, options: string[], opts?: any) => Promise<string | undefined>;
+					select: (title: string, options: string[], opts?: Record<string, unknown>) => Promise<string | undefined>;
 				};
 			},
 		) => {
@@ -96,7 +96,7 @@ export function createSandboxCommandHandlers(
 				return;
 			}
 
-			const dockerfile = (labelMap.get(selected) ?? selected) + ".Dockerfile";
+			const dockerfile = `${labelMap.get(selected) ?? selected}.Dockerfile`;
 			const image = sbx?.imageRef ?? "pi-container-sandbox:latest";
 
 			try {

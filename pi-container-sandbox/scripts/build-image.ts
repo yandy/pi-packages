@@ -44,7 +44,9 @@ async function main() {
 
 	const options = [...dockerfiles, "跳过"];
 	console.log("Select a Dockerfile:");
-	options.forEach((opt, i) => console.log(`  ${i + 1}. ${opt}`));
+	for (let i = 0; i < options.length; i++) {
+		console.log(`  ${i + 1}. ${options[i]}`);
+	}
 
 	const rl = createInterface({ input: process.stdin, output: process.stdout });
 	const answer = await new Promise<string>((resolve) => {
@@ -55,7 +57,7 @@ async function main() {
 	});
 
 	const idx = parseInt(answer, 10) - 1;
-	if (isNaN(idx) || idx < 0 || idx >= options.length) {
+	if (Number.isNaN(idx) || idx < 0 || idx >= options.length) {
 		console.error("Invalid selection.");
 		process.exit(1);
 	}
