@@ -16,7 +16,7 @@
 		"lint": "biome lint .",
 		"format": "biome format --write .",
 		"check": "biome check .",
-		"build-image": "docker build -t pi-container-sandbox:latest -f docker/Dockerfile docker",
+		"build-image": "node --experimental-strip-types scripts/build-image.ts",
 		"clean": "rm -rf dist"
 	},
 	"pi": {

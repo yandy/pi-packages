@@ -1,5 +1,5 @@
 import Dockerode from "dockerode";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PACKAGE_DOCKER_DIR } from "../src/config";
 import { DockerRuntime, deriveContainerName } from "../src/runtime";
 
@@ -11,6 +11,27 @@ const dockerAvailable = (() => {
 		return false;
 	}
 })();
+
+async function ensureTestImage(image: string) {
+	if (!dockerAvailable) return;
+	const docker = new Dockerode({ socketPath: "/var/run/docker.sock" });
+	try {
+		await docker.getImage(image).inspect();
+	} catch {
+		await new Promise<void>((resolve, reject) => {
+			docker.pull(image, {}, (err: any, stream: any) => {
+				if (err) return reject(err);
+				docker.modem.followProgress(
+					stream,
+					(err2: any) => {
+						if (err2) reject(err2 instanceof Error ? err2 : new Error(String(err2)));
+						else resolve();
+					},
+				);
+			});
+		});
+	}
+}
 
 describe("deriveContainerName", () => {
 	it("generates a name with pi-sbx- prefix using cwd basename", () => {
@@ -67,6 +88,8 @@ describe.skipIf(!dockerAvailable)("DockerRuntime", () => {
 describe.skipIf(!dockerAvailable)("DockerRuntime lifecycle", () => {
 	const testName = `pi-test-lifecycle-${Date.now()}`;
 
+	beforeAll(() => ensureTestImage("debian:12-slim"), 120000);
+
 	afterAll(async () => {
 		const d = new Dockerode({ socketPath: "/var/run/docker.sock" });
 		try {
@@ -112,39 +135,12 @@ describe.skipIf(!dockerAvailable)("DockerRuntime lifecycle", () => {
 		}
 	}, 120000);
 
-	it("ensureImage with forceBuild and onProgress rebuilds and reports progress", async () => {
-		const buildName = testName + "-forcebuild";
-		const progressMessages: string[] = [];
-		const runtime = new DockerRuntime({
-			image: "debian:12-slim",
-			hostCwd: "/tmp",
-			name: buildName,
-			allowNetwork: false,
-			resources: { memory: "256m", cpus: "0.5" },
-			forceBuild: false,
-			onProgress: (msg: string) => progressMessages.push(msg),
-		});
-		try {
-			await runtime.init();
-			// First call with forceBuild=false — should skip build (image exists)
-			await runtime.ensureImage({ forceBuild: false });
-			expect(progressMessages.length).toBe(0);
-
-			// Now force rebuild
-			await runtime.ensureImage({ forceBuild: true });
-			expect(progressMessages.length).toBeGreaterThan(0);
-		} finally {
-			try {
-				const d = new Dockerode({ socketPath: "/var/run/docker.sock" });
-				const c = d.getContainer(buildName);
-				await c.remove({ force: true });
-			} catch {}
-		}
-	}, 300000);
 });
 
 describe.skipIf(!dockerAvailable)("DockerRuntime exec", () => {
 	const testName = `pi-test-exec-${Date.now()}`;
+
+	beforeAll(() => ensureTestImage("debian:12-slim"), 120000);
 
 	afterAll(async () => {
 		const d = new Dockerode({ socketPath: "/var/run/docker.sock" });
@@ -261,21 +257,61 @@ describe.skipIf(!dockerAvailable)("DockerRuntime exec", () => {
 	}, 120000);
 });
 
-describe("PACKAGE_DOCKER_DIR", () => {
-	it("resolves to a path ending with /docker", () => {
-		expect(PACKAGE_DOCKER_DIR).toMatch(/\/docker$/);
-	});
-});
-
-describe("DockerRuntime rebuildImage", () => {
-	it("has rebuildImage method", () => {
+describe.skipIf(!dockerAvailable)("DockerRuntime imageExists", () => {
+	beforeAll(() => ensureTestImage("debian:12-slim"), 120000);
+	it("returns false for non-existent image", async () => {
 		const runtime = new DockerRuntime({
-			image: "debian:12-slim",
+			image: "nonexistent-image-xyz",
 			hostCwd: "/tmp",
-			name: "pi-test-rebuild-" + Date.now(),
+			name: "pi-test-exists-" + Date.now(),
 			allowNetwork: false,
 			resources: { memory: "256m", cpus: "0.5" },
 		});
-		expect(typeof runtime.rebuildImage).toBe("function");
+		await runtime.init();
+		const exists = await runtime.imageExists();
+		expect(exists).toBe(false);
+	}, 30000);
+
+	it("returns true for existing image", async () => {
+		const runtime = new DockerRuntime({
+			image: "debian:12-slim",
+			hostCwd: "/tmp",
+			name: "pi-test-exists2-" + Date.now(),
+			allowNetwork: false,
+			resources: { memory: "256m", cpus: "0.5" },
+		});
+		await runtime.init();
+		const exists = await runtime.imageExists();
+		expect(exists).toBe(true);
+	}, 30000);
+});
+
+describe("DockerRuntime buildImage / getImage", () => {
+	it("has buildImage method", () => {
+		const runtime = new DockerRuntime({
+			image: "debian:12-slim",
+			hostCwd: "/tmp",
+			name: "pi-test-build-" + Date.now(),
+			allowNetwork: false,
+			resources: { memory: "256m", cpus: "0.5" },
+		});
+		expect(typeof runtime.buildImage).toBe("function");
+	});
+
+	it("getImage returns the configured image name", () => {
+		const runtime = new DockerRuntime({
+			image: "my-custom-image:v1",
+			hostCwd: "/tmp",
+			name: "pi-test-getimg-" + Date.now(),
+			allowNetwork: false,
+			resources: { memory: "256m", cpus: "0.5" },
+		});
+		expect(runtime.getImage()).toBe("my-custom-image:v1");
+	});
+});
+
+describe("PACKAGE_DOCKER_DIR", () => {
+	it("resolves to a path ending with /docker", () => {
+		expect(PACKAGE_DOCKER_DIR).toMatch(/\/docker$/);
 	});
 });

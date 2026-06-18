@@ -133,6 +133,16 @@ describe("loadSbxConfig hostCommands", () => {
 	});
 });
 
+import { discoverDockerfiles } from "../src/config";
+
+describe("discoverDockerfiles", () => {
+	it("discovers Dockerfile names from docker/ directory", () => {
+		const files = discoverDockerfiles();
+		expect(files).toContain("cn");
+		expect(files).toContain("gh");
+	});
+});
+
 describe("loadSbxConfig preserves unknown fields", () => {
 	it("round-trips user-added fields through save/load", () => {
 		const configDir = resolvePath(testDir, ".pi", "agent");

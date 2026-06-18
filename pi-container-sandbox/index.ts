@@ -9,7 +9,7 @@ import {
 	type ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
 import { createSandboxCommandHandlers } from "./src/commands/sandbox";
-import { imageRefForTag, loadSbxConfig } from "./src/config";
+import { discoverDockerfiles, imageRefForTag, loadSbxConfig, PACKAGE_DOCKER_DIR } from "./src/config";
 import {
 	createEditOps,
 	createHostBashOps,
@@ -68,11 +68,6 @@ export default function (pi: ExtensionAPI) {
 	pi.registerFlag("container-image", {
 		description: "Image to use for the sandbox (default: pi-container-sandbox:latest)",
 		type: "string",
-	});
-	pi.registerFlag("build-image", {
-		description: "Force rebuild the sandbox Docker image even if it already exists",
-		type: "boolean",
-		default: false,
 	});
 	pi.registerFlag("dockerfile", {
 		description: "Path to a custom Dockerfile for the sandbox image (default: extension's built-in Dockerfile)",
@@ -275,7 +270,6 @@ export default function (pi: ExtensionAPI) {
 						.map((p: string) => p.trim())
 						.filter(Boolean)
 				: undefined;
-			const buildImageFlag = pi.getFlag("build-image") as boolean;
 			const dockerfileFlag = pi.getFlag("dockerfile") as string | undefined;
 			const dockerfileContextFlag = pi.getFlag("dockerfile-context") as string | undefined;
 
@@ -324,13 +318,64 @@ export default function (pi: ExtensionAPI) {
 				dockerfile: cfg.dockerfile ?? dockerfileFlag,
 				buildContext: cfg.buildContext ?? dockerfileContextFlag,
 				buildArgs: cfg.buildArgs,
-				forceBuild: buildImageFlag || false,
 				onProgress: (msg: string) => {
 					ctx.ui.setStatus("sandbox", `[build] ${msg}`);
 				},
 			});
 
 			await runtime.init();
+
+			const hasImage = await runtime.imageExists();
+			if (!hasImage) {
+				if (!ctx.hasUI) {
+					ctx.ui.notify(
+						`镜像 ${image} 不存在。请运行 docker build 手动构建，或使用 /sandbox build 命令。`,
+						"error",
+					);
+					return;
+				}
+
+				const dockerfiles = discoverDockerfiles();
+				if (dockerfiles.length === 0) {
+					ctx.ui.notify("没有找到内置 Dockerfile（docker/ 目录为空）。请自行构建镜像。", "warning");
+					return;
+				}
+
+				const skipLabel = "跳过 - 我自己构建";
+				const labelMap = new Map<string, string>();
+				const options: string[] = [];
+				for (const f of dockerfiles) {
+					const label = `${f} (内置)`;
+					labelMap.set(label, f);
+					options.push(label);
+				}
+				options.push(skipLabel);
+
+				const selected = await ctx.ui.select("Docker 镜像不存在，选择 Dockerfile 构建", options);
+				if (!selected || selected === skipLabel) {
+					ctx.ui.notify(
+						`镜像 ${image} 不存在。请手动构建，例如：\n  docker build -t ${image} -f docker/cn.Dockerfile docker`,
+						"warning",
+					);
+					return;
+				}
+
+				const dockerfile = labelMap.get(selected!) + ".Dockerfile";
+				const buildCtx = PACKAGE_DOCKER_DIR;
+
+				try {
+					await runtime.buildImage({
+						dockerfile,
+						buildContext: buildCtx,
+						buildArgs: cfg.buildArgs,
+						onProgress: (msg: string) => ctx.ui.setStatus("sandbox", `[build] ${msg}`),
+					});
+				} catch (e) {
+					ctx.ui.notify(`镜像构建失败: ${e instanceof Error ? e.message : String(e)}`, "error");
+					return;
+				}
+			}
+
 			if (!runtime.isReady()) {
 				await runtime.withReady();
 			}

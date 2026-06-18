@@ -16,6 +16,13 @@ export interface MountSpec {
 	target: string;
 }
 
+export interface BuildImageOpts {
+	dockerfile: string;
+	buildContext?: string;
+	buildArgs?: Record<string, string>;
+	onProgress?: (msg: string) => void;
+}
+
 export interface SandboxOptions {
 	image: string;
 	hostCwd: string;
@@ -32,7 +39,6 @@ export interface SandboxOptions {
 	dockerfile?: string;
 	buildContext?: string;
 	buildArgs?: Record<string, string>;
-	forceBuild?: boolean;
 	onProgress?: (msg: string) => void;
 }
 
@@ -55,8 +61,9 @@ export interface ExecResult {
 export interface Runtime {
 	init(): Promise<void>;
 	isReady(): boolean;
-	ensureImage(): Promise<void>;
-	rebuildImage(onProgress?: (msg: string) => void): Promise<void>;
+	imageExists(): Promise<boolean>;
+	buildImage(opts: BuildImageOpts): Promise<void>;
+	getImage(): string;
 	startContainer(): Promise<void>;
 	withReady(): Promise<void>;
 	exec(opts: ExecOpts): Promise<ExecResult>;
@@ -115,43 +122,57 @@ export class DockerRuntime implements Runtime {
 		return this.state.kind === "ready" ? this.state.id : null;
 	}
 
-	async ensureImage(opts?: { forceBuild?: boolean; onProgress?: (msg: string) => void }): Promise<void> {
+	async imageExists(): Promise<boolean> {
+		try {
+			await this._requireDocker().getImage(this.opts.image).inspect();
+			return true;
+		} catch (err: any) {
+			if (err?.statusCode === 404) return false;
+			throw err;
+		}
+	}
+
+	async buildImage(opts: BuildImageOpts): Promise<void> {
 		const docker = this._requireDocker();
 		const image = this.opts.image;
-		const forceBuild = opts?.forceBuild ?? this.opts.forceBuild;
-		const onProgress = opts?.onProgress ?? this.opts.onProgress;
-
-		if (!forceBuild) {
-			try {
-				await docker.getImage(image).inspect();
-				return;
-			} catch (err: any) {
-				if (err?.statusCode !== 404) throw err;
-			}
-		}
-
-		const buildContext = this.opts.buildContext ?? (this.opts.dockerfile ? this.opts.hostCwd : PACKAGE_DOCKER_DIR);
-		const dockerfile = this.opts.dockerfile ?? "Dockerfile";
-		const buildArgs = this.opts.buildArgs;
+		const buildContext = opts.buildContext ?? PACKAGE_DOCKER_DIR;
+		const dockerfile = opts.dockerfile;
+		const buildArgs = opts.buildArgs ?? this.opts.buildArgs;
+		const onProgress = opts.onProgress ?? this.opts.onProgress;
 
 		const report = (msg: string) => onProgress?.(msg);
 		report(`Building image ${image}...`);
 
 		const buildStream = await docker.buildImage(
 			{ context: buildContext, src: ["."] },
-			{ t: image, dockerfile, buildargs: buildArgs },
+			{ t: image, dockerfile, buildargs: buildArgs, version: "2" },
 		);
 
 		const buildPromise = new Promise<void>((resolve, reject) => {
+			let settled = false;
 			docker.modem.followProgress(
 				buildStream,
 				(err: any) => {
+					if (settled) return;
+					settled = true;
 					if (err) reject(err instanceof Error ? err : new Error(String(err)));
 					else resolve();
 				},
 				(event: any) => {
 					if (event.stream) report(event.stream.trim());
-					else if (event.error) report(`ERROR: ${event.error}`);
+					else if (event.errorDetail) {
+						if (!settled) {
+							settled = true;
+							reject(new Error(event.errorDetail.message || event.error || "Build failed"));
+						}
+					}
+					else if (event.error) {
+						report(`ERROR: ${event.error}`);
+						if (!settled) {
+							settled = true;
+							reject(new Error(event.error));
+						}
+					}
 					else if (event.status) report(event.status);
 				},
 			);
@@ -162,12 +183,11 @@ export class DockerRuntime implements Runtime {
 		);
 
 		await Promise.race([buildPromise, timeoutPromise]);
-
 		report(`Image ${image} built successfully.`);
 	}
 
-	async rebuildImage(onProgress?: (msg: string) => void): Promise<void> {
-		await this.ensureImage({ forceBuild: true, onProgress });
+	getImage(): string {
+		return this.opts.image;
 	}
 
 	async startContainer(): Promise<void> {
@@ -266,6 +286,7 @@ export class DockerRuntime implements Runtime {
 	}
 
 	async exec(opts: ExecOpts): Promise<ExecResult> {
+		if (this.state.kind === "broken") throw new Error(this.state.reason);
 		if (this.state.kind !== "ready") throw new Error("Sandbox not ready");
 		const container = this.state.container;
 
@@ -395,15 +416,6 @@ export class DockerRuntime implements Runtime {
 	private async _doInit(): Promise<void> {
 		const docker = await this._getDocker();
 		if (!docker) return;
-		try {
-			await this.ensureImage();
-		} catch (err) {
-			this.state = {
-				kind: "broken",
-				reason: `Image build failed: ${err instanceof Error ? err.message : String(err)}`,
-			};
-			return;
-		}
 		try {
 			await this.startContainer();
 		} catch (err) {

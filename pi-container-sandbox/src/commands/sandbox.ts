@@ -1,8 +1,9 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve as resolvePath } from "node:path";
-import { getSbxConfigPath, imageRefForTag, loadSbxConfig, saveSbxConfig } from "../config";
+import { discoverDockerfiles, getSbxConfigPath, imageRefForTag, loadSbxConfig, PACKAGE_DOCKER_DIR, saveSbxConfig } from "../config";
 import { execCapture } from "../ops";
+import { DockerRuntime } from "../runtime";
 import { clearSbx, getSbx } from "../session";
 import { type SizeTier, TIER_SPECS } from "../tiers";
 
@@ -67,20 +68,62 @@ export function createSandboxCommandHandlers(
 				ui: {
 					setStatus: (key: string, msg: string) => void;
 					notify: (msg: string, level?: "info" | "warning" | "error") => void;
+					select: (title: string, options: string[], opts?: Record<string, unknown>) => Promise<string | undefined>;
 				};
 			},
 		) => {
 			const sbx = getSbx();
-			if (!sbx) {
-				ctx.ui.notify("Sandbox is not active. Start pi with --container.", "info");
+
+			const dockerfiles = discoverDockerfiles();
+			if (dockerfiles.length === 0) {
+				ctx.ui.notify("docker/ 目录中未找到 .Dockerfile 文件。", "warning");
 				return;
 			}
-			ctx.ui.notify(`Rebuilding image ${sbx.imageRef}...`, "info");
+
+			const skipLabel = "跳过";
+			const labelMap = new Map<string, string>();
+			const options: string[] = [];
+			for (const f of dockerfiles) {
+				const label = `${f} (内置)`;
+				labelMap.set(label, f);
+				options.push(label);
+			}
+			options.push(skipLabel);
+
+			const selected = await ctx.ui.select("选择 Dockerfile 构建镜像", options);
+			if (!selected || selected === skipLabel) {
+				ctx.ui.notify("构建已跳过。请手动执行 docker build 构建镜像。", "info");
+				return;
+			}
+
+			const dockerfile = `${labelMap.get(selected) ?? selected}.Dockerfile`;
+			const image = sbx?.imageRef ?? "pi-container-sandbox:latest";
+
 			try {
-				await sbx.runtime.rebuildImage((msg: string) => ctx.ui.setStatus("sandbox", `[build] ${msg}`));
-				ctx.ui.notify(`Image ${sbx.imageRef} rebuilt successfully.`, "info");
+				if (sbx) {
+					await sbx.runtime.buildImage({
+						dockerfile,
+						buildContext: PACKAGE_DOCKER_DIR,
+						onProgress: (msg: string) => ctx.ui.setStatus("sandbox", `[build] ${msg}`),
+					});
+				} else {
+					const runtime = new DockerRuntime({
+						image,
+						hostCwd: localCwd,
+						name: "pi-sbx-build",
+						allowNetwork: true,
+						resources: { memory: "4g", cpus: "2" },
+						onProgress: (msg: string) => ctx.ui.setStatus("sandbox", `[build] ${msg}`),
+					});
+					await runtime.init();
+					await runtime.buildImage({
+						dockerfile,
+						buildContext: PACKAGE_DOCKER_DIR,
+					});
+				}
+				ctx.ui.notify(`镜像 ${image} 构建成功。`, "info");
 			} catch (e) {
-				ctx.ui.notify(`Build failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+				ctx.ui.notify(`构建失败: ${e instanceof Error ? e.message : String(e)}`, "error");
 			}
 		},
 

@@ -1,5 +1,5 @@
 import Dockerode from "dockerode";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DockerRuntime } from "../src/runtime";
 
 const dockerAvailable = (() => {
@@ -13,6 +13,24 @@ const dockerAvailable = (() => {
 
 describe.skipIf(!dockerAvailable)("DockerRuntime container reuse", () => {
 	const testName = `pi-test-reuse-${Date.now()}`;
+
+	beforeAll(async () => {
+		const docker = new Dockerode({ socketPath: "/var/run/docker.sock" });
+		try {
+			await docker.getImage("debian:12-slim").inspect();
+		} catch {
+			await new Promise<void>((resolve, reject) => {
+				docker.pull("debian:12-slim", {}, (err, stream) => {
+					if (err) return reject(err);
+					if (!stream) return reject(new Error("no pull stream"));
+					docker.modem.followProgress(stream, (err2) => {
+						if (err2) reject(err2 instanceof Error ? err2 : new Error(String(err2)));
+						else resolve();
+					});
+				});
+			});
+		}
+	}, 120000);
 
 	afterAll(async () => {
 		const d = new Dockerode({ socketPath: "/var/run/docker.sock" });
