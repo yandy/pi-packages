@@ -15,7 +15,7 @@ pi-web-tools/
 │   │   ├── types.ts             # SearchSource, SearchResponse 等共享类型
 │   │   ├── exa.ts               # Exa 搜索后端 (REST API + MCP free tier)
 │   │   ├── deepseek.ts          # DeepSeek server-side web_search tool
-│   │   ├── bailian.ts           # Bailian/DashScope 联网搜索
+│   │   ├── aliyun.ts            # 阿里云百炼联网搜索
 │   │   └── index.ts             # Fallback 编排器
 │   └── web_fetch.ts             # URL 抓取 + HTML→Markdown 转换
 ├── package.json
@@ -33,7 +33,7 @@ pi-web-tools/
 |------|------|------|--------|------|
 | `query` | string | 是 | — | 搜索查询，可包含自然语言时间/域名约束 |
 | `numResults` | number | 否 | 10 | 1-20 |
-| `source` | `"exa"` \| `"deepseek"` \| `"bailian"` | 否 | — | 指定源，不指定则自动 fallback |
+| `source` | `"exa"` \| `"deepseek"` \| `"aliyun"` | 否 | — | 指定源，不指定则自动 fallback |
 
 > 无 `timeRange` 参数。时间约束通过 query 自然语言描述（"2026年最新"、"最近一周"），
 > 各源自行理解。工具 description 中声明各源能力差异，LLM 可据此构造 query。
@@ -41,7 +41,7 @@ pi-web-tools/
 ### Fallback 策略
 
 1. 指定 `source` → 只尝试该源，失败返回错误
-2. 未指定 → 按优先级 Exa → DeepSeek → Bailian 自动降级
+2. 未指定 → 按优先级 Exa → DeepSeek → Aliyun 自动降级
 3. 源未配置 API key 时**跳过**（不算失败），已配置但调用失败时**降级到下一个**
 4. 全部不可用或全部失败 → 返回 `isError: true`
 5. 结果中标注实际使用的源名
@@ -64,13 +64,13 @@ pi-web-tools/
 - 返回 LLM 合成答案 + 结构化 sources（title, url, pageAge）+ token 统计
 - 函数签名：`deepseekSearch(query, signal?, onProgress?, ctx?): Promise<SearchResponse>`
 
-#### Bailian (`src/web_search/bailian.ts`)
+#### Aliyun (`src/web_search/aliyun.ts`)
 
 - API: `POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`
-- Auth 优先级：`process.env.ALIYUN_CN_API_KEY` → `ctx.modelRegistry.getApiKeyForProvider("aliyun-cn")`
-- 参数：`enable_search: true`，model: `qwen-plus`（可通过 `DASHSCOPE_SEARCH_MODEL` 覆盖）
+- Auth 优先级：`process.env.ALIYUN_API_KEY` → `ctx.modelRegistry.getApiKeyForProvider("aliyun")`
+- 参数：`enable_search: true`，model: `qwen3.7-plus`（可通过 `ALIYUN_SEARCH_MODEL` 覆盖）
 - 返回 LLM 合成答案（Chat Completions API 不返回结构化 sources）
-- 函数签名：`bailianSearch(query, signal?): Promise<SearchResponse>`
+- 函数签名：`aliyunSearch(query, signal?): Promise<SearchResponse>`
 
 ### 编排器 (`src/web_search/index.ts`)
 
@@ -137,12 +137,12 @@ interface SearchResponse {
 |------|------|--------|
 | `EXA_API_KEY` | Exa API key，不设则走 MCP free tier | — |
 | `DEEPSEEK_API_KEY` | DeepSeek API key | — |
-| `ALIYUN_CN_API_KEY` | 阿里云百炼 API key | — |
-| `DASHSCOPE_BASE_URL` | Bailian compatible API base URL | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| `DASHSCOPE_SEARCH_MODEL` | Bailian 搜索模型 | `qwen-plus` |
+| `ALIYUN_API_KEY` | 阿里云百炼 API key | — |
+| `ALIYUN_BASE_URL` | 阿里云百炼 compatible API base URL | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| `ALIYUN_SEARCH_MODEL` | 阿里云百炼搜索模型 | `qwen3.7-plus` |
 | `DEEPSEEK_SEARCH_MODEL` | DeepSeek 搜索模型 | `deepseek-v4-flash` |
 
-DeepSeek 和 Bailian 额外支持通过 pi 的 `ctx.modelRegistry.getApiKeyForProvider()` 获取 key。
+DeepSeek 和 Aliyun 额外支持通过 pi 的 `ctx.modelRegistry.getApiKeyForProvider()` 获取 key。
 
 ## 错误处理
 
