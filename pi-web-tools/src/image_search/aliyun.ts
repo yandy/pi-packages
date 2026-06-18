@@ -28,9 +28,7 @@ export async function aliyunImageSearch(
 	);
 	const client = createAliyunClient({ apiKey, baseUrl });
 
-	const s = signal
-		? AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)])
-		: AbortSignal.timeout(TIMEOUT_MS);
+	const s = signal ? AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS);
 
 	let input: unknown;
 	let tools: Array<{ type: string }>;

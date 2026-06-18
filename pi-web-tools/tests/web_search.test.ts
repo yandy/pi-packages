@@ -45,11 +45,7 @@ describe("exaSearch", () => {
 
 		expect(result.sourceLabel).toBe("exa");
 		expect(mockFetch).toHaveBeenCalledTimes(2);
-		expect(mockFetch).toHaveBeenNthCalledWith(
-			1,
-			"https://mcp.exa.ai/mcp",
-			expect.objectContaining({ method: "POST" }),
-		);
+		expect(mockFetch).toHaveBeenNthCalledWith(1, "https://mcp.exa.ai/mcp", expect.objectContaining({ method: "POST" }));
 	});
 
 	it("calls REST API when EXA_API_KEY is set", async () => {

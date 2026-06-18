@@ -57,23 +57,31 @@ async function exaRestSearch(
 
 async function exaMcpSearch(query: string, numResults: number, signal: AbortSignal): Promise<SearchResponse> {
 	// 1. initialize
-	const initResult = await mcpCall("initialize", {
-		protocolVersion: "2024-11-05",
-		capabilities: {},
-		clientInfo: { name: "pi-web-tools", version: "1.0" },
-	}, signal);
+	const initResult = await mcpCall(
+		"initialize",
+		{
+			protocolVersion: "2024-11-05",
+			capabilities: {},
+			clientInfo: { name: "pi-web-tools", version: "1.0" },
+		},
+		signal,
+	);
 
 	if (!initResult) {
 		throw new Error("Exa MCP initialize failed: no result");
 	}
 
 	// 2. search
-	const searchResult = await mcpCall(MCP_TOOL_NAME, {
-		query,
-		numResults,
-		type: "auto",
-		contents: { text: { maxCharacters: 3000 } },
-	}, signal) as { content?: Array<{ text?: string }> } | null;
+	const searchResult = (await mcpCall(
+		MCP_TOOL_NAME,
+		{
+			query,
+			numResults,
+			type: "auto",
+			contents: { text: { maxCharacters: 3000 } },
+		},
+		signal,
+	)) as { content?: Array<{ text?: string }> } | null;
 
 	const text = searchResult?.content?.map((c) => c.text || "").join("\n\n") || "";
 	const sources = parseMcpResults(text);
@@ -126,14 +134,10 @@ async function mcpCall(method: string, params: unknown, signal: AbortSignal): Pr
 	return data.result ?? null;
 }
 
-function formatAnswer(
-	sources: Array<{ title: string; url: string; snippet: string }>,
-	query: string,
-): string {
+function formatAnswer(sources: Array<{ title: string; url: string; snippet: string }>, query: string): string {
 	return (
-		sources
-			.map((s, i) => `${i + 1}. [${s.title}](${s.url})\n   ${s.snippet}`)
-			.join("\n\n") || `No results found for: ${query}`
+		sources.map((s, i) => `${i + 1}. [${s.title}](${s.url})\n   ${s.snippet}`).join("\n\n") ||
+		`No results found for: ${query}`
 	);
 }
 

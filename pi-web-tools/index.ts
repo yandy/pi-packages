@@ -28,9 +28,7 @@ export default function (pi: ExtensionAPI) {
 			numResults: Type.Optional(
 				Type.Number({ minimum: 1, maximum: 20, default: 10, description: "Number of results (1-20)." }),
 			),
-			source: Type.Optional(
-				Type.String({ enum: ["exa"], description: "Search source. Default: exa." }),
-			),
+			source: Type.Optional(Type.String({ enum: ["exa"], description: "Search source. Default: exa." })),
 		}),
 		renderCall(args, theme) {
 			const p = args as { query: string };
@@ -46,8 +44,7 @@ export default function (pi: ExtensionAPI) {
 			const lines = body.split("\n");
 			if (!expanded) {
 				const preview = lines.slice(0, 6);
-				if (lines.length > 6)
-					preview.push(theme.fg("dim", `... ${lines.length - 6} more lines · ctrl+o to expand`));
+				if (lines.length > 6) preview.push(theme.fg("dim", `... ${lines.length - 6} more lines · ctrl+o to expand`));
 				return new Text(preview.join("\n"), 0, 0);
 			}
 			return new Text(body, 0, 0);
@@ -110,12 +107,10 @@ export default function (pi: ExtensionAPI) {
 			),
 			assignedSiteList: Type.Optional(
 				Type.Array(Type.String(), {
-					description: "Restrict search to specific sites (e.g. [\"baidu.com\", \"sina.cn\"]).",
+					description: 'Restrict search to specific sites (e.g. ["baidu.com", "sina.cn"]).',
 				}),
 			),
-			enableImageOutput: Type.Optional(
-				Type.Boolean({ description: "Enable mixed text-image output in the response." }),
-			),
+			enableImageOutput: Type.Optional(Type.Boolean({ description: "Enable mixed text-image output in the response." })),
 		}),
 		renderCall(args, theme) {
 			const p = args as { query: string };
@@ -131,8 +126,7 @@ export default function (pi: ExtensionAPI) {
 			const lines = body.split("\n");
 			if (!expanded) {
 				const preview = lines.slice(0, 6);
-				if (lines.length > 6)
-					preview.push(theme.fg("dim", `... ${lines.length - 6} more lines · ctrl+o to expand`));
+				if (lines.length > 6) preview.push(theme.fg("dim", `... ${lines.length - 6} more lines · ctrl+o to expand`));
 				return new Text(preview.join("\n"), 0, 0);
 			}
 			return new Text(body, 0, 0);
@@ -182,20 +176,15 @@ export default function (pi: ExtensionAPI) {
 		label: "Image Search",
 		description:
 			"Search for images by text description or find similar images by URL. Powered by Aliyun (Bailian). Returns image results and model analysis.",
-		promptSnippet:
-			"image_search: search images by text or find similar images by URL. Powered by Aliyun (Bailian).",
+		promptSnippet: "image_search: search images by text or find similar images by URL. Powered by Aliyun (Bailian).",
 		promptGuidelines: [
 			"Use image_search to find images matching a text description (provide query).",
 			"Use image_search to find visually similar images (provide imageUrl, the image must be a publicly accessible URL).",
 			"Both query and imageUrl can be provided together for combined search.",
 		],
 		parameters: Type.Object({
-			query: Type.Optional(
-				Type.String({ minLength: 2, description: "Text description of the image to search for." }),
-			),
-			imageUrl: Type.Optional(
-				Type.String({ description: "Public URL of the image to find similar images." }),
-			),
+			query: Type.Optional(Type.String({ minLength: 2, description: "Text description of the image to search for." })),
+			imageUrl: Type.Optional(Type.String({ description: "Public URL of the image to find similar images." })),
 		}),
 		renderCall(args, theme) {
 			const p = args as { query?: string; imageUrl?: string };
@@ -209,8 +198,7 @@ export default function (pi: ExtensionAPI) {
 			const lines = body.split("\n");
 			if (!expanded) {
 				const preview = lines.slice(0, 6);
-				if (lines.length > 6)
-					preview.push(theme.fg("dim", `... ${lines.length - 6} more lines · ctrl+o to expand`));
+				if (lines.length > 6) preview.push(theme.fg("dim", `... ${lines.length - 6} more lines · ctrl+o to expand`));
 				return new Text(preview.join("\n"), 0, 0);
 			}
 			return new Text(body, 0, 0);
@@ -231,8 +219,7 @@ export default function (pi: ExtensionAPI) {
 				const cfg = loadConfig(ctx.cwd);
 				const result = await imageSearch({ query: p.query, imageUrl: p.imageUrl }, signal, cfg.aliyun, ctx);
 				const imagesText = result.images.length
-					? "\n\nImages:\n" +
-						result.images.map((img) => `${img.index}. [${img.title}](${img.url})`).join("\n")
+					? "\n\nImages:\n" + result.images.map((img) => `${img.index}. [${img.title}](${img.url})`).join("\n")
 					: "";
 				return {
 					content: [{ type: "text", text: result.answer + imagesText }],
@@ -289,8 +276,7 @@ export default function (pi: ExtensionAPI) {
 			const lines = body.split("\n");
 			if (!expanded) {
 				const preview = lines.slice(0, 6);
-				if (lines.length > 6)
-					preview.push(theme.fg("dim", `... ${lines.length - 6} more lines · ctrl+o to expand`));
+				if (lines.length > 6) preview.push(theme.fg("dim", `... ${lines.length - 6} more lines · ctrl+o to expand`));
 				return new Text(preview.join("\n"), 0, 0);
 			}
 			return new Text(body, 0, 0);

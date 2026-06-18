@@ -24,9 +24,7 @@ export async function search(
 ): Promise<SearchResponse> {
 	const errors: string[] = [];
 
-	const sources = specifiedSource
-		? SOURCES.filter((s) => s.name === specifiedSource)
-		: SOURCES;
+	const sources = specifiedSource ? SOURCES.filter((s) => s.name === specifiedSource) : SOURCES;
 
 	if (specifiedSource && sources.length === 0) {
 		throw new Error(`Unknown source: ${specifiedSource}. Available: ${SOURCES.map((s) => s.name).join(", ")}`);
