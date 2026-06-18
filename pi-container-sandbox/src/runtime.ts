@@ -401,20 +401,6 @@ export class DockerRuntime implements Runtime {
 		const docker = await this._getDocker();
 		if (!docker) return;
 		try {
-			if (!(await this.imageExists())) {
-				await new Promise<void>((resolve, reject) => {
-					docker.pull(this.opts.image, {}, (err: any, stream: any) => {
-						if (err) return reject(err);
-						docker.modem.followProgress(
-							stream,
-							(err2: any) => {
-								if (err2) reject(err2 instanceof Error ? err2 : new Error(String(err2)));
-								else resolve();
-							},
-						);
-					});
-				});
-			}
 			await this.startContainer();
 		} catch (err) {
 			this.state = {
