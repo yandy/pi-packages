@@ -189,6 +189,11 @@ describe("search orchestrator", () => {
 	});
 
 	it("falls back from exa to duckduckgo when exa not configured", async () => {
+		// exa MCP initialize fails (no result in response)
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () => Promise.resolve({}),
+		});
 		mockFetch.mockResolvedValueOnce({
 			ok: true,
 			json: () =>

@@ -14,7 +14,8 @@ const SOURCES: SourceEntry[] = [
 	{
 		name: "exa",
 		fn: exaSearch,
-		checkConfigured: () => !!process.env.EXA_API_KEY,
+		// Don't skip exa - it has MCP fallback
+		checkConfigured: () => true,
 	},
 	{
 		name: "duckduckgo",

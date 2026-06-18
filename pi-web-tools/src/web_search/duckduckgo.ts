@@ -25,7 +25,10 @@ export async function duckduckgoSearch(
 	const s = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 
 	const url = `${DDG_URL}?q=${encodeURIComponent(query)}&format=json&no_html=1`;
-	const resp = await fetch(url, { signal: s });
+	const resp = await fetch(url, {
+		signal: s,
+		headers: { "User-Agent": "pi-web-tools/1.0" },
+	});
 
 	if (!resp.ok) {
 		throw new Error(`DuckDuckGo API ${resp.status}: ${resp.statusText}`);

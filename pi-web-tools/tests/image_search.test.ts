@@ -64,7 +64,7 @@ describe("imageSearch", () => {
 				}),
 		});
 
-		const result = await imageSearch({ imageUrl: "https://example.com/photo.jpg" });
+		await imageSearch({ imageUrl: "https://example.com/photo.jpg" });
 		expect(mockFetch).toHaveBeenCalledWith(
 			expect.any(String),
 			expect.objectContaining({
