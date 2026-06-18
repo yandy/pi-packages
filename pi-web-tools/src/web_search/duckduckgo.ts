@@ -3,11 +3,17 @@ import type { SearchSource, SearchResponse } from "./types";
 const DDG_URL = "https://api.duckduckgo.com/";
 const TIMEOUT_MS = 30_000;
 
+interface DdgTopic {
+	Text?: string;
+	FirstURL?: string;
+	Topics?: DdgTopic[];
+}
+
 interface DdgResponse {
 	Abstract?: string;
 	AbstractText?: string;
 	AbstractURL?: string;
-	RelatedTopics?: Array<{ Text?: string; FirstURL?: string }>;
+	RelatedTopics?: DdgTopic[];
 }
 
 export async function duckduckgoSearch(
@@ -36,7 +42,8 @@ export async function duckduckgoSearch(
 		});
 	}
 
-	for (const topic of data.RelatedTopics || []) {
+	function processTopic(topic: DdgTopic): void {
+		if (sources.length >= numResults) return;
 		if (topic.FirstURL && topic.Text) {
 			const parts = topic.Text.split(" - ");
 			sources.push({
@@ -45,7 +52,13 @@ export async function duckduckgoSearch(
 				snippet: parts.slice(1).join(" - ") || topic.Text,
 			});
 		}
-		if (sources.length >= numResults) break;
+		for (const sub of topic.Topics || []) {
+			processTopic(sub);
+		}
+	}
+
+	for (const topic of data.RelatedTopics || []) {
+		processTopic(topic);
 	}
 
 	const answer =

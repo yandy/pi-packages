@@ -141,6 +141,34 @@ describe("duckduckgoSearch", () => {
 		expect(result.answer).toContain("example.com");
 	});
 
+	it("handles nested RelatedTopics", async () => {
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					RelatedTopics: [
+						{
+							Text: "Parent Topic - Description",
+							FirstURL: "https://parent.com",
+							Topics: [
+								{ Text: "Child Topic - Details", FirstURL: "https://child.com" },
+								{ Text: "Child 2", FirstURL: "https://child2.com" },
+							],
+						},
+						{ Text: "Flat Topic", FirstURL: "https://flat.com" },
+					],
+				}),
+		});
+
+		const result = await duckduckgoSearch("test query", 10);
+
+		expect(result.sources).toHaveLength(4);
+		expect(result.sources[0].title).toBe("Parent Topic");
+		expect(result.sources[1].title).toBe("Child Topic");
+		expect(result.sources[2].title).toBe("Child 2");
+		expect(result.sources[3].title).toBe("Flat Topic");
+	});
+
 	it("handles empty response", async () => {
 		mockFetch.mockResolvedValueOnce({
 			ok: true,
