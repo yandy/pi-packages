@@ -1,5 +1,8 @@
 {
-	"name": "pi-container-sandbox",
+	"name": "@yandy0725/pi-container-sandbox",
+	"publishConfig": {
+		"access": "public"
+	},
 	"version": "0.1.0",
 	"description": "pi coding-agent extension that runs every read/write/edit/bash op inside a per-session Docker container",
 	"license": "MIT",

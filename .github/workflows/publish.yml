@@ -1,0 +1,42 @@
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - '@yandy0725/pi-container-sandbox@*'
+      - '@yandy0725/pi-web-tools@*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Determine package directory
+        id: info
+        run: |
+          TAG="${{ github.ref_name }}"
+          case "$TAG" in
+            @yandy0725/pi-container-sandbox@*)
+              echo "dir=pi-container-sandbox" >> "$GITHUB_OUTPUT"
+              ;;
+            @yandy0725/pi-web-tools@*)
+              echo "dir=pi-web-tools" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: ${{ steps.info.outputs.dir }}
+
+      - name: Publish to npm
+        run: npm publish --provenance
+        working-directory: ${{ steps.info.outputs.dir }}
