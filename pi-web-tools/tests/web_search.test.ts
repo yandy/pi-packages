@@ -22,10 +22,12 @@ describe("exaSearch", () => {
 
 		mockFetch.mockResolvedValueOnce({
 			ok: true,
+			headers: new Headers({ "content-type": "application/json" }),
 			json: () => Promise.resolve({ result: {} }),
 		});
 		mockFetch.mockResolvedValueOnce({
 			ok: true,
+			headers: new Headers({ "content-type": "application/json" }),
 			json: () =>
 				Promise.resolve({
 					result: {
@@ -144,10 +146,12 @@ describe("search orchestrator", () => {
 		vi.stubEnv("EXA_API_KEY", "");
 		mockFetch.mockResolvedValueOnce({
 			ok: true,
+			headers: new Headers({ "content-type": "application/json" }),
 			json: () => Promise.resolve({ result: {} }),
 		});
 		mockFetch.mockResolvedValueOnce({
 			ok: true,
+			headers: new Headers({ "content-type": "application/json" }),
 			json: () =>
 				Promise.resolve({
 					result: {

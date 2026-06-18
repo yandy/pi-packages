@@ -52,12 +52,38 @@ async function exaRestSearch(
 	}));
 
 	const answer = formatAnswer(sources, query);
-
 	return { answer, sources, sourceLabel: "exa" };
 }
 
 async function exaMcpSearch(query: string, numResults: number, signal: AbortSignal): Promise<SearchResponse> {
-	const initResp = await fetch(EXA_MCP_URL, {
+	// 1. initialize
+	const initResult = await mcpCall("initialize", {
+		protocolVersion: "2024-11-05",
+		capabilities: {},
+		clientInfo: { name: "pi-web-tools", version: "1.0" },
+	}, signal);
+
+	if (!initResult) {
+		throw new Error("Exa MCP initialize failed: no result");
+	}
+
+	// 2. search
+	const searchResult = await mcpCall(MCP_TOOL_NAME, {
+		query,
+		numResults,
+		type: "auto",
+		contents: { text: { maxCharacters: 3000 } },
+	}, signal) as { content?: Array<{ text?: string }> } | null;
+
+	const text = searchResult?.content?.map((c) => c.text || "").join("\n\n") || "";
+	const sources = parseMcpResults(text);
+	const answer = formatAnswer(sources, query);
+
+	return { answer, sources, sourceLabel: "exa" };
+}
+
+async function mcpCall(method: string, params: unknown, signal: AbortSignal): Promise<Record<string, unknown> | null> {
+	const resp = await fetch(EXA_MCP_URL, {
 		method: "POST",
 		headers: {
 			"Content-Type": "application/json",
@@ -65,55 +91,39 @@ async function exaMcpSearch(query: string, numResults: number, signal: AbortSign
 		},
 		body: JSON.stringify({
 			jsonrpc: "2.0",
-			method: "initialize",
-			params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "pi-web-tools", version: "1.0" } },
+			method: method === "initialize" ? "initialize" : "tools/call",
+			params: method === "initialize" ? params : { name: method, arguments: params },
 			id: 1,
 		}),
 		signal,
 	});
 
-	if (!initResp.ok) {
-		throw new Error(`Exa MCP initialize failed: ${initResp.status}`);
+	if (!resp.ok) {
+		throw new Error(`Exa MCP ${method} failed: ${resp.status}`);
 	}
 
-	const initData = (await initResp.json()) as { result?: unknown };
-	if (!initData.result) {
-		throw new Error("Exa MCP initialize failed: no result in response");
+	const contentType = resp.headers?.get("content-type") || "";
+
+	if (contentType.includes("text/event-stream")) {
+		const text = await resp.text();
+		for (const line of text.split("\n")) {
+			if (line.startsWith("data: ")) {
+				try {
+					const parsed = JSON.parse(line.slice(6));
+					if (parsed.result) return parsed.result as Record<string, unknown>;
+					if (parsed.error) throw new Error(`Exa MCP error: ${parsed.error.message || JSON.stringify(parsed.error)}`);
+				} catch (e) {
+					if (e instanceof SyntaxError) continue;
+					throw e;
+				}
+			}
+		}
+		return null;
 	}
 
-	const searchResp = await fetch(EXA_MCP_URL, {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/json",
-			Accept: "application/json, text/event-stream",
-		},
-		body: JSON.stringify({
-			jsonrpc: "2.0",
-			method: "tools/call",
-			params: {
-				name: MCP_TOOL_NAME,
-				arguments: { query, numResults, type: "auto", contents: { text: { maxCharacters: 3000 } } },
-			},
-			id: 2,
-		}),
-		signal,
-	});
-
-	if (!searchResp.ok) {
-		throw new Error(`Exa MCP search failed: ${searchResp.status}`);
-	}
-
-	const data = (await searchResp.json()) as {
-		result?: { content?: Array<{ text?: string }> };
-	};
-
-	const text = data.result?.content?.map((c) => c.text || "").join("\n\n") || "";
-
-	const sources = parseMcpResults(text);
-
-	const answer = formatAnswer(sources, query);
-
-	return { answer, sources, sourceLabel: "exa" };
+	const data = (await resp.json()) as { result?: Record<string, unknown>; error?: unknown };
+	if (data.error) throw new Error(`Exa MCP error: ${JSON.stringify(data.error)}`);
+	return data.result ?? null;
 }
 
 function formatAnswer(
