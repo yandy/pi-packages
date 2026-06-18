@@ -271,6 +271,7 @@ export class DockerRuntime implements Runtime {
 	}
 
 	async exec(opts: ExecOpts): Promise<ExecResult> {
+		if (this.state.kind === "broken") throw new Error(this.state.reason);
 		if (this.state.kind !== "ready") throw new Error("Sandbox not ready");
 		const container = this.state.container;
 
