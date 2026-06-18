@@ -6,6 +6,11 @@
 	"version": "0.2.0",
 	"description": "pi coding-agent extension that runs every read/write/edit/bash op inside a per-session Docker container",
 	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/yandy/pi-packages",
+		"directory": "pi-container-sandbox"
+	},
 	"type": "module",
 	"files": [
 		"index.ts",

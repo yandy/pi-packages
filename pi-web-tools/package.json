@@ -6,6 +6,11 @@
 	"version": "0.2.0",
 	"description": "pi package providing web_search, deep_search, image_search and web_fetch tools",
 	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/yandy/pi-packages",
+		"directory": "pi-web-tools"
+	},
 	"type": "module",
 	"keywords": [
 		"pi-package"
