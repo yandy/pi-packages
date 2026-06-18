@@ -201,7 +201,7 @@ export default function (pi: ExtensionAPI) {
 
 			try {
 				const cfg = loadConfig(ctx.cwd);
-				const result = await imageSearch({ query: p.query, imageUrl: p.imageUrl }, signal, ctx, cfg.aliyun);
+				const result = await imageSearch({ query: p.query, imageUrl: p.imageUrl }, signal, cfg.aliyun, ctx);
 				const imagesText = result.images.length
 					? "\n\nImages:\n" +
 						result.images.map((img) => `${img.index}. [${img.title}](${img.url})`).join("\n")

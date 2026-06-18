@@ -1,16 +1,18 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { ImageResult, ImageSearchParams, ImageSearchResponse } from "./types";
+import OpenAI from "openai";
 import { resolveSetting } from "../config";
+import { createAliyunClient } from "../openai_client";
+import { resolveAliyunProvider } from "../provider";
+import type { ImageResult, ImageSearchParams, ImageSearchResponse } from "./types";
 
-const DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
-const DEFAULT_MODEL = "qwen3.7-plus";
+const DEFAULT_IMAGE_SEARCH_MODEL = "qwen3.7-plus";
 const TIMEOUT_MS = 120_000;
 
 export async function aliyunImageSearch(
 	params: ImageSearchParams,
 	signal?: AbortSignal,
+	config?: { baseUrl?: string; aliyunProviderKey?: string; imageSearchModel?: string },
 	ctx?: ExtensionContext,
-	config?: { baseUrl?: string; searchModel?: string },
 ): Promise<ImageSearchResponse> {
 	const { query, imageUrl } = params;
 
@@ -18,14 +20,17 @@ export async function aliyunImageSearch(
 		throw new Error("At least one of query or imageUrl must be provided");
 	}
 
-	const textQuery = query;
+	const { apiKey, baseUrl } = await resolveAliyunProvider({ ctx, config });
+	const model = resolveSetting(
+		process.env.ALIYUN_IMAGE_SEARCH_MODEL,
+		config?.imageSearchModel,
+		DEFAULT_IMAGE_SEARCH_MODEL,
+	);
+	const client = createAliyunClient({ apiKey, baseUrl });
 
-	const apiKey = await resolveApiKey(ctx);
-	const baseUrl = resolveSetting(process.env.ALIYUN_BASE_URL, config?.baseUrl, DEFAULT_BASE_URL);
-	const model = resolveSetting(process.env.ALIYUN_SEARCH_MODEL, config?.searchModel, DEFAULT_MODEL);
-
-	const timeoutSignal = AbortSignal.timeout(TIMEOUT_MS);
-	const s = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+	const s = signal
+		? AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)])
+		: AbortSignal.timeout(TIMEOUT_MS);
 
 	let input: unknown;
 	let tools: Array<{ type: string }>;
@@ -40,28 +45,16 @@ export async function aliyunImageSearch(
 		input = [{ role: "user", content }];
 	} else {
 		tools = [{ type: "web_search_image" }];
-		input = textQuery;
+		input = query;
 	}
 
-	const resp = await fetch(`${baseUrl}/responses`, {
-		method: "POST",
-		headers: {
-			Authorization: `Bearer ${apiKey}`,
-			"Content-Type": "application/json",
-		},
-		body: JSON.stringify({ model, input, tools }),
-		signal: s,
-	});
+	const response = (await client.responses.create(
+		{ model, input, tools } as unknown as OpenAI.Responses.ResponseCreateParams,
+		{ signal: s },
+	)) as unknown as AliyunImageResponse;
 
-	if (!resp.ok) {
-		const detail = await resp.text().catch(() => resp.statusText);
-		throw new Error(`Aliyun API ${resp.status}: ${detail}`);
-	}
-
-	const data = (await resp.json()) as AliyunImageResponse;
-
-	const images = parseImages(data.output);
-	const answer = parseAnswer(data.output);
+	const images = parseImages(response.output);
+	const answer = parseAnswer(response.output);
 
 	return { answer, images };
 }
@@ -93,14 +86,4 @@ function parseAnswer(output: AliyunImageResponse["output"] = []): string {
 		(m.content || []).filter((c) => c.type === "output_text").map((c) => c.text || ""),
 	);
 	return texts.join("\n") || "No results";
-}
-
-async function resolveApiKey(ctx?: ExtensionContext): Promise<string> {
-	if (ctx) {
-		const key = await ctx.modelRegistry.getApiKeyForProvider("aliyun");
-		if (key) return key;
-	}
-	const env = process.env.ALIYUN_API_KEY;
-	if (env) return env;
-	throw new Error("ALIYUN_API_KEY not configured. Set ALIYUN_API_KEY or use /login in pi.");
 }
