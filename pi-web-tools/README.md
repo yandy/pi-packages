@@ -62,11 +62,11 @@ Environment variables take precedence over the config file.
 | Config Key | Env Variable (overrides) | Default | Description |
 |------------|--------------------------|---------|-------------|
 | `aliyun.baseUrl` | `ALIYUN_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | Aliyun API base URL |
-| `aliyun.aliyunProviderKey` | — | — | Pi provider name to extract apiKey/baseUrl from |
+| `aliyun.aliyunProviderKey` | — | `aliyun` | Pi provider name to extract apiKey/baseUrl from |
 | `aliyun.deepSearchModel` | `ALIYUN_DEEP_SEARCH_MODEL` | `deepseek-v4-flash` | Model for deep_search |
 | `aliyun.imageSearchModel` | `ALIYUN_IMAGE_SEARCH_MODEL` | `qwen3.7-plus` | Model for image_search |
 
-**aliyunProviderKey:** When set, deep_search and image_search will extract apiKey and baseUrl from the corresponding pi provider (via `modelRegistry`). Environment variables take precedence over provider values. If the provider is not found, falls back to `aliyun.baseUrl` config or default.
+**aliyunProviderKey:** deep_search and image_search will extract apiKey and baseUrl from the corresponding pi provider (via `modelRegistry`). Defaults to `"aliyun"`. Environment variables take precedence over provider values. If the provider is not found, falls back to `aliyun.baseUrl` config or default.
 
 > **Note:** deep_search uses Chat Completions API and does not return structured sources. image_search uses Responses API.
 

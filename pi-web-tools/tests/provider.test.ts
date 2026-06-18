@@ -19,6 +19,21 @@ describe("resolveAliyunProvider", () => {
 		expect(result.apiKey).toBe("env-key");
 	});
 
+	it("defaults aliyunProviderKey to 'aliyun' and resolves from provider", async () => {
+		vi.stubEnv("ALIYUN_API_KEY", "");
+		vi.stubEnv("ALIYUN_BASE_URL", "");
+		const mockCtx = {
+			modelRegistry: {
+				getApiKeyForProvider: vi.fn().mockResolvedValue("provider-key"),
+				getAll: () => [{ provider: "aliyun", baseUrl: "https://provider.example.com/v1" }],
+			},
+		} as any;
+		const result = await resolveAliyunProvider({ ctx: mockCtx, config: {} });
+		expect(result.apiKey).toBe("provider-key");
+		expect(result.baseUrl).toBe("https://provider.example.com/v1");
+		expect(mockCtx.modelRegistry.getApiKeyForProvider).toHaveBeenCalledWith("aliyun");
+	});
+
 	it("throws when no apiKey configured", async () => {
 		vi.stubEnv("ALIYUN_API_KEY", "");
 		await expect(resolveAliyunProvider({ config: {} })).rejects.toThrow("ALIYUN_API_KEY not configured");

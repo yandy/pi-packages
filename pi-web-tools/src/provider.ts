@@ -1,6 +1,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 const DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+const DEFAULT_PROVIDER_KEY = "aliyun";
 
 interface ProviderConfig {
 	baseUrl?: string;
@@ -17,7 +18,7 @@ export async function resolveAliyunProvider(opts: {
 	config?: ProviderConfig;
 }): Promise<ResolvedProvider> {
 	const { ctx, config } = opts;
-	const providerKey = config?.aliyunProviderKey;
+	const providerKey = config?.aliyunProviderKey ?? DEFAULT_PROVIDER_KEY;
 
 	// --- apiKey ---
 	let apiKey: string | undefined;

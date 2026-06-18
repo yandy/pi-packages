@@ -62,11 +62,11 @@ pi -e ./index.ts
 | 配置项 | 环境变量（覆盖） | 默认值 | 说明 |
 |--------|-----------------|--------|------|
 | `aliyun.baseUrl` | `ALIYUN_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 阿里云 API 地址 |
-| `aliyun.aliyunProviderKey` | — | — | pi provider 名称，从中抽取 apiKey/baseUrl |
+| `aliyun.aliyunProviderKey` | — | `aliyun` | pi provider 名称，从中抽取 apiKey/baseUrl |
 | `aliyun.deepSearchModel` | `ALIYUN_DEEP_SEARCH_MODEL` | `deepseek-v4-flash` | deep_search 模型 |
 | `aliyun.imageSearchModel` | `ALIYUN_IMAGE_SEARCH_MODEL` | `qwen3.7-plus` | image_search 模型 |
 
-**aliyunProviderKey：** 设置后，deep_search 和 image_search 会从对应的 pi provider（通过 `modelRegistry`）抽取 apiKey 和 baseUrl。环境变量优先于 provider 值。若未找到对应 provider，回退到 `aliyun.baseUrl` 配置或默认值。
+**aliyunProviderKey：** deep_search 和 image_search 会从对应的 pi provider（通过 `modelRegistry`）抽取 apiKey 和 baseUrl。默认值为 `"aliyun"`。环境变量优先于 provider 值。若未找到对应 provider，回退到 `aliyun.baseUrl` 配置或默认值。
 
 > **注意：** deep_search 使用 Chat Completions API，不返回结构化来源。image_search 使用 Responses API。
 

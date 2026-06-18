@@ -89,7 +89,7 @@ export default function (pi: ExtensionAPI) {
 		description:
 			"Deep search powered by Aliyun (Bailian) using Chat Completions API with web search. The model searches the web and synthesizes a comprehensive answer. Supports vertical domain search, time range filtering, site restriction, and mixed image output.",
 		promptSnippet:
-			"deep_search: Aliyun-powered deep search that synthesizes web results into a comprehensive answer with sources.",
+			"deep_search: Aliyun-powered deep search that synthesizes web results into a comprehensive answer. Supports vertical domain search, time range filtering, site restriction, and mixed image output.",
 		promptGuidelines: [
 			"Use deep_search for complex research questions that benefit from web search synthesis.",
 			"deep_search is powered by Aliyun Chat Completions API. Configure ALIYUN_API_KEY or use aliyunProviderKey in config.",
