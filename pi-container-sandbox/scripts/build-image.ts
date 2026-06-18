@@ -1,9 +1,8 @@
 import { createInterface } from "node:readline";
-import { resolve as resolvePath, dirname } from "node:path";
+import { basename, dirname, extname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
-import { basename, extname } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dockerDir = resolvePath(__dirname, "..", "docker");

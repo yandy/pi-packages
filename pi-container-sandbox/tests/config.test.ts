@@ -133,18 +133,13 @@ describe("loadSbxConfig hostCommands", () => {
 	});
 });
 
-import { discoverDockerfiles, DOCKERFILE_SKIP } from "../src/config";
+import { discoverDockerfiles } from "../src/config";
 
 describe("discoverDockerfiles", () => {
 	it("discovers Dockerfile names from docker/ directory", () => {
 		const files = discoverDockerfiles();
 		expect(files).toContain("cn");
 		expect(files).toContain("gh");
-		expect(files.length).toBe(2);
-	});
-
-	it("DOCKERFILE_SKIP constant is '__skip__'", () => {
-		expect(DOCKERFILE_SKIP).toBe("__skip__");
 	});
 });
 

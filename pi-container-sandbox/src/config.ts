@@ -63,8 +63,6 @@ export function imageRefForTag(image: string, tag: string): string {
 	return `${image}:${tag}`;
 }
 
-export const DOCKERFILE_SKIP = "__skip__";
-
 export function discoverDockerfiles(): string[] {
 	if (!existsSync(PACKAGE_DOCKER_DIR)) return [];
 	return readdirSync(PACKAGE_DOCKER_DIR)
