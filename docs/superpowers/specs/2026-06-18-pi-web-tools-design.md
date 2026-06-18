@@ -58,7 +58,7 @@ pi-web-tools/
 #### DeepSeek (`src/web_search/deepseek.ts`)
 
 - API: `POST https://api.deepseek.com/anthropic/v1/messages`（Anthropic Messages 兼容）
-- Server-side tool: `web_search_20260209`（当前唯一支持的 server tool）
+- Server-side tool: `web_search_20260209`（当前唯一支持的 server tool），`thinking: { type: "disabled" }` 关闭思考
 - Auth 优先级：`process.env.DEEPSEEK_API_KEY` → `ctx.modelRegistry.getApiKeyForProvider("deepseek")`
 - SSE stream 解析，分离 answer 文本和 web_search_tool_result 中的 sources
 - 返回 LLM 合成答案 + 结构化 sources（title, url, pageAge）+ token 统计
@@ -66,10 +66,11 @@ pi-web-tools/
 
 #### Aliyun (`src/web_search/aliyun.ts`)
 
-- API: `POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`
+- API: `POST https://dashscope.aliyuncs.com/compatible-mode/v1/responses`（Responses API）
 - Auth 优先级：`process.env.ALIYUN_API_KEY` → `ctx.modelRegistry.getApiKeyForProvider("aliyun")`
-- 参数：`enable_search: true`，model: `qwen3.7-plus`（可通过 `ALIYUN_SEARCH_MODEL` 覆盖）
-- 返回 LLM 合成答案（Chat Completions API 不返回结构化 sources）
+- 参数：`tools: [{ type: "web_search" }]`，`reasoning: { effort: "none" }`，model: `qwen3.7-plus`（可通过 `ALIYUN_SEARCH_MODEL` 覆盖）
+- 从 `output` 中解析 `web_search_call`（含 `sources: [{ type, url }]`）和最终 `message` 文本
+- sources 无 title 字段，用 URL 域名作为 title
 - 函数签名：`aliyunSearch(query, signal?): Promise<SearchResponse>`
 
 ### 编排器 (`src/web_search/index.ts`)
