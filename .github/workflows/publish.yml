@@ -1,29 +1,27 @@
 name: Publish to npm
 
 on:
-  push:
-    tags:
-      - 'pi-container-sandbox-v*'
-      - 'pi-web-tools-v*'
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
 
       - name: Determine package directory
         id: info
         run: |
-          TAG="${{ github.ref_name }}"
+          TAG="${{ github.event.release.tag_name }}"
           case "$TAG" in
             pi-container-sandbox-v*)
               echo "dir=pi-container-sandbox" >> "$GITHUB_OUTPUT"
@@ -34,9 +32,13 @@ jobs:
           esac
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
+        working-directory: ${{ steps.info.outputs.dir }}
+
+      - name: Run tests
+        run: npm run test
         working-directory: ${{ steps.info.outputs.dir }}
 
       - name: Publish to npm
-        run: unset NODE_AUTH_TOKEN && npm publish --provenance
+        run: npm publish --provenance
         working-directory: ${{ steps.info.outputs.dir }}
