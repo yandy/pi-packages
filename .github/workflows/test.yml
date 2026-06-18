@@ -19,6 +19,8 @@ jobs:
           filters: |
             pi-container-sandbox:
               - "pi-container-sandbox/**"
+            pi-web-tools:
+              - "pi-web-tools/**"
 
   test:
     needs: changes
