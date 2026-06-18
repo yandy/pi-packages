@@ -3,25 +3,22 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
-// We import after mocking so the module uses our mock
-let exaSearch: typeof import("../src/web_search/exa.js").exaSearch;
-
-beforeEach(async () => {
+beforeEach(() => {
 	vi.resetModules();
 	mockFetch.mockReset();
-	const mod = await import("../src/web_search/exa.js");
-	exaSearch = mod.exaSearch;
+	vi.unstubAllEnvs();
 });
 
 describe("exaSearch", () => {
 	it("falls back to MCP when EXA_API_KEY not set", async () => {
 		delete process.env.EXA_API_KEY;
-		// MCP: first initialize call
+		const mod = await import("../src/web_search/exa.js");
+		const exaSearch = mod.exaSearch;
+
 		mockFetch.mockResolvedValueOnce({
 			ok: true,
-			json: () => Promise.resolve({}),
+			json: () => Promise.resolve({ result: {} }),
 		});
-		// MCP: second tools/call
 		mockFetch.mockResolvedValueOnce({
 			ok: true,
 			json: () =>
@@ -42,7 +39,10 @@ describe("exaSearch", () => {
 	});
 
 	it("calls REST API when EXA_API_KEY is set", async () => {
-		process.env.EXA_API_KEY = "test-key";
+		vi.stubEnv("EXA_API_KEY", "test-key");
+		const mod = await import("../src/web_search/exa.js");
+		const exaSearch = mod.exaSearch;
+
 		mockFetch.mockResolvedValueOnce({
 			ok: true,
 			json: () =>
@@ -66,5 +66,49 @@ describe("exaSearch", () => {
 		expect(result.sourceLabel).toBe("exa");
 		expect(result.sources).toHaveLength(2);
 		expect(result.sources[0].title).toBe("Test Page");
+	});
+
+	it("throws on REST API non-2xx response", async () => {
+		vi.stubEnv("EXA_API_KEY", "test-key");
+		const mod = await import("../src/web_search/exa.js");
+		const exaSearch = mod.exaSearch;
+
+		mockFetch.mockResolvedValueOnce({
+			ok: false,
+			status: 500,
+			text: () => Promise.resolve("Internal Server Error"),
+		});
+
+		await expect(exaSearch("test query", 5)).rejects.toThrow("Exa API 500");
+	});
+
+	it("throws on MCP initialize non-2xx response", async () => {
+		delete process.env.EXA_API_KEY;
+		const mod = await import("../src/web_search/exa.js");
+		const exaSearch = mod.exaSearch;
+
+		mockFetch.mockResolvedValueOnce({
+			ok: false,
+			status: 403,
+			text: () => Promise.resolve("Forbidden"),
+		});
+
+		await expect(exaSearch("test query", 5)).rejects.toThrow("Exa MCP initialize failed: 403");
+	});
+
+	it("shows fallback message for empty REST results", async () => {
+		vi.stubEnv("EXA_API_KEY", "test-key");
+		const mod = await import("../src/web_search/exa.js");
+		const exaSearch = mod.exaSearch;
+
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () => Promise.resolve({ results: [] }),
+		});
+
+		const result = await exaSearch("test query", 5);
+
+		expect(result.sources).toHaveLength(0);
+		expect(result.answer).toContain("No results found");
 	});
 });

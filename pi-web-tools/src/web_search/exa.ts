@@ -50,10 +50,7 @@ async function exaRestSearch(
 		snippet: (r.text || "").slice(0, 500),
 	}));
 
-	const answer =
-		sources
-			.map((s, i) => `${i + 1}. [${s.title}](${s.url})\n   ${s.snippet}`)
-			.join("\n\n") || `No results found for: ${query}`;
+	const answer = formatAnswer(sources, query);
 
 	return { answer, sources, sourceLabel: "exa" };
 }
@@ -73,6 +70,11 @@ async function exaMcpSearch(query: string, numResults: number, signal: AbortSign
 
 	if (!initResp.ok) {
 		throw new Error(`Exa MCP initialize failed: ${initResp.status}`);
+	}
+
+	const initData = (await initResp.json()) as { result?: unknown };
+	if (!initData.result) {
+		throw new Error("Exa MCP initialize failed: no result in response");
 	}
 
 	const searchResp = await fetch(EXA_MCP_URL, {
@@ -102,12 +104,20 @@ async function exaMcpSearch(query: string, numResults: number, signal: AbortSign
 
 	const sources = parseMcpResults(text);
 
-	const answer =
-		sources
-			.map((s, i) => `${i + 1}. [${s.title}](${s.url})\n   ${s.snippet}`)
-			.join("\n\n") || `No results found for: ${query}`;
+	const answer = formatAnswer(sources, query);
 
 	return { answer, sources, sourceLabel: "exa" };
+}
+
+function formatAnswer(
+	sources: Array<{ title: string; url: string; snippet: string }>,
+	query: string,
+): string {
+	return (
+		sources
+			.map((s, i) => `${i + 1}. [${s.title}](${s.url})\n   ${s.snippet}`)
+			.join("\n\n") || `No results found for: ${query}`
+	);
 }
 
 function parseMcpResults(text: string): Array<{ title: string; url: string; snippet: string }> {
