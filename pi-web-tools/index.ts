@@ -131,7 +131,7 @@ export default function (pi: ExtensionAPI) {
 
 			try {
 				const cfg = loadConfig(ctx.cwd);
-				const result = await deepSearch(query, signal, cfg.aliyun);
+				const result = await deepSearch(query, signal, cfg.aliyun, ctx);
 				const sourcesText = result.sources.length
 					? `\n\nSources:\n${result.sources.map((s, i) => `${i + 1}. [${s.title}](${s.url})`).join("\n")}`
 					: "";

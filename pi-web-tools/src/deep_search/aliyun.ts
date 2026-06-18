@@ -1,4 +1,5 @@
 import type { DeepSearchResponse } from "./types";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveSetting } from "../config";
 
 const DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
@@ -9,8 +10,9 @@ export async function aliyunDeepSearch(
 	query: string,
 	signal?: AbortSignal,
 	config?: { baseUrl?: string; searchModel?: string },
+	ctx?: ExtensionContext,
 ): Promise<DeepSearchResponse> {
-	const apiKey = resolveApiKey();
+	const apiKey = await resolveApiKey(ctx);
 	const baseUrl = resolveSetting(process.env.ALIYUN_BASE_URL, config?.baseUrl, DEFAULT_BASE_URL);
 	const model = resolveSetting(process.env.ALIYUN_SEARCH_MODEL, config?.searchModel, DEFAULT_MODEL);
 
@@ -44,7 +46,11 @@ export async function aliyunDeepSearch(
 	return { answer, sources };
 }
 
-function resolveApiKey(): string {
+async function resolveApiKey(ctx?: ExtensionContext): Promise<string> {
+	if (ctx) {
+		const key = await ctx.modelRegistry.getApiKeyForProvider("aliyun");
+		if (key) return key;
+	}
 	const env = process.env.ALIYUN_API_KEY;
 	if (env) return env;
 	throw new Error("ALIYUN_API_KEY not configured. Set ALIYUN_API_KEY or use /login in pi.");
