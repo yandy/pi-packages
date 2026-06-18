@@ -90,15 +90,32 @@ export default function (pi: ExtensionAPI) {
 		name: "deep_search",
 		label: "Deep Search",
 		description:
-			"Deep search powered by Aliyun (Bailian) using web_search + web_extractor. The model searches the web, extracts page content, and synthesizes a comprehensive answer with sources.",
+			"Deep search powered by Aliyun (Bailian) using Chat Completions API with web search. The model searches the web and synthesizes a comprehensive answer. Supports vertical domain search, time range filtering, site restriction, and mixed image output.",
 		promptSnippet:
 			"deep_search: Aliyun-powered deep search that synthesizes web results into a comprehensive answer with sources.",
 		promptGuidelines: [
-			"Use deep_search for complex research questions that benefit from multi-source synthesis.",
-			"deep_search is powered by Aliyun. Configure ALIYUN_API_KEY or use /login in pi.",
+			"Use deep_search for complex research questions that benefit from web search synthesis.",
+			"deep_search is powered by Aliyun Chat Completions API. Configure ALIYUN_API_KEY or use aliyunProviderKey in config.",
 		],
 		parameters: Type.Object({
 			query: Type.String({ minLength: 2, description: "The search query." }),
+			enableSearchExtension: Type.Optional(
+				Type.Boolean({ description: "Enable vertical domain search for more precise results." }),
+			),
+			freshness: Type.Optional(
+				Type.Number({
+					enum: [7, 30, 180, 365],
+					description: "Time range filter: 7/30/180/365 days. Only effective with turbo strategy.",
+				}),
+			),
+			assignedSiteList: Type.Optional(
+				Type.Array(Type.String(), {
+					description: "Restrict search to specific sites (e.g. [\"baidu.com\", \"sina.cn\"]).",
+				}),
+			),
+			enableImageOutput: Type.Optional(
+				Type.Boolean({ description: "Enable mixed text-image output in the response." }),
+			),
 		}),
 		renderCall(args, theme) {
 			const p = args as { query: string };
@@ -121,17 +138,28 @@ export default function (pi: ExtensionAPI) {
 			return new Text(body, 0, 0);
 		},
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const p = params as { query: string };
+			const p = params as {
+				query: string;
+				enableSearchExtension?: boolean;
+				freshness?: number;
+				assignedSiteList?: string[];
+				enableImageOutput?: boolean;
+			};
 			const query = p.query?.trim();
 			if (!query) {
-				return { content: [{ type: "text", text: "Error: query is required." }], details: {} };
+				return { content: [{ type: "text", text: "Error: query is required." }], details: {}, isError: true };
 			}
 
 			onUpdate?.({ content: [{ type: "text", text: "Deep searching..." }], details: {} });
 
 			try {
 				const cfg = loadConfig(ctx.cwd);
-				const result = await deepSearch(query, signal, cfg.aliyun, ctx);
+				const result = await deepSearch(query, signal, cfg.aliyun, ctx, {
+					enableSearchExtension: p.enableSearchExtension,
+					freshness: p.freshness,
+					assignedSiteList: p.assignedSiteList,
+					enableImageOutput: p.enableImageOutput,
+				});
 				const sourcesText = result.sources.length
 					? `\n\nSources:\n${result.sources.map((s, i) => `${i + 1}. [${s.title}](${s.url})`).join("\n")}`
 					: "";
