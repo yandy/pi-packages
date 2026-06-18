@@ -11,7 +11,7 @@ beforeEach(() => {
 
 describe("exaSearch", () => {
 	it("falls back to MCP when EXA_API_KEY not set", async () => {
-		delete process.env.EXA_API_KEY;
+		vi.stubEnv("EXA_API_KEY", "");
 		const mod = await import("../src/web_search/exa.js");
 		const exaSearch = mod.exaSearch;
 
@@ -83,7 +83,7 @@ describe("exaSearch", () => {
 	});
 
 	it("throws on MCP initialize non-2xx response", async () => {
-		delete process.env.EXA_API_KEY;
+		vi.stubEnv("EXA_API_KEY", "");
 		const mod = await import("../src/web_search/exa.js");
 		const exaSearch = mod.exaSearch;
 
