@@ -95,11 +95,9 @@ interface SearchResponse { answer: string; sources: SearchSource[]; sourceLabel:
 - 请求体：
   ```
   { model: "qwen3.7-plus", input: query,
-    tools: [{ type: "web_search" }, { type: "web_extractor" }],
-    reasoning: { effort: "none" } }
+    tools: [{ type: "web_search" }, { type: "web_extractor" }] }
   ```
 - 官方推荐 `web_search` + `web_extractor` 同时开启以获最佳效果
-- 关掉 thinking（`reasoning: { effort: "none" }`）
 - 从 `output` 解析：`web_search_call`（sources）、`web_extractor_call`（抽取内容）、最终 `message`（合成答案）
 - sources 仅含 `{ type, url }`，无 title，用域名作为 title
 - 函数签名：`aliyunDeepSearch(query, signal?, ctx?): Promise<DeepSearchResponse>`
@@ -130,7 +128,6 @@ interface DeepSearchResponse { answer: string; sources: DeepSearchSource[]; }
 - Auth：`process.env.ALIYUN_API_KEY` → `ctx.modelRegistry.getApiKeyForProvider("aliyun")`
 - 文搜图（仅 `query`）：`tools: [{ type: "web_search_image" }]`，`input` 为文本
 - 图搜图（有 `imageUrl`）：`tools: [{ type: "image_search" }]`，`input` 为多模态 `[{ input_text }, { input_image }]`
-- 关掉 thinking：`reasoning: { effort: "none" }`
 - 从 `output` 解析：`web_search_image_call` 或 `image_search_call` 的 `output`（JSON 数组 `[{ index, title, url }]`）+ 最终 `message` 文本
 - 函数签名：`aliyunImageSearch(params, signal?, ctx?): Promise<ImageSearchResponse>`
 
