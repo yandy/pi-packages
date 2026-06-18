@@ -11,7 +11,7 @@ export async function exaSearch(query: string, numResults: number, signal?: Abor
 	const s = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 
 	if (!apiKey) {
-		throw new Error("EXA_API_KEY is not set");
+		return exaMcpSearch(query, numResults, s);
 	}
 	return exaRestSearch(query, numResults, apiKey, s);
 }

@@ -14,9 +14,31 @@ beforeEach(async () => {
 });
 
 describe("exaSearch", () => {
-	it("throws when EXA_API_KEY not set", async () => {
+	it("falls back to MCP when EXA_API_KEY not set", async () => {
 		delete process.env.EXA_API_KEY;
-		await expect(exaSearch("test", 5)).rejects.toThrow("EXA_API_KEY");
+		// MCP: first initialize call
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () => Promise.resolve({}),
+		});
+		// MCP: second tools/call
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					result: { content: [{ text: "Title: Test\nURL: https://example.com\nText: Sample" }] },
+				}),
+		});
+
+		const result = await exaSearch("test query", 5);
+
+		expect(result.sourceLabel).toBe("exa");
+		expect(mockFetch).toHaveBeenCalledTimes(2);
+		expect(mockFetch).toHaveBeenNthCalledWith(
+			1,
+			"https://api.exa.ai/api/mcp",
+			expect.objectContaining({ method: "POST" }),
+		);
 	});
 
 	it("calls REST API when EXA_API_KEY is set", async () => {
