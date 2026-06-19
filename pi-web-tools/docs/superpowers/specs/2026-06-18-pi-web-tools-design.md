@@ -1,5 +1,8 @@
 # pi-web-tools 设计文档
 
+> **OBSOLETED 2026-06-19:** `deep_search` and `image_search` tools have been removed from pi-web-tools.
+> The sections below referencing these tools are no longer valid and are kept for historical reference only.
+
 ## 概述
 
 `pi-web-tools` 是一个 pi 包，提供四个工具：`web_search`、`deep_search`、`image_search`、`web_fetch`。

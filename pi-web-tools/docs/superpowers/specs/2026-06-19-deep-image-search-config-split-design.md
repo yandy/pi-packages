@@ -1,5 +1,8 @@
 # Design: deep_search / image_search 配置分离与 OpenAI SDK 改造
 
+> **OBSOLETED 2026-06-19:** `deep_search` and `image_search` tools have been removed from pi-web-tools.
+> This whole spec is no longer valid and is kept for historical reference only.
+
 - 日期: 2026-06-19
 - 状态: Approved
 
