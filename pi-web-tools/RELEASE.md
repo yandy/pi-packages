@@ -15,9 +15,12 @@ git tag pi-web-tools-v<新版本号>
 
 # 2. 推送
 git push origin main --tags
+
+# 3. 创建 GitHub Release（触发发布）
+gh release create pi-web-tools-v<新版本号> --title "pi-web-tools v<新版本号>" --notes ""
 ```
 
-推送到 GitHub 后，`.github/workflows/publish.yml` 自动匹配 `pi-web-tools-v*` tag，执行 `npm install` + `npm publish --provenance`（OIDC 认证，无需本地 npm token）。
+创建 Release 后，`.github/workflows/publish.yml` 响应 `release: published` 事件，执行 `npm install` + `npm publish --provenance`（OIDC 认证，无需本地 npm token）。
 
 发布到：`@yandy0725/pi-web-tools@X.Y.Z`（public access）
 
