@@ -5,8 +5,6 @@ interface WebToolsConfig {
 	aliyun?: {
 		baseUrl?: string;
 		aliyunProviderKey?: string;
-		deepSearchModel?: string;
-		imageSearchModel?: string;
 	};
 }
 
