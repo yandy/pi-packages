@@ -4,7 +4,7 @@
 		"access": "public"
 	},
 	"version": "0.2.0",
-	"description": "pi package providing web_search, deep_search, image_search and web_fetch tools",
+	"description": "pi package providing web_search and web_fetch tools",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
@@ -31,9 +31,6 @@
 		"extensions": [
 			"./index.ts"
 		]
-	},
-	"dependencies": {
-		"openai": "^6.26.0"
 	},
 	"peerDependencies": {
 		"@earendil-works/pi-coding-agent": ">=0.74.0"
