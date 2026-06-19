@@ -1,0 +1,28 @@
+# 发布新版本
+
+发布通过 GitHub Actions 自动完成，触发条件是推送 `pi-container-sandbox-v*` 格式的 git tag。
+
+## 操作步骤
+
+```bash
+cd pi-container-sandbox
+
+# 1. 升级版本号并打 tag
+npm version <新版本号> --no-git-tag-version
+git add package.json package-lock.json
+git commit -m "<新版本号>"
+git tag pi-container-sandbox-v<新版本号>
+
+# 2. 推送
+git push origin main --tags
+```
+
+推送到 GitHub 后，`.github/workflows/publish.yml` 自动匹配 `pi-container-sandbox-v*` tag，执行 `npm install` + `npm publish --provenance`（OIDC 认证，无需本地 npm token）。
+
+发布到：`@yandy0725/pi-container-sandbox@X.Y.Z`（public access）
+
+## 注意事项
+
+- `npm version` 在 monorepo 子目录下不会自动 commit/tag，需手动操作
+- tag 格式必须是 `pi-container-sandbox-vX.Y.Z`，不能是 `vX.Y.Z`
+- 发布前确保 `npm run typecheck`、`npm run lint`、`npm run test` 全部通过
