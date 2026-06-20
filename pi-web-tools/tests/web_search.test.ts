@@ -3,12 +3,36 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
+// ---------------------------------------------------------------------------
+// Shared MCP mock
+// ---------------------------------------------------------------------------
+
+const mockCallTool = vi.fn();
+const mockClose = vi.fn();
+
+vi.mock("../src/web_search/mcp.js", () => ({
+	createMcpClient: vi.fn().mockResolvedValue({
+		callTool: mockCallTool,
+		close: mockClose,
+	}),
+}));
+
 let search: typeof import("../src/web_search/index.js").search;
 
 beforeEach(async () => {
 	vi.resetModules();
 	mockFetch.mockReset();
 	vi.unstubAllEnvs();
+
+	mockCallTool.mockReset();
+	mockClose.mockReset();
+
+	// 重设 createMcpClient 的 mock 实现
+	const { createMcpClient } = await import("../src/web_search/mcp.js");
+	vi.mocked(createMcpClient).mockResolvedValue({
+		callTool: mockCallTool,
+		close: mockClose,
+	} as any);
 
 	const wsMod = await import("../src/web_search/index.js");
 	search = wsMod.search;
@@ -187,5 +211,18 @@ describe("search orchestrator", () => {
 
 	it("throws for unknown source", async () => {
 		await expect(search("test", 5, undefined, undefined, "unknown")).rejects.toThrow("Unknown source");
+	});
+});
+
+describe("mcp client", () => {
+	it("createMcpClient resolves with callTool and close", async () => {
+		const { createMcpClient } = await import("../src/web_search/mcp.js");
+
+		const client = await createMcpClient("https://test.example.com/mcp", {
+			Authorization: "Bearer test-key",
+		});
+
+		expect(client.callTool).toBe(mockCallTool);
+		expect(client.close).toBe(mockClose);
 	});
 });
