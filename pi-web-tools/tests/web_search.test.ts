@@ -26,6 +26,7 @@ beforeEach(async () => {
 
 	mockCallTool.mockReset();
 	mockClose.mockReset();
+	mockClose.mockResolvedValue(undefined);
 
 	// 重设 createMcpClient 的 mock 实现
 	const { createMcpClient } = await import("../src/web_search/mcp.js");
@@ -44,32 +45,26 @@ describe("exaSearch", () => {
 		const mod = await import("../src/web_search/exa.js");
 		const exaSearch = mod.exaSearch;
 
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			headers: new Headers({ "content-type": "application/json" }),
-			json: () => Promise.resolve({ result: {} }),
-		});
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			headers: new Headers({ "content-type": "application/json" }),
-			json: () =>
-				Promise.resolve({
-					result: {
-						content: [
-							{
-								type: "text",
-								text: "Title: Test\nURL: https://example.com\nPublished: N/A\nAuthor: N/A\nHighlights:\nSample content",
-							},
-						],
-					},
-				}),
+		mockCallTool.mockResolvedValueOnce({
+			content: [
+				{
+					type: "text",
+					text: "Title: Test\nURL: https://example.com\nHighlights:\nSample content",
+				},
+			],
 		});
 
 		const result = await exaSearch("test query", 5);
 
+		const { createMcpClient } = await import("../src/web_search/mcp.js");
+		expect(createMcpClient).toHaveBeenCalledWith(
+			"https://mcp.exa.ai/mcp",
+			{},
+		);
+		expect(mockCallTool).toHaveBeenCalledWith(
+			expect.objectContaining({ name: "web_search_exa" }),
+		);
 		expect(result.sourceLabel).toBe("exa");
-		expect(mockFetch).toHaveBeenCalledTimes(2);
-		expect(mockFetch).toHaveBeenNthCalledWith(1, "https://mcp.exa.ai/mcp", expect.objectContaining({ method: "POST" }));
 	});
 
 	it("calls REST API when EXA_API_KEY is set", async () => {
@@ -121,13 +116,9 @@ describe("exaSearch", () => {
 		const mod = await import("../src/web_search/exa.js");
 		const exaSearch = mod.exaSearch;
 
-		mockFetch.mockResolvedValueOnce({
-			ok: false,
-			status: 403,
-			text: () => Promise.resolve("Forbidden"),
-		});
+		mockCallTool.mockRejectedValueOnce(new Error("Connection refused"));
 
-		await expect(exaSearch("test query", 5)).rejects.toThrow("Exa MCP initialize failed: 403");
+		await expect(exaSearch("test query", 5)).rejects.toThrow("Connection refused");
 	});
 
 	it("shows fallback message for empty REST results", async () => {
@@ -200,11 +191,7 @@ describe("search orchestrator", () => {
 
 	it("throws when all sources fail", async () => {
 		vi.stubEnv("EXA_API_KEY", "");
-		mockFetch.mockResolvedValueOnce({
-			ok: false,
-			status: 500,
-			text: () => Promise.resolve("Error"),
-		});
+		mockCallTool.mockRejectedValueOnce(new Error("Connection refused"));
 
 		await expect(search("test", 5)).rejects.toThrow("All search sources failed");
 	});
