@@ -28,6 +28,14 @@ beforeEach(async () => {
 	mockClose.mockReset();
 	mockClose.mockResolvedValue(undefined);
 
+	// Reset createMcpClient mock so call history is isolated per-test
+	const { createMcpClient: mcpReset } = await import("../src/web_search/mcp.js");
+	vi.mocked(mcpReset).mockReset();
+	vi.mocked(mcpReset).mockResolvedValue({
+		callTool: mockCallTool,
+		close: mockClose,
+	} as any);
+
 	// 重设 createMcpClient 的 mock 实现
 	const { createMcpClient } = await import("../src/web_search/mcp.js");
 	vi.mocked(createMcpClient).mockResolvedValue({
@@ -197,5 +205,102 @@ describe("mcp client", () => {
 
 		expect(client.callTool).toBe(mockCallTool);
 		expect(client.close).toBe(mockClose);
+	});
+});
+
+describe("aliyunSearch", () => {
+	it("throws when ALIYUN_API_KEY not set", async () => {
+		vi.stubEnv("ALIYUN_API_KEY", "");
+		const mod = await import("../src/web_search/aliyun.js");
+		const aliyunSearch = mod.aliyunSearch;
+
+		await expect(aliyunSearch("test query", 5)).rejects.toThrow("ALIYUN_API_KEY not set");
+	});
+
+	it("calls MCP with Bearer auth", async () => {
+		vi.stubEnv("ALIYUN_API_KEY", "test-key");
+		const { createMcpClient } = await import("../src/web_search/mcp.js");
+		const mod = await import("../src/web_search/aliyun.js");
+		const aliyunSearch = mod.aliyunSearch;
+
+		mockCallTool.mockResolvedValueOnce({
+			content: [
+				{
+					type: "text",
+					text: JSON.stringify({
+						pages: [
+							{ title: "Bailian Test", link: "https://example.com", snippet: "Bailian content" },
+						],
+					}),
+				},
+			],
+		});
+
+		const result = await aliyunSearch("test query", 5);
+
+		expect(result.sourceLabel).toBe("aliyun");
+		expect(result.sources).toHaveLength(1);
+		expect(result.sources[0].title).toBe("Bailian Test");
+		expect(result.sources[0].url).toBe("https://example.com");
+		expect(createMcpClient).toHaveBeenCalledWith(
+			"https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp",
+			{ Authorization: "Bearer test-key" },
+			expect.any(AbortSignal),
+		);
+		expect(mockCallTool).toHaveBeenCalledWith({
+			name: "bailian_web_search",
+			arguments: { query: "test query", count: 5 },
+		});
+	});
+
+	it("returns empty results when no pages found", async () => {
+		vi.stubEnv("ALIYUN_API_KEY", "test-key");
+		const mod = await import("../src/web_search/aliyun.js");
+		const aliyunSearch = mod.aliyunSearch;
+
+		mockCallTool.mockResolvedValueOnce({
+			content: [{ type: "text", text: JSON.stringify({ pages: [] }) }],
+		});
+
+		const result = await aliyunSearch("test query", 5);
+
+		expect(result.sources).toHaveLength(0);
+		expect(result.answer).toContain("No results found");
+	});
+
+	it("throws on callTool error", async () => {
+		vi.stubEnv("ALIYUN_API_KEY", "test-key");
+		const mod = await import("../src/web_search/aliyun.js");
+		const aliyunSearch = mod.aliyunSearch;
+
+		mockCallTool.mockRejectedValueOnce(new Error("MCP connection failed"));
+
+		await expect(aliyunSearch("test query", 5)).rejects.toThrow("MCP connection failed");
+	});
+
+	it("uses apiKey parameter over env var", async () => {
+		vi.stubEnv("ALIYUN_API_KEY", "env-key");
+		const { createMcpClient } = await import("../src/web_search/mcp.js");
+		const mod = await import("../src/web_search/aliyun.js");
+		const aliyunSearch = mod.aliyunSearch;
+
+		mockCallTool.mockResolvedValueOnce({
+			content: [
+				{
+					type: "text",
+					text: JSON.stringify({
+						pages: [{ title: "Param Key", link: "https://param.example.com", snippet: "content" }],
+					}),
+				},
+			],
+		});
+
+		await aliyunSearch("test query", 5, undefined, "param-key");
+
+		expect(createMcpClient).toHaveBeenCalledWith(
+			expect.any(String),
+			{ Authorization: "Bearer param-key" },
+			expect.any(AbortSignal),
+		);
 	});
 });
