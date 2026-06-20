@@ -8,7 +8,10 @@
 （需要对 `/var/run/docker.sock` 或 Docker Desktop 有读写权限）。
 
 ```bash
-# 从本地仓库安装
+# 从 npm 安装
+npm install npm:@yandy0725/pi-container-sandbox
+
+# 或从本地仓库安装
 pi install .
 
 # 或直接运行

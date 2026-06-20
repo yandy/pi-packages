@@ -10,10 +10,13 @@ Requires Docker (any recent version) running and accessible to your user
 (you need read/write on `/var/run/docker.sock` or Docker Desktop).
 
 ```bash
-# from a local checkout
+# Install from npm
+npm install npm:@yandy0725/pi-container-sandbox
+
+# Or install from a local checkout
 pi install .
 
-# or directly
+# Or run directly
 npm install && npm run build-image
 pi -e ./index.ts
 ```

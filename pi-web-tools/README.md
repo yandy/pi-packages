@@ -12,10 +12,14 @@ A [pi](https://pi.dev/docs/latest/packages) package providing web search and web
 ## Quick Start
 
 ```bash
-# Install from a local checkout
+# Install from npm
+npm install npm:@yandy0725/pi-web-tools
+
+# Or install from a local checkout
 pi install ./path/to/pi-web-tools
 
-# Or test with -e flag
+# Or run directly
+npm install
 pi -e ./index.ts
 ```
 

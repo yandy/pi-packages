@@ -12,10 +12,13 @@
 ## 快速开始
 
 ```bash
-# 从本地仓库安装
+# 从 npm 安装
+npm install npm:@yandy0725/pi-web-tools
+
+# 或从本地仓库安装
 pi install ./path/to/pi-web-tools
 
-# 或用 -e 参数测试
+# 或直接运行
 pi -e ./index.ts
 ```
 
