@@ -1,9 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { clearSbx, getSbx, type SbxSession, setSbx } from "../src/session";
-import { mockRuntime } from "./_helpers";
 
 const mockSession: SbxSession = {
-	runtime: mockRuntime(),
+	runtime: { exec: async () => ({ exitCode: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }) } as any,
 	name: "test-container",
 	hostCwd: "/tmp/test",
 	keep: false,

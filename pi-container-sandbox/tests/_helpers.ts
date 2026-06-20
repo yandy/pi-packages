@@ -1,5 +1,15 @@
 import type { ExecOpts, ExecResult, Runtime } from "../src/runtime";
+import type { SbxConfig } from "../src/config";
 import { type SbxSession, setSbx } from "../src/session";
+
+const DEFAULT_CONFIG: SbxConfig = {
+	image: "pi-sandbox",
+	tag: "latest",
+	containerName: null,
+	tier: "medium",
+	persist: false,
+	cacheVolume: null,
+};
 
 export function mockRuntime(overrides?: Partial<Runtime>): Runtime {
 	return {
@@ -22,8 +32,8 @@ export function mockRuntime(overrides?: Partial<Runtime>): Runtime {
 	};
 }
 
-export function mockSbx(overrides?: Partial<SbxSession>): SbxSession {
-	const session: SbxSession = {
+export function createTestSession(overrides?: Partial<SbxSession>): SbxSession {
+	return {
 		runtime: mockRuntime(),
 		name: "test-box",
 		hostCwd: "/tmp",
@@ -31,18 +41,15 @@ export function mockSbx(overrides?: Partial<SbxSession>): SbxSession {
 		mounts: [],
 		allowedExternalPrefixes: [],
 		imageRef: "img:latest",
-		config: {
-			image: "pi-sandbox",
-			tag: "latest",
-			containerName: null,
-			tier: "medium",
-			persist: false,
-			cacheVolume: null,
-		} as any,
+		config: { ...DEFAULT_CONFIG, ...overrides?.config },
 		isReusable: false,
 		isReattached: false,
 		...overrides,
 	};
+}
+
+export function mockSbx(overrides?: Partial<SbxSession>): SbxSession {
+	const session = createTestSession(overrides);
 	setSbx(session);
 	return session;
 }
