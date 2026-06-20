@@ -57,7 +57,7 @@ async function exaRestSearch(
 }
 
 async function exaMcpSearch(query: string, numResults: number, signal: AbortSignal): Promise<SearchResponse> {
-	const client = await createMcpClient(EXA_MCP_URL, {});
+	const client = await createMcpClient(EXA_MCP_URL, {}, signal);
 
 	try {
 		const result = await client.callTool({

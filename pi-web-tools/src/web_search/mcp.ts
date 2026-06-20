@@ -4,9 +4,10 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 export async function createMcpClient(
 	url: string,
 	headers: Record<string, string>,
+	signal?: AbortSignal,
 ): Promise<Client> {
 	const transport = new StreamableHTTPClientTransport(new URL(url), {
-		requestInit: { headers },
+		requestInit: { headers, signal },
 	});
 
 	const client = new Client(

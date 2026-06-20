@@ -60,6 +60,7 @@ describe("exaSearch", () => {
 		expect(createMcpClient).toHaveBeenCalledWith(
 			"https://mcp.exa.ai/mcp",
 			{},
+			expect.any(AbortSignal),
 		);
 		expect(mockCallTool).toHaveBeenCalledWith(
 			expect.objectContaining({ name: "web_search_exa" }),
@@ -155,21 +156,6 @@ describe("search orchestrator", () => {
 
 	it("uses exa MCP when no API key", async () => {
 		vi.stubEnv("EXA_API_KEY", "");
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			headers: new Headers({ "content-type": "application/json" }),
-			json: () => Promise.resolve({ result: {} }),
-		});
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			headers: new Headers({ "content-type": "application/json" }),
-			json: () =>
-				Promise.resolve({
-					result: {
-						content: [{ type: "text", text: "Title: X\nURL: https://x.com\nHighlights:\nyes" }],
-					},
-				}),
-		});
 
 		const result = await search("test", 5);
 		expect(result.sourceLabel).toBe("exa");
