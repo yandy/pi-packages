@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { webFetch } from "./src/web_fetch";
-import { search } from "./src/web_search/index";
+import { search, buildSources } from "./src/web_search/index";
 
 export default function (pi: ExtensionAPI) {
 	// -------------------------------------------------------------------
@@ -12,10 +12,10 @@ export default function (pi: ExtensionAPI) {
 		name: "web_search",
 		label: "Web Search",
 		description:
-			`Search the web via Exa and return raw results (titles, URLs, snippets). With EXA_API_KEY: full REST API. Without: MCP free tier (150 calls/day). ` +
+			`Search the web via Exa (primary) or Aliyun (fallback) and return raw results (titles, URLs, snippets). With EXA_API_KEY: full REST API. Without: MCP free tier (150 calls/day). Set ALIYUN_API_KEY to enable Aliyun fallback. ` +
 			`The current year is ${new Date().getFullYear()}.`,
 		promptSnippet:
-			"web_search: search the web via Exa. Returns raw results with titles, URLs, snippets. LLM synthesizes the answer.",
+			"web_search: search the web via Exa (primary) or Aliyun (fallback). Returns raw results with titles, URLs, snippets. LLM synthesizes the answer.",
 		promptGuidelines: [
 			"Use web_search when you need current information outside your training data.",
 			"Synthesize a clear answer from the search results and cite sources with markdown hyperlinks.",
@@ -25,7 +25,7 @@ export default function (pi: ExtensionAPI) {
 			numResults: Type.Optional(
 				Type.Number({ minimum: 1, maximum: 20, default: 10, description: "Number of results (1-20)." }),
 			),
-			source: Type.Optional(Type.String({ enum: ["exa"], description: "Search source. Default: exa." })),
+			source: Type.Optional(Type.String({ enum: ["exa", "aliyun"], description: "Search source. Default: exa." })),
 		}),
 		renderCall(args, theme) {
 			const p = args as { query: string };
@@ -46,7 +46,7 @@ export default function (pi: ExtensionAPI) {
 			}
 			return new Text(body, 0, 0);
 		},
-		async execute(_toolCallId, params, signal, onUpdate, _ctx) {
+		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			const p = params as { query: string; numResults?: number; source?: string };
 			const query = p.query?.trim();
 			if (!query) {
@@ -64,7 +64,9 @@ export default function (pi: ExtensionAPI) {
 			};
 
 			try {
-				const result = await search(query, p.numResults ?? 10, signal, onProgress, p.source);
+				const aliyunApiKey = await ctx.modelRegistry.getApiKeyForProvider("aliyun").catch(() => undefined);
+				const sources = buildSources({ aliyun: aliyunApiKey });
+				const result = await search(query, p.numResults ?? 10, signal, onProgress, p.source, sources);
 				const sourceLabel = `\n\n*Source: ${result.sourceLabel}*`;
 				return {
 					content: [{ type: "text", text: result.answer + sourceLabel }],
