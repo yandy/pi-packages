@@ -12,7 +12,9 @@ export async function webFetch(
 	format: "text" | "markdown" | "html",
 	timeout: number,
 	signal?: AbortSignal,
+	_fetch?: typeof fetch,
 ): Promise<FetchResult> {
+	const doFetch = _fetch ?? fetch;
 	let parsedUrl: URL;
 	try {
 		parsedUrl = new URL(url);
@@ -28,7 +30,7 @@ export async function webFetch(
 	const timeoutSignal = AbortSignal.timeout(timeoutMs);
 	const s = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 
-	const response = await fetch(url, {
+	const response = await doFetch(url, {
 		method: "GET",
 		headers: {
 			"User-Agent": "pi-web-tools/1.0",
