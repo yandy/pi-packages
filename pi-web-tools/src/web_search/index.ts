@@ -1,3 +1,4 @@
+import { aliyunSearch } from "./aliyun";
 import { exaSearch } from "./exa";
 import type { SearchResponse } from "./types";
 
@@ -8,12 +9,20 @@ interface SourceEntry {
 	fn: SearchFn;
 }
 
-const SOURCES: SourceEntry[] = [
-	{
-		name: "exa",
-		fn: exaSearch,
-	},
-];
+export function buildSources(
+	apiKeys: Record<string, string | undefined>,
+): SourceEntry[] {
+	return [
+		{ name: "exa", fn: exaSearch },
+		{
+			name: "aliyun",
+			fn: (query, numResults, signal) =>
+				aliyunSearch(query, numResults, signal, apiKeys.aliyun),
+		},
+	];
+}
+
+const DEFAULT_SOURCES = buildSources({});
 
 export async function search(
 	query: string,
@@ -21,16 +30,23 @@ export async function search(
 	signal?: AbortSignal,
 	onProgress?: (msg: string) => void,
 	specifiedSource?: string,
+	sources?: SourceEntry[],
 ): Promise<SearchResponse> {
 	const errors: string[] = [];
 
-	const sources = specifiedSource ? SOURCES.filter((s) => s.name === specifiedSource) : SOURCES;
+	const src = sources ?? DEFAULT_SOURCES;
 
-	if (specifiedSource && sources.length === 0) {
-		throw new Error(`Unknown source: ${specifiedSource}. Available: ${SOURCES.map((s) => s.name).join(", ")}`);
+	const filtered = specifiedSource
+		? src.filter((s) => s.name === specifiedSource)
+		: src;
+
+	if (specifiedSource && filtered.length === 0) {
+		throw new Error(
+			`Unknown source: ${specifiedSource}. Available: ${src.map((s) => s.name).join(", ")}`,
+		);
 	}
 
-	for (const source of sources) {
+	for (const source of filtered) {
 		try {
 			onProgress?.(`Trying ${source.name}...`);
 			const resp = await source.fn(query, numResults, signal);
@@ -41,5 +57,7 @@ export async function search(
 		}
 	}
 
-	throw new Error(`All search sources failed:\n${errors.map((e) => `  - ${e}`).join("\n")}`);
+	throw new Error(
+		`All search sources failed:\n${errors.map((e) => `  - ${e}`).join("\n")}`,
+	);
 }

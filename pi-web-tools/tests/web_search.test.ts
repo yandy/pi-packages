@@ -18,6 +18,7 @@ vi.mock("../src/web_search/mcp.js", () => ({
 }));
 
 let search: typeof import("../src/web_search/index.js").search;
+let buildSources: typeof import("../src/web_search/index.js").buildSources;
 
 beforeEach(async () => {
 	vi.resetModules();
@@ -45,6 +46,7 @@ beforeEach(async () => {
 
 	const wsMod = await import("../src/web_search/index.js");
 	search = wsMod.search;
+	buildSources = wsMod.buildSources;
 });
 
 describe("exaSearch", () => {
@@ -158,14 +160,14 @@ describe("search orchestrator", () => {
 				}),
 		});
 
-		const result = await search("test", 5);
+		const result = await search("test", 5, undefined, undefined, undefined, buildSources({}));
 		expect(result.sourceLabel).toBe("exa");
 	});
 
 	it("uses exa MCP when no API key", async () => {
 		vi.stubEnv("EXA_API_KEY", "");
 
-		const result = await search("test", 5);
+		const result = await search("test", 5, undefined, undefined, undefined, buildSources({}));
 		expect(result.sourceLabel).toBe("exa");
 	});
 
@@ -179,19 +181,68 @@ describe("search orchestrator", () => {
 				}),
 		});
 
-		const result = await search("test", 5, undefined, undefined, "exa");
+		const result = await search("test", 5, undefined, undefined, "exa", buildSources({}));
 		expect(result.sourceLabel).toBe("exa");
+	});
+
+	it("falls back to aliyun when exa fails", async () => {
+		vi.stubEnv("EXA_API_KEY", "");
+		vi.stubEnv("ALIYUN_API_KEY", "aliyun-key");
+		// exa MCP fails
+		mockCallTool.mockRejectedValueOnce(new Error("Exa down"));
+		// aliyun succeeds
+		mockCallTool.mockResolvedValueOnce({
+			content: [
+				{
+					type: "text",
+					text: JSON.stringify({
+						pages: [{ title: "Aliyun Fallback", link: "https://aliyun.example.com", snippet: "fallback content" }],
+					}),
+				},
+			],
+		});
+
+		const sources = buildSources({ aliyun: "aliyun-key" });
+		const result = await search("test", 5, undefined, undefined, undefined, sources);
+		expect(result.sourceLabel).toBe("aliyun");
+		expect(result.sources[0].title).toBe("Aliyun Fallback");
+	});
+
+	it("uses specified aliyun source", async () => {
+		vi.stubEnv("ALIYUN_API_KEY", "aliyun-key");
+		mockCallTool.mockResolvedValueOnce({
+			content: [
+				{
+					type: "text",
+					text: JSON.stringify({
+						pages: [{ title: "Aliyun Direct", link: "https://example.com", snippet: "direct" }],
+					}),
+				},
+			],
+		});
+
+		const sources = buildSources({ aliyun: "aliyun-key" });
+		const result = await search("test", 5, undefined, undefined, "aliyun", sources);
+		expect(result.sourceLabel).toBe("aliyun");
 	});
 
 	it("throws when all sources fail", async () => {
 		vi.stubEnv("EXA_API_KEY", "");
-		mockCallTool.mockRejectedValueOnce(new Error("Connection refused"));
+		vi.stubEnv("ALIYUN_API_KEY", "");
+		mockCallTool.mockRejectedValueOnce(new Error("Exa error"));
+		mockCallTool.mockRejectedValueOnce(new Error("ALIYUN_API_KEY not set"));
 
-		await expect(search("test", 5)).rejects.toThrow("All search sources failed");
+		const sources = buildSources({});
+		await expect(
+			search("test", 5, undefined, undefined, undefined, sources),
+		).rejects.toThrow("All search sources failed");
 	});
 
 	it("throws for unknown source", async () => {
-		await expect(search("test", 5, undefined, undefined, "unknown")).rejects.toThrow("Unknown source");
+		const sources = buildSources({});
+		await expect(
+			search("test", 5, undefined, undefined, "unknown", sources),
+		).rejects.toThrow("Unknown source");
 	});
 });
 
