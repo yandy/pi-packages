@@ -40,7 +40,7 @@ export function loadConfig(cwd?: string): WebToolsConfig {
 
 	const agentDir = getAgentDir();
 	const globalConfig = readJsonFile(resolve(agentDir, "web-tools.json")) || {};
-	const projectConfig = readJsonFile(resolve(dir, CONFIG_DIR_NAME, "agent", "web-tools.json")) || {};
+	const projectConfig = readJsonFile(resolve(dir, CONFIG_DIR_NAME, "web-tools.json")) || {};
 
 	cachedConfig = mergeConfigs(globalConfig, projectConfig);
 	cachedCwd = dir;
