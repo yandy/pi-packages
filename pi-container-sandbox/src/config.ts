@@ -30,7 +30,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export const PACKAGE_DOCKER_DIR = resolvePath(__dirname, "..", "docker");
 
 export function getSbxConfigPath(hostCwd: string): string {
-	return resolvePath(hostCwd, CONFIG_DIR_NAME, "agent", "sandbox.json");
+	return resolvePath(hostCwd, CONFIG_DIR_NAME, "sandbox.json");
 }
 
 export function loadSbxConfig(hostCwd: string): SbxConfig {

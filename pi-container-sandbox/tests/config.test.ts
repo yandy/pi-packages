@@ -24,9 +24,9 @@ afterEach(() => {
 });
 
 describe("getSbxConfigPath", () => {
-	it("returns path under CONFIG_DIR_NAME/agent/sandbox.json", () => {
+	it("returns path under CONFIG_DIR_NAME/sandbox.json", () => {
 		const path = getSbxConfigPath(testDir);
-		expect(path).toBe(resolvePath(testDir, TEST_CONFIG_DIR, "agent", "sandbox.json"));
+		expect(path).toBe(resolvePath(testDir, TEST_CONFIG_DIR, "sandbox.json"));
 	});
 });
 
@@ -44,7 +44,7 @@ describe("loadSbxConfig", () => {
 	});
 
 	it("loads values from existing config file", () => {
-		const configDir = resolvePath(testDir, TEST_CONFIG_DIR, "agent");
+		const configDir = resolvePath(testDir, TEST_CONFIG_DIR);
 		mkdirSync(configDir, { recursive: true });
 		writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify({ image: "my-img", tag: "v2", tier: "large" }));
 
@@ -57,7 +57,7 @@ describe("loadSbxConfig", () => {
 	});
 
 	it("falls back to defaults on corrupt JSON", () => {
-		const configDir = resolvePath(testDir, TEST_CONFIG_DIR, "agent");
+		const configDir = resolvePath(testDir, TEST_CONFIG_DIR);
 		mkdirSync(configDir, { recursive: true });
 		writeFileSync(resolvePath(configDir, "sandbox.json"), "not json {{{");
 
@@ -88,7 +88,7 @@ describe("saveSbxConfig", () => {
 
 describe("loadSbxConfig new fields", () => {
 	it("parses dockerfile, buildContext, buildArgs from config", () => {
-		const configDir = resolvePath(testDir, TEST_CONFIG_DIR, "agent");
+		const configDir = resolvePath(testDir, TEST_CONFIG_DIR);
 		mkdirSync(configDir, { recursive: true });
 		writeFileSync(
 			resolvePath(configDir, "sandbox.json"),
@@ -108,7 +108,7 @@ describe("loadSbxConfig new fields", () => {
 	});
 
 	it("omits optional fields when not present in config", () => {
-		const configDir = resolvePath(testDir, TEST_CONFIG_DIR, "agent");
+		const configDir = resolvePath(testDir, TEST_CONFIG_DIR);
 		mkdirSync(configDir, { recursive: true });
 		writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify({ image: "img" }));
 
@@ -121,7 +121,7 @@ describe("loadSbxConfig new fields", () => {
 
 describe("loadSbxConfig hostCommands", () => {
 	it("reads hostCommands from config file", () => {
-		const configDir = resolvePath(testDir, TEST_CONFIG_DIR, "agent");
+		const configDir = resolvePath(testDir, TEST_CONFIG_DIR);
 		mkdirSync(configDir, { recursive: true });
 		writeFileSync(
 			resolvePath(configDir, "sandbox.json"),
@@ -153,7 +153,7 @@ describe("discoverDockerfiles", () => {
 
 describe("loadSbxConfig preserves unknown fields", () => {
 	it("round-trips user-added fields through save/load", () => {
-		const configDir = resolvePath(testDir, TEST_CONFIG_DIR, "agent");
+		const configDir = resolvePath(testDir, TEST_CONFIG_DIR);
 		mkdirSync(configDir, { recursive: true });
 		const original = { image: "pi-sandbox", custom_user_field: "hello", nested: { foo: 1 } };
 		writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify(original));
