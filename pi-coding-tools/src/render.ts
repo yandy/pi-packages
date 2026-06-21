@@ -1,6 +1,6 @@
-import * as Diff from "diff";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import * as Diff from "diff";
 import { extractPatchedPaths as _extractPatchedPaths } from "./parse";
 export const extractPatchedPaths = _extractPatchedPaths;
 
@@ -120,7 +120,11 @@ export function truncatePreview(text: string): string {
 	const changedHunkPreview = createChangedHunkPreview(lines);
 	const previewText =
 		changedHunkPreview ??
-		[...lines.slice(0, PATCH_PREVIEW_HEAD_LINES), PATCH_PREVIEW_TRUNCATION_MARKER, ...lines.slice(-PATCH_PREVIEW_TAIL_LINES)].join("\n");
+		[
+			...lines.slice(0, PATCH_PREVIEW_HEAD_LINES),
+			PATCH_PREVIEW_TRUNCATION_MARKER,
+			...lines.slice(-PATCH_PREVIEW_TAIL_LINES),
+		].join("\n");
 	return enforcePreviewCharLimit(previewText);
 }
 
@@ -252,7 +256,9 @@ export function formatPatchPreview(
 	}
 
 	const noun = "files";
-	lines.push(`${formatPatchOperation("update")} ${preview.files.length} ${noun} ${formatLineCountSummary(preview.added, preview.removed)}`);
+	lines.push(
+		`${formatPatchOperation("update")} ${preview.files.length} ${noun} ${formatLineCountSummary(preview.added, preview.removed)}`,
+	);
 	for (const file of preview.files) {
 		lines.push(`  ${formatPatchFileSummary(file, cwd)}`);
 		if (expanded && file.diff) {

@@ -1,17 +1,16 @@
-import * as Diff from "diff";
-import path from "node:path";
 import { readFile } from "node:fs/promises";
-import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
+import path from "node:path";
+import type { AgentToolResult, Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { defineTool, getLanguageFromPath, highlightCode } from "@earendil-works/pi-coding-agent";
-import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import * as Diff from "diff";
 
 type ThemeBg = "selectedBg" | "userMessageBg" | "customMessageBg" | "toolPendingBg" | "toolSuccessBg" | "toolErrorBg";
-import { Box } from "@earendil-works/pi-tui";
-import { Container } from "@earendil-works/pi-tui";
-import { Spacer } from "@earendil-works/pi-tui";
-import { Text } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
 
+import { Box, Container, Spacer, Text } from "@earendil-works/pi-tui";
+import { Type } from "typebox";
+import type { ApplyPatchProgress, ApplyPatchResult } from "./apply";
+import { applyParsedPatchDetailed, replaceChunks } from "./apply";
+import type { ParsedPatch } from "./parse";
 import {
 	APPLY_PATCH_FREEFORM_DESCRIPTION,
 	APPLY_PATCH_LARK_GRAMMAR,
@@ -19,10 +18,7 @@ import {
 	parseNonEmptyPatch,
 	parsePatch,
 } from "./parse";
-import type { ParsedPatch } from "./parse";
-import { applyParsedPatchDetailed } from "./apply";
-import type { ApplyPatchProgress, ApplyPatchResult } from "./apply";
-import { replaceChunks } from "./apply";
+import type { ApplyPatchPreview, ApplyPatchPreviewFile } from "./render";
 import {
 	createPatchDiff,
 	formatInFlightCallText,
@@ -34,7 +30,6 @@ import {
 	readExistingFileForPreview,
 	truncatePreview,
 } from "./render";
-import type { ApplyPatchPreview, ApplyPatchPreviewFile } from "./render";
 
 const APPLY_PATCH_PARAMS = Type.Object({
 	input: Type.String({
@@ -130,11 +125,7 @@ function highlightDiffContent(content: string, filePath: string): string {
 	}
 }
 
-function renderInlineDiff(
-	oldContent: string,
-	newContent: string,
-	theme: Theme,
-): { added: string; removed: string } {
+function renderInlineDiff(oldContent: string, newContent: string, theme: Theme): { added: string; removed: string } {
 	const parts = Diff.diffWords(replaceTabs(oldContent), replaceTabs(newContent));
 	let added = "";
 	let removed = "";
@@ -212,9 +203,7 @@ function renderOpenCodeLikeDiff(diffText: string, filePath: string, theme: Theme
 
 		if (line.kind !== "removed") {
 			rendered.push(
-				line.kind === "meta"
-					? theme.fg("toolDiffContext", line.text)
-					: renderOpenCodeLikeDiffLine(line, filePath, theme),
+				line.kind === "meta" ? theme.fg("toolDiffContext", line.text) : renderOpenCodeLikeDiffLine(line, filePath, theme),
 			);
 			index++;
 			continue;
@@ -262,12 +251,7 @@ function renderOpenCodeLikeDiff(diffText: string, filePath: string, theme: Theme
 	return rendered.join("\n");
 }
 
-function renderPatchPreview(
-	preview: ApplyPatchPreview,
-	cwd: string,
-	theme: Theme,
-	expanded: boolean,
-): string {
+function renderPatchPreview(preview: ApplyPatchPreview, cwd: string, theme: Theme, expanded: boolean): string {
 	if (expanded) {
 		try {
 			const renderFile = (file: ApplyPatchPreviewFile, headerPrefix: string): string => {

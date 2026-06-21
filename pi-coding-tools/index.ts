@@ -4,13 +4,13 @@ import { loadConfig } from "./src/config";
 import { enableSearchTools } from "./src/search-tools";
 
 export default function (pi: ExtensionAPI) {
-  const config = loadConfig();
+	const config = loadConfig();
 
-  if (config.applyPatch) {
-    pi.registerTool(createApplyPatchTool());
-  }
+	if (config.applyPatch) {
+		pi.registerTool(createApplyPatchTool());
+	}
 
-  pi.on("session_start", async (_event, _ctx) => {
-    enableSearchTools(pi, config);
-  });
+	pi.on("session_start", async (_event, _ctx) => {
+		enableSearchTools(pi, config);
+	});
 }

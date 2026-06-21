@@ -3,9 +3,9 @@ import {
 	APPLY_PATCH_LARK_GRAMMAR,
 	extractPatchedPaths,
 	normalizeSeekLine,
+	PatchParseError,
 	parseNonEmptyPatch,
 	parsePatch,
-	PatchParseError,
 } from "../src/parse";
 
 describe("parsePatch", () => {

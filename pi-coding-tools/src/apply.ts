@@ -1,8 +1,8 @@
-import { mkdir, realpath, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import path from "node:path";
-import { writeFileAtomic } from "./write-file-atomic";
 import type { ParsedPatch, PatchChunk } from "./parse";
 import { parseNonEmptyPatch, seekSequence, splitFileLines } from "./parse";
+import { writeFileAtomic } from "./write-file-atomic";
 
 export type ApplyPatchFailure = {
 	filePath: string;
@@ -107,7 +107,11 @@ async function resolvePatchPath(cwd: string, filePath: string): Promise<string> 
 	return absolutePath;
 }
 
-export function replaceChunks(content: string, filePath: string, chunks: PatchChunk[]): { content: string; fuzz: number } {
+export function replaceChunks(
+	content: string,
+	filePath: string,
+	chunks: PatchChunk[],
+): { content: string; fuzz: number } {
 	const originalLines = splitFileLines(content);
 	const replacements: { start: number; oldLength: number; newLines: string[] }[] = [];
 	let lineIndex = 0;
