@@ -29,6 +29,9 @@ jobs:
             pi-web-tools-v*)
               echo "dir=pi-web-tools" >> "$GITHUB_OUTPUT"
               ;;
+            pi-coding-tools-v*)
+              echo "dir=pi-coding-tools" >> "$GITHUB_OUTPUT"
+              ;;
           esac
 
       - name: Install dependencies
