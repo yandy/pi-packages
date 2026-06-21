@@ -254,7 +254,7 @@ export async function applyPatch(cwd: string, patchText: string): Promise<string
 	return summaries;
 }
 
-async function applyParsedPatchDetailed(
+export async function applyParsedPatchDetailed(
 	cwd: string,
 	hunks: ParsedPatch[],
 	onProgress?: ApplyPatchProgressCallback,
