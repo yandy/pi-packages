@@ -8,9 +8,11 @@
 新建 `pi-coding-tools` pi 包，提供一个扩展，实现两个功能：
 
 1. 注册 `apply_patch` 工具——支持 Codex 文本格式 patch（`*** Begin Patch` ... `*** End Patch`），通过 lark freeform grammar 让模型直接输出 raw patch 文本，无需 JSON 包装。支持文件的创建、更新、删除、移动操作，多文件一次应用。
-2. 激活默认未激活的内置工具 `ls`、`find`、`grep`——在 `session_start` 事件中无条件添加到激活工具集。
+2. 激活默认未激活的内置工具 `ls`、`find`、`grep`——在 `session_start` 事件中添加到激活工具集。
 
-实现以 [code-yeongyu/pi-apply-patch](https://github.com/code-yeongyu/pi-apply-patch)（参考 3）为主干，保留其 patch 解析、路径安全、原子写入、完整 diff 渲染、失败恢复指令等全部核心逻辑。主要差异：移除参考 3 的条件激活/工具集同步/系统提示注入（改为无条件激活，不替换 edit/write），新增 ls/find/grep 激活和单元测试。
+两个功能均通过配置文件控制是否启用，支持全局配置和项目级配置（项目级覆盖全局级），默认全部启用。
+
+实现以 [code-yeongyu/pi-apply-patch](https://github.com/code-yeongyu/pi-apply-patch)（参考 3）为主干，保留其 patch 解析、路径安全、原子写入、完整 diff 渲染、失败恢复指令等全部核心逻辑。主要差异：移除参考 3 的条件激活/工具集同步/系统提示注入（改为无条件激活，不替换 edit/write），新增 ls/find/grep 激活、配置文件支持和单元测试。
 
 ## Scope
 
@@ -19,13 +21,14 @@
 | File | Purpose |
 |------|---------|
 | `pi-coding-tools/package.json` | 包元数据，`pi-package` 关键字，`pi.extensions: ["./index.ts"]`，peerDep `@earendil-works/pi-coding-agent`，dep `diff` |
-| `pi-coding-tools/index.ts` | 扩展入口：注册 `apply_patch` 工具 + `session_start` 激活 ls/find/grep |
+| `pi-coding-tools/index.ts` | 扩展入口：加载配置，按配置注册 `apply_patch` 工具 + `session_start` 按配置激活 ls/find/grep |
 | `pi-coding-tools/src/parse.ts` | Codex patch 文本解析 → `ParsedPatch[]`，lark grammar 定义，模糊匹配 `seekSequence` |
 | `pi-coding-tools/src/apply.ts` | 应用 patch 到文件系统：路径安全、原子写入、`replaceChunks`、失败恢复指令 |
 | `pi-coding-tools/src/render.ts` | TUI 渲染：diff 预览、行号、word-diff、语法高亮、背景色分层、进度更新 |
 | `pi-coding-tools/src/apply-patch-tool.ts` | 工具定义：组合 parse/apply/render，导出 `createApplyPatchTool()`（含 execute/renderCall/renderResult） |
 | `pi-coding-tools/src/write-file-atomic.ts` | 原子写入（temp 文件 + rename，Windows 兼容） |
-| `pi-coding-tools/src/search-tools.ts` | `enableSearchTools(pi)`：激活 ls/find/grep |
+| `pi-coding-tools/src/config.ts` | 配置加载：全局 `~/.pi/agent/coding-tools.json` + 项目级 `.pi/coding-tools.json`，项目级覆盖全局级 |
+| `pi-coding-tools/src/search-tools.ts` | `enableSearchTools(pi, config)`：按配置激活 ls/find/grep |
 | `pi-coding-tools/tsconfig.json` | 复用 pi-web-tools 配置 |
 | `pi-coding-tools/vitest.config.ts` | 复用 pi-web-tools 配置 |
 | `pi-coding-tools/biome.json` | 复用 pi-web-tools 配置 |
@@ -35,6 +38,7 @@
 | `pi-coding-tools/tests/parse.test.ts` | 解析器单测 |
 | `pi-coding-tools/tests/apply.test.ts` | 应用逻辑单测（临时目录） |
 | `pi-coding-tools/tests/render.test.ts` | 渲染工具函数测试 |
+| `pi-coding-tools/tests/config.test.ts` | 配置加载、合并、默认值单测 |
 
 ### 修改文件
 
@@ -59,9 +63,10 @@
 | 工具集同步 | `syncToolset()` 在 session_start/model_select/before_agent_start | 无 | 不条件激活，无需同步 |
 | 系统提示注入 | 为 Codex 模型追加用法说明 | 无 | 不按模型区分，靠 promptSnippet + promptGuidelines |
 | 额外功能 | — | 激活 ls/find/grep | 用户需求 2 |
+| 配置支持 | — | 全局+项目级配置文件，控制各工具启用/禁用 | 用户需求 3 |
 | 包名 | `@earendil-works/pi-coding-agent`（peerDep） | `@yandy0725/pi-coding-tools`，peerDep `@earendil-works/pi-coding-agent ^0.74.0` | monorepo 约定 |
-| 测试 | 无 | `tests/` 含 parse/apply/render 单测 | TDD + monorepo 约定 |
-| 文件组织 | `src/index.ts` + `src/write-file-atomic.ts`（2 文件） | `src/parse.ts` + `src/apply.ts` + `src/render.ts` + `src/apply-patch-tool.ts` + `src/write-file-atomic.ts` + `src/search-tools.ts` | 参考三单文件 1200 行过大，拆分便于测试和维护 |
+| 测试 | 无 | `tests/` 含 parse/apply/render/config 单测 | TDD + monorepo 约定 |
+| 文件组织 | `src/index.ts` + `src/write-file-atomic.ts`（2 文件） | `src/parse.ts` + `src/apply.ts` + `src/render.ts` + `src/apply-patch-tool.ts` + `src/write-file-atomic.ts` + `src/config.ts` + `src/search-tools.ts` | 参考三单文件 1200 行过大，拆分便于测试和维护 |
 
 ### 完全保留（与参考 3 一致）
 
@@ -88,6 +93,7 @@ pi-coding-tools/
 │   ├── render.ts         # TUI 渲染
 │   ├── apply-patch-tool.ts   # 工具定义（组合 parse/apply/render）
 │   ├── write-file-atomic.ts  # 原子写入
+│   ├── config.ts         # 配置加载（全局+项目级）
 │   └── search-tools.ts   # 激活 ls/find/grep
 ├── tests/
 │   ├── parse.test.ts
@@ -326,6 +332,103 @@ type ApplyPatchResult = {
 - **diff 预览生成**：`createPatchPreview` 读取原文件，用 `Diff.diffLines` 生成行号 diff，`truncatePreview` 头尾截断（16 行/4000 字符上限，优先显示变更 hunk 附近上下文）
 - **applyLayeredBackground**：处理 ANSI 转义码与背景色叠加
 
+## Configuration
+
+参考 [pi-web-tools/src/config.ts](https://github.com/yandy/pi-packages/blob/main/pi-web-tools/src/config.ts) 的配置模式。
+
+### 配置文件位置
+
+| Scope | Path | 说明 |
+|-------|------|------|
+| 全局 | `~/.pi/agent/coding-tools.json` | `getAgentDir()` + 文件名 |
+| 项目级 | `<cwd>/.pi/coding-tools.json` | `CONFIG_DIR_NAME` + 文件名 |
+
+项目级覆盖全局级（浅合并各字段）。
+
+### 配置结构
+
+```typescript
+interface CodingToolsConfig {
+  applyPatch: boolean;  // 默认 true
+  ls: boolean;          // 默认 true
+  find: boolean;        // 默认 true
+  grep: boolean;        // 默认 true
+}
+```
+
+### 配置文件示例
+
+```json
+{
+  "applyPatch": true,
+  "ls": true,
+  "find": true,
+  "grep": true
+}
+```
+
+不配置文件时，四个工具全部启用（默认值）。项目级配置的某个字段会覆盖全局配置的对应字段，未覆盖的字段保持全局值或默认值。
+
+### src/config.ts
+
+```typescript
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
+
+interface CodingToolsConfig {
+  applyPatch: boolean;
+  ls: boolean;
+  find: boolean;
+  grep: boolean;
+}
+
+const DEFAULT_CONFIG: CodingToolsConfig = {
+  applyPatch: true,
+  ls: true,
+  find: true,
+  grep: true,
+};
+
+let cachedConfig: CodingToolsConfig | null = null;
+let cachedCwd: string | null = null;
+
+function readJsonFile(path: string): Partial<CodingToolsConfig> | null {
+  try {
+    const raw = readFileSync(path, "utf-8");
+    return JSON.parse(raw) as Partial<CodingToolsConfig>;
+  } catch {
+    return null;
+  }
+}
+
+export function loadConfig(cwd?: string): CodingToolsConfig {
+  const dir = cwd || process.cwd();
+  if (cachedConfig && cachedCwd === dir) return cachedConfig;
+
+  const agentDir = getAgentDir();
+  const globalConfig = readJsonFile(resolve(agentDir, "coding-tools.json")) || {};
+  const projectConfig = readJsonFile(resolve(dir, CONFIG_DIR_NAME, "coding-tools.json")) || {};
+
+  cachedConfig = {
+    applyPatch: projectConfig.applyPatch ?? globalConfig.applyPatch ?? DEFAULT_CONFIG.applyPatch,
+    ls: projectConfig.ls ?? globalConfig.ls ?? DEFAULT_CONFIG.ls,
+    find: projectConfig.find ?? globalConfig.find ?? DEFAULT_CONFIG.find,
+    grep: projectConfig.grep ?? globalConfig.grep ?? DEFAULT_CONFIG.grep,
+  };
+  cachedCwd = dir;
+  return cachedConfig;
+}
+```
+
+### 行为
+
+- `applyPatch: false` → 不注册 `apply_patch` 工具
+- `ls: false` → 不添加 `ls` 到激活工具集
+- `find: false` → 不添加 `find` 到激活工具集
+- `grep: false` → 不添加 `grep` 到激活工具集
+- 各字段独立控制，互不影响
+
 ## ls/find/grep Activation
 
 ### index.ts 入口
@@ -334,12 +437,17 @@ type ApplyPatchResult = {
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createApplyPatchTool } from "./src/apply-patch-tool";
 import { enableSearchTools } from "./src/search-tools";
+import { loadConfig } from "./src/config";
 
 export default function (pi: ExtensionAPI) {
-  pi.registerTool(createApplyPatchTool());
+  const config = loadConfig();
+
+  if (config.applyPatch) {
+    pi.registerTool(createApplyPatchTool());
+  }
 
   pi.on("session_start", async (_event, _ctx) => {
-    enableSearchTools(pi);
+    enableSearchTools(pi, config);
   });
 }
 ```
@@ -349,13 +457,19 @@ export default function (pi: ExtensionAPI) {
 ### search-tools.ts
 
 ```typescript
-const SEARCH_TOOLS = ["ls", "find", "grep"] as const;
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { CodingToolsConfig } from "./config";
 
-export function enableSearchTools(pi: ExtensionAPI): void {
+export function enableSearchTools(pi: ExtensionAPI, config: CodingToolsConfig): void {
   const allTools = new Set(pi.getAllTools());
   const current = new Set(pi.getActiveTools());
-  for (const name of SEARCH_TOOLS) {
-    if (allTools.has(name) && !current.has(name)) {
+  const desired = [
+    { name: "ls", enabled: config.ls },
+    { name: "find", enabled: config.find },
+    { name: "grep", enabled: config.grep },
+  ] as const;
+  for (const { name, enabled } of desired) {
+    if (enabled && allTools.has(name) && !current.has(name)) {
       current.add(name);
     }
   }
@@ -366,8 +480,9 @@ export function enableSearchTools(pi: ExtensionAPI): void {
 关键点：
 - 用 `getAllTools()` 验证名称有效性——如果某个名称不是内置工具，跳过
 - 用 `getActiveTools()`/`setActiveTools()` 增量添加，不覆盖现有激活状态
-- 在 `session_start` 触发，每个会话都会激活
-- 无条件激活，不按模型/flag 切换
+- 在 `session_start` 触发，每个会话都会按配置激活
+- 按配置字段决定是否激活，默认全部启用
+
 
 ## Testing Strategy
 
@@ -405,6 +520,15 @@ export function enableSearchTools(pi: ExtensionAPI): void {
 - `formatPatchPreview`：单文件/多文件摘要格式
 - `createPatchDiff`：行号 diff 生成、added/removed 计数
 - 渲染快照（`toMatchSnapshot`）：折叠/展开两种模式
+
+### tests/config.test.ts — 配置测试
+
+- 无配置文件时返回默认值（四个工具全部 true）
+- 全局配置文件存在时读取全局值
+- 项目级配置文件存在时覆盖全局值
+- 部分字段配置：未配置字段保持默认值
+- 配置文件 JSON 解析失败时回退到默认值
+- 按 cwd 缓存：相同 cwd 返回缓存结果
 
 ### 不测试的部分（集成层，需 pi 运行时）
 
