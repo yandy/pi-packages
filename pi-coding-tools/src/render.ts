@@ -179,11 +179,11 @@ export async function readExistingFileForPreview(absolutePath: string): Promise<
 	}
 }
 
-function formatLineCountSummary(added: number, removed: number): string {
+export function formatLineCountSummary(added: number, removed: number): string {
 	return `(+${added} -${removed})`;
 }
 
-function formatPatchOperation(operation: ApplyPatchOperation): string {
+export function formatPatchOperation(operation: ApplyPatchOperation): string {
 	if (operation === "add") {
 		return "Added";
 	}
@@ -226,7 +226,7 @@ export function formatPatchFileSummary(file: ApplyPatchPreviewFile, cwd: string)
 	return `${formatPatchFilePath(file, cwd)} ${formatLineCountSummary(file.added, file.removed)}`;
 }
 
-function formatPatchFileHeader(file: ApplyPatchPreviewFile, cwd: string): string {
+export function formatPatchFileHeader(file: ApplyPatchPreviewFile, cwd: string): string {
 	return `${formatPatchOperation(file.operation)} ${formatPatchFileSummary(file, cwd)}`;
 }
 

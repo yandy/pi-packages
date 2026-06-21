@@ -107,7 +107,7 @@ async function resolvePatchPath(cwd: string, filePath: string): Promise<string> 
 	return absolutePath;
 }
 
-function replaceChunks(content: string, filePath: string, chunks: PatchChunk[]): { content: string; fuzz: number } {
+export function replaceChunks(content: string, filePath: string, chunks: PatchChunk[]): { content: string; fuzz: number } {
 	const originalLines = splitFileLines(content);
 	const replacements: { start: number; oldLength: number; newLines: string[] }[] = [];
 	let lineIndex = 0;
