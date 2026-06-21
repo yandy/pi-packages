@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import type { SizeTier } from "./tiers";
 
 export interface SbxConfig {
@@ -29,7 +30,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export const PACKAGE_DOCKER_DIR = resolvePath(__dirname, "..", "docker");
 
 export function getSbxConfigPath(hostCwd: string): string {
-	return resolvePath(hostCwd, ".pi", "agent", "sandbox.json");
+	return resolvePath(hostCwd, CONFIG_DIR_NAME, "agent", "sandbox.json");
 }
 
 export function loadSbxConfig(hostCwd: string): SbxConfig {

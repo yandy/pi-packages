@@ -37,7 +37,7 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.0",
-		"@earendil-works/pi-coding-agent": "^0.74.0",
+		"@earendil-works/pi-coding-agent": "^0.79.9",
 		"@types/dockerode": "^4.0.1",
 		"@types/node": "^22.0.0",
 		"typescript": "~5.7.0",
