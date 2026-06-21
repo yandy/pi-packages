@@ -398,9 +398,6 @@ async function createPatchPreview(cwd: string, hunks: ParsedPatch[]): Promise<Ap
 		const oldContent = await readFile(absolutePath, "utf-8");
 		const newContent =
 			hunk.chunks.length === 0 ? oldContent : replaceChunks(oldContent, hunk.filePath, hunk.chunks).content;
-		if (hunk.movePath) {
-			path.resolve(cwd, hunk.movePath);
-		}
 		const diff = createPatchDiff(oldContent, newContent);
 		const file = { filePath: hunk.filePath, operation: "update", ...diff } satisfies ApplyPatchPreviewFile;
 		files.push(hunk.movePath !== undefined ? { ...file, movePath: hunk.movePath } : file);
