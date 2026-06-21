@@ -4,7 +4,7 @@
 
 pi extension 的配置文件有两种级别：
 - **全局配置**：`${AgentDir}/<config-file>.json`
-- **项目配置**：`${cwd}/${CONFIG_DIR_NAME}/agent/<config-file>.json`
+- **项目配置**：`${cwd}/${CONFIG_DIR_NAME}/<config-file>.json`
 
 应确保项目配置覆盖全局配置的同名字段，且路径不能写死 `.pi` 或 `~/.pi/agent/`，
 因为换肤发行版可能通过 `piConfig.configDir` 修改配置目录名，AgentDir 也可通过环境变量覆盖。
@@ -60,7 +60,7 @@ async function importModule() {
 
 describe("loadConfig", () => {
   it("loads global config from AgentDir/<config-file>.json", async () => { ... });
-  it("loads project config from cwd/CONFIG_DIR_NAME/agent/<config-file>.json", async () => { ... });
+  it("loads project config from cwd/CONFIG_DIR_NAME/<config-file>.json", async () => { ... });
   it("project config overrides global config at section level", async () => { ... });
   it("returns empty config when neither global nor project config exists", async () => { ... });
   it("uses global config when project config is absent", async () => { ... });
@@ -71,7 +71,7 @@ describe("loadConfig", () => {
 关键测试用例：
 
 1. **全局配置加载** — mock `readFileSync` 在 `${mockAgentDir}/<config-file>.json` 返回 JSON，验证配置正确
-2. **项目配置加载** — mock 在 `${cwd}/${mockConfigDirName}/agent/<config-file>.json` 返回 JSON
+2. **项目配置加载** — mock 在 `${cwd}/${mockConfigDirName}/<config-file>.json` 返回 JSON
 3. **合并覆盖** — 全局设 `section: { a: 1, b: 2 }`，项目设 `section: { a: 3 }`，结果应为 `{ a: 3, b: 2 }`
 4. **缺失容错** — 两者都不存在时返回 `{}`
 5. **仅有全局** — 项目不存在时正确加载全局
@@ -120,7 +120,7 @@ export function loadConfig(cwd?: string): YourConfigType {
   const agentDir = getAgentDir();
   const globalConfig = readJsonFile(resolve(agentDir, "<config-file>.json")) || {};
   const projectConfig =
-    readJsonFile(resolve(dir, CONFIG_DIR_NAME, "agent", "<config-file>.json")) || {};
+    readJsonFile(resolve(dir, CONFIG_DIR_NAME, "<config-file>.json")) || {};
 
   cachedConfig = mergeConfigs(globalConfig, projectConfig);
   cachedCwd = dir;
@@ -132,7 +132,7 @@ export function loadConfig(cwd?: string): YourConfigType {
 - `readJsonFile` 用 try/catch 安全读取，文件不存在返回 `null`
 - `mergeConfigs` 遍历每个配置节（section），展开合并，override 覆盖 base
 - 全局路径 `${getAgentDir()}/<config-file>.json`
-- 项目路径 `${cwd}/${CONFIG_DIR_NAME}/agent/<config-file>.json`
+- 项目路径 `${cwd}/${CONFIG_DIR_NAME}/<config-file>.json`
 - `<config-file>` 替换为你的配置文件名（如 `web-tools.json`）
 
 ### Step 4: 验证
@@ -148,8 +148,8 @@ npm run lint            # 无 lint 错误
 | 层级 | 路径格式 | 示例 |
 |------|----------|------|
 | 全局 | `${getAgentDir()}/<name>.json` | `~/.pi/agent/web-tools.json` |
-| 项目 | `${cwd}/${CONFIG_DIR_NAME}/agent/<name>.json` | `<project>/.pi/agent/web-tools.json` |
+| 项目 | `${cwd}/${CONFIG_DIR_NAME}/<name>.json` | `<project>/.pi/web-tools.json` |
 
 换肤发行版（`piConfig.configDir = ".myapp"`）下自动变为：
 - 全局：`~/.myapp/agent/web-tools.json`
-- 项目：`<project>/.myapp/agent/web-tools.json`
+- 项目：`<project>/.myapp/web-tools.json`
