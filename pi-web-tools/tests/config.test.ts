@@ -38,9 +38,9 @@ describe("loadConfig", () => {
 		expect(config.aliyun?.baseUrl).toBe("https://global.example.com");
 	});
 
-	it("loads project config from cwd/CONFIG_DIR_NAME/agent/web-tools.json", async () => {
+	it("loads project config from cwd/CONFIG_DIR_NAME/web-tools.json", async () => {
 		mockReadFileSync.mockImplementation((path: string) => {
-			if (path === "/project/.myapp/agent/web-tools.json") {
+			if (path === "/project/.myapp/web-tools.json") {
 				return JSON.stringify({ aliyun: { baseUrl: "https://project.example.com" } });
 			}
 			throw new Error("ENOENT");
@@ -59,7 +59,7 @@ describe("loadConfig", () => {
 					aliyun: { baseUrl: "https://global.example.com", aliyunProviderKey: "global-provider" },
 				});
 			}
-			if (path === "/project/.myapp/agent/web-tools.json") {
+			if (path === "/project/.myapp/web-tools.json") {
 				return JSON.stringify({ aliyun: { baseUrl: "https://project.example.com" } });
 			}
 			throw new Error("ENOENT");
