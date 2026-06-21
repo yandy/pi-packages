@@ -1,0 +1,50 @@
+{
+	"name": "@yandy0725/pi-coding-tools",
+	"publishConfig": {
+		"access": "public"
+	},
+	"version": "0.1.0",
+	"description": "pi package providing apply_patch tool and enabling ls/find/grep built-in tools",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/yandy/pi-packages",
+		"directory": "pi-coding-tools"
+	},
+	"type": "module",
+	"keywords": [
+		"pi-package"
+	],
+	"files": [
+		"index.ts",
+		"src/"
+	],
+	"scripts": {
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"typecheck": "tsc --noEmit",
+		"lint": "biome lint .",
+		"format": "biome format --write .",
+		"check": "biome check ."
+	},
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": ">=0.74.0"
+	},
+	"dependencies": {
+		"@earendil-works/pi-tui": "^0.79.9",
+		"diff": "^9.0.0",
+		"typebox": "^1.1.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.5.0",
+		"@types/diff": "^8.0.0",
+		"@types/node": "^22.0.0",
+		"typescript": "~5.7.0",
+		"vitest": "^3.0.0"
+	}
+}

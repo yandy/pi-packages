@@ -21,6 +21,8 @@ jobs:
               - "pi-container-sandbox/**"
             pi-web-tools:
               - "pi-web-tools/**"
+            pi-coding-tools:
+              - "pi-coding-tools/**"
 
   test:
     needs: changes
