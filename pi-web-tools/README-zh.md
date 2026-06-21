@@ -13,7 +13,7 @@
 
 ```bash
 # 从 npm 安装
-npm install npm:@yandy0725/pi-web-tools
+pi install npm:@yandy0725/pi-web-tools
 
 # 或从本地仓库安装
 pi install ./path/to/pi-web-tools

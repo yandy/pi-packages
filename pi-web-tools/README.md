@@ -13,7 +13,7 @@ A [pi](https://pi.dev/docs/latest/packages) package providing web search and web
 
 ```bash
 # Install from npm
-npm install npm:@yandy0725/pi-web-tools
+pi install npm:@yandy0725/pi-web-tools
 
 # Or install from a local checkout
 pi install ./path/to/pi-web-tools

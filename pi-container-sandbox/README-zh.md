@@ -9,7 +9,7 @@
 
 ```bash
 # 从 npm 安装
-npm install npm:@yandy0725/pi-container-sandbox
+pi install npm:@yandy0725/pi-container-sandbox
 
 # 或从本地仓库安装
 pi install .

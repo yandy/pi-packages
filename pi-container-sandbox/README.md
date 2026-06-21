@@ -11,7 +11,7 @@ Requires Docker (any recent version) running and accessible to your user
 
 ```bash
 # Install from npm
-npm install npm:@yandy0725/pi-container-sandbox
+pi install npm:@yandy0725/pi-container-sandbox
 
 # Or install from a local checkout
 pi install .
