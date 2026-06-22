@@ -41,10 +41,6 @@
 		"typebox": "^1.1.0"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.5.0",
-		"@types/diff": "^8.0.0",
-		"@types/node": "^22.0.0",
-		"typescript": "~5.7.0",
-		"vitest": "^3.0.0"
+		"@types/diff": "^8.0.0"
 	}
 }
