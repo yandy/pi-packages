@@ -165,15 +165,13 @@ export class DockerRuntime implements Runtime {
 							settled = true;
 							reject(new Error(event.errorDetail.message || event.error || "Build failed"));
 						}
-					}
-					else if (event.error) {
+					} else if (event.error) {
 						report(`ERROR: ${event.error}`);
 						if (!settled) {
 							settled = true;
 							reject(new Error(event.error));
 						}
-					}
-					else if (event.status) report(event.status);
+					} else if (event.status) report(event.status);
 				},
 			);
 		});

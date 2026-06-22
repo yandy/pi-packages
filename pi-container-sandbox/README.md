@@ -217,12 +217,15 @@ Find the container name from `/sandbox status` or `docker ps --filter name=pi-sb
 ## Development
 
 ```bash
-npm install              # install dependencies
-npm run typecheck        # tsc --noEmit
-npm test                 # vitest run
-npm run build-image      # build the sandbox image
-pi -e ./index.ts         # run the extension locally
-bash tests/e2e.sh        # run E2E tests (requires Docker + pi CLI)
+# From repo root:
+npm ci                    # Install all dependencies
+npm run typecheck         # Type-check all packages
+npm test                  # Run all tests
+
+# Package-specific:
+npm run build-image --workspace=pi-container-sandbox
+pi -e ./index.ts          # Run the extension locally (from this dir)
+bash tests/e2e.sh         # Run E2E tests (requires Docker + pi CLI)
 ```
 
 ## How it works

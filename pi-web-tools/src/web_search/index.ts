@@ -9,15 +9,12 @@ interface SourceEntry {
 	fn: SearchFn;
 }
 
-export function buildSources(
-	apiKeys: Record<string, string | undefined>,
-): SourceEntry[] {
+export function buildSources(apiKeys: Record<string, string | undefined>): SourceEntry[] {
 	return [
 		{ name: "exa", fn: exaSearch },
 		{
 			name: "aliyun",
-			fn: (query, numResults, signal) =>
-				aliyunSearch(query, numResults, signal, apiKeys.aliyun),
+			fn: (query, numResults, signal) => aliyunSearch(query, numResults, signal, apiKeys.aliyun),
 		},
 	];
 }
@@ -36,14 +33,10 @@ export async function search(
 
 	const src = sources ?? DEFAULT_SOURCES;
 
-	const filtered = specifiedSource
-		? src.filter((s) => s.name === specifiedSource)
-		: src;
+	const filtered = specifiedSource ? src.filter((s) => s.name === specifiedSource) : src;
 
 	if (specifiedSource && filtered.length === 0) {
-		throw new Error(
-			`Unknown source: ${specifiedSource}. Available: ${src.map((s) => s.name).join(", ")}`,
-		);
+		throw new Error(`Unknown source: ${specifiedSource}. Available: ${src.map((s) => s.name).join(", ")}`);
 	}
 
 	for (const source of filtered) {
@@ -57,7 +50,5 @@ export async function search(
 		}
 	}
 
-	throw new Error(
-		`All search sources failed:\n${errors.map((e) => `  - ${e}`).join("\n")}`,
-	);
+	throw new Error(`All search sources failed:\n${errors.map((e) => `  - ${e}`).join("\n")}`);
 }

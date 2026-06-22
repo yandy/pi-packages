@@ -34,10 +34,6 @@ jobs:
               ;;
           esac
 
-      - name: Install dependencies
-        run: npm install
-        working-directory: ${{ steps.info.outputs.dir }}
+      - run: npm ci
 
-      - name: Publish to npm
-        run: npm publish --provenance
-        working-directory: ${{ steps.info.outputs.dir }}
+      - run: npm publish --provenance --workspace=${{ steps.info.outputs.dir }}

@@ -2,6 +2,6 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
 	test: {
-		include: ["tests/**/*.test.ts"],
+		projects: ["pi-coding-tools", "pi-container-sandbox", "pi-web-tools"],
 	},
 });
