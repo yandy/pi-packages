@@ -10,10 +10,7 @@ export async function createMcpClient(
 		requestInit: { headers, signal },
 	});
 
-	const client = new Client(
-		{ name: "pi-web-tools", version: "0.3.0" },
-		{ capabilities: {} },
-	);
+	const client = new Client({ name: "pi-web-tools", version: "0.3.0" }, { capabilities: {} });
 
 	await client.connect(transport);
 	return client;

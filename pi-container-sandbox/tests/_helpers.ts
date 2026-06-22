@@ -1,5 +1,5 @@
-import type { ExecOpts, ExecResult, Runtime } from "../src/runtime";
 import type { SbxConfig } from "../src/config";
+import type { ExecOpts, ExecResult, Runtime } from "../src/runtime";
 import { type SbxSession, setSbx } from "../src/session";
 
 const DEFAULT_CONFIG: SbxConfig = {

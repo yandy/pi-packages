@@ -328,10 +328,7 @@ export default function (pi: ExtensionAPI) {
 			const hasImage = await runtime.imageExists();
 			if (!hasImage) {
 				if (!ctx.hasUI) {
-					ctx.ui.notify(
-						`镜像 ${image} 不存在。请运行 docker build 手动构建，或使用 /sandbox build 命令。`,
-						"error",
-					);
+					ctx.ui.notify(`镜像 ${image} 不存在。请运行 docker build 手动构建，或使用 /sandbox build 命令。`, "error");
 					return;
 				}
 

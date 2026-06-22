@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { webFetch } from "./src/web_fetch";
-import { search, buildSources } from "./src/web_search/index";
+import { buildSources, search } from "./src/web_search/index";
 
 export default function (pi: ExtensionAPI) {
 	// -------------------------------------------------------------------
