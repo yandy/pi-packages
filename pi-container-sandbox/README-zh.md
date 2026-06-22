@@ -69,7 +69,19 @@ agent skill 目录以 **只读** 方式挂载到 `/skills/`。
 
 ## 配置
 
-### `.pi/agent/sandbox.json`（项目级）
+配置从两个位置读取，项目配置覆盖全局配置。
+
+### 全局配置
+
+`~/.pi/agent/sandbox.json`：
+
+```json
+{
+  "tier": "medium"
+}
+```
+
+### `.pi/sandbox.json`（项目级）
 
 ```json
 {

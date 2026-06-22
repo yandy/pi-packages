@@ -14,7 +14,6 @@ function makeMockPi(allTools: string[], activeTools: string[]) {
 }
 
 const allTrueConfig: CodingToolsConfig = {
-	applyPatch: true,
 	ls: true,
 	find: true,
 	grep: true,
@@ -58,7 +57,7 @@ describe("enableSearchTools", () => {
 
 	it("respects config: all false adds nothing", () => {
 		const pi = makeMockPi(["read", "ls", "find", "grep"], ["read"]);
-		const config: CodingToolsConfig = { applyPatch: true, ls: false, find: false, grep: false };
+		const config: CodingToolsConfig = { ls: false, find: false, grep: false };
 		enableSearchTools(pi as any, config);
 		const result = pi.setActiveTools.mock.calls[0][0] as string[];
 		expect(result).toEqual(["read"]);

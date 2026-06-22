@@ -3,14 +3,12 @@ import { resolve } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 
 export interface CodingToolsConfig {
-	applyPatch: boolean;
 	ls: boolean;
 	find: boolean;
 	grep: boolean;
 }
 
 const DEFAULT_CONFIG: CodingToolsConfig = {
-	applyPatch: true,
 	ls: true,
 	find: true,
 	grep: true,
@@ -37,7 +35,6 @@ export function loadConfig(cwd?: string): CodingToolsConfig {
 	const projectConfig = readJsonFile(resolve(dir, CONFIG_DIR_NAME, "coding-tools.json")) || {};
 
 	cachedConfig = {
-		applyPatch: projectConfig.applyPatch ?? globalConfig.applyPatch ?? DEFAULT_CONFIG.applyPatch,
 		ls: projectConfig.ls ?? globalConfig.ls ?? DEFAULT_CONFIG.ls,
 		find: projectConfig.find ?? globalConfig.find ?? DEFAULT_CONFIG.find,
 		grep: projectConfig.grep ?? globalConfig.grep ?? DEFAULT_CONFIG.grep,

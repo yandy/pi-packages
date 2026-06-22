@@ -4,7 +4,7 @@
 		"access": "public"
 	},
 	"version": "0.1.0",
-	"description": "pi package providing apply_patch tool and enabling ls/find/grep built-in tools",
+	"description": "pi package enabling ls/find/grep built-in tools",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
@@ -35,12 +35,11 @@
 	"peerDependencies": {
 		"@earendil-works/pi-coding-agent": ">=0.74.0"
 	},
-	"dependencies": {
-		"@earendil-works/pi-tui": "^0.79.9",
-		"diff": "^9.0.0",
-		"typebox": "^1.1.0"
-	},
+	"dependencies": {},
 	"devDependencies": {
-		"@types/diff": "^8.0.0"
+		"@biomejs/biome": "^2.5.0",
+		"@types/node": "^22.0.0",
+		"typescript": "~5.7.0",
+		"vitest": "^3.0.0"
 	}
 }

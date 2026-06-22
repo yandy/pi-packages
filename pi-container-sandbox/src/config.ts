@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { SizeTier } from "./tiers";
 
 export interface SbxConfig {
@@ -29,24 +29,29 @@ export const DEFAULT_SBX_CONFIG: SbxConfig = {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const PACKAGE_DOCKER_DIR = resolvePath(__dirname, "..", "docker");
 
+function readJsonFile(path: string): Record<string, unknown> | null {
+	try {
+		const raw = readFileSync(path, "utf-8");
+		return JSON.parse(raw) as Record<string, unknown>;
+	} catch {
+		return null;
+	}
+}
+
 export function getSbxConfigPath(hostCwd: string): string {
 	return resolvePath(hostCwd, CONFIG_DIR_NAME, "sandbox.json");
 }
 
 export function loadSbxConfig(hostCwd: string): SbxConfig {
-	const configPath = getSbxConfigPath(hostCwd);
-	if (!existsSync(configPath)) {
-		return { ...DEFAULT_SBX_CONFIG };
-	}
-	try {
-		const raw = JSON.parse(readFileSync(configPath, "utf-8"));
-		return {
-			...DEFAULT_SBX_CONFIG,
-			...raw,
-		} as SbxConfig;
-	} catch {
-		return { ...DEFAULT_SBX_CONFIG };
-	}
+	const agentDir = getAgentDir();
+	const globalConfig = readJsonFile(resolvePath(agentDir, "sandbox.json")) || {};
+	const projectConfig =
+		readJsonFile(getSbxConfigPath(hostCwd)) || {};
+	return {
+		...DEFAULT_SBX_CONFIG,
+		...globalConfig,
+		...projectConfig,
+	} as SbxConfig;
 }
 
 export function saveSbxConfig(hostCwd: string, config: SbxConfig): void {

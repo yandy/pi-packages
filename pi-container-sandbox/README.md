@@ -74,7 +74,19 @@ The sandbox container is removed when pi exits, unless you set
 
 ## Configuration
 
-### `.pi/agent/sandbox.json` (project-level)
+Configuration is read from two locations. Project config overrides global config.
+
+### Global config
+
+`~/.pi/agent/sandbox.json`:
+
+```json
+{
+  "tier": "medium"
+}
+```
+
+### `.pi/sandbox.json` (project-level)
 
 ```json
 {
