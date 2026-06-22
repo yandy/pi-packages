@@ -5,27 +5,30 @@
 ## 操作步骤
 
 ```bash
-cd pi-web-tools
+# 在仓库根目录执行：
 
-# 1. 升级版本号并打 tag
-npm version <新版本号> --no-git-tag-version
-git add package.json package-lock.json
-git commit -m "<新版本号>"
+# 1. 确保全部通过
+npm run typecheck && npm run check && npm test
+
+# 2. 升级版本号并打 tag
+npm version <新版本号> --workspace=pi-web-tools --no-git-tag-version
+git add pi-web-tools/package.json package-lock.json
+git commit -m "pi-web-tools v<新版本号>"
 git tag pi-web-tools-v<新版本号>
 
-# 2. 推送
+# 3. 推送
 git push origin main --tags
 
-# 3. 创建 GitHub Release（触发发布）
+# 4. 创建 GitHub Release（触发发布）
 gh release create pi-web-tools-v<新版本号> --title "pi-web-tools v<新版本号>" --notes ""
 ```
 
-创建 Release 后，`.github/workflows/publish.yml` 响应 `release: published` 事件，执行 `npm install` + `npm publish --provenance`（OIDC 认证，无需本地 npm token）。
+创建 Release 后，`.github/workflows/publish.yml` 响应 `release: published` 事件，执行 `npm ci` + `npm publish --provenance --workspace=pi-web-tools`（OIDC 认证，无需本地 npm token）。
 
 发布到：`@yandy0725/pi-web-tools@X.Y.Z`（public access）
 
 ## 注意事项
 
-- `npm version` 在 monorepo 子目录下不会自动 commit/tag，需手动操作
+- `npm version --workspace` 在 monorepo 中不会自动 commit/tag（已用 `--no-git-tag-version`），需手动操作
+- `--workspace` 参数可用 `-w` 简写
 - tag 格式必须是 `pi-web-tools-vX.Y.Z`，不能是 `vX.Y.Z`
-- 发布前确保 `npm run typecheck`、`npm run lint`、`npm run test` 全部通过

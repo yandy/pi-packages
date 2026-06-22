@@ -72,10 +72,14 @@ Fetch content from a URL and return as text, markdown, or raw HTML.
 ## Development
 
 ```bash
-npm install              # Install dependencies
-npm run typecheck        # tsc --noEmit
-npm run lint             # biome lint
-npm test                 # vitest run
+# From repo root:
+npm ci                    # Install all dependencies
+npm run typecheck         # Type-check all packages
+npm run check             # Lint + format check
+npm test                  # Run all tests
+
+# Package-specific:
+pi -e ./index.ts          # Run the extension locally (from this dir)
 ```
 
 ## License
