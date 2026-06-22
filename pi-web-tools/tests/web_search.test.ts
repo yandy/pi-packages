@@ -1,8 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 let search: typeof import("../src/web_search/index.js").search;
 let buildSources: typeof import("../src/web_search/index.js").buildSources;
@@ -14,10 +14,7 @@ vi.stubGlobal("fetch", mockFetch);
 vi.mock("../src/web_search/mcp.js", () => ({
 	createMcpClient: vi.fn().mockImplementation(async () => {
 		const [ct, st] = InMemoryTransport.createLinkedPair();
-		const client = new Client(
-			{ name: "test-client", version: "1.0" },
-			{ capabilities: {} },
-		);
+		const client = new Client({ name: "test-client", version: "1.0" }, { capabilities: {} });
 		await Promise.all([client.connect(ct), testServer.connect(st)]);
 		return client;
 	}),
@@ -28,10 +25,7 @@ beforeEach(async () => {
 	mockFetch.mockReset();
 	vi.unstubAllEnvs();
 
-	testServer = new Server(
-		{ name: "test-server", version: "1.0" },
-		{ capabilities: { tools: {} } },
-	);
+	testServer = new Server({ name: "test-server", version: "1.0" }, { capabilities: { tools: {} } });
 
 	const wsMod = await import("../src/web_search/index.js");
 	search = wsMod.search;
@@ -171,9 +165,7 @@ describe("aliyunSearch", () => {
 					{
 						type: "text",
 						text: JSON.stringify({
-							pages: [
-								{ title: "Bailian Test", link: "https://example.com", snippet: "Bailian content" },
-							],
+							pages: [{ title: "Bailian Test", link: "https://example.com", snippet: "Bailian content" }],
 						}),
 					},
 				],
@@ -343,15 +335,13 @@ describe("search orchestrator", () => {
 		});
 
 		const sources = buildSources({});
-		await expect(
-			search("test", 5, undefined, undefined, undefined, sources),
-		).rejects.toThrow("All search sources failed");
+		await expect(search("test", 5, undefined, undefined, undefined, sources)).rejects.toThrow(
+			"All search sources failed",
+		);
 	});
 
 	it("throws for unknown source", async () => {
 		const sources = buildSources({});
-		await expect(
-			search("test", 5, undefined, undefined, "unknown", sources),
-		).rejects.toThrow("Unknown source");
+		await expect(search("test", 5, undefined, undefined, "unknown", sources)).rejects.toThrow("Unknown source");
 	});
 });

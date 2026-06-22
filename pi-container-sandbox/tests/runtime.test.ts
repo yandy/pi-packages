@@ -21,13 +21,10 @@ async function ensureTestImage(image: string) {
 		await new Promise<void>((resolve, reject) => {
 			docker.pull(image, {}, (err: any, stream: any) => {
 				if (err) return reject(err);
-				docker.modem.followProgress(
-					stream,
-					(err2: any) => {
-						if (err2) reject(err2 instanceof Error ? err2 : new Error(String(err2)));
-						else resolve();
-					},
-				);
+				docker.modem.followProgress(stream, (err2: any) => {
+					if (err2) reject(err2 instanceof Error ? err2 : new Error(String(err2)));
+					else resolve();
+				});
 			});
 		});
 	}
@@ -134,7 +131,6 @@ describe.skipIf(!dockerAvailable)("DockerRuntime lifecycle", () => {
 			} catch {}
 		}
 	}, 120000);
-
 });
 
 describe.skipIf(!dockerAvailable)("DockerRuntime exec", () => {

@@ -1,5 +1,5 @@
-import type { SearchResponse } from "./types";
 import { createMcpClient } from "./mcp";
+import type { SearchResponse } from "./types";
 
 const EXA_REST_URL = "https://api.exa.ai/search";
 const EXA_MCP_URL = "https://mcp.exa.ai/mcp";
