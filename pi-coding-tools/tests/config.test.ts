@@ -11,22 +11,26 @@ function makeTempDir(): string {
 describe("loadConfig", () => {
 	let tempCwd: string;
 	let savedHome: string | undefined;
+	let savedAgentDir: string | undefined;
 
 	beforeEach(() => {
 		tempCwd = makeTempDir();
 		// loadConfig caches by cwd; reset cache between tests by using a unique cwd each time
 		savedHome = process.env.HOME;
+		// Unset PI_CODING_AGENT_DIR so getAgentDir() uses HOME instead
+		savedAgentDir = process.env.PI_CODING_AGENT_DIR;
+		delete process.env.PI_CODING_AGENT_DIR;
 	});
 
 	afterEach(() => {
 		if (savedHome !== undefined) process.env.HOME = savedHome;
+		if (savedAgentDir !== undefined) process.env.PI_CODING_AGENT_DIR = savedAgentDir;
 		rmSync(tempCwd, { recursive: true, force: true });
 	});
 
 	it("returns all-true defaults when no config files exist", () => {
 		const config = loadConfig(tempCwd);
 		const expected: CodingToolsConfig = {
-			applyPatch: true,
 			ls: true,
 			find: true,
 			grep: true,
@@ -39,11 +43,10 @@ describe("loadConfig", () => {
 		process.env.HOME = tempCwd;
 		const agentDir = join(tempCwd, ".pi", "agent");
 		mkdirSync(agentDir, { recursive: true });
-		writeFileSync(join(agentDir, "coding-tools.json"), JSON.stringify({ applyPatch: false, grep: false }));
+		writeFileSync(join(agentDir, "coding-tools.json"), JSON.stringify({ grep: false }));
 
 		const config = loadConfig(tempCwd);
 		expect(config).toEqual({
-			applyPatch: false,
 			ls: true,
 			find: true,
 			grep: false,
@@ -54,7 +57,7 @@ describe("loadConfig", () => {
 		process.env.HOME = tempCwd;
 		const agentDir = join(tempCwd, ".pi", "agent");
 		mkdirSync(agentDir, { recursive: true });
-		writeFileSync(join(agentDir, "coding-tools.json"), JSON.stringify({ applyPatch: false, ls: false }));
+		writeFileSync(join(agentDir, "coding-tools.json"), JSON.stringify({ ls: false }));
 
 		// Project config at <cwd>/.pi/coding-tools.json
 		mkdirSync(join(tempCwd, ".pi"), { recursive: true });
@@ -62,12 +65,11 @@ describe("loadConfig", () => {
 		const projectCwd = join(tempCwd, "project");
 		mkdirSync(projectCwd);
 		mkdirSync(join(projectCwd, ".pi"), { recursive: true });
-		writeFileSync(join(projectCwd, ".pi", "coding-tools.json"), JSON.stringify({ applyPatch: true }));
+		writeFileSync(join(projectCwd, ".pi", "coding-tools.json"), JSON.stringify({ ls: true }));
 
 		const config = loadConfig(projectCwd);
 		expect(config).toEqual({
-			applyPatch: true, // overridden by project
-			ls: false, // from global
+			ls: true, // overridden by project
 			find: true, // default
 			grep: true, // default
 		});
@@ -81,7 +83,6 @@ describe("loadConfig", () => {
 
 		const config = loadConfig(tempCwd);
 		expect(config).toEqual({
-			applyPatch: true,
 			ls: true,
 			find: true,
 			grep: true,
@@ -96,7 +97,6 @@ describe("loadConfig", () => {
 
 		const config = loadConfig(tempCwd);
 		expect(config).toEqual({
-			applyPatch: true,
 			ls: true,
 			find: false,
 			grep: true,
