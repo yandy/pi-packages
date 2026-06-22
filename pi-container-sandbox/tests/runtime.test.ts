@@ -48,7 +48,7 @@ describe("deriveContainerName", () => {
 	});
 
 	it("truncates long basenames to stay under 128 chars", () => {
-		const longDir = "/" + "a".repeat(200);
+		const longDir = `/${"a".repeat(200)}`;
 		const name = deriveContainerName(longDir);
 		expect(name.length).toBeLessThanOrEqual(128);
 		expect(name).toMatch(/^pi-sbx-/);
@@ -113,7 +113,7 @@ describe.skipIf(!dockerAvailable)("DockerRuntime lifecycle", () => {
 	}, 120000);
 
 	it("second withReady() call is deduplicated", async () => {
-		const dedupName = testName + "-dedup";
+		const dedupName = `${testName}-dedup`;
 		const runtime = new DockerRuntime({
 			image: "debian:12-slim",
 			hostCwd: "/tmp",
@@ -141,23 +141,23 @@ describe.skipIf(!dockerAvailable)("DockerRuntime exec", () => {
 	afterAll(async () => {
 		const d = new Dockerode({ socketPath: "/var/run/docker.sock" });
 		try {
-			const c = d.getContainer(testName + "-exec1");
+			const c = d.getContainer(`${testName}-exec1`);
 			await c.remove({ force: true });
 		} catch {}
 		try {
-			const c = d.getContainer(testName + "-exec2");
+			const c = d.getContainer(`${testName}-exec2`);
 			await c.remove({ force: true });
 		} catch {}
 		try {
-			const c = d.getContainer(testName + "-exec3");
+			const c = d.getContainer(`${testName}-exec3`);
 			await c.remove({ force: true });
 		} catch {}
 		try {
-			const c = d.getContainer(testName + "-exec4");
+			const c = d.getContainer(`${testName}-exec4`);
 			await c.remove({ force: true });
 		} catch {}
 		try {
-			const c = d.getContainer(testName + "-exec5");
+			const c = d.getContainer(`${testName}-exec5`);
 			await c.remove({ force: true });
 		} catch {}
 	});
@@ -166,7 +166,7 @@ describe.skipIf(!dockerAvailable)("DockerRuntime exec", () => {
 		const runtime = new DockerRuntime({
 			image: "debian:12-slim",
 			hostCwd: "/tmp",
-			name: testName + "-exec1",
+			name: `${testName}-exec1`,
 			allowNetwork: false,
 			resources: { memory: "256m", cpus: "0.5" },
 		});
@@ -183,7 +183,7 @@ describe.skipIf(!dockerAvailable)("DockerRuntime exec", () => {
 		const runtime = new DockerRuntime({
 			image: "debian:12-slim",
 			hostCwd: "/tmp",
-			name: testName + "-exec2",
+			name: `${testName}-exec2`,
 			allowNetwork: false,
 			resources: { memory: "256m", cpus: "0.5" },
 		});
@@ -198,7 +198,7 @@ describe.skipIf(!dockerAvailable)("DockerRuntime exec", () => {
 		const runtime = new DockerRuntime({
 			image: "debian:12-slim",
 			hostCwd: "/tmp",
-			name: testName + "-exec3",
+			name: `${testName}-exec3`,
 			allowNetwork: false,
 			resources: { memory: "256m", cpus: "0.5" },
 		});
@@ -216,7 +216,7 @@ describe.skipIf(!dockerAvailable)("DockerRuntime exec", () => {
 		const runtime = new DockerRuntime({
 			image: "debian:12-slim",
 			hostCwd: "/tmp",
-			name: testName + "-exec4",
+			name: `${testName}-exec4`,
 			allowNetwork: false,
 			resources: { memory: "256m", cpus: "0.5" },
 		});
@@ -234,7 +234,7 @@ describe.skipIf(!dockerAvailable)("DockerRuntime exec", () => {
 		const runtime = new DockerRuntime({
 			image: "debian:12-slim",
 			hostCwd: "/tmp",
-			name: testName + "-exec5",
+			name: `${testName}-exec5`,
 			allowNetwork: false,
 			resources: { memory: "256m", cpus: "0.5" },
 		});
@@ -259,7 +259,7 @@ describe.skipIf(!dockerAvailable)("DockerRuntime imageExists", () => {
 		const runtime = new DockerRuntime({
 			image: "nonexistent-image-xyz",
 			hostCwd: "/tmp",
-			name: "pi-test-exists-" + Date.now(),
+			name: `pi-test-exists-${Date.now()}`,
 			allowNetwork: false,
 			resources: { memory: "256m", cpus: "0.5" },
 		});
@@ -272,7 +272,7 @@ describe.skipIf(!dockerAvailable)("DockerRuntime imageExists", () => {
 		const runtime = new DockerRuntime({
 			image: "debian:12-slim",
 			hostCwd: "/tmp",
-			name: "pi-test-exists2-" + Date.now(),
+			name: `pi-test-exists2-${Date.now()}`,
 			allowNetwork: false,
 			resources: { memory: "256m", cpus: "0.5" },
 		});
@@ -287,7 +287,7 @@ describe("DockerRuntime buildImage / getImage", () => {
 		const runtime = new DockerRuntime({
 			image: "debian:12-slim",
 			hostCwd: "/tmp",
-			name: "pi-test-build-" + Date.now(),
+			name: `pi-test-build-${Date.now()}`,
 			allowNetwork: false,
 			resources: { memory: "256m", cpus: "0.5" },
 		});
@@ -298,7 +298,7 @@ describe("DockerRuntime buildImage / getImage", () => {
 		const runtime = new DockerRuntime({
 			image: "my-custom-image:v1",
 			hostCwd: "/tmp",
-			name: "pi-test-getimg-" + Date.now(),
+			name: `pi-test-getimg-${Date.now()}`,
 			allowNetwork: false,
 			resources: { memory: "256m", cpus: "0.5" },
 		});

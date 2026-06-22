@@ -12,7 +12,7 @@ import { DEFAULT_SBX_CONFIG, getSbxConfigPath, imageRefForTag, loadSbxConfig, sa
 
 const TEST_CONFIG_DIR = ".test-cfg";
 
-const testDir = resolvePath(tmpdir(), "pi-sandbox-test-" + Date.now());
+const testDir = resolvePath(tmpdir(), `pi-sandbox-test-${Date.now()}`);
 
 beforeEach(() => {
 	if (existsSync(testDir)) rmSync(testDir, { recursive: true });

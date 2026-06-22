@@ -45,8 +45,7 @@ export function getSbxConfigPath(hostCwd: string): string {
 export function loadSbxConfig(hostCwd: string): SbxConfig {
 	const agentDir = getAgentDir();
 	const globalConfig = readJsonFile(resolvePath(agentDir, "sandbox.json")) || {};
-	const projectConfig =
-		readJsonFile(getSbxConfigPath(hostCwd)) || {};
+	const projectConfig = readJsonFile(getSbxConfigPath(hostCwd)) || {};
 	return {
 		...DEFAULT_SBX_CONFIG,
 		...globalConfig,
@@ -60,7 +59,7 @@ export function saveSbxConfig(hostCwd: string, config: SbxConfig): void {
 	if (!existsSync(dir)) {
 		mkdirSync(dir, { recursive: true });
 	}
-	const tmpPath = configPath + ".tmp";
+	const tmpPath = `${configPath}.tmp`;
 	writeFileSync(tmpPath, JSON.stringify(config, null, 2));
 	renameSync(tmpPath, configPath);
 }

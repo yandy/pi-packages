@@ -16,7 +16,7 @@ import {
 } from "../src/paths";
 import type { MountSpec } from "../src/runtime";
 
-const testDir = resolvePath(tmpdir(), "pi-paths-test-" + Date.now());
+const testDir = resolvePath(tmpdir(), `pi-paths-test-${Date.now()}`);
 
 beforeEach(() => {
 	if (!existsSync(testDir)) mkdirSync(testDir, { recursive: true });
@@ -123,7 +123,7 @@ describe("PathApprovalStore", () => {
 		store.add("/tmp/foo", Infinity);
 		const found = store.find("/tmp/foo");
 		expect(found).toBeDefined();
-		expect(found!.path).toBe("/tmp/foo");
+		expect(found?.path).toBe("/tmp/foo");
 	});
 	it("revokes records", () => {
 		const store = new PathApprovalStore(testDir);
@@ -142,7 +142,7 @@ describe("PathApprovalStore", () => {
 		store.add("/tmp/approved-dir", Infinity);
 		const found = store.find("/tmp/approved-dir/sub/file.txt");
 		expect(found).toBeDefined();
-		expect(found!.path).toBe("/tmp/approved-dir");
+		expect(found?.path).toBe("/tmp/approved-dir");
 	});
 	it("expired records are not returned", () => {
 		const store = new PathApprovalStore(testDir);
@@ -234,7 +234,7 @@ describe("PathApprovalStore merge-on-conflict", () => {
 		const store3 = new PathApprovalStore(dir);
 		const found = store3.find("/bar");
 		expect(found).toBeDefined();
-		expect(found!.path).toBe("/bar");
+		expect(found?.path).toBe("/bar");
 
 		rmSync(dir, { recursive: true, force: true });
 	});

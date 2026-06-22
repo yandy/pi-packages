@@ -39,13 +39,13 @@ describe.skipIf(!dockerAvailable)("DockerRuntime container reuse", () => {
 			await c.remove({ force: true });
 		} catch {}
 		try {
-			const c = d.getContainer(testName + "-stopped");
+			const c = d.getContainer(`${testName}-stopped`);
 			await c.remove({ force: true });
 		} catch {}
 	});
 
 	it("stopped container is removed and a new one is created", async () => {
-		const stoppedName = testName + "-stopped";
+		const stoppedName = `${testName}-stopped`;
 		const d = new Dockerode({ socketPath: "/var/run/docker.sock" });
 
 		try {

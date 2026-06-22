@@ -171,7 +171,7 @@ export class PathApprovalStore {
 			}
 		}
 
-		const tmpPath = this.path + ".tmp";
+		const tmpPath = `${this.path}.tmp`;
 		const data = Array.from(this.records.values()).map((r) => ({
 			...r,
 			expiresAt: r.expiresAt === Infinity ? null : r.expiresAt,
@@ -206,7 +206,7 @@ export class PathApprovalStore {
 
 		for (const [, record] of this.records) {
 			if (
-				(absPath === record.path || absPath.startsWith(record.path + "/")) &&
+				(absPath === record.path || absPath.startsWith(`${record.path}/`)) &&
 				(record.expiresAt === Infinity || record.expiresAt > Date.now())
 			) {
 				return record;
@@ -250,7 +250,7 @@ export async function requestPathApproval(
 	},
 ): Promise<boolean> {
 	for (const prefix of sessionPrefixes) {
-		if (absPath === prefix || absPath.startsWith(prefix + "/")) return true;
+		if (absPath === prefix || absPath.startsWith(`${prefix}/`)) return true;
 	}
 
 	const existing = store.find(absPath);
