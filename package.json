@@ -1,4 +1,5 @@
 {
+	"name": "pi-packages",
 	"private": true,
 	"workspaces": [
 		"pi-coding-tools",

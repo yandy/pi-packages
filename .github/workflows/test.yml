@@ -17,6 +17,12 @@ jobs:
         id: filter
         with:
           filters: |
+            root:
+              - "package.json"
+              - "package-lock.json"
+              - "tsconfig.base.json"
+              - "vitest.config.ts"
+              - "biome.json"
             pi-container-sandbox:
               - "pi-container-sandbox/**"
             pi-web-tools:
