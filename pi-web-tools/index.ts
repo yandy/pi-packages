@@ -6,18 +6,18 @@ import { buildSources, search } from "./src/web_search/index";
 
 export default function (pi: ExtensionAPI) {
 	// -------------------------------------------------------------------
-	// web_search
+	// websearch
 	// -------------------------------------------------------------------
 	pi.registerTool({
-		name: "web_search",
+		name: "websearch",
 		label: "Web Search",
 		description:
 			`Search the web via Exa (primary) or Aliyun (fallback) and return raw results (titles, URLs, snippets). With EXA_API_KEY: full REST API. Without: MCP free tier (150 calls/day). Set ALIYUN_API_KEY to enable Aliyun fallback. ` +
 			`The current year is ${new Date().getFullYear()}.`,
 		promptSnippet:
-			"web_search: search the web via Exa (primary) or Aliyun (fallback). Returns raw results with titles, URLs, snippets. LLM synthesizes the answer.",
+			"websearch: search the web via Exa (primary) or Aliyun (fallback). Returns raw results with titles, URLs, snippets. LLM synthesizes the answer.",
 		promptGuidelines: [
-			"Use web_search when you need current information outside your training data.",
+			"Use websearch when you need current information outside your training data.",
 			"Synthesize a clear answer from the search results and cite sources with markdown hyperlinks.",
 		],
 		parameters: Type.Object({
@@ -30,7 +30,7 @@ export default function (pi: ExtensionAPI) {
 		renderCall(args, theme) {
 			const p = args as { query: string };
 			return new Text(
-				theme.fg("toolTitle", theme.bold("web_search ")) + theme.fg("accent", `"${p.query || "..."}"`),
+				theme.fg("toolTitle", theme.bold("websearch ")) + theme.fg("accent", `"${p.query || "..."}"`),
 				0,
 				0,
 			);
@@ -80,15 +80,15 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// -------------------------------------------------------------------
-	// web_fetch
+	// webfetch
 	// -------------------------------------------------------------------
 	pi.registerTool({
-		name: "web_fetch",
+		name: "webfetch",
 		label: "Web Fetch",
 		description: "Fetch content from a URL and return as text, markdown, or raw HTML.",
-		promptSnippet: "web_fetch: fetch content from a URL as text, markdown, or raw HTML.",
+		promptSnippet: "webfetch: fetch content from a URL as text, markdown, or raw HTML.",
 		promptGuidelines: [
-			"Use web_fetch to retrieve full page content from a URL.",
+			"Use webfetch to retrieve full page content from a URL.",
 			"Prefer fetching specific pages rather than homepages for more targeted information.",
 		],
 		parameters: Type.Object({
@@ -111,7 +111,7 @@ export default function (pi: ExtensionAPI) {
 		}),
 		renderCall(args, theme) {
 			const p = args as { url: string };
-			return new Text(theme.fg("toolTitle", theme.bold("web_fetch ")) + theme.fg("accent", p.url || "..."), 0, 0);
+			return new Text(theme.fg("toolTitle", theme.bold("webfetch ")) + theme.fg("accent", p.url || "..."), 0, 0);
 		},
 		renderResult(result, { expanded }, theme) {
 			const text = result.content?.[0];
