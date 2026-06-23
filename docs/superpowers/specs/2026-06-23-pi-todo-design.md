@@ -87,28 +87,28 @@ pi-todo/
 
 ## 持久化
 
-- 通过 `pi.appendEntry()` 写入 session 文件（.jsonl）
-- 每次 `set` / `update` 操作写入一条 entry，携带完整快照
+采用 pi 官方推荐的状态管理方式——将完整快照存入 tool result `details`，而非 `appendEntry`。原因：这种方式天然支持分支（branch-safe），`/fork` 或 `/clone` 后 todo 状态自动还原到该历史点。
+
+- 每次 `set` / `update` 执行时，将当前完整列表写入返回值的 `details.todos`
+- `session_start` 和 `session_tree` 事件触发重建：扫描 `ctx.sessionManager.getBranch()` 中所有 `todo` 工具的 toolResult，取最后一条的 `details` 作为当前状态
+- Session resume 时同样走 `session_start` 重建路径，todo 状态可见
 - 依赖校验：set 时校验 blockedBy 引用的 ID 存在、无自依赖、无循环依赖，校验失败返回错误
-- Session resume 时扫描 entries，重建当前 todo 状态
 - 仅在当前 session 内有效，不跨 session 共享
 
 ## 提示词注入
 
-极简注入，仅在 `before_agent_start` 时添加一行 GuidanceBlock：
+极简注入，直接在工具定义上声明 `promptSnippet` 与 `promptGuidelines`，由 pi 自动注入到系统提示词的 `Available tools` 与 `Guidelines` 区块。无需额外 `before_agent_start` 事件钩子，零胶水代码。
 
-```
-Use `todo` tool to track tasks: action "set" to plan, "update" to change status, "list" to review.
-```
-
-不注入复杂工作流指引，不污染系统提示词。
+- `promptSnippet`: `Track tasks with a todo list.`
+- `promptGuidelines`:
+  - `Use todo to plan multi-step work: action "set" lists all tasks up front.`
+  - `Use todo action "update" to mark tasks in_progress/done as you complete them.`
 
 ## 生命周期
 
-- **初始化（agent_start）**: 从 session entries 重建 todo 状态
-- **工具执行**: 更新内存状态 + appendEntry 持久化
-- **Widget 更新（post_tool_execution）**: 每次 todo 工具执行后刷新 widget 显示
-- **Widget 生命周期**: 跟随 session，全部 done 自动隐藏
+- **重建（session_start / session_tree）**: 扫描 getBranch() 重建内存状态，刷新 widget
+- **工具执行**: 更新内存状态，写入返回值 details（持久化），刷新 widget
+- **Widget 生命周期**: 跟随 session，全部 done 或无任务时自动隐藏
 
 ## 工程质量
 
