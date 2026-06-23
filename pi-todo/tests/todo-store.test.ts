@@ -55,12 +55,14 @@ describe("updateTodo", () => {
 
 	it("updates the title of an existing todo", () => {
 		const result = updateTodo(base, "a", { title: "Renamed" });
+		expect(result.error).toBeUndefined();
 		expect(result.todos[0].title).toBe("Renamed");
 	});
 
 	it("updates blockedBy and re-validates dependencies", () => {
 		const result = updateTodo(base, "a", { blockedBy: ["b"] });
 		expect(result.error).toMatch(/cycle/i);
+		expect(result.todos).toEqual(base);
 	});
 
 	it("returns an error when the id is not found", () => {
@@ -71,6 +73,7 @@ describe("updateTodo", () => {
 
 	it("leaves other fields untouched when patch is partial", () => {
 		const result = updateTodo(base, "b", { status: "done" });
+		expect(result.error).toBeUndefined();
 		expect(result.todos[1].title).toBe("Task B");
 		expect(result.todos[1].blockedBy).toEqual(["a"]);
 	});

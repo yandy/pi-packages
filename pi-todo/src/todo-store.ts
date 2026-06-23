@@ -53,6 +53,12 @@ export function validateDependencies(items: TodoItem[]): string | undefined {
 	return undefined;
 }
 
+export function setTodos(items: TodoItem[]): TodoResult {
+	const error = validateDependencies(items);
+	if (error) return { todos: [], error };
+	return { todos: items.map((i) => ({ ...i })) };
+}
+
 export function updateTodo(
 	todos: TodoItem[],
 	id: string,
@@ -77,10 +83,4 @@ export function updateTodo(
 	if (error) return { todos: [...todos], error };
 
 	return { todos: next };
-}
-
-export function setTodos(items: TodoItem[]): TodoResult {
-	const error = validateDependencies(items);
-	if (error) return { todos: [], error };
-	return { todos: items.map((i) => ({ ...i })) };
 }
