@@ -4,7 +4,8 @@
 	"workspaces": [
 		"pi-coding-tools",
 		"pi-container-sandbox",
-		"pi-web-tools"
+		"pi-web-tools",
+		"pi-todo"
 	],
 	"scripts": {
 		"test": "npm run test --workspaces --if-present",
