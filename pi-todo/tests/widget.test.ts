@@ -18,7 +18,7 @@ describe("renderWidget", () => {
 		expect(renderWidget(items, theme)).toBeNull();
 	});
 
-	it("returns a single line summarising each non-done todo", () => {
+	it("renders one line per todo, with done items shown via ✓ + strikethrough", () => {
 		const items: TodoItem[] = [
 			{ id: "a", title: "Plan", status: "pending" },
 			{ id: "b", title: "Build", status: "in_progress" },
@@ -26,11 +26,11 @@ describe("renderWidget", () => {
 		];
 		const lines = renderWidget(items, theme);
 		expect(lines).not.toBeNull();
-		expect(lines?.length).toBe(1);
+		expect(lines?.length).toBe(3);
 		expect(lines?.[0]).toContain("○ Plan");
-		expect(lines?.[0]).toContain("◉ Build");
-		// Done items are omitted from the widget.
-		expect(lines?.[0]).not.toContain("Shipped");
+		expect(lines?.[1]).toContain("◉ Build");
+		// Done items are kept and shown with ✓ (not omitted).
+		expect(lines?.[2]).toContain("✓ Shipped");
 	});
 
 	it("shows the blocked marker for blocked todos", () => {
@@ -39,6 +39,6 @@ describe("renderWidget", () => {
 			{ id: "b", title: "Second", status: "pending", blockedBy: ["a"] },
 		];
 		const lines = renderWidget(items, theme);
-		expect(lines?.[0]).toContain("🔒 Second");
+		expect(lines?.[1]).toContain("🔒 Second");
 	});
 });
