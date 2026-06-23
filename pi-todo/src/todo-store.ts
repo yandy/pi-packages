@@ -106,7 +106,22 @@ export function listTodos(todos: TodoItem[]): string {
 	return todos
 		.map((t) => {
 			const marker = isBlocked(todos, t) ? "🔒" : STATUS_MARKER[t.status];
-			return `${marker} ${t.title}`;
+			return `${marker} [${t.id}] ${t.title}`;
 		})
 		.join("\n");
+}
+
+/** Reconstruct the current todo list from session branch entries (last-write-wins). */
+export function reconstructTodos(
+	entries: Array<{ type: string; message?: { role?: string; toolName?: string; details?: unknown } }>,
+): TodoItem[] {
+	let todos: TodoItem[] = [];
+	for (const entry of entries) {
+		if (entry.type !== "message") continue;
+		const msg = entry.message;
+		if (msg?.role !== "toolResult" || msg.toolName !== "todo") continue;
+		const details = msg.details as { todos?: TodoItem[] } | undefined;
+		if (details?.todos) todos = details.todos;
+	}
+	return todos;
 }

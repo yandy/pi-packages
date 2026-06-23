@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { listTodos, setTodos, type TodoItem, updateTodo } from "../src/todo-store.js";
+import { listTodos, reconstructTodos, setTodos, type TodoItem, updateTodo } from "../src/todo-store.js";
 
 describe("setTodos", () => {
 	it("accepts a valid list of todos", () => {
@@ -53,10 +53,10 @@ describe("listTodos", () => {
 			{ id: "d", title: "Task D", status: "pending", blockedBy: ["a"] },
 		];
 		const text = listTodos(items);
-		expect(text).toContain("○ Task A");
-		expect(text).toContain("◉ Task B");
-		expect(text).toContain("✓ Task C");
-		expect(text).toContain("🔒 Task D");
+		expect(text).toContain("○ [a] Task A");
+		expect(text).toContain("◉ [b] Task B");
+		expect(text).toContain("✓ [c] Task C");
+		expect(text).toContain("🔒 [d] Task D");
 	});
 });
 
@@ -96,5 +96,51 @@ describe("updateTodo", () => {
 		expect(result.error).toBeUndefined();
 		expect(result.todos[1].title).toBe("Task B");
 		expect(result.todos[1].blockedBy).toEqual(["a"]);
+	});
+});
+
+describe("reconstructTodos", () => {
+	const todoEntry = (todos: TodoItem[]) => ({
+		type: "message",
+		message: {
+			role: "toolResult",
+			toolName: "todo",
+			details: { todos },
+		},
+	});
+
+	it("returns an empty array for empty entries", () => {
+		expect(reconstructTodos([])).toEqual([]);
+	});
+
+	it("returns an empty array when no entries match", () => {
+		const entries = [
+			{ type: "other" },
+			{ type: "message", message: { role: "toolResult", toolName: "other" } },
+			{ type: "message", message: { role: "user", toolName: "todo" } },
+		];
+		expect(reconstructTodos(entries)).toEqual([]);
+	});
+
+	it("returns todos from the single matching toolResult entry", () => {
+		const items: TodoItem[] = [{ id: "a", title: "Task A", status: "pending" }];
+		expect(reconstructTodos([todoEntry(items)])).toEqual(items);
+	});
+
+	it("returns the last matching entry's todos (last-write-wins)", () => {
+		const first: TodoItem[] = [{ id: "a", title: "First", status: "pending" }];
+		const last: TodoItem[] = [{ id: "b", title: "Last", status: "done" }];
+		expect(reconstructTodos([todoEntry(first), todoEntry(last)])).toEqual(last);
+	});
+
+	it("ignores entries where details.todos is missing and keeps prior", () => {
+		const a: TodoItem[] = [{ id: "a", title: "Task A", status: "pending" }];
+		const b: TodoItem[] = [{ id: "b", title: "Task B", status: "done" }];
+		const entries = [
+			todoEntry(a),
+			{ type: "message", message: { role: "toolResult", toolName: "todo", details: {} } },
+			todoEntry(b),
+		];
+		expect(reconstructTodos(entries)).toEqual(b);
 	});
 });

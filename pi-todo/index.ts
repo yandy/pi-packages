@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { isBlocked, listTodos, setTodos, type TodoItem, updateTodo } from "./src/todo-store.js";
+import { isBlocked, listTodos, reconstructTodos, setTodos, type TodoItem, updateTodo } from "./src/todo-store.js";
 import { renderWidget } from "./src/widget.js";
 
 const WIDGET_ID = "pi-todo";
@@ -23,14 +23,7 @@ export default function (pi: ExtensionAPI) {
 
 	// Reconstruct branch-safe state from tool-result details on (re)start / tree navigation.
 	const reconstructState = (ctx: ExtensionContext) => {
-		todos = [];
-		for (const entry of ctx.sessionManager.getBranch()) {
-			if (entry.type !== "message") continue;
-			const msg = entry.message;
-			if (msg.role !== "toolResult" || msg.toolName !== "todo") continue;
-			const details = msg.details as TodoDetails | undefined;
-			if (details?.todos) todos = details.todos;
-		}
+		todos = reconstructTodos(ctx.sessionManager.getBranch());
 		refreshWidget(ctx);
 	};
 
@@ -147,7 +140,7 @@ export default function (pi: ExtensionAPI) {
 
 			refreshWidget(ctx);
 
-			const text = result.error ?? (params.action === "list" ? listTodos(todos) : "OK");
+			const text = result.error ?? (params.action === "update" ? "OK" : listTodos(todos));
 			return {
 				content: [{ type: "text", text }],
 				details: { action: params.action, todos: [...todos], error: result.error } as TodoDetails,
