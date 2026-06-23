@@ -53,6 +53,32 @@ export function validateDependencies(items: TodoItem[]): string | undefined {
 	return undefined;
 }
 
+export function updateTodo(
+	todos: TodoItem[],
+	id: string,
+	patch: {
+		status?: "pending" | "in_progress" | "done";
+		title?: string;
+		blockedBy?: string[];
+	},
+): TodoResult {
+	const target = todos.find((t) => t.id === id);
+	if (!target) {
+		return { todos: [...todos], error: `Task not found: ${id}` };
+	}
+
+	const updated: TodoItem = { ...target };
+	if (patch.status !== undefined) updated.status = patch.status;
+	if (patch.title !== undefined) updated.title = patch.title;
+	if (patch.blockedBy !== undefined) updated.blockedBy = [...patch.blockedBy];
+
+	const next = todos.map((t) => (t.id === id ? updated : t));
+	const error = validateDependencies(next);
+	if (error) return { todos: [...todos], error };
+
+	return { todos: next };
+}
+
 export function setTodos(items: TodoItem[]): TodoResult {
 	const error = validateDependencies(items);
 	if (error) return { todos: [], error };

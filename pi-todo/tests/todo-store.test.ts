@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { setTodos, type TodoItem } from "../src/todo-store.js";
+import { setTodos, type TodoItem, updateTodo } from "../src/todo-store.js";
 
 describe("setTodos", () => {
 	it("accepts a valid list of todos", () => {
@@ -37,5 +37,41 @@ describe("setTodos", () => {
 		const result = setTodos([]);
 		expect(result.error).toBeUndefined();
 		expect(result.todos).toEqual([]);
+	});
+});
+
+describe("updateTodo", () => {
+	const base: TodoItem[] = [
+		{ id: "a", title: "Task A", status: "pending" },
+		{ id: "b", title: "Task B", status: "pending", blockedBy: ["a"] },
+	];
+
+	it("updates the status of an existing todo", () => {
+		const result = updateTodo(base, "a", { status: "in_progress" });
+		expect(result.error).toBeUndefined();
+		expect(result.todos[0].status).toBe("in_progress");
+		expect(result.todos[1].status).toBe("pending");
+	});
+
+	it("updates the title of an existing todo", () => {
+		const result = updateTodo(base, "a", { title: "Renamed" });
+		expect(result.todos[0].title).toBe("Renamed");
+	});
+
+	it("updates blockedBy and re-validates dependencies", () => {
+		const result = updateTodo(base, "a", { blockedBy: ["b"] });
+		expect(result.error).toMatch(/cycle/i);
+	});
+
+	it("returns an error when the id is not found", () => {
+		const result = updateTodo(base, "zzz", { status: "done" });
+		expect(result.error).toMatch(/not found/i);
+		expect(result.todos).toEqual(base);
+	});
+
+	it("leaves other fields untouched when patch is partial", () => {
+		const result = updateTodo(base, "b", { status: "done" });
+		expect(result.todos[1].title).toBe("Task B");
+		expect(result.todos[1].blockedBy).toEqual(["a"]);
 	});
 });
