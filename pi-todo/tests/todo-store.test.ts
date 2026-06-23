@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { setTodos, type TodoItem, updateTodo } from "../src/todo-store.js";
+import { listTodos, setTodos, type TodoItem, updateTodo } from "../src/todo-store.js";
 
 describe("setTodos", () => {
 	it("accepts a valid list of todos", () => {
@@ -37,6 +37,26 @@ describe("setTodos", () => {
 		const result = setTodos([]);
 		expect(result.error).toBeUndefined();
 		expect(result.todos).toEqual([]);
+	});
+});
+
+describe("listTodos", () => {
+	it("returns a placeholder for an empty list", () => {
+		expect(listTodos([])).toBe("No todos");
+	});
+
+	it("lists each todo with a status marker and blocked indicator", () => {
+		const items: TodoItem[] = [
+			{ id: "a", title: "Task A", status: "pending" },
+			{ id: "b", title: "Task B", status: "in_progress" },
+			{ id: "c", title: "Task C", status: "done" },
+			{ id: "d", title: "Task D", status: "pending", blockedBy: ["a"] },
+		];
+		const text = listTodos(items);
+		expect(text).toContain("○ Task A");
+		expect(text).toContain("◉ Task B");
+		expect(text).toContain("✓ Task C");
+		expect(text).toContain("🔒 Task D");
 	});
 });
 

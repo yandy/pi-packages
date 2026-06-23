@@ -84,3 +84,29 @@ export function updateTodo(
 
 	return { todos: next };
 }
+
+const STATUS_MARKER: Record<TodoItem["status"], string> = {
+	pending: "○",
+	in_progress: "◉",
+	done: "✓",
+};
+
+/** True when a todo is blocked by at least one incomplete dependency. */
+export function isBlocked(todos: TodoItem[], item: TodoItem): boolean {
+	const byId = new Map(todos.map((t) => [t.id, t]));
+	for (const dep of item.blockedBy ?? []) {
+		const node = byId.get(dep);
+		if (node?.status !== "done") return true;
+	}
+	return false;
+}
+
+export function listTodos(todos: TodoItem[]): string {
+	if (todos.length === 0) return "No todos";
+	return todos
+		.map((t) => {
+			const marker = isBlocked(todos, t) ? "🔒" : STATUS_MARKER[t.status];
+			return `${marker} ${t.title}`;
+		})
+		.join("\n");
+}
