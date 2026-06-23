@@ -1,0 +1,5 @@
+node_modules/
+.opencode/
+*.log
+.DS_Store
+.worktrees/
