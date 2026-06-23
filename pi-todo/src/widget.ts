@@ -1,13 +1,5 @@
+import type { Theme } from "@earendil-works/pi-coding-agent";
 import { isBlocked, type TodoItem } from "./todo-store.js";
-
-/**
- * Minimal theme interface matching the subset needed by renderWidget.
- * Injected by the pi-tui framework at integration time.
- */
-export interface Theme {
-	fg: (name: string, text: string) => string;
-	strikethrough: (text: string) => string;
-}
 
 const STATUS_ICON: Record<TodoItem["status"], string> = {
 	pending: "○",
@@ -26,7 +18,7 @@ export function renderWidget(items: TodoItem[], theme: Theme): string[] | null {
 
 	const parts = visible.map((t) => {
 		const icon = isBlocked(items, t) ? "🔒" : STATUS_ICON[t.status];
-		const label = t.status === "done" ? theme.strikethrough(t.title) : t.title;
+		const label = t.title;
 		return theme.fg("muted", `${icon} ${label}`);
 	});
 
