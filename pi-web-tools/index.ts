@@ -29,11 +29,7 @@ export default function (pi: ExtensionAPI) {
 		}),
 		renderCall(args, theme) {
 			const p = args as { query: string };
-			return new Text(
-				theme.fg("toolTitle", theme.bold("websearch ")) + theme.fg("accent", `"${p.query || "..."}"`),
-				0,
-				0,
-			);
+			return new Text(theme.fg("toolTitle", theme.bold("websearch ")) + theme.fg("accent", `"${p.query || "..."}"`), 0, 0);
 		},
 		renderResult(result, { expanded }, theme) {
 			const text = result.content?.[0];
