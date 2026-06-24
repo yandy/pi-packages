@@ -2,14 +2,19 @@ import { spawn } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import * as jsonrpc from "vscode-jsonrpc";
+import {
+	createMessageConnection,
+	type MessageConnection,
+	StreamMessageReader,
+	StreamMessageWriter,
+} from "vscode-jsonrpc/node";
 import type { ServerDef } from "./servers";
 import type { DocumentSymbol, Hover, Location, LocationLink, SymbolInformation } from "./types";
 
 const POST_OPEN_DELAY_MS = 200;
 
 export class LspClient {
-	private conn: jsonrpc.MessageConnection | null = null;
+	private conn: MessageConnection | null = null;
 	private proc: import("node:child_process").ChildProcess | null = null;
 	private readonly openedFiles = new Set<string>();
 	private readonly documentVersions = new Map<string, number>();
@@ -31,15 +36,13 @@ export class LspClient {
 
 	async start(): Promise<void> {
 		const [cmd, ...args] = this.server.command;
-		this.proc = spawn(cmd, args, { cwd: this.root, stdio: ["pipe", "pipe", "pipe"] });
+		const proc = spawn(cmd, args, { cwd: this.root, stdio: ["pipe", "pipe", "pipe"] });
+		this.proc = proc;
 		this.alive = true;
-		this.proc.once("exit", () => {
+		proc.once("exit", () => {
 			this.alive = false;
 		});
-		this.conn = jsonrpc.createMessageConnection(
-			new jsonrpc.StreamMessageReader(this.proc.stdout),
-			new jsonrpc.StreamMessageWriter(this.proc.stdin),
-		);
+		this.conn = createMessageConnection(new StreamMessageReader(proc.stdout), new StreamMessageWriter(proc.stdin));
 		this.conn.listen();
 	}
 

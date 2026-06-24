@@ -87,7 +87,7 @@ export interface ResolvedServer {
 	installed: boolean;
 }
 
-export function resolveServerForFile(path: string, config?: CodingToolsConfig): ResolvedServer | null {
+export function resolveServerForFile(path: string, config?: Partial<CodingToolsConfig>): ResolvedServer | null {
 	if (config?.lsp?.disabled) return null;
 	const langId = detectLanguage(path);
 	if (!langId) return null;
