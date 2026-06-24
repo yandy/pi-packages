@@ -145,4 +145,5 @@ vite.config.ts.timestamp-*
 # git worktrees
 .worktrees/
 
-.worktrees/
+# superpowers reference materials (external project clones, not part of this repo)
+.superpowers/refs/

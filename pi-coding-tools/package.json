@@ -3,7 +3,7 @@
 	"publishConfig": {
 		"access": "public"
 	},
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"description": "pi package enabling ls/find/grep built-in tools",
 	"license": "MIT",
 	"repository": {
@@ -35,7 +35,11 @@
 	"peerDependencies": {
 		"@earendil-works/pi-coding-agent": ">=0.74.0"
 	},
-	"dependencies": {},
+	"dependencies": {
+		"@ast-grep/cli": "^0.41.1",
+		"@earendil-works/pi-ai": "^0.80.2",
+		"vscode-jsonrpc": "^8.2.1"
+	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.0",
 		"@types/node": "^22.0.0",

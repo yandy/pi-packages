@@ -6,7 +6,7 @@ Monorepo for @yandy pi packages. Uses npm workspaces.
 
 | Package | Description | npm |
 |---|---|---|
-| [pi-coding-tools](./pi-coding-tools) | apply_patch tool + ls/find/grep built-in tools | `@yandy0725/pi-coding-tools` |
+| [pi-coding-tools](./pi-coding-tools) | AST/LSP code-intel tools (ast_grep_search/lsp_symbols/lsp_hover/lsp_navigate) + ls/find/grep | `@yandy0725/pi-coding-tools` |
 | [pi-container-sandbox](./pi-container-sandbox) | Docker sandbox extension | `@yandy0725/pi-container-sandbox` |
 | [pi-todo](./pi-todo) | Minimal todo tool with editor-overhead widget | `@yandy0725/pi-todo` |
 | [pi-web-tools](./pi-web-tools) | websearch + webfetch tools | `@yandy0725/pi-web-tools` |
