@@ -1,4 +1,6 @@
-import type { CliRewriteMatch, SgRewriteResult } from "./types";
+import { spawn } from "node:child_process";
+import { getAstGrepPath } from "./binary";
+import type { CliLanguage, CliRewriteMatch, RunSgRewriteOptions, SgRewriteResult } from "./types";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
 	return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -48,4 +50,84 @@ export function parseRewriteStdout(stdout: string): Pick<SgRewriteResult, "match
 	}
 	const matches = Array.isArray(parsed) && parsed.every(isCliRewriteMatch) ? (parsed as CliRewriteMatch[]) : [];
 	return { matches, totalMatches: matches.length, truncated: false };
+}
+
+const REWRITE_TIMEOUT_MS = 30_000;
+
+const INSTALL_HINT = [
+	"ast-grep binary not found.",
+	"",
+	"Install options:",
+	"  npm install -g @ast-grep/cli",
+	"  cargo install ast-grep --locked",
+	"  brew install ast-grep",
+].join("\n");
+
+function buildRewriteArgs(options: RunSgRewriteOptions): string[] {
+	const args = [
+		"run",
+		"-p",
+		options.pattern,
+		"-r",
+		options.rewrite,
+		"--lang",
+		options.lang,
+		"--json=compact",
+	];
+	if (options.apply) args.push("-U");
+	args.push(...(options.paths.length > 0 ? options.paths : ["."]));
+	return args;
+}
+
+export async function runAstGrepRewrite(options: RunSgRewriteOptions): Promise<SgRewriteResult> {
+	const cliPath = await getAstGrepPath();
+	if (!cliPath) {
+		return { matches: [], totalMatches: 0, truncated: false, error: INSTALL_HINT, applied: options.apply };
+	}
+
+	return new Promise<SgRewriteResult>((resolve) => {
+		const proc = spawn(cliPath, buildRewriteArgs(options), { stdio: ["ignore", "pipe", "pipe"] });
+		let stdout = "";
+		let stderr = "";
+		const timer = setTimeout(() => {
+			proc.kill("SIGKILL");
+			resolve({
+				matches: [],
+				totalMatches: 0,
+				truncated: true,
+				truncatedReason: "timeout",
+				error: "rewrite timed out",
+				applied: options.apply,
+			});
+		}, REWRITE_TIMEOUT_MS);
+
+		proc.stdout.setEncoding("utf-8");
+		proc.stderr.setEncoding("utf-8");
+		proc.stdout.on("data", (c: string) => (stdout += c));
+		proc.stderr.on("data", (c: string) => (stderr += c));
+
+		proc.once("error", () => {
+			clearTimeout(timer);
+			resolve({ matches: [], totalMatches: 0, truncated: false, error: INSTALL_HINT, applied: options.apply });
+		});
+		proc.once("close", (code) => {
+			clearTimeout(timer);
+			if (code !== 0 && !stdout.trim()) {
+				if (stderr.includes("No files found")) {
+					resolve({ matches: [], totalMatches: 0, truncated: false, applied: options.apply });
+					return;
+				}
+				resolve({
+					matches: [],
+					totalMatches: 0,
+					truncated: false,
+					error: stderr.trim() || `ast-grep exited with code ${code}`,
+					applied: options.apply,
+				});
+				return;
+			}
+			const parsed = parseRewriteStdout(stdout);
+			resolve({ ...parsed, applied: options.apply });
+		});
+	});
 }
