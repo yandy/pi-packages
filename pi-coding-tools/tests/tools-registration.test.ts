@@ -7,10 +7,15 @@ vi.mock("../src/ast-grep/search", () => ({
 	inferLangFromPath: (p: string) => (p.endsWith(".ts") ? "typescript" : undefined),
 }));
 vi.mock("../src/ast-grep/binary", () => ({ getAstGrepPath: vi.fn(async () => "/fake/ast-grep") }));
+vi.mock("../src/ast-grep/rewrite", () => ({
+	runAstGrepRewrite: vi.fn(),
+}));
 
 import { runAstGrep } from "../src/ast-grep/search";
+import { runAstGrepRewrite } from "../src/ast-grep/rewrite";
 import type { SgResult } from "../src/ast-grep/types";
 import { ast_grep_search } from "../src/tools/ast-grep-search";
+import { ast_grep_replace } from "../src/tools/ast-grep-replace";
 
 // mock lsp manager
 const mockClient = {
@@ -46,6 +51,24 @@ const okResult: SgResult = {
 	],
 	totalMatches: 1,
 	truncated: false,
+};
+
+const rewriteOk: Awaited<ReturnType<typeof runAstGrepRewrite>> = {
+	matches: [
+		{
+			text: 'console.log("hi")',
+			file: "src/index.ts",
+			lines: 'console.log("hi");\n',
+			language: "typescript",
+			charCount: { leading: 0, trailing: 1 },
+			range: { start: { line: 4, column: 0 }, end: { line: 4, column: 19 }, byteOffset: { start: 0, end: 19 } },
+			replacement: 'logger.info("hi")',
+			replacementOffsets: { start: 0, end: 19 },
+		},
+	],
+	totalMatches: 1,
+	truncated: false,
+	applied: false,
 };
 
 describe("ast_grep_search tool", () => {
@@ -97,6 +120,76 @@ describe("ast_grep_search tool", () => {
 		);
 		const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
 		expect(text).toContain("ast-grep binary not found");
+	});
+});
+
+describe("ast_grep_replace tool", () => {
+	it("has correct name and schema", () => {
+		expect(ast_grep_replace.name).toBe("ast_grep_replace");
+		expect(ast_grep_replace.parameters).toBeDefined();
+	});
+
+	it("dry-run previews without applying", async () => {
+		vi.mocked(runAstGrepRewrite).mockResolvedValueOnce(rewriteOk);
+		const res = await ast_grep_replace.execute(
+			"id",
+			{ pattern: "console.log($MSG)", rewrite: "logger.info($MSG)", lang: "typescript", path: "src" },
+			undefined,
+			undefined,
+			{ cwd: "/proj" } as never,
+		);
+		const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
+		expect(text).toContain("dry-run");
+		expect(text).toContain("src/index.ts:5:1");
+		expect(text).toContain('logger.info("hi")');
+		// apply flag defaults to false in the call
+		expect(vi.mocked(runAstGrepRewrite).mock.lastCall?.[0].apply).toBe(false);
+	});
+
+	it("apply=true is forwarded", async () => {
+		vi.mocked(runAstGrepRewrite).mockResolvedValueOnce({ ...rewriteOk, applied: true });
+		const res = await ast_grep_replace.execute(
+			"id",
+			{ pattern: "console.log($MSG)", rewrite: "logger.info($MSG)", apply: true, path: "src" },
+			undefined,
+			undefined,
+			{ cwd: "/proj" } as never,
+		);
+		const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
+		expect(text).toContain("Applied 1 change");
+		expect(vi.mocked(runAstGrepRewrite).mock.lastCall?.[0].apply).toBe(true);
+	});
+
+	it("surfaces binary-missing error", async () => {
+		vi.mocked(runAstGrepRewrite).mockResolvedValueOnce({
+			matches: [],
+			totalMatches: 0,
+			truncated: false,
+			error: "ast-grep binary not found.",
+			applied: false,
+		});
+		const res = await ast_grep_replace.execute(
+			"id",
+			{ pattern: "x", rewrite: "y", lang: "typescript", path: "src" },
+			undefined,
+			undefined,
+			{ cwd: "/proj" } as never,
+		);
+		const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
+		expect(text).toContain("ast-grep binary not found");
+	});
+
+	it("appends pattern hint when no matches and no error", async () => {
+		vi.mocked(runAstGrepRewrite).mockResolvedValueOnce({ matches: [], totalMatches: 0, truncated: false, applied: false });
+		const res = await ast_grep_replace.execute(
+			"id",
+			{ pattern: "foo\\w+", rewrite: "bar", lang: "typescript", path: "src" },
+			undefined,
+			undefined,
+			{ cwd: "/proj" } as never,
+		);
+		const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
+		expect(text).toMatch(/regex/);
 	});
 });
 
