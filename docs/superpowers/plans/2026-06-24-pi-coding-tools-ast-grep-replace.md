@@ -240,7 +240,9 @@ git commit -m "feat(pi-coding-tools): add parseRewriteStdout for ast-grep rewrit
 
 **Interfaces:**
 - Consumes: `getAstGrepPath` from `./binary`, `CliLanguage`, `RunSgRewriteOptions`, `SgRewriteResult` from `./types`, `parseRewriteStdout` from same file.
-- Produces: `runAstGrepRewrite(options: RunSgRewriteOptions): Promise<SgRewriteResult>` — spawns `ast-grep run -p -r --json=compact` (+`-U` when `apply`), returns result with `applied` set from `options.apply`.
+- Produces: `runAstGrepRewrite(options: RunSgRewriteOptions): Promise<SgRewriteResult>` — spawns `ast-grep run -p -r --json=compact` for the dry-run/preview pass, returns result with `applied` set from `options.apply`.
+
+**CORRECTION (resolved by Task 5 integration test):** ast-grep's `-U` and `--json=compact` CANNOT be used together — when both are passed, structured JSON is returned but files are NOT written. Therefore apply mode uses a **two-pass strategy**: (1) a preview pass WITH `--json=compact` (no `-U`) to capture structured matches (file, replacement, range); (2) an apply pass WITH `-U` (no `--json=compact`) to write files. The returned `SgRewriteResult` uses the structured matches from pass 1 with `applied: true`. See the updated `runAstGrepRewrite` code below.
 
 - [ ] **Step 1: Add `runAstGrepRewrite` to `rewrite.ts`**
 
@@ -268,30 +270,22 @@ const INSTALL_HINT = [
 	"  brew install ast-grep",
 ].join("\n");
 
-function buildRewriteArgs(options: RunSgRewriteOptions): string[] {
-	const args = [
-		"run",
-		"-p",
-		options.pattern,
-		"-r",
-		options.rewrite,
-		"--lang",
-		options.lang,
-		"--json=compact",
-	];
-	if (options.apply) args.push("-U");
+function buildArgs(options: RunSgRewriteOptions, apply: boolean): string[] {
+	const args = ["run", "-p", options.pattern, "-r", options.rewrite, "--lang", options.lang];
+	if (apply) {
+		args.push("-U"); // apply pass: write files (NO --json, it neutralizes -U)
+	} else {
+		args.push("--json=compact"); // preview pass: structured JSON, no write
+	}
 	args.push(...(options.paths.length > 0 ? options.paths : ["."]));
 	return args;
 }
 
-export async function runAstGrepRewrite(options: RunSgRewriteOptions): Promise<SgRewriteResult> {
-	const cliPath = await getAstGrepPath();
-	if (!cliPath) {
-		return { matches: [], totalMatches: 0, truncated: false, error: INSTALL_HINT, applied: options.apply };
-	}
-
+// Spawn one ast-grep run and resolve its SgRewriteResult. `applyPass` selects
+// -U (write, plain stdout) vs --json=compact (preview, structured stdout).
+function spawnRun(cliPath: string, options: RunSgRewriteOptions, applyPass: boolean): Promise<SgRewriteResult> {
 	return new Promise<SgRewriteResult>((resolve) => {
-		const proc = spawn(cliPath, buildRewriteArgs(options), { stdio: ["ignore", "pipe", "pipe"] });
+		const proc = spawn(cliPath, buildArgs(options, applyPass), { stdio: ["ignore", "pipe", "pipe"] });
 		let stdout = "";
 		let stderr = "";
 		const timer = setTimeout(() => {
@@ -335,6 +329,25 @@ export async function runAstGrepRewrite(options: RunSgRewriteOptions): Promise<S
 			resolve({ ...parsed, applied: options.apply });
 		});
 	});
+}
+
+export async function runAstGrepRewrite(options: RunSgRewriteOptions): Promise<SgRewriteResult> {
+	const cliPath = await getAstGrepPath();
+	if (!cliPath) {
+		return { matches: [], totalMatches: 0, truncated: false, error: INSTALL_HINT, applied: options.apply };
+	}
+
+	// Preview pass (always): structured JSON with file/replacement/range.
+	const preview = await spawnRun(cliPath, options, false);
+	if (preview.error || preview.matches.length === 0) return preview;
+
+	// Apply pass (only when requested): -U writes files, plain stdout.
+	// Reuses the preview's structured matches so callers still get per-file
+	// detail; only `applied` flips to true.
+	if (!options.apply) return preview;
+	const applyResult = await spawnRun(cliPath, options, true);
+	if (applyResult.error) return applyResult; // write failed — surface it
+	return { ...preview, applied: true };
 }
 ```
 
@@ -583,7 +596,9 @@ describe.skipIf(findAstGrepPathSync() === null)("ast-grep rewrite integration (r
 - [ ] **Step 2: Run the integration test**
 
 Run: `npm test -w pi-coding-tools -- rewrite.integration 2>&1 | tail -30`
-Expected: PASS — both tests pass. This confirms `-U` + `--json=compact` writes files AND returns structured matches. If the apply test FAILS (file unchanged), the fallback is: change `buildRewriteArgs` so apply mode does NOT use `--json=compact` (drop it when `options.apply`), parse the `Applied N changes` line from stdout for the count, and adjust `runAstGrepRewrite` to build a synthetic match list — but only do this if the test fails. Prefer the current implementation which the test validates.
+Expected: PASS — both tests pass. The dry-run test confirms no file write + structured preview; the apply test confirms the file IS modified to `logger.info("hi");`. 
+
+**NOTE (resolved):** The integration test PROVED that `-U` + `--json=compact` together do NOT write files. The corrected `runAstGrepRewrite` (see Task 3 CORRECTION) uses a two-pass strategy for apply mode: a preview pass (`--json=compact`, no `-U`) for structured matches, then an apply pass (`-U`, no `--json`) to write. With that correction in place, both integration tests pass. If you find the apply test still fails (file unchanged), verify `runAstGrepRewrite` was updated to the two-pass strategy from the Task 3 CORRECTION block.
 
 - [ ] **Step 3: Commit**
 
