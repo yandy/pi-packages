@@ -10,6 +10,7 @@ import {
 	isReadOnlyMount,
 	PathApprovalStore,
 	remoteToHost,
+	requestPathApproval,
 	resolveExtraMountPath,
 	shq,
 	toContainerPath,
@@ -217,6 +218,26 @@ describe("remoteToHost", () => {
 
 	it("throws for unmapped /skills path", () => {
 		expect(() => remoteToHost("/skills/unknown/file", "/home/user", [])).toThrow("Cannot map container path");
+	});
+});
+
+describe("requestPathApproval", () => {
+	it("select dialog title includes the path being approved", async () => {
+		const testPath = "/home/user/sensitive-file.txt";
+		let capturedTitle = "";
+
+		const mockUi = {
+			select: async (title: string, _options: string[]) => {
+				capturedTitle = title;
+				return "Deny";
+			},
+			notify: () => {},
+		};
+
+		const store = new PathApprovalStore(testDir);
+		await requestPathApproval(testPath, [], store, mockUi);
+
+		expect(capturedTitle).toContain(testPath);
 	});
 });
 
