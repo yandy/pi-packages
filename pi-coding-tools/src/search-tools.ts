@@ -16,7 +16,9 @@ export function enableTools(pi: ExtensionAPI, config: CodingToolsConfig): void {
 		lsp_navigate: config.lsp_navigate,
 	};
 	for (const name of ALL_TOOL_NAMES) {
-		if (enabled[name] && allTools.has(name) && !current.has(name)) {
+		if (!enabled[name] && current.has(name)) {
+			current.delete(name);
+		} else if (enabled[name] && allTools.has(name) && !current.has(name)) {
 			current.add(name);
 		}
 	}

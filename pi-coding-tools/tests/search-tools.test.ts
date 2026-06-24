@@ -120,6 +120,24 @@ describe("enableTools", () => {
 		expect(result).toEqual(["read"]);
 	});
 
+	it("removes tools from active set when config says false", () => {
+		// 真实场景：registerTool 后工具默认 active，config 禁掉应该移除
+		const pi = makeMockPi(
+			["read", "bash", "edit", "ls", "find", "grep", "ast_grep_search", "lsp_symbols", "lsp_hover", "lsp_navigate"],
+			["read", "bash", "edit", "ls", "lsp_hover", "lsp_navigate"],
+		);
+		const config: CodingToolsConfig = { ...allTrueConfig, lsp_hover: false, lsp_navigate: false };
+		enableTools(pi as unknown as ExtensionAPI, config);
+		const result = pi.setActiveTools.mock.calls[0][0] as string[];
+		expect(result).not.toContain("lsp_hover");
+		expect(result).not.toContain("lsp_navigate");
+		// 仍然保留其他 active 工具
+		expect(result).toContain("read");
+		expect(result).toContain("bash");
+		expect(result).toContain("edit");
+		expect(result).toContain("ls");
+	});
+
 	it("preserves existing active tools", () => {
 		const pi = makeMockPi(
 			["read", "bash", "edit", "ls", "find", "grep", "ast_grep_search", "lsp_symbols", "lsp_hover", "lsp_navigate"],
