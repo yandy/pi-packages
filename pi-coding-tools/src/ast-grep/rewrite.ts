@@ -63,30 +63,22 @@ const INSTALL_HINT = [
 	"  brew install ast-grep",
 ].join("\n");
 
-function buildRewriteArgs(options: RunSgRewriteOptions): string[] {
-	const args = [
-		"run",
-		"-p",
-		options.pattern,
-		"-r",
-		options.rewrite,
-		"--lang",
-		options.lang,
-		"--json=compact",
-	];
-	if (options.apply) args.push("-U");
+function buildArgs(options: RunSgRewriteOptions, apply: boolean): string[] {
+	const args = ["run", "-p", options.pattern, "-r", options.rewrite, "--lang", options.lang];
+	if (apply) {
+		args.push("-U"); // apply pass: write files (NO --json, it neutralizes -U)
+	} else {
+		args.push("--json=compact"); // preview pass: structured JSON, no write
+	}
 	args.push(...(options.paths.length > 0 ? options.paths : ["."]));
 	return args;
 }
 
-export async function runAstGrepRewrite(options: RunSgRewriteOptions): Promise<SgRewriteResult> {
-	const cliPath = await getAstGrepPath();
-	if (!cliPath) {
-		return { matches: [], totalMatches: 0, truncated: false, error: INSTALL_HINT, applied: options.apply };
-	}
-
+// Spawn one ast-grep run and resolve its SgRewriteResult. `applyPass` selects
+// -U (write, plain stdout) vs --json=compact (preview, structured stdout).
+function spawnRun(cliPath: string, options: RunSgRewriteOptions, applyPass: boolean): Promise<SgRewriteResult> {
 	return new Promise<SgRewriteResult>((resolve) => {
-		const proc = spawn(cliPath, buildRewriteArgs(options), { stdio: ["ignore", "pipe", "pipe"] });
+		const proc = spawn(cliPath, buildArgs(options, applyPass), { stdio: ["ignore", "pipe", "pipe"] });
 		let stdout = "";
 		let stderr = "";
 		const timer = setTimeout(() => {
@@ -130,4 +122,23 @@ export async function runAstGrepRewrite(options: RunSgRewriteOptions): Promise<S
 			resolve({ ...parsed, applied: options.apply });
 		});
 	});
+}
+
+export async function runAstGrepRewrite(options: RunSgRewriteOptions): Promise<SgRewriteResult> {
+	const cliPath = await getAstGrepPath();
+	if (!cliPath) {
+		return { matches: [], totalMatches: 0, truncated: false, error: INSTALL_HINT, applied: options.apply };
+	}
+
+	// Preview pass (always): structured JSON with file/replacement/range.
+	const preview = await spawnRun(cliPath, options, false);
+	if (preview.error || preview.matches.length === 0) return preview;
+
+	// Apply pass (only when requested): -U writes files, plain stdout.
+	// Reuses the preview's structured matches so callers still get per-file
+	// detail; only `applied` flips to true.
+	if (!options.apply) return preview;
+	const applyResult = await spawnRun(cliPath, options, true);
+	if (applyResult.error) return applyResult; // write failed — surface it
+	return { ...preview, applied: true };
 }
