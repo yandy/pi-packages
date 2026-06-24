@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { getAstGrepPath } from "./binary";
+import { getAstGrepPath, INSTALL_HINT } from "./binary";
 import type { CliRewriteMatch, RunSgRewriteOptions, SgRewriteResult } from "./types";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -53,15 +53,6 @@ export function parseRewriteStdout(stdout: string): Pick<SgRewriteResult, "match
 }
 
 const REWRITE_TIMEOUT_MS = 30_000;
-
-const INSTALL_HINT = [
-	"ast-grep binary not found.",
-	"",
-	"Install options:",
-	"  npm install -g @ast-grep/cli",
-	"  cargo install ast-grep --locked",
-	"  brew install ast-grep",
-].join("\n");
 
 function buildArgs(options: RunSgRewriteOptions, apply: boolean): string[] {
 	const args = ["run", "-p", options.pattern, "-r", options.rewrite, "--lang", options.lang];

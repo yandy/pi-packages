@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { findAstGrepPathSync, resetResolvedForTests } from "../../src/ast-grep/binary";
 import { runAstGrepRewrite } from "../../src/ast-grep/rewrite";
 
@@ -14,6 +14,9 @@ describe.skipIf(findAstGrepPathSync() === null)("ast-grep rewrite integration (r
 	beforeAll(() => {
 		fixtureDir = mkdtempSync(join(tmpdir(), "sg-rewrite-integ-"));
 		fixtureFile = join(fixtureDir, "a.ts");
+	});
+
+	beforeEach(() => {
 		writeFileSync(fixtureFile, 'console.log("hi");\n');
 	});
 

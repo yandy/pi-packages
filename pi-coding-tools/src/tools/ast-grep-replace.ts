@@ -59,6 +59,7 @@ export const ast_grep_replace = defineTool({
 		"Use ast_grep_replace for structural code changes. It is dry-run by default — call with apply=true only after reviewing the preview.",
 		"Patterns are AST nodes, not regex. Use $VAR (e.g. $MSG) to capture a node and reference it in rewrite, $$$ for zero-or-more nodes. Example: pattern 'console.log($MSG)', rewrite 'logger.info($MSG)'.",
 		"Always dry-run first (omit apply) to preview before→after, then call again with apply=true to write. Do NOT use regex constructs (\\w, .*, |).",
+		"Every $VAR used in rewrite must be captured in the pattern — ast-grep substitutes empty for unbound meta-variables, so a typo'd $VAR silently vanishes from the output.",
 	],
 	parameters: ReplaceParams,
 	async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
