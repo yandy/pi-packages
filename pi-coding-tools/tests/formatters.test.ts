@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { SgResult } from "../src/ast-grep/types";
-import { formatHover, formatNavigate, formatSearchResult, formatSymbolTree } from "../src/formatters";
+import type { CliRewriteMatch, SgResult } from "../src/ast-grep/types";
+import {
+	formatHover,
+	formatNavigate,
+	formatRewriteResult,
+	formatSearchResult,
+	formatSymbolTree,
+} from "../src/formatters";
 import type { DocumentSymbol, Hover, Location } from "../src/lsp/types";
 
 const match: SgResult["matches"][number] = {
@@ -129,5 +135,84 @@ describe("formatNavigate", () => {
 	it("references → list", () => {
 		const out = formatNavigate("references", [loc, loc], "/proj");
 		expect(out).toContain("references (2)");
+	});
+});
+
+const rewriteMatch: CliRewriteMatch = {
+	text: 'console.log("hi")',
+	file: "src/index.ts",
+	lines: 'console.log("hi");\n',
+	language: "typescript",
+	charCount: { leading: 0, trailing: 1 },
+	range: { start: { line: 4, column: 0 }, end: { line: 4, column: 19 }, byteOffset: { start: 0, end: 19 } },
+	replacement: 'logger.info("hi")',
+	replacementOffsets: { start: 0, end: 19 },
+};
+
+describe("formatRewriteResult", () => {
+	it("dry-run lists before->after with file:line and dry-run marker", () => {
+		const out = formatRewriteResult({
+			matches: [rewriteMatch],
+			totalMatches: 1,
+			truncated: false,
+			applied: false,
+		});
+		expect(out).toContain("1 match");
+		expect(out).toContain("dry-run");
+		expect(out).toContain("src/index.ts:5:1");
+		expect(out).toContain('console.log("hi")');
+		expect(out).toContain('logger.info("hi")');
+	});
+
+	it("groups by file with count in dry-run", () => {
+		const m2 = { ...rewriteMatch, range: { ...rewriteMatch.range, start: { line: 10, column: 0 } } };
+		const out = formatRewriteResult({
+			matches: [rewriteMatch, m2],
+			totalMatches: 2,
+			truncated: false,
+			applied: false,
+		});
+		expect(out).toContain("src/index.ts (2 matches)");
+	});
+
+	it("apply mode shows Applied summary with per-file changes", () => {
+		const out = formatRewriteResult({
+			matches: [rewriteMatch],
+			totalMatches: 1,
+			truncated: false,
+			applied: true,
+		});
+		expect(out).toContain("Applied 1 change");
+		expect(out).toContain("src/index.ts (1 change)");
+		expect(out).not.toContain("dry-run");
+	});
+
+	it("no matches", () => {
+		expect(formatRewriteResult({ matches: [], totalMatches: 0, truncated: false, applied: false })).toContain(
+			"No matches",
+		);
+	});
+
+	it("aligns the + replacement line under the - original line", () => {
+		const out = formatRewriteResult({
+			matches: [rewriteMatch],
+			totalMatches: 1,
+			truncated: false,
+			applied: false,
+		});
+		const lines = out.split("\n");
+		const dashLine = lines.find((l) => l.includes("- console.log"));
+		const plusLine = lines.find((l) => l.includes("+ logger.info"));
+		expect(dashLine).toBeDefined();
+		expect(plusLine).toBeDefined();
+		const dashCol = dashLine?.indexOf("-") ?? -1;
+		const plusCol = plusLine?.indexOf("+") ?? -1;
+		expect(plusCol).toBe(dashCol);
+	});
+
+	it("surfaces error", () => {
+		expect(
+			formatRewriteResult({ matches: [], totalMatches: 0, truncated: false, error: "boom", applied: false }),
+		).toContain("boom");
 	});
 });

@@ -18,6 +18,7 @@ const allTrueConfig: CodingToolsConfig = {
 	find: true,
 	grep: true,
 	ast_grep_search: true,
+	ast_grep_replace: true,
 	lsp_symbols: true,
 	lsp_hover: true,
 	lsp_navigate: true,
@@ -37,6 +38,7 @@ describe("syncToolsStatus", () => {
 				"find",
 				"grep",
 				"ast_grep_search",
+				"ast_grep_replace",
 				"lsp_symbols",
 				"lsp_hover",
 				"lsp_navigate",
@@ -56,12 +58,23 @@ describe("syncToolsStatus", () => {
 	});
 
 	it("all false removes everything", () => {
-		const pi = makeMockPi(["read", "ls", "find", "grep", "ast_grep_search", "lsp_symbols", "lsp_hover", "lsp_navigate"]);
+		const pi = makeMockPi([
+			"read",
+			"ls",
+			"find",
+			"grep",
+			"ast_grep_search",
+			"ast_grep_replace",
+			"lsp_symbols",
+			"lsp_hover",
+			"lsp_navigate",
+		]);
 		const config: CodingToolsConfig = {
 			ls: false,
 			find: false,
 			grep: false,
 			ast_grep_search: false,
+			ast_grep_replace: false,
 			lsp_symbols: false,
 			lsp_hover: false,
 			lsp_navigate: false,

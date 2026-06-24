@@ -1,7 +1,16 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { CodingToolsConfig } from "./config";
 
-const ALL_TOOL_NAMES = ["ls", "find", "grep", "ast_grep_search", "lsp_symbols", "lsp_hover", "lsp_navigate"] as const;
+const ALL_TOOL_NAMES = [
+	"ls",
+	"find",
+	"grep",
+	"ast_grep_search",
+	"ast_grep_replace",
+	"lsp_symbols",
+	"lsp_hover",
+	"lsp_navigate",
+] as const;
 
 export function syncToolsStatus(pi: ExtensionAPI, config: CodingToolsConfig): void {
 	const current = new Set(pi.getActiveTools());

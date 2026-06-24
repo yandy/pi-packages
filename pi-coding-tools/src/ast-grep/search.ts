@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { extname } from "node:path";
-import { getAstGrepPath } from "./binary";
+import { getAstGrepPath, INSTALL_HINT } from "./binary";
 import type { CliLanguage, CliMatch, RunSgOptions, SgResult } from "./types";
 
 const SEARCH_TIMEOUT_MS = 30_000;
@@ -69,15 +69,6 @@ export function parseSgStdout(stdout: string): SgResult {
 	const matches = Array.isArray(parsed) && parsed.every(isCliMatch) ? (parsed as CliMatch[]) : [];
 	return { matches, totalMatches: matches.length, truncated: false };
 }
-
-const INSTALL_HINT = [
-	"ast-grep binary not found.",
-	"",
-	"Install options:",
-	"  npm install -g @ast-grep/cli",
-	"  cargo install ast-grep --locked",
-	"  brew install ast-grep",
-].join("\n");
 
 function buildArgs(options: RunSgOptions): string[] {
 	const args = ["run", "-p", options.pattern, "--lang", options.lang, "--json=compact"];

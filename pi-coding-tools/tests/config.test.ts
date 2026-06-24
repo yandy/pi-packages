@@ -5,6 +5,7 @@ const baseTrue = {
 	find: true,
 	grep: true,
 	ast_grep_search: true,
+	ast_grep_replace: true,
 	lsp_symbols: true,
 	lsp_hover: true,
 	lsp_navigate: true,

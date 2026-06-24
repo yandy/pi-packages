@@ -1,6 +1,6 @@
 import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { CliMatch, SgResult } from "./ast-grep/types";
+import type { CliMatch, CliRewriteMatch, SgResult, SgRewriteResult } from "./ast-grep/types";
 import type { DocumentSymbol, Hover, Location, LocationLink, SymbolInformation } from "./lsp/types";
 import { symbolKindName } from "./lsp/types";
 
@@ -127,4 +127,38 @@ export function formatNavigate(
 		return `definition →\n${locs.map((l) => `  ${formatLocation(l, rootDir)}`).join("\n")}`;
 	}
 	return `references (${locs.length}) →\n${locs.map((l) => `  ${formatLocation(l, rootDir)}`).join("\n")}`;
+}
+
+export function formatRewriteResult(result: SgRewriteResult): string {
+	if (result.error) return `Error: ${result.error}`;
+	if (result.matches.length === 0) return "No matches found";
+
+	const byFile = new Map<string, CliRewriteMatch[]>();
+	for (const m of result.matches) {
+		const arr = byFile.get(m.file) ?? [];
+		arr.push(m);
+		byFile.set(m.file, arr);
+	}
+
+	const lines: string[] = [];
+	if (result.applied) {
+		lines.push(`Applied ${result.matches.length} change(s) across ${byFile.size} file(s)`);
+		for (const [file, ms] of byFile) {
+			lines.push(`${file} (${ms.length} change${ms.length > 1 ? "s" : ""})`);
+		}
+	} else {
+		lines.push(`${result.matches.length} match(es) \u2022 ${byFile.size} file(s) [dry-run, no files written]`);
+		for (const [file, ms] of byFile) {
+			lines.push(`${file} (${ms.length} match${ms.length > 1 ? "es" : ""})`);
+			for (const m of ms) {
+				const loc = `${m.range.start.line + 1}:${m.range.start.column + 1}`;
+				lines.push(`  ${m.file}:${loc}  - ${m.text.trim()}`);
+				lines.push(`  ${" ".repeat(m.file.length + loc.length + 3)}+ ${m.replacement.trim()}`);
+			}
+		}
+	}
+	if (result.truncated) {
+		lines.push(`(truncated, ${result.totalMatches} total)`);
+	}
+	return lines.join("\n");
 }

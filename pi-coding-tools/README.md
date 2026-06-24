@@ -8,11 +8,12 @@ Pi package enabling `ls`/`find`/`grep` built-in tools.
 
 ## AST/LSP 代码理解工具
 
-新增 4 个 token-efficient 工具，让 LLM 用最少 token 理解代码库：
+新增 5 个 token-efficient 工具，让 LLM 用最少 token 理解代码库：
 
 | Tool | 用途 | 机制 |
 |------|------|------|
 | `ast_grep_search` | 按 AST 结构搜索代码（比 grep 精准，不匹配注释/字符串） | ast-grep CLI |
+| `ast_grep_replace` | AST-aware 重写代码（dry-run 预览，apply=true 写盘） | ast-grep CLI `-r`/`-U` |
 | `lsp_symbols` | 文件骨架大纲（比 read 省 ~95% token） | LSP documentSymbol |
 | `lsp_hover` | 查符号类型/文档（唯一能答"这表达式什么类型"） | LSP hover |
 | `lsp_navigate` | 语义跳转：定义在哪 / 谁在用（operation: definition\|references） | LSP definition/references |
@@ -40,6 +41,7 @@ Pi package enabling `ls`/`find`/`grep` built-in tools.
 ```jsonc
 {
   "ast_grep_search": true,
+  "ast_grep_replace": true,
   "lsp_symbols": true,
   "lsp_hover": true,
   "lsp_navigate": true,
@@ -87,6 +89,7 @@ Configuration files control which tools are enabled. All default to `true`.
 | `find` | `true` | Enable the `find` built-in tool |
 | `grep` | `true` | Enable the `grep` built-in tool |
 | `ast_grep_search` | `true` | Enable the AST-based code search tool |
+| `ast_grep_replace` | `true` | Enable the AST-based code rewrite tool (dry-run by default) |
 | `lsp_symbols` | `true` | Enable the LSP document symbols tool |
 | `lsp_hover` | `true` | Enable the LSP hover (type/docs) tool |
 | `lsp_navigate` | `true` | Enable the LSP definition/references tool |

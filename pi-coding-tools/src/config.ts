@@ -18,6 +18,7 @@ export interface CodingToolsConfig {
 	find: boolean;
 	grep: boolean;
 	ast_grep_search: boolean;
+	ast_grep_replace: boolean;
 	lsp_symbols: boolean;
 	lsp_hover: boolean;
 	lsp_navigate: boolean;
@@ -29,6 +30,7 @@ const DEFAULT_CONFIG: CodingToolsConfig = {
 	find: true,
 	grep: true,
 	ast_grep_search: true,
+	ast_grep_replace: true,
 	lsp_symbols: true,
 	lsp_hover: true,
 	lsp_navigate: true,
@@ -59,6 +61,7 @@ export function loadConfig(cwd?: string): CodingToolsConfig {
 		find: projectConfig.find ?? globalConfig.find ?? DEFAULT_CONFIG.find,
 		grep: projectConfig.grep ?? globalConfig.grep ?? DEFAULT_CONFIG.grep,
 		ast_grep_search: projectConfig.ast_grep_search ?? globalConfig.ast_grep_search ?? DEFAULT_CONFIG.ast_grep_search,
+		ast_grep_replace: projectConfig.ast_grep_replace ?? globalConfig.ast_grep_replace ?? DEFAULT_CONFIG.ast_grep_replace,
 		lsp_symbols: projectConfig.lsp_symbols ?? globalConfig.lsp_symbols ?? DEFAULT_CONFIG.lsp_symbols,
 		lsp_hover: projectConfig.lsp_hover ?? globalConfig.lsp_hover ?? DEFAULT_CONFIG.lsp_hover,
 		lsp_navigate: projectConfig.lsp_navigate ?? globalConfig.lsp_navigate ?? DEFAULT_CONFIG.lsp_navigate,

@@ -4,6 +4,15 @@ import { delimiter, dirname, join } from "node:path";
 
 const MIN_BINARY_SIZE_BYTES = 10_000;
 
+export const INSTALL_HINT = [
+	"ast-grep binary not found.",
+	"",
+	"Install options:",
+	"  npm install -g @ast-grep/cli",
+	"  cargo install ast-grep --locked",
+	"  brew install ast-grep",
+].join("\n");
+
 function isValidBinary(filePath: string): boolean {
 	try {
 		return statSync(filePath).size > MIN_BINARY_SIZE_BYTES;

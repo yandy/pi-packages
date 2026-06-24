@@ -35,3 +35,22 @@ export interface RunSgOptions {
 	lang: CliLanguage;
 	paths: string[];
 }
+
+export interface CliRewriteMatch extends CliMatch {
+	replacement: string;
+	replacementOffsets: { start: number; end: number };
+}
+
+export interface SgRewriteResult {
+	matches: CliRewriteMatch[];
+	totalMatches: number;
+	truncated: boolean;
+	truncatedReason?: SgTruncationReason;
+	error?: string;
+	applied: boolean;
+}
+
+export interface RunSgRewriteOptions extends RunSgOptions {
+	rewrite: string;
+	apply: boolean;
+}
