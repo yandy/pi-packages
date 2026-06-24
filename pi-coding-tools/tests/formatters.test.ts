@@ -90,7 +90,7 @@ describe("formatSymbolTree", () => {
 		expect(out).toContain("src/user.ts");
 		expect(out).toContain("class UserService");
 		expect(out).toContain("findById(id: string): User");
-		expect(out).toContain("├──");
+		expect(out).toContain("└──");
 	});
 });
 

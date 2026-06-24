@@ -52,8 +52,8 @@ export function formatSymbolTree(symbols: Array<DocumentSymbol | SymbolInformati
 	const lines: string[] = [filePath];
 	const docs = symbols.filter(isDocumentSymbol) as DocumentSymbol[];
 	const flat = symbols.filter((s) => !isDocumentSymbol(s)) as SymbolInformation[];
-	for (const s of docs) {
-		lines.push(...renderSymbolNode(s, "", false));
+	for (let i = 0; i < docs.length; i++) {
+		lines.push(...renderSymbolNode(docs[i], "", i === docs.length - 1));
 	}
 	for (const s of flat) {
 		const kind = symbolKindName(s.kind).toLowerCase();
