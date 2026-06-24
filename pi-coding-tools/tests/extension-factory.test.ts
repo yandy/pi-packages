@@ -12,12 +12,12 @@ function makeLoadingPi() {
 			if (!handlers.has(event)) handlers.set(event, []);
 			handlers.get(event)!.push(handler);
 		}),
-		registerTool: vi.fn(),
+		registerTool: vi.fn<(def: { name: string }) => void>(),
 		// 模拟真实 pi：加载期间 action methods 抛错
-		getActiveTools: vi.fn(() => {
+		getActiveTools: vi.fn<() => string[]>(() => {
 			throw ACTION_ERROR;
 		}),
-		setActiveTools: vi.fn(() => {
+		setActiveTools: vi.fn<(_tools: string[]) => void>(() => {
 			throw ACTION_ERROR;
 		}),
 	};
