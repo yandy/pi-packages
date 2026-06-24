@@ -14,7 +14,9 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool(lspTools.lsp_hover);
 	pi.registerTool(lspTools.lsp_navigate);
 
-	syncToolsStatus(pi, loadConfig());
+	pi.on("session_start", () => {
+		syncToolsStatus(pi, loadConfig());
+	});
 
 	pi.on("session_shutdown", async (_event, _ctx) => {
 		await lspManager.dispose();
