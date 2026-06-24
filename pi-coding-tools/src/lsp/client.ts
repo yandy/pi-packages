@@ -128,6 +128,10 @@ export class LspClient {
 		});
 	}
 
+	async getCounts(): Promise<{ didOpen: number; didClose: number }> {
+		return this.sendRequest<{ didOpen: number; didClose: number }>("test/counts", {});
+	}
+
 	async stop(): Promise<void> {
 		this.alive = false;
 		try {

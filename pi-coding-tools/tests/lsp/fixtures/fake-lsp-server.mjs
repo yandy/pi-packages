@@ -43,10 +43,18 @@ conn.onRequest("textDocument/references", (p) => [
 ]);
 
 conn.onRequest("shutdown", () => null);
+conn.onRequest("test/counts", () => ({ didOpen: didOpenCount, didClose: didCloseCount }));
+
+let didOpenCount = 0;
+let didCloseCount = 0;
 
 conn.onNotification("initialized", () => {});
-conn.onNotification("textDocument/didOpen", () => {});
-conn.onNotification("textDocument/didClose", () => {});
+conn.onNotification("textDocument/didOpen", () => {
+	didOpenCount++;
+});
+conn.onNotification("textDocument/didClose", () => {
+	didCloseCount++;
+});
 conn.onNotification("exit", () => {
 	conn.dispose();
 	process.exit(0);

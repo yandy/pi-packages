@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -56,6 +56,24 @@ describe("LspClient end-to-end (fake server)", () => {
 	it("references returns array", async () => {
 		const refs = await client.references(sampleFile, 2, 6);
 		expect(Array.isArray(refs) ? refs.length : 0).toBeGreaterThan(0);
+	});
+
+	it("re-opens file with didClose+didOpen when mtime changes", async () => {
+		// First call → didOpen
+		await client.documentSymbols(sampleFile);
+		const c1 = await client.getCounts();
+		expect(c1.didOpen).toBe(1);
+		expect(c1.didClose).toBe(0);
+
+		// Bump mtime so the client sees a change
+		const future = Date.now() / 1000 + 10;
+		utimesSync(sampleFile, future, future);
+
+		// Second call → triggers didClose + didOpen (mtime refresh)
+		await client.documentSymbols(sampleFile);
+		const c2 = await client.getCounts();
+		expect(c2.didClose).toBe(1);
+		expect(c2.didOpen).toBe(2);
 	});
 
 	it("isAlive true after start", () => {
