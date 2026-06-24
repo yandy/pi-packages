@@ -3,7 +3,7 @@
 	"publishConfig": {
 		"access": "public"
 	},
-	"version": "0.4.1",
+	"version": "0.5.0",
 	"description": "pi package enabling ls/find/grep built-in tools",
 	"license": "MIT",
 	"repository": {
