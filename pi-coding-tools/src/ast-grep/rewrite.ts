@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { getAstGrepPath } from "./binary";
-import type { CliLanguage, CliRewriteMatch, RunSgRewriteOptions, SgRewriteResult } from "./types";
+import type { CliRewriteMatch, RunSgRewriteOptions, SgRewriteResult } from "./types";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
 	return typeof v === "object" && v !== null && !Array.isArray(v);

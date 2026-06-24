@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { CliRewriteMatch, SgResult, SgRewriteResult } from "../src/ast-grep/types";
-import { formatHover, formatNavigate, formatRewriteResult, formatSearchResult, formatSymbolTree } from "../src/formatters";
+import type { CliRewriteMatch, SgResult } from "../src/ast-grep/types";
+import {
+	formatHover,
+	formatNavigate,
+	formatRewriteResult,
+	formatSearchResult,
+	formatSymbolTree,
+} from "../src/formatters";
 import type { DocumentSymbol, Hover, Location } from "../src/lsp/types";
 
 const match: SgResult["matches"][number] = {
@@ -182,9 +188,9 @@ describe("formatRewriteResult", () => {
 	});
 
 	it("no matches", () => {
-		expect(
-			formatRewriteResult({ matches: [], totalMatches: 0, truncated: false, applied: false }),
-		).toContain("No matches");
+		expect(formatRewriteResult({ matches: [], totalMatches: 0, truncated: false, applied: false })).toContain(
+			"No matches",
+		);
 	});
 
 	it("aligns the + replacement line under the - original line", () => {
@@ -199,8 +205,8 @@ describe("formatRewriteResult", () => {
 		const plusLine = lines.find((l) => l.includes("+ logger.info"));
 		expect(dashLine).toBeDefined();
 		expect(plusLine).toBeDefined();
-		const dashCol = dashLine!.indexOf("-");
-		const plusCol = plusLine!.indexOf("+");
+		const dashCol = dashLine?.indexOf("-") ?? -1;
+		const plusCol = plusLine?.indexOf("+") ?? -1;
 		expect(plusCol).toBe(dashCol);
 	});
 

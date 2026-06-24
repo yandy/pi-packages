@@ -11,11 +11,11 @@ vi.mock("../src/ast-grep/rewrite", () => ({
 	runAstGrepRewrite: vi.fn(),
 }));
 
-import { runAstGrep } from "../src/ast-grep/search";
 import { runAstGrepRewrite } from "../src/ast-grep/rewrite";
+import { runAstGrep } from "../src/ast-grep/search";
 import type { SgResult } from "../src/ast-grep/types";
-import { ast_grep_search } from "../src/tools/ast-grep-search";
 import { ast_grep_replace } from "../src/tools/ast-grep-replace";
+import { ast_grep_search } from "../src/tools/ast-grep-search";
 
 // mock lsp manager
 const mockClient = {
@@ -180,7 +180,9 @@ describe("ast_grep_replace tool", () => {
 	});
 
 	it("appends pattern hint when no matches and no error", async () => {
-		vi.mocked(runAstGrepRewrite).mockResolvedValueOnce({ matches: [], totalMatches: 0, truncated: false, applied: false });
+		vi
+			.mocked(runAstGrepRewrite)
+			.mockResolvedValueOnce({ matches: [], totalMatches: 0, truncated: false, applied: false });
 		const res = await ast_grep_replace.execute(
 			"id",
 			{ pattern: "foo\\w+", rewrite: "bar", lang: "typescript", path: "src" },

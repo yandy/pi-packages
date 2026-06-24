@@ -30,8 +30,7 @@ const ReplaceParams = Type.Object({
 	path: Type.Optional(Type.String({ description: "File or directory to rewrite (default: cwd)" })),
 	apply: Type.Optional(
 		Type.Boolean({
-			description:
-				"Default false = dry-run: preview changes WITHOUT writing files. Set true to write changes to disk.",
+			description: "Default false = dry-run: preview changes WITHOUT writing files. Set true to write changes to disk.",
 		}),
 	),
 });
@@ -87,7 +86,13 @@ export const ast_grep_replace = defineTool({
 		}
 		if (!lang) lang = "typescript";
 
-		const result = await runAstGrepRewrite({ pattern: params.pattern, rewrite: params.rewrite, lang, paths: [path], apply });
+		const result = await runAstGrepRewrite({
+			pattern: params.pattern,
+			rewrite: params.rewrite,
+			lang,
+			paths: [path],
+			apply,
+		});
 		const text = formatRewriteResult(result);
 		const hint =
 			result.matches.length === 0 && !result.error ? (getPatternHint(params.pattern, lang) ?? undefined) : undefined;

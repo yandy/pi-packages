@@ -58,7 +58,17 @@ describe("syncToolsStatus", () => {
 	});
 
 	it("all false removes everything", () => {
-		const pi = makeMockPi(["read", "ls", "find", "grep", "ast_grep_search", "ast_grep_replace", "lsp_symbols", "lsp_hover", "lsp_navigate"]);
+		const pi = makeMockPi([
+			"read",
+			"ls",
+			"find",
+			"grep",
+			"ast_grep_search",
+			"ast_grep_replace",
+			"lsp_symbols",
+			"lsp_hover",
+			"lsp_navigate",
+		]);
 		const config: CodingToolsConfig = {
 			ls: false,
 			find: false,
