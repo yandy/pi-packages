@@ -62,6 +62,27 @@ export function formatSymbolTree(symbols: Array<DocumentSymbol | SymbolInformati
 	return lines.join("\n");
 }
 
+// Strip markdown noise (code fences, stray backticks) so the LLM gets a clean
+// signature/type line instead of fenced markdown — saves tokens and matches
+// the package's compact-output principle.
+function stripMarkdown(text: string): string {
+	let out = text;
+	// Remove fenced code blocks ```lang ... ```, keep inner content joined
+	out = out.replace(/```[a-zA-Z]*\n?([\s\S]*?)```/g, (_, body) => body.trim());
+	// Remove remaining standalone fence markers
+	out = out.replace(/```/g, "");
+	// Inline `code` → code (drop single backticks around a span)
+	out = out.replace(/`([^`\n]+)`/g, "$1");
+	// Collapse 3+ blank lines to one, trim trailing whitespace per line
+	out = out
+		.split("\n")
+		.map((l) => l.trimEnd())
+		.join("\n")
+		.replace(/\n{3,}/g, "\n\n")
+		.trim();
+	return out;
+}
+
 export function formatHover(hover: Hover): string {
 	if (!hover) return "No hover information at this position.";
 	const c = hover.contents;
@@ -69,7 +90,8 @@ export function formatHover(hover: Hover): string {
 	if (typeof c === "string") text = c;
 	else if (Array.isArray(c)) text = c.map((x) => (typeof x === "string" ? x : x.value)).join("\n");
 	else text = c.value;
-	return text.trim() || "No hover information at this position.";
+	const stripped = stripMarkdown(text);
+	return stripped || "No hover information at this position.";
 }
 
 function uriToRelPath(uri: string, rootDir: string): string {

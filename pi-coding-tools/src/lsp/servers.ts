@@ -78,7 +78,6 @@ function applyOverride(server: ServerDef, override: ServerOverride | undefined):
 	return {
 		...server,
 		...(override.command ? { command: override.command } : {}),
-		...(override.priority !== undefined ? {} : {}),
 	};
 }
 

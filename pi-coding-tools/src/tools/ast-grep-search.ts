@@ -28,7 +28,7 @@ const SearchParams = Type.Object({
 
 export interface AstGrepSearchDetails {
 	pattern: string;
-	lang: CliLanguage;
+	lang?: CliLanguage;
 	paths: string[];
 	matches: SgResult["matches"];
 	totalMatches: number;
@@ -64,7 +64,6 @@ export const ast_grep_search = defineTool({
 				content: [{ type: "text" as const, text: `Unsupported language: ${params.lang}` }],
 				details: {
 					pattern: params.pattern,
-					lang: "typescript",
 					paths: [path],
 					matches: [],
 					totalMatches: 0,

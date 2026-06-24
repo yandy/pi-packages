@@ -7,6 +7,12 @@ import type { LspManager } from "../lsp/manager";
 
 const defineTool = ((t) => t) as typeof DefineToolType;
 
+/** Minimal details carried by the LSP tools. */
+export interface LspToolDetails {
+	operation?: string;
+	error?: string;
+}
+
 export interface LspTools {
 	lsp_symbols: ReturnType<typeof defineTool>;
 	lsp_hover: ReturnType<typeof defineTool>;
@@ -26,13 +32,14 @@ export function createLspTools(manager: LspManager, getConfig: () => CodingTools
 			"For a textual pattern across files, use grep instead. For exact cross-file resolution, use lsp_navigate.",
 		],
 		parameters: Type.Object({ path: Type.String({ description: "File path" }) }),
-		async execute(_id, params, _signal, _onUpdate, _ctx) {
+		async execute(_id, params, _signal, _onUpdate, ctx) {
+			const cwd = (ctx as ExtensionContext).cwd;
 			try {
-				const { client } = await manager.getClientForFile(params.path, getConfig());
+				const { client } = await manager.getClientForFile(params.path, getConfig(), cwd);
 				const syms = await client.documentSymbols(params.path);
 				return {
 					content: [{ type: "text" as const, text: formatSymbolTree(syms, params.path) }],
-					details: {} as unknown,
+					details: {} satisfies LspToolDetails,
 				};
 			} catch (e) {
 				return {
@@ -42,7 +49,7 @@ export function createLspTools(manager: LspManager, getConfig: () => CodingTools
 							text: `Error: ${e instanceof Error ? e.message : String(e)}`,
 						},
 					],
-					details: {} as unknown,
+					details: { error: e instanceof Error ? e.message : String(e) } satisfies LspToolDetails,
 				};
 			}
 		},
@@ -64,13 +71,14 @@ export function createLspTools(manager: LspManager, getConfig: () => CodingTools
 			line: Type.Integer({ description: "Line number (1-based)" }),
 			character: Type.Integer({ description: "Column (0-based)" }),
 		}),
-		async execute(_id, params, _signal, _onUpdate, _ctx) {
+		async execute(_id, params, _signal, _onUpdate, ctx) {
+			const cwd = (ctx as ExtensionContext).cwd;
 			try {
-				const { client } = await manager.getClientForFile(params.path, getConfig());
+				const { client } = await manager.getClientForFile(params.path, getConfig(), cwd);
 				const h = await client.hover(params.path, params.line, params.character);
 				return {
 					content: [{ type: "text" as const, text: formatHover(h) }],
-					details: {} as unknown,
+					details: {} satisfies LspToolDetails,
 				};
 			} catch (e) {
 				return {
@@ -80,7 +88,7 @@ export function createLspTools(manager: LspManager, getConfig: () => CodingTools
 							text: `Error: ${e instanceof Error ? e.message : String(e)}`,
 						},
 					],
-					details: {} as unknown,
+					details: { error: e instanceof Error ? e.message : String(e) } satisfies LspToolDetails,
 				};
 			}
 		},
@@ -108,18 +116,18 @@ export function createLspTools(manager: LspManager, getConfig: () => CodingTools
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			const cwd = (ctx as ExtensionContext).cwd;
 			try {
-				const { client } = await manager.getClientForFile(params.path, getConfig());
+				const { client } = await manager.getClientForFile(params.path, getConfig(), cwd);
 				if (params.operation === "definition") {
 					const r = await client.definition(params.path, params.line, params.character);
 					return {
 						content: [{ type: "text" as const, text: formatNavigate("definition", r, cwd) }],
-						details: {} as unknown,
+						details: { operation: "definition" } satisfies LspToolDetails,
 					};
 				}
 				const r = await client.references(params.path, params.line, params.character);
 				return {
 					content: [{ type: "text" as const, text: formatNavigate("references", r, cwd) }],
-					details: {} as unknown,
+					details: { operation: "references" } satisfies LspToolDetails,
 				};
 			} catch (e) {
 				return {
@@ -129,7 +137,10 @@ export function createLspTools(manager: LspManager, getConfig: () => CodingTools
 							text: `Error: ${e instanceof Error ? e.message : String(e)}`,
 						},
 					],
-					details: {} as unknown,
+					details: {
+						operation: params.operation,
+						error: e instanceof Error ? e.message : String(e),
+					} satisfies LspToolDetails,
 				};
 			}
 		},

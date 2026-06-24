@@ -1,4 +1,4 @@
-import { mkdtempSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -32,6 +32,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
 	await client.stop();
+	rmSync(root, { recursive: true, force: true });
 });
 
 describe("LspClient end-to-end (fake server)", () => {
@@ -74,6 +75,16 @@ describe("LspClient end-to-end (fake server)", () => {
 		const c2 = await client.getCounts();
 		expect(c2.didClose).toBe(1);
 		expect(c2.didOpen).toBe(2);
+	});
+
+	it("does NOT re-open when mtime is unchanged (skip readFileSync path)", async () => {
+		// Capture counts before the unchanged-mtime call
+		const before = await client.getCounts();
+		// Call again without touching mtime → should be a no-op (no didOpen/didClose)
+		await client.documentSymbols(sampleFile);
+		const after = await client.getCounts();
+		expect(after.didOpen).toBe(before.didOpen);
+		expect(after.didClose).toBe(before.didClose);
 	});
 
 	it("isAlive true after start", () => {

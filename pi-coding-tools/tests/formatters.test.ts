@@ -100,6 +100,16 @@ describe("formatHover", () => {
 			contents: { kind: "markdown", value: "`(method) findById(id: string): User`" },
 		};
 		expect(formatHover(h)).toContain("findById(id: string): User");
+		// inline backticks stripped
+		expect(formatHover(h)).not.toContain("`findById");
+	});
+	it("strips fenced code blocks, keeping inner content", () => {
+		const h: Hover = {
+			contents: { kind: "markdown", value: "```typescript\nfunction foo(x: number): void\n```" },
+		};
+		const out = formatHover(h);
+		expect(out).toContain("function foo(x: number): void");
+		expect(out).not.toContain("```");
 	});
 	it("null hover → message", () => {
 		expect(formatHover(null)).toMatch(/No hover/);
