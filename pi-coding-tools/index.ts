@@ -7,7 +7,7 @@ import { createLspTools } from "./src/tools/lsp-tools";
 
 export default function (pi: ExtensionAPI) {
 	const lspManager = new LspManager();
-	const lspTools = createLspTools(lspManager);
+	const lspTools = createLspTools(lspManager, () => loadConfig());
 
 	// factory 注册 4 工具
 	pi.registerTool(ast_grep_search);

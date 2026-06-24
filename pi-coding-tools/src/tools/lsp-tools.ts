@@ -1,6 +1,7 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { defineTool as DefineToolType, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import type { CodingToolsConfig } from "../config";
 import { formatHover, formatNavigate, formatSymbolTree } from "../formatters";
 import type { LspManager } from "../lsp/manager";
 
@@ -12,7 +13,7 @@ export interface LspTools {
 	lsp_navigate: ReturnType<typeof defineTool>;
 }
 
-export function createLspTools(manager: LspManager): LspTools {
+export function createLspTools(manager: LspManager, getConfig: () => CodingToolsConfig): LspTools {
 	const lsp_symbols = defineTool({
 		name: "lsp_symbols",
 		label: "LSP Symbols",
@@ -27,7 +28,7 @@ export function createLspTools(manager: LspManager): LspTools {
 		parameters: Type.Object({ path: Type.String({ description: "File path" }) }),
 		async execute(_id, params, _signal, _onUpdate, _ctx) {
 			try {
-				const { client } = await manager.getClientForFile(params.path);
+				const { client } = await manager.getClientForFile(params.path, getConfig());
 				const syms = await client.documentSymbols(params.path);
 				return {
 					content: [{ type: "text" as const, text: formatSymbolTree(syms, params.path) }],
@@ -65,7 +66,7 @@ export function createLspTools(manager: LspManager): LspTools {
 		}),
 		async execute(_id, params, _signal, _onUpdate, _ctx) {
 			try {
-				const { client } = await manager.getClientForFile(params.path);
+				const { client } = await manager.getClientForFile(params.path, getConfig());
 				const h = await client.hover(params.path, params.line, params.character);
 				return {
 					content: [{ type: "text" as const, text: formatHover(h) }],
@@ -107,7 +108,7 @@ export function createLspTools(manager: LspManager): LspTools {
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			const cwd = (ctx as ExtensionContext).cwd;
 			try {
-				const { client } = await manager.getClientForFile(params.path);
+				const { client } = await manager.getClientForFile(params.path, getConfig());
 				if (params.operation === "definition") {
 					const r = await client.definition(params.path, params.line, params.character);
 					return {

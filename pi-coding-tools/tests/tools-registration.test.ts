@@ -103,11 +103,22 @@ describe("ast_grep_search tool", () => {
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { CodingToolsConfig } from "../src/config";
 import { createLspTools } from "../src/tools/lsp-tools";
+
+const baseTrue: CodingToolsConfig = {
+	ls: true,
+	find: true,
+	grep: true,
+	ast_grep_search: true,
+	lsp_symbols: true,
+	lsp_hover: true,
+	lsp_navigate: true,
+};
 
 describe("lsp tools", () => {
 	let tsFile: string;
-	const tools = createLspTools(mockManager as never);
+	const tools = createLspTools(mockManager as never, () => baseTrue);
 	beforeAll(() => {
 		const root = mkdtempSync(join(tmpdir(), "lsp-tools-"));
 		tsFile = join(root, "a.ts");
@@ -158,11 +169,31 @@ describe("lsp tools", () => {
 				throw new Error("not installed. Install: npm i -g pyright");
 			}),
 		};
-		const t = createLspTools(m as never);
+		const t = createLspTools(m as never, () => baseTrue);
 		const res = await t.lsp_hover.execute("id", { path: tsFile, line: 1, character: 0 }, undefined, undefined, {
 			cwd: "/proj",
 		} as never);
 		const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
 		expect(text).toContain("not installed");
+	});
+
+	it("threads lsp config to manager.getClientForFile", async () => {
+		const capturedConfigs: Array<CodingToolsConfig | undefined> = [];
+		const configMgr = {
+			getClientForFile: vi.fn(async (_path: string, config?: CodingToolsConfig) => {
+				capturedConfigs.push(config);
+				return { client: mockClient, server: { id: "ts" } };
+			}),
+		};
+		const cfg: CodingToolsConfig = {
+			...baseTrue,
+			lsp: { disabled: true, servers: { clangd: { disabled: true } } },
+		};
+		const tools2 = createLspTools(configMgr as never, () => cfg);
+
+		await tools2.lsp_symbols.execute("id", { path: tsFile }, undefined, undefined, { cwd: "/proj" } as never);
+		expect(capturedConfigs.length).toBeGreaterThanOrEqual(1);
+		expect(capturedConfigs[0]?.lsp?.disabled).toBe(true);
+		expect(capturedConfigs[0]?.lsp?.servers?.clangd?.disabled).toBe(true);
 	});
 });
