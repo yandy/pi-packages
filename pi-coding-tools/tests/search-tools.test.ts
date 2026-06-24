@@ -1,12 +1,11 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import type { CodingToolsConfig } from "../src/config";
-import { enableTools } from "../src/search-tools";
+import { disableTools } from "../src/search-tools";
 
-function makeMockPi(allTools: string[], activeTools: string[]) {
+function makeMockPi(activeTools: string[]) {
 	let currentActive = [...activeTools];
 	return {
-		getAllTools: vi.fn(() => allTools.map((name) => ({ name }))),
 		getActiveTools: vi.fn(() => [...currentActive]),
 		setActiveTools: vi.fn((tools: string[]) => {
 			currentActive = [...tools];
@@ -24,25 +23,10 @@ const allTrueConfig: CodingToolsConfig = {
 	lsp_navigate: true,
 };
 
-describe("enableTools", () => {
-	it("adds ls/find/grep when not already active", () => {
-		const pi = makeMockPi(
-			[
-				"read",
-				"bash",
-				"edit",
-				"write",
-				"ls",
-				"find",
-				"grep",
-				"ast_grep_search",
-				"lsp_symbols",
-				"lsp_hover",
-				"lsp_navigate",
-			],
-			["read", "bash", "edit", "write"],
-		);
-		enableTools(pi as unknown as ExtensionAPI, allTrueConfig);
+describe("disableTools", () => {
+	it("adds enabled tools that are not yet active (built-in activation)", () => {
+		const pi = makeMockPi(["read", "bash", "edit", "write"]);
+		disableTools(pi as unknown as ExtensionAPI, allTrueConfig);
 		expect(pi.setActiveTools).toHaveBeenCalledWith(
 			expect.arrayContaining([
 				"read",
@@ -60,52 +44,19 @@ describe("enableTools", () => {
 		);
 	});
 
-	it("does not duplicate already-active tools", () => {
-		const pi = makeMockPi(
-			["read", "bash", "ls", "find", "grep", "ast_grep_search", "lsp_symbols", "lsp_hover", "lsp_navigate"],
-			["read", "bash", "ls"],
-		);
-		enableTools(pi as unknown as ExtensionAPI, allTrueConfig);
+	it("removes tools that config says false", () => {
+		const pi = makeMockPi(["read", "bash", "edit", "ls", "lsp_hover", "lsp_navigate"]);
+		const config: CodingToolsConfig = { ...allTrueConfig, lsp_hover: false, lsp_navigate: false };
+		disableTools(pi as unknown as ExtensionAPI, config);
 		const result = pi.setActiveTools.mock.calls[0][0] as string[];
-		const lsCount = result.filter((t) => t === "ls").length;
-		expect(lsCount).toBe(1);
-	});
-
-	it("skips tools not in getAllTools", () => {
-		const pi = makeMockPi(["read", "bash"], ["read", "bash"]);
-		enableTools(pi as unknown as ExtensionAPI, allTrueConfig);
-		const result = pi.setActiveTools.mock.calls[0][0] as string[];
-		expect(result).not.toContain("ls");
-		expect(result).not.toContain("find");
-		expect(result).not.toContain("grep");
-		expect(result).not.toContain("ast_grep_search");
-		expect(result).not.toContain("lsp_symbols");
 		expect(result).not.toContain("lsp_hover");
 		expect(result).not.toContain("lsp_navigate");
+		expect(result).toContain("read");
+		expect(result).toContain("ls");
 	});
 
-	it("respects config: ls=false skips ls", () => {
-		const pi = makeMockPi(
-			["read", "ls", "find", "grep", "ast_grep_search", "lsp_symbols", "lsp_hover", "lsp_navigate"],
-			["read"],
-		);
-		const config: CodingToolsConfig = { ...allTrueConfig, ls: false };
-		enableTools(pi as unknown as ExtensionAPI, config);
-		const result = pi.setActiveTools.mock.calls[0][0] as string[];
-		expect(result).not.toContain("ls");
-		expect(result).toContain("find");
-		expect(result).toContain("grep");
-		expect(result).toContain("ast_grep_search");
-		expect(result).toContain("lsp_symbols");
-		expect(result).toContain("lsp_hover");
-		expect(result).toContain("lsp_navigate");
-	});
-
-	it("respects config: all false adds nothing", () => {
-		const pi = makeMockPi(
-			["read", "ls", "find", "grep", "ast_grep_search", "lsp_symbols", "lsp_hover", "lsp_navigate"],
-			["read"],
-		);
+	it("all false removes everything", () => {
+		const pi = makeMockPi(["read", "ls", "find", "grep", "ast_grep_search", "lsp_symbols", "lsp_hover", "lsp_navigate"]);
 		const config: CodingToolsConfig = {
 			ls: false,
 			find: false,
@@ -115,46 +66,25 @@ describe("enableTools", () => {
 			lsp_hover: false,
 			lsp_navigate: false,
 		};
-		enableTools(pi as unknown as ExtensionAPI, config);
-		const result = pi.setActiveTools.mock.calls[0][0] as string[];
-		expect(result).toEqual(["read"]);
+		disableTools(pi as unknown as ExtensionAPI, config);
+		expect(pi.setActiveTools.mock.calls[0][0]).toEqual(["read"]);
 	});
 
-	it("removes tools from active set when config says false", () => {
-		// 真实场景：registerTool 后工具默认 active，config 禁掉应该移除
-		const pi = makeMockPi(
-			["read", "bash", "edit", "ls", "find", "grep", "ast_grep_search", "lsp_symbols", "lsp_hover", "lsp_navigate"],
-			["read", "bash", "edit", "ls", "lsp_hover", "lsp_navigate"],
-		);
-		const config: CodingToolsConfig = { ...allTrueConfig, lsp_hover: false, lsp_navigate: false };
-		enableTools(pi as unknown as ExtensionAPI, config);
+	it("Set.add is idempotent — no duplicates", () => {
+		const pi = makeMockPi(["read", "ls", "find"]);
+		disableTools(pi as unknown as ExtensionAPI, allTrueConfig);
 		const result = pi.setActiveTools.mock.calls[0][0] as string[];
-		expect(result).not.toContain("lsp_hover");
-		expect(result).not.toContain("lsp_navigate");
-		// 仍然保留其他 active 工具
-		expect(result).toContain("read");
-		expect(result).toContain("bash");
-		expect(result).toContain("edit");
-		expect(result).toContain("ls");
+		expect(result.filter((t) => t === "ls").length).toBe(1);
+		expect(result.filter((t) => t === "find").length).toBe(1);
 	});
 
-	it("preserves existing active tools", () => {
-		const pi = makeMockPi(
-			["read", "bash", "edit", "ls", "find", "grep", "ast_grep_search", "lsp_symbols", "lsp_hover", "lsp_navigate"],
-			["read", "bash", "edit"],
-		);
-		enableTools(pi as unknown as ExtensionAPI, allTrueConfig);
+	it("preserves non-coding tools", () => {
+		const pi = makeMockPi(["read", "bash", "edit", "write"]);
+		disableTools(pi as unknown as ExtensionAPI, allTrueConfig);
 		const result = pi.setActiveTools.mock.calls[0][0] as string[];
 		expect(result).toContain("read");
 		expect(result).toContain("bash");
 		expect(result).toContain("edit");
-	});
-
-	it("adds ast_grep_search when enabled and present", () => {
-		const pi = makeMockPi(["read", "ast_grep_search", "lsp_symbols"], ["read"]);
-		enableTools(pi as unknown as ExtensionAPI, allTrueConfig);
-		const result = pi.setActiveTools.mock.calls[0][0] as string[];
-		expect(result).toContain("ast_grep_search");
-		expect(result).toContain("lsp_symbols");
+		expect(result).toContain("write");
 	});
 });
