@@ -24,11 +24,16 @@
 | 新建包 vs 扩展现有 | **扩展现有 pi-coding-tools** | 主题一致（coding tools），控制包数；现有 config 模式天然延伸 |
 | 工具数 | **4**（ast_grep_search / lsp_symbols / lsp_hover / lsp_navigate） | goto_def+find_references 合并进 `lsp_navigate(operation)` 压到 4 |
 | 工具命名 | **机制前缀**（`ast_grep_*` / `lsp_*`），非 `code_*` | 机制名编码行为契约（ast-grep≠正则、LSP 需服务器）、与内置 `grep` 区分、匹配生态约定、prime ast-grep 模式语法 |
-| AST 后端 | **ast-grep CLI**（`sg`） | 简单、二进制管理成熟；napi native addon 复杂度留 P1 |
+| AST 后端 | **ast-grep CLI**（二进制 `ast-grep`/`sg`） | 简单、二进制管理成熟；napi 仅内置 ts/js 不覆盖 py/java/kotlin/c-c++，放弃 |
 | LSP 管理 | **最小自写**（懒加载+进程缓存+空闲超时+崩溃重启一次） | v1 精简；refcount/init-reaping 留 P1 |
 | `lsp_symbols` fallback | **不做** ast-grep fallback，纯 LSP | hover/navigate 必须有 LSP，没装 LSP 是半残；fallback 只救孤立 symbols 价值低，且省 5 套语言模式工作量；质量不如 LSP |
 | P0 语言 | ts/js、python、java/kotlin、c/c++ | 用户选择 |
 | 方案档位 | **方案 A（精简）** | 精简优先，健壮性增量留 P1 |
+| 开发方式 | **git worktree 隔离开发** | 实施阶段用 using-git-worktrees skill 建隔离工作区，避免干扰主分支 |
+
+## 开发方法
+
+实施阶段使用 **git worktree** 建立隔离工作区（`using-git-worktrees` skill），避免在主工作区直接改动。所有代码变更、测试、验证均在 worktree 内进行，完成后再合并回主分支。这与本 monorepo 既有 `.worktrees/` 目录约定一致。
 
 ## Scope
 
@@ -36,8 +41,8 @@
 
 | File | Purpose |
 |------|---------|
-| `pi-coding-tools/src/ast-grep/binary.ts` | `sg` 二进制解析：PATH → `@ast-grep/cli` → 平台包 → 可选 GitHub 下载（`PI_OFFLINE` 可关） |
-| `pi-coding-tools/src/ast-grep/search.ts` | 执行 `sg run --json`，解析+格式化；正则式 pattern 检测与提示 |
+| `pi-coding-tools/src/ast-grep/binary.ts` | `ast-grep`/`sg` 二进制解析：PATH(优先 ast-grep) → `@ast-grep/cli` → 平台包 → 可选 GitHub 下载（`PI_OFFLINE` 可关） |
+| `pi-coding-tools/src/ast-grep/search.ts` | 执行 `ast-grep run --json=compact`，解析+格式化；正则式 pattern 检测与提示 |
 | `pi-coding-tools/src/lsp/manager.ts` | `LspManager`：懒加载 + `Map<lang,server>` 缓存 + 空闲超时(5min) + 崩溃驱逐重启一次 + dispose |
 | `pi-coding-tools/src/lsp/client.ts` | JSON-RPC over stdio（`vscode-jsonrpc`）：initialize/didOpen/hover/documentSymbol/definition/references；位置换算；mtime 重开刷新 |
 | `pi-coding-tools/src/lsp/servers.ts` | 每语言服务器定义（command/args/extensions/initOptions/installHint/installed 探测） |
@@ -84,9 +89,9 @@ pi session
 │
 ├── ls / find / grep        ─── pi 内置（enableSearchTools 激活）
 │
-├── ast_grep_search         ─── exec sg run --pattern ... --json
+├── ast_grep_search         ─── exec ast-grep run --pattern ... --json
 │                                 │
-│                            ast-grep/binary.ts（sg 解析）
+│                            ast-grep/binary.ts（ast-grep/sg 解析）
 │                            ast-grep/search.ts（执行+格式化+pattern-hint）
 │
 └── lsp_symbols / lsp_hover / lsp_navigate
@@ -134,7 +139,7 @@ pi-coding-tools/
 
 ### `ast_grep_search` — AST 结构搜索
 
-**后端**：ast-grep CLI（`sg`）
+**后端**：ast-grep CLI（二进制名 `ast-grep`/`sg`，见下）
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|:---:|------|
@@ -229,20 +234,24 @@ src/user.ts:15:3   validateToken(input.token, env.JWT_SECRET)
 
 ### 二进制解析（`ast-grep/binary.ts`）
 
+> **二进制名修正**：ast-grep 的 CLI 二进制在不同安装方式下名字不同——`cargo install ast-grep` / `brew install ast-grep`（Linux/macOS）装的是 **`ast-grep`**；而 `@ast-grep/cli` npm 包内部的 shim 叫 **`sg`**。pi-ast-grep 只找 `sg`，会漏掉只有 `ast-grep` 的系统。**本包同时找两者，优先 `ast-grep`**（Linux 标准名），`sg` 作为 npm shim fallback。
+
 解析顺序（借鉴 pi-ast-grep MIT 逻辑，NOTICE 注明）：
 
-1. **PATH** — 系统 `sg` / `sg.exe`
-2. **`@ast-grep/cli` npm 包** — createRequire 相对本包解析
-3. **平台 npm 包** — `@ast-grep/cli-{platform}-{arch}-{libc}`（darwin/linux/win × arm64/x64）
-4. **GitHub release 自动下载**（最后手段，`PI_OFFLINE=1` 关闭）— 拉 `app-{arch}-{os}.zip` 解压到 `$XDG_CACHE_HOME/pi-coding-tools/bin/sg`，按存在+>10KB 校验
+1. **PATH** — 优先找 `ast-grep`（`ast-grep.exe` on Windows），再找 `sg`（`sg.exe`）。`ast-grep` 优先因为它是 cargo/brew/Linux 的标准二进制名
+2. **`@ast-grep/cli` npm 包** — createRequire 相对本包解析包内 `sg` shim
+3. **平台 npm 包** — `@ast-grep/cli-{platform}-{arch}-{libc}`（darwin/linux/win × arm64/x64），其内二进制名为 `ast-grep`
+4. **GitHub release 自动下载**（最后手段，`PI_OFFLINE=1` 关闭）— 拉 `app-{arch}-{os}.zip` 解压到 `$XDG_CACHE_HOME/pi-coding-tools/bin/ast-grep`，按存在+>10KB 校验
 
-**Trust model**：自动下载仅 HTTPS，无校验和（同 pi-ast-grep）。需可复现性则手动装 `sg` + `PI_OFFLINE=1`。
+**Trust model**：自动下载仅 HTTPS，无校验和（同 pi-ast-grep）。需可复现性则手动装 `ast-grep` + `PI_OFFLINE=1`。
 
 ### 搜索执行（`ast-grep/search.ts`）
 
 ```
-sg run --pattern <p> --lang <l> --json <path>
+ast-grep run --pattern <p> --lang <l> --json=compact <path>
 ```
+
+（`--json=compact` 同 pi-ast-grep，输出更紧凑的 JSON）
 
 - 解析 JSON 输出，归一化为 `{file, line, column, text}` 列表
 - lang 未传时按 `path` 扩展名/目录文件推断
@@ -354,7 +363,7 @@ class LspManager {
 | 纯单元 | 位置换算 | 1-based/0-based 互转 |
 | LSP manager | 空闲驱逐、崩溃重启一次、dispose | mock client（无真实服务器） |
 | LSP 协议 | didOpen/hover/docSymbol/def/refs | `fixtures/fake-lsp-server.mjs` 假服务器端到端 |
-| ast-grep 集成 | 真实 `sg` 搜索夹具 | `sg` 可用才跑，离线跳过 |
+| ast-grep 集成 | 真实 `ast-grep` 搜索夹具 | `ast-grep` 可用才跑，离线跳过 |
 | 工具注册 | 工具注册 + execute 返回 | mock 后端 |
 
 ## 入口接线（`index.ts`）
@@ -386,7 +395,7 @@ export default function (pi: ExtensionAPI) {
 
 | 依赖 | 用途 | 类型 |
 |------|------|------|
-| `@ast-grep/cli` | `sg` 二进制解析 | dependencies |
+| `@ast-grep/cli` | `ast-grep`/`sg` 二进制解析 | dependencies |
 | `vscode-jsonrpc` | LSP JSON-RPC 传输 | dependencies |
 | `extract-zip` | GitHub 下载解压 | dependencies |
 
@@ -395,7 +404,7 @@ export default function (pi: ExtensionAPI) {
 ## Out of Scope / P1
 
 - LSP 健壮性：refcount 生命周期、init-reaping(60s)、capabilities 检测、post-edit `didChange` 同步（`tool_result` hook）
-- `@ast-grep/napi` 进程内后端（更快，免 spawn）
+- ~~`@ast-grep/napi` 进程内后端~~（已评估放弃：napi 仅内置 ts/js，py/java/kotlin/c-c++ 需编译 tree-sitter 动态库，跨平台工程过重；CLI 已内置全部语言）
 - `lsp_symbols` ast-grep fallback（本次明确不做）
 - 更多语言（go/rust/ruby/php…）、更多服务器
 - 写操作：`ast_grep_replace`、lsp rename

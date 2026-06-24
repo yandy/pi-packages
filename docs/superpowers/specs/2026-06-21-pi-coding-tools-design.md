@@ -1,7 +1,9 @@
 # Design: pi-coding-tools 包
 
 **Date:** 2026-06-21
-**Status:** approved
+**Status:** 已放弃（superseded）
+
+> **⚠️ 已放弃（2026-06-24）**：本 spec 提出的 `apply_patch` 工具**未实现**（当前 pi-coding-tools 仅含 ls/find/grep 激活）。`apply_patch` 功能不再计划引入。pi-coding-tools 的后续演进见 [2026-06-24-pi-coding-tools-ast-lsp-design.md](./2026-06-24-pi-coding-tools-ast-lsp-design.md)（AST/LSP 代码理解工具）。本 spec 仅作历史归档保留。
 
 ## Summary
 
