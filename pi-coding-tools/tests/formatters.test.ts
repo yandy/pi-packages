@@ -187,6 +187,23 @@ describe("formatRewriteResult", () => {
 		).toContain("No matches");
 	});
 
+	it("aligns the + replacement line under the - original line", () => {
+		const out = formatRewriteResult({
+			matches: [rewriteMatch],
+			totalMatches: 1,
+			truncated: false,
+			applied: false,
+		});
+		const lines = out.split("\n");
+		const dashLine = lines.find((l) => l.includes("- console.log"));
+		const plusLine = lines.find((l) => l.includes("+ logger.info"));
+		expect(dashLine).toBeDefined();
+		expect(plusLine).toBeDefined();
+		const dashCol = dashLine!.indexOf("-");
+		const plusCol = plusLine!.indexOf("+");
+		expect(plusCol).toBe(dashCol);
+	});
+
 	it("surfaces error", () => {
 		expect(
 			formatRewriteResult({ matches: [], totalMatches: 0, truncated: false, error: "boom", applied: false }),

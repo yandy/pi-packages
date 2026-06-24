@@ -153,7 +153,7 @@ export function formatRewriteResult(result: SgRewriteResult): string {
 			for (const m of ms) {
 				const loc = `${m.range.start.line + 1}:${m.range.start.column + 1}`;
 				lines.push(`  ${m.file}:${loc}  - ${m.text.trim()}`);
-				lines.push(`  ${" ".repeat(m.file.length + loc.length + 6)}+ ${m.replacement.trim()}`);
+				lines.push(`  ${" ".repeat(m.file.length + loc.length + 3)}+ ${m.replacement.trim()}`);
 			}
 		}
 	}
