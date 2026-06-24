@@ -3,7 +3,7 @@ import type { CodingToolsConfig } from "./config";
 
 const ALL_TOOL_NAMES = ["ls", "find", "grep", "ast_grep_search", "lsp_symbols", "lsp_hover", "lsp_navigate"] as const;
 
-export function disableTools(pi: ExtensionAPI, config: CodingToolsConfig): void {
+export function syncToolsStatus(pi: ExtensionAPI, config: CodingToolsConfig): void {
 	const current = new Set(pi.getActiveTools());
 	for (const name of ALL_TOOL_NAMES) {
 		if (!config[name]) current.delete(name);
