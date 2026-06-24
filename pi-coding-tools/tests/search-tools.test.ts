@@ -17,6 +17,10 @@ const allTrueConfig: CodingToolsConfig = {
 	ls: true,
 	find: true,
 	grep: true,
+	ast_grep_search: true,
+	lsp_symbols: true,
+	lsp_hover: true,
+	lsp_navigate: true,
 };
 
 describe("enableSearchTools", () => {
@@ -57,7 +61,15 @@ describe("enableSearchTools", () => {
 
 	it("respects config: all false adds nothing", () => {
 		const pi = makeMockPi(["read", "ls", "find", "grep"], ["read"]);
-		const config: CodingToolsConfig = { ls: false, find: false, grep: false };
+		const config: CodingToolsConfig = {
+			ls: false,
+			find: false,
+			grep: false,
+			ast_grep_search: false,
+			lsp_symbols: false,
+			lsp_hover: false,
+			lsp_navigate: false,
+		};
 		enableSearchTools(pi as any, config);
 		const result = pi.setActiveTools.mock.calls[0][0] as string[];
 		expect(result).toEqual(["read"]);

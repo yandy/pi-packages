@@ -1,0 +1,11 @@
+pi-coding-tools
+
+Copyright (c) 2026 yandy
+
+This package's ast-grep binary resolution logic (PATH / npm package / platform
+package / GitHub release download) is adapted from pi-ast-grep
+(https://github.com/code-yeongyu/pi-ast-grep), MIT licensed, Copyright (c)
+Yeongyu Kim. See the ast-grep CLI itself at https://ast-grep.github.io.
+
+The LSP client/manager patterns are informed by pi-lsp-client
+(https://github.com/code-yeongyu/pi-lsp-client), MIT licensed.
