@@ -10,7 +10,7 @@ function makeLoadingPi() {
 		handlers,
 		on: vi.fn((event: string, handler: (...args: unknown[]) => unknown) => {
 			if (!handlers.has(event)) handlers.set(event, []);
-			handlers.get(event)!.push(handler);
+			handlers.get(event)?.push(handler);
 		}),
 		registerTool: vi.fn<(def: { name: string }) => void>(),
 		// 模拟真实 pi：加载期间 action methods 抛错
@@ -51,7 +51,7 @@ describe("extension factory", () => {
 		pi.getActiveTools.mockReturnValue(["read", "bash", "edit", "write"]);
 		pi.setActiveTools.mockImplementation(() => {});
 
-		const sessionStartHandler = pi.handlers.get("session_start")![0];
+		const sessionStartHandler = pi.handlers.get("session_start")?.[0];
 		await sessionStartHandler();
 
 		// syncToolsStatus 应该已经启用了配置中的工具
