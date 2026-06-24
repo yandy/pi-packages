@@ -51,7 +51,13 @@ export class LspClient {
 		await this.conn.sendRequest("initialize", {
 			processId: process.pid,
 			rootUri: pathToFileURL(this.root).href,
-			capabilities: {},
+			capabilities: {
+				textDocument: {
+					documentSymbol: { hierarchicalDocumentSymbolSupport: true },
+					hover: { contentFormat: ["markdown", "plaintext"] },
+					definition: { linkSupport: true },
+				},
+			},
 			workspaceFolders: [{ uri: pathToFileURL(this.root).href, name: "root" }],
 			initializationOptions: this.server.initOptions ?? {},
 		});
@@ -71,16 +77,17 @@ export class LspClient {
 	async openFile(filePath: string): Promise<void> {
 		const absPath = resolve(filePath);
 		const uri = pathToFileURL(absPath).href;
-		const text = readFileSync(absPath, "utf-8");
-		const mtime = statSync(absPath).mtimeMs;
 
+		const mtime = statSync(absPath).mtimeMs;
 		if (this.openedFiles.has(absPath)) {
-			// mtime 变了 → 重开刷新（捕获外部编辑）
+			// mtime unchanged → skip (no disk read)
 			if (this.lastMtime.get(uri) === mtime) return;
+			// mtime changed → close to re-open below (captures external edits)
 			await this.sendNotification("textDocument/didClose", { textDocument: { uri } });
 			this.openedFiles.delete(absPath);
 		}
 
+		const text = readFileSync(absPath, "utf-8");
 		const version = (this.documentVersions.get(uri) ?? 0) + 1;
 		this.documentVersions.set(uri, version);
 		this.lastMtime.set(uri, mtime);
