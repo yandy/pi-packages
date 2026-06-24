@@ -39,8 +39,10 @@ function findOnPath(binaryName: string): string | null {
 	return null;
 }
 
-// ast-grep 二进制名因安装方式而异：cargo/brew/Linux 装的是 `ast-grep`；
-// @ast-grep/cli npm 包内部 shim 叫 `sg`。优先找 ast-grep（标准名），再找 sg。
+// ast-grep binary naming: cargo/brew/Linux ships `ast-grep`;
+// @ast-grep/cli npm package internal shim is named `sg`.
+// sg is NOT searched on PATH — it collides with Unix sg(1) (switch-group).
+// The sg shim is still found via findBinaryInCliPackage() (package-internal).
 function findBinaryInCliPackage(binaryName: string): string | null {
 	try {
 		const require = createRequire(import.meta.url);
@@ -67,8 +69,8 @@ function findBinaryInPlatformPackage(): string | null {
 }
 
 export function findAstGrepPathSync(): string | null {
-	// 1. PATH: ast-grep 优先（Linux/cargo/brew 标准），再 sg（npm shim）
-	const onPath = findOnPath("ast-grep") ?? findOnPath("sg");
+	// 1. PATH: only ast-grep (sg collides with Unix switch-group command)
+	const onPath = findOnPath("ast-grep");
 	if (onPath) return onPath;
 	// 2. @ast-grep/cli 包内 sg shim
 	const inCli = findBinaryInCliPackage(process.platform === "win32" ? "sg.exe" : "sg");
