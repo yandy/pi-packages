@@ -263,8 +263,11 @@ export async function requestPathApproval(
 
 	let choice: string | undefined;
 	try {
-		choice = await ui.select(`Sandbox: 允许读取外部文件?
-${absPath}`, options);
+		choice = await ui.select(
+			`Sandbox: 允许读取外部文件?
+${absPath}`,
+			options,
+		);
 	} catch {
 		return false;
 	}
