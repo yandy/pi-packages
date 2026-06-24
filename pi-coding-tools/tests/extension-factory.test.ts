@@ -52,6 +52,7 @@ describe("extension factory", () => {
 		pi.setActiveTools.mockImplementation(() => {});
 
 		const sessionStartHandler = pi.handlers.get("session_start")?.[0];
+		if (!sessionStartHandler) throw new Error("expected session_start handler");
 		await sessionStartHandler();
 
 		// syncToolsStatus 应该已经启用了配置中的工具
