@@ -33,7 +33,7 @@ type SharpModule = (data: Buffer) => SharpPipeline;
 
 const defaultSharpLoader = async (): Promise<SharpModule | null> => {
 	try {
-		// @ts-ignore sharp is an optional dependency, may not be installed
+		// @ts-expect-error sharp is an optional dependency, may not be installed
 		const mod = (await import("sharp")) as { default?: SharpModule } & SharpModule;
 		return mod.default ?? (mod as unknown as SharpModule);
 	} catch {

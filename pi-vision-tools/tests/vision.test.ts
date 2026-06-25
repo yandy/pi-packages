@@ -1,7 +1,7 @@
+import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import type { VisionConfig } from "../src/config.js";
 import type { DecodedImage } from "../src/image.js";
-import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
 import { type CompleteFn, callVision, resolveVisionModel } from "../src/vision.js";
 
 const fakeModel = (input: string[]) =>
@@ -100,7 +100,7 @@ describe("callVision", () => {
 			{ model, auth: { apiKey: "k" }, prompt: "p", images: [img], reasoning: { reasoningEffort: "high" } },
 			completeFn,
 		);
-		expect(receivedOpts!.reasoningEffort).toBe("high");
+		expect(receivedOpts?.reasoningEffort).toBe("high");
 	});
 
 	it("returns errorMessage when completeFn throws", async () => {

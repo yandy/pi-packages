@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "./src/config";
 import { LspManager } from "./src/lsp/manager";
-import { refreshTools } from "./src/search-tools"
+import { refreshTools } from "./src/search-tools";
 import { ast_grep_replace } from "./src/tools/ast-grep-replace";
 import { ast_grep_search } from "./src/tools/ast-grep-search";
 import { createLspTools } from "./src/tools/lsp-tools";

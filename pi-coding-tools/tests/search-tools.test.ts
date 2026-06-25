@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import type { CodingToolsConfig } from "../src/config";
-import { refreshTools } from "../src/search-tools"
+import { refreshTools } from "../src/search-tools";
 
 function makeMockPi(activeTools: string[]) {
 	let currentActive = [...activeTools];
