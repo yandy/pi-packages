@@ -12,7 +12,7 @@ const ALL_TOOL_NAMES = [
 	"lsp_navigate",
 ] as const;
 
-export function syncToolsStatus(pi: ExtensionAPI, config: CodingToolsConfig): void {
+export function refreshTools(pi: ExtensionAPI, config: CodingToolsConfig): void {
 	const current = new Set(pi.getActiveTools());
 	for (const name of ALL_TOOL_NAMES) {
 		if (!config[name]) current.delete(name);

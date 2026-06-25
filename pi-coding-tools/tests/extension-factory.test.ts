@@ -34,13 +34,13 @@ describe("extension factory", () => {
 		// 上面 mock 的抛错会冒泡到这里，导致工厂执行失败
 		expect(() => factory(pi as never)).not.toThrow();
 
-		// 验证：将 syncToolsStatus 推迟到了 session_start
+		// 验证：将 refreshTools 推迟到了 session_start
 		const sessionStartHandlers = pi.handlers.get("session_start");
 		expect(sessionStartHandlers).toBeDefined();
 		expect(sessionStartHandlers?.length).toBe(1);
 	});
 
-	it("syncToolsStatus runs when session_start fires (with initialized runtime)", async () => {
+	it("refreshTools runs when session_start fires (with initialized runtime)", async () => {
 		const pi = makeLoadingPi();
 
 		const mod = await import("../index");
@@ -55,7 +55,7 @@ describe("extension factory", () => {
 		if (!sessionStartHandler) throw new Error("expected session_start handler");
 		await sessionStartHandler();
 
-		// syncToolsStatus 应该已经启用了配置中的工具
+		// refreshTools 应该已经启用了配置中的工具
 		expect(pi.setActiveTools).toHaveBeenCalled();
 		const activeTools: string[] = pi.setActiveTools.mock.calls[0][0];
 		for (const name of ["ls", "find", "grep", "ast_grep_search", "lsp_symbols", "lsp_hover", "lsp_navigate"]) {
