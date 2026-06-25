@@ -82,7 +82,7 @@ describe("callVision", () => {
 	});
 
 	it("passes reasoningEffort through when provided", async () => {
-		let receivedOpts: Record<string, unknown>;
+		let receivedOpts: Record<string, unknown> | undefined;
 		const completeFn: CompleteFn = async (_m, _c, opts) => {
 			receivedOpts = opts;
 			return {
@@ -100,7 +100,7 @@ describe("callVision", () => {
 			{ model, auth: { apiKey: "k" }, prompt: "p", images: [img], reasoning: { reasoningEffort: "high" } },
 			completeFn,
 		);
-		expect(receivedOpts.reasoningEffort).toBe("high");
+		expect(receivedOpts!.reasoningEffort).toBe("high");
 	});
 
 	it("returns errorMessage when completeFn throws", async () => {
@@ -124,7 +124,7 @@ describe("callVision", () => {
 				stopReason: "error",
 				errorMessage: "rate limited",
 				timestamp: 0,
-			}) as AssistantMessage;
+			}) as unknown as AssistantMessage;
 		const out = await callVision({ model, auth: { apiKey: "k" }, prompt: "p", images: [img], reasoning: {} }, completeFn);
 		expect(out.text).toBe("");
 		expect(out.errorMessage).toBe("rate limited");
