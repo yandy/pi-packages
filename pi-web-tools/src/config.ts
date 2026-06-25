@@ -34,16 +34,15 @@ function mergeConfigs(base: WebToolsConfig, override: WebToolsConfig): WebToolsC
 	return merged;
 }
 
-export function loadConfig(cwd?: string): WebToolsConfig {
-	const dir = cwd || process.cwd();
-	if (cachedConfig && cachedCwd === dir) return cachedConfig;
+export function loadConfig(cwd: string): WebToolsConfig {
+	if (cachedConfig && cachedCwd === cwd) return cachedConfig;
 
 	const agentDir = getAgentDir();
 	const globalConfig = readJsonFile(resolve(agentDir, "web-tools.json")) || {};
-	const projectConfig = readJsonFile(resolve(dir, CONFIG_DIR_NAME, "web-tools.json")) || {};
+	const projectConfig = readJsonFile(resolve(cwd, CONFIG_DIR_NAME, "web-tools.json")) || {};
 
 	cachedConfig = mergeConfigs(globalConfig, projectConfig);
-	cachedCwd = dir;
+	cachedCwd = cwd;
 	return cachedConfig;
 }
 

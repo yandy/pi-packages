@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "./src/config";
 import { LspManager } from "./src/lsp/manager";
 import { refreshTools } from "./src/search-tools";
@@ -8,7 +8,7 @@ import { createLspTools } from "./src/tools/lsp-tools";
 
 export default function (pi: ExtensionAPI) {
 	const lspManager = new LspManager();
-	const lspTools = createLspTools(lspManager, () => loadConfig());
+	const lspTools = createLspTools(lspManager, (cwd) => loadConfig(cwd));
 
 	pi.registerTool(ast_grep_search);
 	pi.registerTool(ast_grep_replace);
@@ -16,8 +16,8 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool(lspTools.lsp_hover);
 	pi.registerTool(lspTools.lsp_navigate);
 
-	pi.on("session_start", () => {
-		refreshTools(pi, loadConfig());
+	pi.on("session_start", (_event, ctx: ExtensionContext) => {
+		refreshTools(pi, loadConfig(ctx.cwd));
 	});
 
 	pi.on("session_shutdown", async (_event, _ctx) => {

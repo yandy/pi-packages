@@ -19,7 +19,7 @@ export interface LspTools {
 	lsp_navigate: ReturnType<typeof defineTool>;
 }
 
-export function createLspTools(manager: LspManager, getConfig: () => CodingToolsConfig): LspTools {
+export function createLspTools(manager: LspManager, getConfig: (cwd: string) => CodingToolsConfig): LspTools {
 	const lsp_symbols = defineTool({
 		name: "lsp_symbols",
 		label: "LSP Symbols",
@@ -35,7 +35,7 @@ export function createLspTools(manager: LspManager, getConfig: () => CodingTools
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			const cwd = (ctx as ExtensionContext).cwd;
 			try {
-				const { client } = await manager.getClientForFile(params.path, getConfig(), cwd);
+				const { client } = await manager.getClientForFile(params.path, cwd, getConfig(cwd));
 				const syms = await client.documentSymbols(params.path);
 				return {
 					content: [{ type: "text" as const, text: formatSymbolTree(syms, params.path) }],
@@ -74,7 +74,7 @@ export function createLspTools(manager: LspManager, getConfig: () => CodingTools
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			const cwd = (ctx as ExtensionContext).cwd;
 			try {
-				const { client } = await manager.getClientForFile(params.path, getConfig(), cwd);
+				const { client } = await manager.getClientForFile(params.path, cwd, getConfig(cwd));
 				const h = await client.hover(params.path, params.line, params.character);
 				return {
 					content: [{ type: "text" as const, text: formatHover(h) }],
@@ -116,7 +116,7 @@ export function createLspTools(manager: LspManager, getConfig: () => CodingTools
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			const cwd = (ctx as ExtensionContext).cwd;
 			try {
-				const { client } = await manager.getClientForFile(params.path, getConfig(), cwd);
+				const { client } = await manager.getClientForFile(params.path, cwd, getConfig(cwd));
 				if (params.operation === "definition") {
 					const r = await client.definition(params.path, params.line, params.character);
 					return {

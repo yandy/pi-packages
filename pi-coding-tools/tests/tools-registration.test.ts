@@ -214,7 +214,7 @@ const baseTrue: CodingToolsConfig = {
 
 describe("lsp tools", () => {
 	let tsFile: string;
-	const tools = createLspTools(mockManager as never, () => baseTrue);
+	const tools = createLspTools(mockManager as never, (_cwd) => baseTrue);
 	beforeAll(() => {
 		const root = mkdtempSync(join(tmpdir(), "lsp-tools-"));
 		tsFile = join(root, "a.ts");
@@ -265,7 +265,7 @@ describe("lsp tools", () => {
 				throw new Error("not installed. Install: npm i -g pyright");
 			}),
 		};
-		const t = createLspTools(m as never, () => baseTrue);
+		const t = createLspTools(m as never, (_cwd) => baseTrue);
 		const res = await t.lsp_hover.execute("id", { path: tsFile, line: 1, character: 0 }, undefined, undefined, {
 			cwd: "/proj",
 		} as never);
@@ -276,7 +276,7 @@ describe("lsp tools", () => {
 	it("threads lsp config to manager.getClientForFile", async () => {
 		const capturedConfigs: Array<CodingToolsConfig | undefined> = [];
 		const configMgr = {
-			getClientForFile: vi.fn(async (_path: string, config?: CodingToolsConfig) => {
+			getClientForFile: vi.fn(async (_path: string, _root: string, config?: CodingToolsConfig) => {
 				capturedConfigs.push(config);
 				return { client: mockClient, server: { id: "ts" } };
 			}),
@@ -285,7 +285,7 @@ describe("lsp tools", () => {
 			...baseTrue,
 			lsp: { disabled: true, servers: { clangd: { disabled: true } } },
 		};
-		const tools2 = createLspTools(configMgr as never, () => cfg);
+		const tools2 = createLspTools(configMgr as never, (_cwd) => cfg);
 
 		await tools2.lsp_symbols.execute("id", { path: tsFile }, undefined, undefined, { cwd: "/proj" } as never);
 		expect(capturedConfigs.length).toBeGreaterThanOrEqual(1);

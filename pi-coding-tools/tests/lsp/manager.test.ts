@@ -63,8 +63,8 @@ describe("LspManager", () => {
 	it("lazily creates + caches one client per language", async () => {
 		const factory = vi.fn((root, server) => new FakeLspClient(root, server) as unknown as LspClient);
 		const m = new LspManager({ clientFactory: factory });
-		await m.getClientForFile("/p/a.ts");
-		await m.getClientForFile("/p/b.ts");
+		await m.getClientForFile("/p/a.ts", "/p", undefined);
+		await m.getClientForFile("/p/b.ts", "/p", undefined);
 		expect(factory).toHaveBeenCalledTimes(1); // 同语言复用
 		await m.dispose();
 	});
@@ -78,7 +78,7 @@ describe("LspManager", () => {
 			idleTimeoutMs: 1000,
 			reaperIntervalMs: 500,
 		});
-		await m.getClientForFile("/p/a.ts");
+		await m.getClientForFile("/p/a.ts", "/p", undefined);
 		expect(fake.stops).toBe(0);
 		vi.advanceTimersByTime(1500);
 		expect(fake.stops).toBe(1); // 被空闲回收
@@ -89,10 +89,10 @@ describe("LspManager", () => {
 	it("restarts once after crash (dead client) for read op", async () => {
 		const fake = new FakeLspClient("/p", tsServer);
 		const m = new LspManager({ clientFactory: () => fake as unknown as LspClient });
-		await m.getClientForFile("/p/a.ts");
+		await m.getClientForFile("/p/a.ts", "/p", undefined);
 		fake.markDead();
 		// 再次获取应重建（start 计数 +1）
-		await m.getClientForFile("/p/a.ts");
+		await m.getClientForFile("/p/a.ts", "/p", undefined);
 		expect(fake.starts).toBe(2);
 		await m.dispose();
 	});
@@ -100,7 +100,7 @@ describe("LspManager", () => {
 	it("dispose stops all", async () => {
 		const fake = new FakeLspClient("/p", tsServer);
 		const m = new LspManager({ clientFactory: () => fake as unknown as LspClient });
-		await m.getClientForFile("/p/a.ts");
+		await m.getClientForFile("/p/a.ts", "/p", undefined);
 		await m.dispose();
 		expect(fake.stops).toBeGreaterThanOrEqual(1);
 	});
