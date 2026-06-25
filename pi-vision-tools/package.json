@@ -1,0 +1,45 @@
+{
+	"name": "@yandy0725/pi-vision-tools",
+	"publishConfig": {
+		"access": "public"
+	},
+	"version": "0.1.0",
+	"description": "pi package adding a describe_image tool that lets non-multimodal models delegate image analysis to a vision model",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/yandy/pi-packages",
+		"directory": "pi-vision-tools"
+	},
+	"type": "module",
+	"keywords": [
+		"pi-package"
+	],
+	"files": [
+		"index.ts",
+		"src/"
+	],
+	"scripts": {
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"typecheck": "tsc --noEmit",
+		"lint": "biome lint .",
+		"format": "biome format --write .",
+		"check": "biome check ."
+	},
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": ">=0.74.0"
+	},
+	"dependencies": {
+		"@earendil-works/pi-ai": "^0.80.2"
+	},
+	"devDependencies": {
+		"@earendil-works/pi-tui": "^0.79.9",
+		"typebox": "^1.1.38"
+	}
+}

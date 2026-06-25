@@ -5,7 +5,8 @@
 		"pi-coding-tools",
 		"pi-container-sandbox",
 		"pi-web-tools",
-		"pi-todo"
+		"pi-todo",
+		"pi-vision-tools"
 	],
 	"scripts": {
 		"test": "npm run test --workspaces --if-present",
