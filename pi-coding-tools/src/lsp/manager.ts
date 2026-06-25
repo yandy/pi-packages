@@ -52,8 +52,8 @@ export class LspManager {
 
 	async getClientForFile(
 		path: string,
+		root: string,
 		config?: CodingToolsConfig,
-		root?: string,
 	): Promise<{ client: LspClient; server: ServerDef }> {
 		if (this.disposed) throw new Error("LspManager disposed");
 		const resolved = resolveServerForFile(path, config);
@@ -64,7 +64,6 @@ export class LspManager {
 		}
 
 		const lang = server.languageId;
-		const clientRoot = root ?? process.cwd();
 		let m = this.clients.get(lang);
 		if (m && !m.client.isAlive()) {
 			// 崩溃：驱逐，下方重建（重启一次）
@@ -73,7 +72,7 @@ export class LspManager {
 			m = undefined;
 		}
 		if (!m) {
-			const client = this.clientFactory(clientRoot, server);
+			const client = this.clientFactory(root, server);
 			await client.start();
 			await client.initialize();
 			m = { client, server, lastUsedAt: this.now() };

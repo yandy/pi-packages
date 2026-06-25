@@ -48,13 +48,12 @@ function readJsonFile(path: string): Partial<CodingToolsConfig> | null {
 	}
 }
 
-export function loadConfig(cwd?: string): CodingToolsConfig {
-	const dir = cwd || process.cwd();
-	if (cachedConfig && cachedCwd === dir) return cachedConfig;
+export function loadConfig(cwd: string): CodingToolsConfig {
+	if (cachedConfig && cachedCwd === cwd) return cachedConfig;
 
 	const agentDir = getAgentDir();
 	const globalConfig = readJsonFile(resolve(agentDir, "coding-tools.json")) || {};
-	const projectConfig = readJsonFile(resolve(dir, CONFIG_DIR_NAME, "coding-tools.json")) || {};
+	const projectConfig = readJsonFile(resolve(cwd, CONFIG_DIR_NAME, "coding-tools.json")) || {};
 
 	cachedConfig = {
 		ls: projectConfig.ls ?? globalConfig.ls ?? DEFAULT_CONFIG.ls,
@@ -67,6 +66,6 @@ export function loadConfig(cwd?: string): CodingToolsConfig {
 		lsp_navigate: projectConfig.lsp_navigate ?? globalConfig.lsp_navigate ?? DEFAULT_CONFIG.lsp_navigate,
 		lsp: projectConfig.lsp ?? globalConfig.lsp ?? DEFAULT_CONFIG.lsp,
 	};
-	cachedCwd = dir;
+	cachedCwd = cwd;
 	return cachedConfig;
 }

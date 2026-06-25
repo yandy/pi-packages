@@ -53,7 +53,7 @@ describe("extension factory", () => {
 
 		const sessionStartHandler = pi.handlers.get("session_start")?.[0];
 		if (!sessionStartHandler) throw new Error("expected session_start handler");
-		await sessionStartHandler();
+		await sessionStartHandler({} as never, { cwd: "/proj" } as never);
 
 		// refreshTools 应该已经启用了配置中的工具
 		expect(pi.setActiveTools).toHaveBeenCalled();
