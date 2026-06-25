@@ -1,3 +1,4 @@
+import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import type { VisionConfig } from "../src/config.js";
 import type { DecodedImage } from "../src/image.js";
@@ -15,7 +16,7 @@ const fakeModel = (input: string[]) =>
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: 1000,
 		maxTokens: 1000,
-	}) as any;
+	}) as Model<any>;
 
 describe("resolveVisionModel", () => {
 	const registry = {
@@ -55,7 +56,7 @@ describe("callVision", () => {
 
 	it("builds a message with text + image parts and returns extracted text", async () => {
 		const completeFn: CompleteFn = async (_m, context, _opts) => {
-			const msg = (context as any).messages[0];
+			const msg = context.messages[0];
 			expect(msg.content[0]).toEqual({ type: "text", text: "describe" });
 			expect(msg.content[1]).toEqual({ type: "image", data: "AQID", mimeType: "image/png" });
 			return {
@@ -67,7 +68,7 @@ describe("callVision", () => {
 				usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
 				stopReason: "stop",
 				timestamp: 0,
-			} as any;
+			} as AssistantMessage;
 		};
 
 		const out = await callVision(
@@ -81,7 +82,7 @@ describe("callVision", () => {
 	});
 
 	it("passes reasoningEffort through when provided", async () => {
-		let receivedOpts: any;
+		let receivedOpts: Record<string, unknown> | undefined;
 		const completeFn: CompleteFn = async (_m, _c, opts) => {
 			receivedOpts = opts;
 			return {
@@ -93,13 +94,13 @@ describe("callVision", () => {
 				usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 				stopReason: "stop",
 				timestamp: 0,
-			} as any;
+			} as AssistantMessage;
 		};
 		await callVision(
 			{ model, auth: { apiKey: "k" }, prompt: "p", images: [img], reasoning: { reasoningEffort: "high" } },
 			completeFn,
 		);
-		expect(receivedOpts.reasoningEffort).toBe("high");
+		expect(receivedOpts?.reasoningEffort).toBe("high");
 	});
 
 	it("returns errorMessage when completeFn throws", async () => {
@@ -123,7 +124,7 @@ describe("callVision", () => {
 				stopReason: "error",
 				errorMessage: "rate limited",
 				timestamp: 0,
-			}) as any;
+			}) as unknown as AssistantMessage;
 		const out = await callVision({ model, auth: { apiKey: "k" }, prompt: "p", images: [img], reasoning: {} }, completeFn);
 		expect(out.text).toBe("");
 		expect(out.errorMessage).toBe("rate limited");
@@ -143,7 +144,7 @@ describe("callVision", () => {
 				usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 				stopReason: "stop",
 				timestamp: 0,
-			}) as any;
+			}) as AssistantMessage;
 		const out = await callVision({ model, auth: { apiKey: "k" }, prompt: "p", images: [img], reasoning: {} }, completeFn);
 		expect(out.text).toBe("a\nb");
 	});
