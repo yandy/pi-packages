@@ -6,7 +6,7 @@ import { Type } from "typebox";
 import { compressImage, readCompressionSettings } from "./src/compress.js";
 import { loadConfig, saveConfig, type VisionConfig } from "./src/config.js";
 import { type DecodedImage, decodeImage } from "./src/image.js";
-import { reasoningToOptions, type VisionReasoning } from "./src/reasoning.js";
+import { effectiveReasoning, reasoningToOptions, type VisionReasoning } from "./src/reasoning.js";
 import { callingModelHasVision, effectiveEnabled, footerLabel } from "./src/state.js";
 import { callVision, resolveVisionModel } from "./src/vision.js";
 
@@ -133,7 +133,8 @@ export default function (pi: ExtensionAPI) {
 
 			onUpdate?.({ content: [{ type: "text", text: "Analyzing image..." }], details: {} });
 
-			const reasoning = reasoningToOptions(p.reasoning ?? config.defaultReasoning);
+			const reasoningLevel = effectiveReasoning(p.reasoning, config.defaultReasoning);
+			const reasoning = reasoningToOptions(reasoningLevel);
 			const result = await callVision(
 				{
 					model: resolved.model,
@@ -161,7 +162,7 @@ export default function (pi: ExtensionAPI) {
 					usage: result.usage,
 					compressed,
 					mimeType,
-					reasoning: p.reasoning ?? "off",
+					reasoning: reasoningLevel,
 				},
 			};
 		},

@@ -10,3 +10,13 @@ export function reasoningToOptions(level: VisionReasoning | undefined): Reasonin
 	if (!level || level === "off") return {};
 	return { reasoningEffort: level };
 }
+
+/**
+ * Resolve the effective reasoning level: explicit param wins, else config default, else "off".
+ */
+export function effectiveReasoning(
+	param: VisionReasoning | undefined,
+	configDefault: VisionReasoning | undefined,
+): VisionReasoning {
+	return param ?? configDefault ?? "off";
+}
