@@ -22,7 +22,7 @@ Pi package enabling `ls`/`find`/`grep` built-in tools.
 
 | 语言 | LSP 服务器 | 安装 |
 |------|-----------|------|
-| TypeScript/JavaScript | typescript-language-server | `npm i -g typescript-language-server typescript` |
+| TypeScript/JavaScript | typescript-language-server | `npm i -g typescript-language-server` |
 | Python | pyright | `npm i -g pyright` |
 | Java | jdtls | Eclipse JDT LS（需 JDK 17+） |
 | Kotlin | kotlin-language-server | [fwcd/kotlin-language-server](https://github.com/fwcd/kotlin-language-server) |
