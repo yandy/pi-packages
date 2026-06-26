@@ -10,17 +10,19 @@
 # 1. 确保全部通过
 npm run typecheck && npm run check && npm test
 
-# 2. 升级版本号并打 tag
+# 2. 升级版本号并提交
 npm version <新版本号> --workspace=pi-vision-tools --no-git-tag-version
 git add pi-vision-tools/package.json package-lock.json
 git commit -m "pi-vision-tools v<新版本号>"
-git tag pi-vision-tools-v<新版本号>
+# 记录该 commit id
+COMMIT=$(git rev-parse HEAD)
 
-# 3. 推送 tag（Release 依赖这个 tag 存在）
-git push origin main --tags
+# 3. 推送
+git push origin main
 
-# 4. 创建 GitHub Release（触发发布 workflow）
-gh release create pi-vision-tools-v<新版本号> --title "pi-vision-tools v<新版本号>" --notes ""
+# 4. 创建 GitHub Release（gh 自动创建 tag，无需手动 git tag）
+gh release create pi-vision-tools-v<新版本号> --target $COMMIT \
+  --title "pi-vision-tools v<新版本号>" --notes ""
 ```
 
 创建 Release 后，`.github/workflows/publish.yml` 响应 `release: published` 事件，执行 `npm ci` + `npm publish --provenance --workspace=pi-vision-tools`（OIDC 认证，无需本地 npm token）。
@@ -29,6 +31,8 @@ gh release create pi-vision-tools-v<新版本号> --title "pi-vision-tools v<新
 
 ## 注意事项
 
-- `npm version --workspace` 在 monorepo 中不会自动 commit/tag（已用 `--no-git-tag-version`），需手动操作
+- `npm version --workspace` 在 monorepo 中不会自动 commit/tag（已用 `--no-git-tag-version`），需手动提交
+- `gh release create` 会自动创建对应名称的 git tag，**无需手动 `git tag`**
+- `--target` 指定 tag 指向的 commit，确保 tag 落在版本升级的那个 commit 上
 - `--workspace` 参数可用 `-w` 简写
 - tag 格式必须是 `pi-vision-tools-vX.Y.Z`，不能是 `vX.Y.Z`
