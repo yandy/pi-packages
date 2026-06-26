@@ -35,6 +35,9 @@ jobs:
             pi-todo-v*)
               echo "dir=pi-todo" >> "$GITHUB_OUTPUT"
               ;;
+            pi-vision-tools-v*)
+              echo "dir=pi-vision-tools" >> "$GITHUB_OUTPUT"
+              ;;
           esac
 
       - run: npm ci
