@@ -1,6 +1,6 @@
 # 发布新版本
 
-发布通过 GitHub Actions 自动完成，触发条件是推送 `pi-vision-tools-v*` 格式的 git tag。
+发布通过 GitHub Actions 自动完成，触发条件是创建 GitHub Release（Release tag 格式 `pi-vision-tools-v*`）。
 
 ## 操作步骤
 
@@ -16,10 +16,10 @@ git add pi-vision-tools/package.json package-lock.json
 git commit -m "pi-vision-tools v<新版本号>"
 git tag pi-vision-tools-v<新版本号>
 
-# 3. 推送
+# 3. 推送 tag（Release 依赖这个 tag 存在）
 git push origin main --tags
 
-# 4. 创建 GitHub Release（触发发布）
+# 4. 创建 GitHub Release（触发发布 workflow）
 gh release create pi-vision-tools-v<新版本号> --title "pi-vision-tools v<新版本号>" --notes ""
 ```
 
