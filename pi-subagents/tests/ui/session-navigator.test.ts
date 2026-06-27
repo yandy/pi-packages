@@ -34,7 +34,9 @@ function fakeSource(overrides: Partial<TranscriptSource> = {}): TranscriptSource
 	};
 }
 
-function makeOverlay(opts: { source?: TranscriptSource; done?: (r: undefined) => void; tui?: TUI } = {}) {
+function makeOverlay(
+	opts: { source?: TranscriptSource; done?: (r: undefined) => void; tui?: TUI; modelName?: string } = {},
+) {
 	return new TranscriptOverlay({
 		tui: opts.tui ?? mockTui(),
 		theme: ansiTheme(),
@@ -42,6 +44,7 @@ function makeOverlay(opts: { source?: TranscriptSource; done?: (r: undefined) =>
 		done: opts.done ?? vi.fn(),
 		cwd: "/test/cwd",
 		markdownTheme: getMarkdownTheme(),
+		modelName: opts.modelName,
 	});
 }
 
@@ -138,6 +141,83 @@ describe("TranscriptOverlay", () => {
 		messages = [{ role: "user", content: "second" }] as unknown as SessionMessage[];
 		captured?.();
 		expect(overlay.render(80).join("\n")).toContain("second");
+	});
+
+	// ── Performance: throttled rebuilds + cached laid-out lines ───────────────
+	//
+	// A running agent emits many events per second (text deltas, tool calls).
+	// Without throttling each rebuilt the whole component tree (markdown parsing
+	// included), starving the event loop so arrow keys / `q` stopped responding.
+	// These tests pin the two caches that keep the overlay responsive.
+
+	it("coalesces a burst of source events into at most one rebuild per throttle window", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(100_000));
+		const tui = mockTui();
+		let captured: (() => void) | undefined;
+		const source = fakeSource({
+			subscribe: (onChange) => {
+				captured = onChange;
+				return () => {};
+			},
+		});
+		makeOverlay({ source, tui });
+
+		// 10 rapid events at the same instant.
+		for (let i = 0; i < 10; i++) captured?.();
+		// First event rebuilds immediately; the other 9 coalesce into one trailing rebuild.
+		expect(tui.requestRender).toHaveBeenCalledOnce();
+
+		// Advancing past the throttle window fires the single coalesced trailing rebuild.
+		vi.advanceTimersByTime(500);
+		expect(tui.requestRender).toHaveBeenCalledTimes(2);
+		vi.useRealTimers();
+	});
+
+	it("does not re-render the container on repeated renders or keystrokes (caches laid-out lines)", () => {
+		const streaming = vi.fn(() => undefined);
+		const source = fakeSource({ streaming });
+		const overlay = makeOverlay({ source });
+
+		overlay.render(80); // cache miss → buildContentLines reads streaming()
+		expect(streaming).toHaveBeenCalledTimes(1);
+		overlay.render(80); // cache hit → no re-render
+		expect(streaming).toHaveBeenCalledTimes(1);
+		overlay.handleInput("\x1b[B"); // down arrow → uses the cached line count
+		expect(streaming).toHaveBeenCalledTimes(1);
+	});
+
+	it("cancels the pending trailing rebuild when disposed", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(100_000));
+		const tui = mockTui();
+		let captured: (() => void) | undefined;
+		const source = fakeSource({
+			subscribe: (onChange) => {
+				captured = onChange;
+				return () => {};
+			},
+		});
+		const overlay = makeOverlay({ source, tui });
+
+		captured?.(); // immediate rebuild (large elapsed)
+		expect(tui.requestRender).toHaveBeenCalledOnce();
+		captured?.(); // schedules a trailing rebuild (within the throttle window)
+		overlay.dispose();
+		vi.advanceTimersByTime(500);
+		// No additional render from the cancelled trailing rebuild.
+		expect(tui.requestRender).toHaveBeenCalledOnce();
+		vi.useRealTimers();
+	});
+
+	it("advertises q as the close key in the footer", () => {
+		const out = makeOverlay().render(80).join("\n");
+		expect(out).toContain("q close");
+	});
+
+	it("shows the model name in the header when set", () => {
+		const out = makeOverlay({ modelName: "haiku" }).render(80).join("\n");
+		expect(out).toContain("haiku");
 	});
 });
 

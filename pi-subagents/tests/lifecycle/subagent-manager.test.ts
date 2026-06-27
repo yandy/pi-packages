@@ -327,6 +327,55 @@ describe("SubagentManager — evicted descriptors", () => {
 		manager.clearCompleted();
 		expect(manager.listEvicted()).toEqual([]);
 	});
+
+	it("restoreEvicted repopulates descriptors recovered from disk (e.g. after resume/fork)", () => {
+		({ manager } = createManager());
+		expect(manager.listEvicted()).toEqual([]);
+
+		manager.restoreEvicted([
+			{
+				id: "recovered-1",
+				type: "Explore",
+				description: "old task",
+				status: "completed",
+				startedAt: 1000,
+				completedAt: 4000,
+				toolUses: 5,
+				modelName: "haiku",
+				outputFile: "/tasks/recovered-1.jsonl",
+			},
+		]);
+
+		const evicted = manager.listEvicted();
+		expect(evicted).toHaveLength(1);
+		expect(evicted[0]).toMatchObject({
+			id: "recovered-1",
+			type: "Explore",
+			outputFile: "/tasks/recovered-1.jsonl",
+			modelName: "haiku",
+		});
+	});
+
+	it("restoreEvicted dedupes against live agents by id", () => {
+		({ manager } = createManager());
+		const liveId = spawnBg(manager, "test", "live task");
+
+		manager.restoreEvicted([
+			{
+				id: liveId,
+				type: "general-purpose",
+				description: "stale on-disk descriptor",
+				status: "completed",
+				startedAt: 1000,
+				completedAt: 4000,
+				toolUses: 1,
+				outputFile: "/tasks/stale.jsonl",
+			},
+		]);
+
+		// The live record wins — the stale descriptor is not surfaced.
+		expect(manager.listEvicted()).toEqual([]);
+	});
 });
 
 // Eager init removes the optional/required asymmetry that previously required
