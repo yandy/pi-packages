@@ -1,0 +1,36 @@
+{
+	"name": "@yandy0725/pi-lark",
+	"publishConfig": {
+		"access": "public"
+	},
+	"version": "0.1.0",
+	"description": "Pi package with Lark (Feishu) API skills for AI-powered Lark app development",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/yandy/pi-packages",
+		"directory": "pi-lark"
+	},
+	"type": "module",
+	"keywords": [
+		"pi-package",
+		"lark",
+		"feishu",
+		"skills"
+	],
+	"files": [
+		"skills/"
+	],
+	"peerDependencies": {
+		"@larksuite/cli": "*"
+	},
+	"scripts": {
+		"download-skills": "node scripts/download-skills.mjs",
+		"prepublishOnly": "npm run download-skills"
+	},
+	"pi": {
+		"skills": [
+			"./skills"
+		]
+	}
+}
