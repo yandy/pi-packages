@@ -1,0 +1,27 @@
+{
+	"name": "@yandy0725/pi-dingtalk",
+	"publishConfig": {
+		"access": "public"
+	},
+	"version": "0.1.0",
+	"description": "Pi package with DingTalk workspace CLI skills for AI-powered DingTalk development",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/yandy/pi-packages",
+		"directory": "pi-dingtalk"
+	},
+	"type": "module",
+	"keywords": ["pi-package", "dingtalk", "skills"],
+	"files": ["skills/"],
+	"peerDependencies": {
+		"dingtalk-workspace-cli": "*"
+	},
+	"scripts": {
+		"download-skills": "node scripts/download-skills.mjs",
+		"prepublishOnly": "npm run download-skills"
+	},
+	"pi": {
+		"skills": ["./skills"]
+	}
+}
