@@ -6,7 +6,8 @@
 		"pi-container-sandbox",
 		"pi-web-tools",
 		"pi-todo",
-		"pi-vision-tools"
+		"pi-vision-tools",
+		"pi-lark"
 	],
 	"scripts": {
 		"test": "npm run test --workspaces --if-present",
