@@ -22,6 +22,7 @@ function makeEvicted(overrides: Partial<EvictedSubagent> = {}): EvictedSubagent 
 		startedAt: 1000,
 		completedAt: 4000,
 		toolUses: 5,
+		modelName: undefined,
 		outputFile: "/tasks/evicted-1.jsonl",
 		...overrides,
 	};
@@ -54,6 +55,29 @@ describe("listNavigableAgents", () => {
 		const [entry] = listNavigableAgents([record], [], registry);
 		// getDisplayName resolves "general-purpose" against the empty registry to its fallback display name.
 		expect(entry.label).toBe("Agent (Investigate the bug) · 3 tools · completed · 3.0s");
+	});
+
+	it("includes the model name in a live entry's label when set", () => {
+		const record = makeNavigable({
+			description: "Investigate the bug",
+			toolUses: 3,
+			status: "completed",
+			startedAt: 1000,
+			completedAt: 4000,
+			modelName: "haiku",
+		});
+		const [entry] = listNavigableAgents([record], [], registry);
+		expect(entry.label).toBe("Agent (Investigate the bug) · 3 tools · completed · 3.0s · model:haiku");
+	});
+
+	it("includes the model name in an evicted entry's label when set", () => {
+		const descriptor = makeEvicted({
+			description: "Old task",
+			toolUses: 5,
+			modelName: "sonnet",
+		});
+		const [entry] = listNavigableAgents([], [descriptor], registry);
+		expect(entry.label).toBe("Agent (Old task) · 5 tools · completed · 3.0s · model:sonnet · evicted (snapshot)");
 	});
 
 	it("appends evicted entries with a snapshot marker and their outputFile", () => {

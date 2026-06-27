@@ -80,7 +80,7 @@ describe("SubagentEventsObserver", () => {
 			expect(emit).toHaveBeenCalledWith("subagents:failed", expect.anything());
 		});
 
-		it("calls appendEntry with subagents:record and the eight persisted fields", () => {
+		it("calls appendEntry with subagents:record and the persisted fields", () => {
 			const { observer, appendEntry } = makeObserver();
 			const record = createTestSubagent({
 				id: "agent-2",
@@ -91,6 +91,7 @@ describe("SubagentEventsObserver", () => {
 				error: undefined,
 				startedAt: 1000,
 				completedAt: 2000,
+				invocation: { runInBackground: true, modelName: "haiku" },
 			});
 
 			observer.onSubagentCompleted(record);
@@ -104,7 +105,25 @@ describe("SubagentEventsObserver", () => {
 				error: undefined,
 				startedAt: 1000,
 				completedAt: 2000,
+				toolUses: 3,
+				modelName: "haiku",
+				outputFile: record.outputFile,
 			});
+		});
+
+		it("persists modelName and toolUses so the record can be recovered after resume/fork", () => {
+			const { observer, appendEntry } = makeObserver();
+			const record = createTestSubagent({
+				status: "completed",
+				invocation: { runInBackground: true, modelName: "sonnet" },
+				toolUses: 4,
+			});
+
+			observer.onSubagentCompleted(record);
+
+			const persisted = appendEntry.mock.calls[0][1] as Record<string, unknown>;
+			expect(persisted.modelName).toBe("sonnet");
+			expect(persisted.toolUses).toBe(4);
 		});
 
 		it("calls notifications.sendCompletion when result is not consumed", () => {

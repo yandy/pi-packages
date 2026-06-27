@@ -180,6 +180,7 @@ export class AgentWidget implements SubagentManagerObserver {
 			activeTools: record.activeTools,
 			responseText: record.responseText,
 			contextPercent: record.getContextPercent(),
+			modelName: record.invocation?.modelName,
 		};
 	}
 

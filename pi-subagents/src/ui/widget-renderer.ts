@@ -42,6 +42,8 @@ export interface WidgetAgent {
 	readonly responseText: string;
 	/** Context-window utilisation (0–100), or null when unavailable. */
 	readonly contextPercent: number | null;
+	/** Short model name when the agent runs on a non-parent model, else undefined. */
+	readonly modelName?: string;
 }
 
 // ── Per-agent rendering ──────────────────────────────────────────────────────
@@ -74,6 +76,7 @@ export function renderFinishedLine(agent: WidgetAgent, registry: AgentConfigLook
 	}
 
 	const parts: string[] = [];
+	if (agent.modelName) parts.push(agent.modelName);
 	parts.push(formatTurns(agent.turnCount, agent.maxTurns));
 	if (agent.toolUses > 0) parts.push(`${agent.toolUses} tool use${agent.toolUses === 1 ? "" : "s"}`);
 	parts.push(duration);
@@ -98,6 +101,7 @@ export function renderRunningLines(
 	const tokenText = tokens > 0 ? formatSessionTokens(tokens, agent.contextPercent, theme, agent.compactionCount) : "";
 
 	const parts: string[] = [];
+	if (agent.modelName) parts.push(agent.modelName);
 	parts.push(formatTurns(agent.turnCount, agent.maxTurns));
 	if (agent.toolUses > 0) parts.push(`${agent.toolUses} tool use${agent.toolUses === 1 ? "" : "s"}`);
 	if (tokenText) parts.push(tokenText);

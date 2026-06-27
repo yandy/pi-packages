@@ -36,6 +36,8 @@ export interface EvictedSubagent {
 	readonly startedAt: number;
 	readonly completedAt: number | undefined;
 	readonly toolUses: number;
+	/** Short model name when the agent ran on a non-parent model, else undefined. */
+	readonly modelName?: string;
 	readonly outputFile: string;
 }
 
@@ -237,6 +239,21 @@ export class SubagentManager {
 		return [...this.evicted.values()].sort((a, b) => b.startedAt - a.startedAt);
 	}
 
+	/**
+	 * Repopulate evicted descriptors recovered from disk (the parent session's
+	 * `subagents:record` entries) on session start/resume/fork — the in-memory
+	 * map starts empty because the extension is re-instantiated per session.
+	 *
+	 * Descriptors whose id still has a live record are dropped: the live record
+	 * (and its real-time transcript) wins over the stale on-disk descriptor.
+	 */
+	restoreEvicted(descriptors: readonly EvictedSubagent[]): void {
+		for (const descriptor of descriptors) {
+			if (this.agents.has(descriptor.id)) continue; // live record wins
+			this.evicted.set(descriptor.id, descriptor);
+		}
+	}
+
 	abort(id: string): boolean {
 		const record = this.agents.get(id);
 		if (!record) return false;
@@ -348,6 +365,7 @@ function toEvictedSubagent(record: Subagent, outputFile: string): EvictedSubagen
 		startedAt: record.startedAt,
 		completedAt: record.completedAt,
 		toolUses: record.toolUses,
+		modelName: record.invocation?.modelName,
 		outputFile,
 	};
 }

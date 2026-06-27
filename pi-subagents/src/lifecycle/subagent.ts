@@ -129,6 +129,10 @@ export class Subagent {
 	get maxTurns(): number | undefined {
 		return this.execution.maxTurns;
 	}
+	/** Short model name when the agent runs on a non-parent model, else undefined. */
+	get modelName(): string | undefined {
+		return this.invocation?.modelName;
+	}
 
 	readonly abortController: AbortController;
 	private _promise?: Promise<void>;

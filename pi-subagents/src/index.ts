@@ -37,6 +37,7 @@ import { detectEnv } from "./session/env";
 
 import { resolveModel } from "./session/model-resolver";
 import { buildAgentPrompt } from "./session/prompts";
+import { recoverEvictedSubagents } from "./session/recover-subagents";
 import { deriveSubagentSessionDir } from "./session/session-dir";
 import { SettingsManager } from "./settings";
 import { AgentTool } from "./tools/agent-tool";
@@ -124,6 +125,7 @@ export default function (pi: ExtensionAPI) {
 		manager,
 		() => notifications.dispose(),
 		unpublishSubagentsService,
+		(parentSessionFile) => recoverEvictedSubagents(parentSessionFile, (path) => readFileSync(path, "utf8")),
 	);
 
 	pi.on("session_start", (event, ctx) => lifecycle.handleSessionStart(event, ctx));

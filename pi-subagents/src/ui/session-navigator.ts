@@ -92,6 +92,8 @@ export interface TranscriptOverlayOptions {
 	done: (result: undefined) => void;
 	cwd: string;
 	markdownTheme: MarkdownTheme;
+	/** Short model name to show in the header, or undefined to omit. */
+	modelName?: string;
 }
 
 /**
@@ -117,15 +119,23 @@ export class SessionNavigatorHandler {
 		if (!entry) return;
 
 		let source: TranscriptSource;
+		let modelName: string | undefined;
 		try {
-			source = entry.kind === "live" ? liveSource(entry.record) : fileSnapshotSource(entry.outputFile, readFile);
+			if (entry.kind === "live") {
+				source = liveSource(entry.record);
+				modelName = entry.record.modelName;
+			} else {
+				source = fileSnapshotSource(entry.outputFile, readFile);
+				modelName = entry.modelName;
+			}
 		} catch {
 			ui.notify("Could not read the session transcript file.", "error");
 			return;
 		}
 		const markdownTheme = getMarkdownTheme();
 		await ui.custom<undefined>(
-			(tui, theme, _keybindings, done) => new TranscriptOverlay({ tui, theme, source, done, cwd, markdownTheme }),
+			(tui, theme, _keybindings, done) =>
+				new TranscriptOverlay({ tui, theme, source, done, cwd, markdownTheme, modelName }),
 			{
 				overlay: true,
 				overlayOptions: { anchor: "center", width: "90%", maxHeight: `${VIEWPORT_HEIGHT_PCT}%` },
@@ -135,13 +145,33 @@ export class SessionNavigatorHandler {
 }
 
 /**
+ * Minimum interval between two component rebuilds for a live (streaming) source.
+ *
+ * A running agent emits many events per second (text deltas, tool calls). Without
+ * throttling, each event rebuilt the whole component tree (markdown parsing
+ * included) and re-rendered it — starving the event loop so keystrokes (arrows,
+ * `q`) stopped responding. Coalescing bursts into at most one rebuild per tick
+ * keeps the overlay responsive while still streaming.
+ */
+const REBUILD_THROTTLE_MS = 120;
+
+/**
  * Read-only scrollable transcript overlay.
  *
- * Caches a `Container` of Pi's per-entry components and rebuilds it only when the
- * source changes (live agents) — each paint reuses the cached tree, so markdown
- * highlighting does not re-run per frame. This class owns scroll state, chrome,
- * and the running-agent streaming indicator; the component mapping lives in
- * `buildTranscriptComponents`.
+ * Two caches keep it responsive even for long, live-streaming transcripts:
+ *
+ *   - `content` (a `Container` of Pi's per-entry components) is rebuilt only when
+ *     the source changes, and rebuilds are *throttled* — a burst of streaming
+ *     events coalesces into at most one rebuild per `REBUILD_THROTTLE_MS`, so
+ *     markdown highlighting never re-runs on every token.
+ *   - `renderedLines` caches the laid-out, width-wrapped lines. `render()` and
+ *     `handleInput()` read the cache (O(1) slice / length) instead of
+ *     re-rendering the whole container on every frame and every keystroke.
+ *
+ * The cache is invalidated (`linesDirty`) whenever the component tree changes,
+ * and recomputed lazily at the current width. This class owns scroll state,
+ * chrome, and the running-agent streaming indicator; the component mapping lives
+ * in `buildTranscriptComponents`.
  */
 export class TranscriptOverlay implements Component {
 	private scrollOffset = 0;
@@ -155,21 +185,31 @@ export class TranscriptOverlay implements Component {
 	private readonly done: (result: undefined) => void;
 	private readonly cwd: string;
 	private readonly markdownTheme: MarkdownTheme;
+	private readonly modelName?: string;
 	private content: Container;
 
-	constructor({ tui, theme, source, done, cwd, markdownTheme }: TranscriptOverlayOptions) {
+	/** Throttle bookkeeping for coalescing live-source rebuilds. */
+	private rebuildTimer: ReturnType<typeof setTimeout> | undefined;
+	private lastRebuildAt = 0;
+
+	/** Cached laid-out lines + the width they were computed at; recomputed lazily when `linesDirty`. */
+	private renderedLines: string[] = [];
+	private renderedWidth = -1;
+	private linesDirty = true;
+
+	constructor({ tui, theme, source, done, cwd, markdownTheme, modelName }: TranscriptOverlayOptions) {
 		this.tui = tui;
 		this.theme = theme;
 		this.source = source;
 		this.done = done;
 		this.cwd = cwd;
 		this.markdownTheme = markdownTheme;
+		this.modelName = modelName;
 		this.content = this.rebuild();
-		this.unsubscribe = source.subscribe(() => {
-			if (this.closed) return;
-			this.content = this.rebuild();
-			this.tui.requestRender();
-		});
+		// Start `lastRebuildAt` at 0 so the first live event rebuilds immediately
+		// (the constructor just built `content`); subsequent bursts are then throttled.
+		this.lastRebuildAt = 0;
+		this.unsubscribe = source.subscribe(() => this.scheduleRebuild());
 	}
 
 	// fallow-ignore-next-line unused-class-member
@@ -180,7 +220,7 @@ export class TranscriptOverlay implements Component {
 			return;
 		}
 
-		const totalLines = this.buildContentLines(this.innerWidth()).length;
+		const totalLines = this.getRenderedLines(this.innerWidth()).length;
 		const viewportHeight = this.viewportHeight();
 		const maxScroll = Math.max(0, totalLines - viewportHeight);
 
@@ -219,10 +259,11 @@ export class TranscriptOverlay implements Component {
 		const hrMid = row(th.fg("dim", "─".repeat(innerW)));
 
 		lines.push(hrTop);
-		lines.push(row(th.bold("Subagent session")));
+		const title = this.modelName ? `Subagent session · ${this.modelName}` : "Subagent session";
+		lines.push(row(th.bold(title)));
 		lines.push(hrMid);
 
-		const contentLines = this.buildContentLines(innerW);
+		const contentLines = this.getRenderedLines(innerW);
 		const viewportHeight = this.viewportHeight();
 		const maxScroll = Math.max(0, contentLines.length - viewportHeight);
 		if (this.autoScroll) this.scrollOffset = maxScroll;
@@ -236,7 +277,7 @@ export class TranscriptOverlay implements Component {
 				? "100%"
 				: `${Math.round(((visibleStart + viewportHeight) / contentLines.length) * 100)}%`;
 		const footerLeft = th.fg("dim", `${contentLines.length} lines · ${scrollPct}`);
-		const footerRight = th.fg("dim", "↑↓ scroll · PgUp/PgDn · Esc close");
+		const footerRight = th.fg("dim", "↑↓ scroll · PgUp/PgDn · q close");
 		const footerGap = Math.max(1, innerW - visibleWidth(footerLeft) - visibleWidth(footerRight));
 		lines.push(row(footerLeft + " ".repeat(footerGap) + footerRight));
 		lines.push(hrBot);
@@ -247,11 +288,17 @@ export class TranscriptOverlay implements Component {
 	// fallow-ignore-next-line unused-class-member
 	invalidate(): void {
 		this.content.invalidate();
+		this.linesDirty = true;
+		this.renderedWidth = -1;
 	}
 
 	// fallow-ignore-next-line unused-class-member
 	dispose(): void {
 		this.closed = true;
+		if (this.rebuildTimer) {
+			clearTimeout(this.rebuildTimer);
+			this.rebuildTimer = undefined;
+		}
 		if (this.unsubscribe) {
 			this.unsubscribe();
 			this.unsubscribe = undefined;
@@ -267,6 +314,50 @@ export class TranscriptOverlay implements Component {
 	private viewportHeight(): number {
 		const maxRows = Math.floor((this.tui.terminal.rows * VIEWPORT_HEIGHT_PCT) / 100);
 		return Math.max(MIN_VIEWPORT, maxRows - CHROME_LINES);
+	}
+
+	/**
+	 * Coalesce a burst of source-change events into at most one component rebuild
+	 * per `REBUILD_THROTTLE_MS`. The first event after an idle gap rebuilds
+	 * immediately (so a freshly-picked agent paints without delay); subsequent
+	 * events inside the gap are merged into a single trailing rebuild.
+	 */
+	private scheduleRebuild(): void {
+		if (this.closed) return;
+		const now = Date.now();
+		const elapsed = now - this.lastRebuildAt;
+		if (elapsed >= REBUILD_THROTTLE_MS) {
+			this.doRebuild();
+			return;
+		}
+		if (this.rebuildTimer) return; // a trailing rebuild is already pending
+		this.rebuildTimer = setTimeout(() => {
+			this.rebuildTimer = undefined;
+			this.doRebuild();
+		}, REBUILD_THROTTLE_MS - elapsed);
+	}
+
+	/** Rebuild the component tree, invalidate the line cache, and request a paint. */
+	private doRebuild(): void {
+		if (this.closed) return;
+		this.lastRebuildAt = Date.now();
+		this.content = this.rebuild();
+		this.linesDirty = true;
+		this.tui.requestRender();
+	}
+
+	/**
+	 * Return the laid-out content lines at `innerW`, recomputing the cache only
+	 * when the component tree changed (`linesDirty`) or the width changed.
+	 * Cheap O(1) on the hot path (every render frame and every keystroke).
+	 */
+	private getRenderedLines(innerW: number): string[] {
+		if (innerW <= 0) return [];
+		if (!this.linesDirty && this.renderedWidth === innerW) return this.renderedLines;
+		this.renderedLines = this.buildContentLines(innerW);
+		this.renderedWidth = innerW;
+		this.linesDirty = false;
+		return this.renderedLines;
 	}
 
 	private buildContentLines(innerW: number): string[] {

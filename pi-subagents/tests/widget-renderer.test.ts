@@ -139,6 +139,13 @@ describe("renderFinishedLine", () => {
 		expect(line).toContain("[dim:■]");
 		expect(line).toContain("[dim: stopped]");
 	});
+
+	it("shows the model name when set, alongside the stats", () => {
+		const agent = makeAgent({ modelName: "haiku" });
+		const line = renderFinishedLine(agent, testRegistry, theme);
+
+		expect(line).toContain("haiku");
+	});
 });
 
 describe("renderRunningLines", () => {
@@ -211,6 +218,13 @@ describe("renderRunningLines", () => {
 		const [header] = renderRunningLines(agent, testRegistry, 0, theme);
 
 		expect(header).not.toContain("token");
+	});
+
+	it("shows the model name in the header when set", () => {
+		const agent = makeAgent({ status: "running", completedAt: undefined, modelName: "haiku" });
+		const [header] = renderRunningLines(agent, testRegistry, 0, theme);
+
+		expect(header).toContain("haiku");
 	});
 });
 
