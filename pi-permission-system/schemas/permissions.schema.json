@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/gotgenes/pi-permission-system/main/schemas/permissions.schema.json",
+  "title": "PI Permission System Configuration",
+  "description": "Unified config file combining runtime knobs and flat permission policy for pi-permission-system.",
+  "markdownDescription": "Unified config file combining runtime knobs and flat permission policy for [pi-permission-system](https://github.com/gotgenes/pi-permission-system).\n\nPlace at `~/.pi/agent/extensions/pi-permission-system/config.json` (global) or `<project>/.pi/extensions/pi-permission-system/config.json` (project).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "description": "JSON Schema URI for editor autocomplete and validation.",
+      "type": "string"
+    },
+    "debugLog": {
+      "description": "Write verbose permission-system diagnostics to the extension logs directory.",
+      "markdownDescription": "Write verbose permission-system diagnostics to `logs/pi-permission-system-debug.jsonl` under the extension config directory.",
+      "type": "boolean",
+      "default": false
+    },
+    "permissionReviewLog": {
+      "description": "Write permission request and decision audit events to the extension logs directory.",
+      "markdownDescription": "Write permission request and decision audit events to `logs/pi-permission-system-permission-review.jsonl` under the extension config directory.",
+      "type": "boolean",
+      "default": true
+    },
+    "yoloMode": {
+      "description": "Auto-approve ask-state permission checks, including subagent approval forwarding.",
+      "markdownDescription": "Auto-approve `ask`-state permission checks, including subagent approval forwarding.\n\n⚠️ **Use with caution** — this disables all interactive confirmation prompts.",
+      "type": "boolean",
+      "default": false
+    },
+    "toolInputPreviewMaxLength": {
+      "description": "Maximum character length of the inline-JSON tool-input preview shown in permission prompts. Omit to use the default (200). Set to a large value to disable truncation.",
+      "markdownDescription": "Maximum character length of the inline-JSON tool-input preview shown in permission prompts.\n\nOmit to use the default (200). Set to a large value (e.g. `10000`) to effectively disable truncation and see the full input.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "toolTextSummaryMaxLength": {
+      "description": "Maximum character length of inline pattern/path summaries (e.g. grep patterns, find globs, ls paths) in permission prompts. Omit to use the default (80).",
+      "markdownDescription": "Maximum character length of inline pattern/path summaries (e.g. grep patterns, find globs, ls paths) shown in permission prompts.\n\nOmit to use the default (80). Increase this when working with long regexes or deep paths that are being cut off.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "piInfrastructureReadPaths": {
+      "description": "Additional directories to auto-allow for reads as Pi infrastructure, bypassing the external_directory gate. Supports ~ expansion and wildcard patterns (* and ?).",
+      "markdownDescription": "Additional directories to auto-allow for reads as Pi infrastructure, bypassing the `external_directory` gate.\n\nThe extension auto-discovers the global node_modules root (walks up from the extension's install path; falls back to `npm root -g` from a dev checkout), Pi's own install directory (via the coding-agent `getPackageDir()` API), `agentDir`, `agentDir/git`, and project-local `.pi/npm/` and `.pi/git/`. Add entries here for edge cases where auto-discovery is insufficient (e.g. custom `npmCommand` pointing to pnpm).\n\nSupports `~`/`$HOME` expansion. Entries may be plain directory prefixes or wildcard patterns using `*` (matches any characters, including `/`) and `?` (matches exactly one character). `**` and `*` are equivalent — both cross directory boundaries.\n\nOn Windows, matching is case-insensitive and tolerant of either path separator.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "default": []
+    },
+    "permission": {
+      "description": "Flat permission policy. Each key is a surface name; values are a PermissionState string (catch-all) or a pattern→action map.",
+      "markdownDescription": "Flat permission policy.\n\nEach top-level key is a surface name:\n- `\"*\"` — universal fallback (replaces `defaultPolicy.tools` from the legacy format)\n- Tool names (`read`, `write`, `bash`, `mcp`, `skill`, `external_directory`, `path`, etc.)\n\nA **string** value is shorthand for `{ \"*\": action }` (surface-level catch-all).\nAn **object** value maps wildcard patterns to actions — last matching pattern wins.\n\nFor built-in file tools (`read`, `write`, `edit`, `find`, `grep`, `ls`), patterns are matched against the file path from `input.path`. For example, `\"read\": { \"*\": \"allow\", \"*.env\": \"deny\" }` allows reads but denies `.env` files.\n\nWhen Pi's current working directory is known, relative path inputs also match their cwd-normalized absolute form, so `src/App.jsx` can match both `src/*` and `/workspace/project/*`. Bash path tokens use the effective directory after literal `cd` commands for this matching; non-literal `cd \"$DIR\"` style commands remain conservative.\n\nThe `path` surface is a cross-cutting gate that applies to **all** file access: Pi tools, bash commands, MCP calls (via `input.arguments.path`), and extension tools (via `input.path` or a registered access extractor). A `path` deny cannot be overridden by a per-tool allow. Use it to protect sensitive files (`.env`, `~/.ssh/*`) from all path-aware tools at once.\n\nThe `external_directory` surface gates access **outside** the working directory. Give it a pattern map to allow specific outside-CWD directories without opening all external access — e.g. `\"external_directory\": { \"*\": \"ask\", \"~/.cargo/registry/*\": \"allow\" }` to silence repeated prompts on a local cache. The trailing `*` is greedy and crosses subdirectory boundaries; a bare `~/.cargo/registry` matches only the directory entry itself. Because layers compose with most-restrictive-wins, a `path` allow cannot loosen an `external_directory: ask` boundary — allow outside-CWD directories here, not on `path`.\n\n**Merge order (lowest → highest precedence):** global → project → per-agent frontmatter.",
+      "type": "object",
+      "propertyNames": {
+        "description": "A surface name or the universal fallback key '*'.",
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/permissionState",
+            "description": "Catch-all shorthand: equivalent to { \"*\": action }."
+          },
+          {
+            "$ref": "#/$defs/permissionMap",
+            "description": "Pattern→action map for this surface."
+          }
+        ]
+      },
+      "examples": [
+        {
+          "*": "ask",
+          "path": {
+            "*": "allow",
+            "*.env": "deny",
+            "*.env.*": "deny",
+            "*.env.example": "allow"
+          },
+          "read": "allow",
+          "write": "deny",
+          "edit": "deny",
+          "bash": {
+            "*": "ask",
+            "git *": "ask",
+            "git status": "allow",
+            "git diff": "allow"
+          },
+          "mcp": { "*": "ask", "mcp_status": "allow", "exa:*": "allow" },
+          "skill": { "*": "ask", "librarian": "allow" },
+          "external_directory": { "*": "ask", "~/.cargo/registry/*": "allow" }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "permissionState": {
+      "description": "A permission decision: allow (permit silently), deny (block with error), or ask (prompt the user for confirmation).",
+      "oneOf": [
+        {
+          "const": "allow",
+          "description": "Permit the action silently with no user interaction."
+        },
+        {
+          "const": "deny",
+          "description": "Block the action with an error message. The agent is told not to retry."
+        },
+        {
+          "const": "ask",
+          "description": "Prompt the user for confirmation via the interactive UI before proceeding."
+        }
+      ]
+    },
+    "permissionMap": {
+      "description": "A map of wildcard patterns to permission states. Last matching pattern wins.",
+      "markdownDescription": "A map of wildcard patterns to permission states.\n\nUse `*` for wildcard matching. When multiple patterns match, the **last matching rule wins** — put broad catch-alls first and specific overrides after them.\n\nPattern keys support home directory expansion:\n- `~/path` or `$HOME/path` — expanded to the OS home directory at match time.\n- `~` or `$HOME` alone — expands to the home directory itself.\n\nThe stored pattern is always shown in logs and approval dialogs as written (e.g. `~/dev/*`).",
+      "type": "object",
+      "propertyNames": {
+        "description": "A non-empty pattern string. Use * for wildcard matching. Prefix with ~/ or $HOME/ for home-relative paths.",
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/permissionState",
+            "description": "A permission decision for this pattern."
+          },
+          {
+            "$ref": "#/$defs/denyWithReason",
+            "description": "Deny this pattern with an optional custom reason."
+          }
+        ]
+      }
+    },
+    "denyWithReason": {
+      "type": "object",
+      "description": "Deny with an optional custom reason shown to the agent when the action is blocked.",
+      "properties": {
+        "action": {
+          "const": "deny",
+          "description": "The permission decision \u2014 must be \"deny\"."
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Optional reason shown to the agent when this action is denied."
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    }
+  }
+}

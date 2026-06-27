@@ -1,0 +1,836 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ConcurrencyLimiter } from "../../src/lifecycle/concurrency-limiter";
+import type { CreateSubagentSessionParams } from "../../src/lifecycle/create-subagent-session";
+import { SubagentManager, type SubagentManagerObserver } from "../../src/lifecycle/subagent-manager";
+import type { SubagentSession } from "../../src/lifecycle/subagent-session";
+import type { WorkspaceProvider } from "../../src/lifecycle/workspace";
+import { NotificationState } from "../../src/observation/notification-state";
+import type { RunConfig } from "../../src/runtime";
+import type { Subagent } from "../../src/types";
+import { createBlockingFactory, createSessionFactory } from "../helpers/manager-stubs";
+import { createMockSession, createSubagentSessionStub, emitResumeUsageAndCompaction, toSubagentSession } from "../helpers/mock-session";
+import { STUB_SNAPSHOT } from "../helpers/stub-ctx";
+
+/** Default max concurrent background agents (matches production default). */
+const DEFAULT_MAX_CONCURRENT = 4;
+
+type SessionFactory = (params: CreateSubagentSessionParams) => Promise<SubagentSession>;
+
+/** Default factory: resolves to a fresh SubagentSession stub on every spawn. */
+function defaultFactory(): SessionFactory {
+  return vi.fn(async (_params: CreateSubagentSessionParams) => toSubagentSession(createSubagentSessionStub()));
+}
+
+/** Test helper: construct an SubagentManager with injected stubs. */
+function createManager(overrides?: {
+  createSubagentSession?: SessionFactory;
+  observer?: Partial<SubagentManagerObserver>;
+  getMaxConcurrent?: () => number;
+  getRunConfig?: () => RunConfig;
+  baseCwd?: string;
+}) {
+  const createSubagentSession: SessionFactory = overrides?.createSubagentSession ?? defaultFactory();
+  const observer: SubagentManagerObserver | undefined = overrides?.observer
+    ? {
+        onSubagentStarted: overrides.observer.onSubagentStarted ?? (() => {}),
+        onSubagentCompleted: overrides.observer.onSubagentCompleted ?? (() => {}),
+        onSubagentCompacted: overrides.observer.onSubagentCompacted ?? (() => {}),
+        onSubagentCreated: overrides.observer.onSubagentCreated ?? (() => {}),
+      }
+    : undefined;
+  const limiter = new ConcurrencyLimiter(overrides?.getMaxConcurrent ?? (() => DEFAULT_MAX_CONCURRENT));
+  const mgr = new SubagentManager({
+    createSubagentSession,
+    observer,
+    limiter,
+    baseCwd: overrides?.baseCwd ?? "/repo",
+    getRunConfig: overrides?.getRunConfig,
+  });
+  return { manager: mgr, createSubagentSession, limiter };
+}
+
+/** Spawn a background agent using STUB_SNAPSHOT. */
+function spawnBg(mgr: SubagentManager, prompt = "test", desc = prompt) {
+  return mgr.spawn(STUB_SNAPSHOT, "general-purpose", prompt, {
+    description: desc,
+    isBackground: true,
+  });
+}
+
+/** Spawn a foreground agent using STUB_SNAPSHOT. */
+function spawnFg(mgr: SubagentManager, prompt = "test", desc = prompt) {
+  return mgr.spawnAndWait(STUB_SNAPSHOT, "general-purpose", prompt, {
+    description: desc,
+  });
+}
+
+/** Spawn a background agent carrying a parentSession.toolCallId (notification path). */
+function spawnBgWithToolCall(mgr: SubagentManager, toolCallId: string, prompt = "test", desc = prompt) {
+  return mgr.spawn(STUB_SNAPSHOT, "general-purpose", prompt, {
+    description: desc,
+    isBackground: true,
+    parentSession: { toolCallId },
+  });
+}
+
+/** Arrange a manager at limit 1 with two bg agents over a blocking factory: first runs, second queues. */
+function arrangeQueuedPair() {
+  const factory = createBlockingFactory();
+  const { manager: mgr } = createManager({ createSubagentSession: factory, getMaxConcurrent: () => 1 });
+  const running = spawnBg(mgr, "a");
+  const queued = spawnBg(mgr, "b");
+  return { manager: mgr, factory, running, queued };
+}
+
+/**
+ * Arrange a manager whose onSubagentCompleted observer records the record's
+ * resultConsumed flag, with one background agent spawned via a tool call.
+ * The act (when markConsumed is called relative to awaiting) stays in each test.
+ */
+function seedResultConsumedObserver() {
+  let seenConsumed: boolean | undefined;
+  const { manager } = createManager({
+    observer: { onSubagentCompleted: (r) => { seenConsumed = r.notification?.resultConsumed; } },
+  });
+  const id = spawnBgWithToolCall(manager, "tc-1");
+  const record = manager.getRecord(id)!;
+  return { manager, record, getSeenConsumed: () => seenConsumed };
+}
+
+describe("SubagentManager — Bug 1 race condition (notification.resultConsumed vs onComplete)", () => {
+  let manager: SubagentManager;
+
+  afterEach(() => {
+    manager.dispose();
+  });
+
+  it("reproduces bug: onComplete fires with resultConsumed=false when markConsumed called after await", async () => {
+    const seeded = seedResultConsumedObserver();
+    manager = seeded.manager;
+    const { record } = seeded;
+
+    // Simulate the buggy get_subagent_result: await THEN mark consumed
+    await record.promise;
+    record.notification!.markConsumed(); // too late — onComplete already fired
+
+    // onComplete saw resultConsumed as false — would queue a notification (the bug)
+    expect(seeded.getSeenConsumed()).toBeFalsy();
+  });
+
+  it("fix: onComplete sees resultConsumed=true when markConsumed called before await", async () => {
+    const seeded = seedResultConsumedObserver();
+    manager = seeded.manager;
+    const { record } = seeded;
+
+    // The fix: pre-mark BEFORE awaiting
+    record.notification!.markConsumed();
+    await record.promise;
+
+    expect(seeded.getSeenConsumed()).toBe(true);
+  });
+
+  it("normal case: onComplete fires with no notification when agent was not spawned via tool", async () => {
+    let completedRecord: Subagent | undefined;
+    ({ manager } = createManager({ observer: { onSubagentCompleted: (r) => {
+      completedRecord = r;
+    } } }));
+
+    const id = spawnBg(manager);
+    await manager.getRecord(id)!.promise;
+
+    expect(completedRecord).toBeDefined();
+    expect(completedRecord!.notification).toBeUndefined();
+  });
+
+  it("onComplete is not called for foreground agents", async () => {
+    let onCompleteCalled = false;
+    ({ manager } = createManager({ observer: { onSubagentCompleted: () => {
+      onCompleteCalled = true;
+    } } }));
+
+    await spawnFg(manager);
+
+    expect(onCompleteCalled).toBe(false);
+  });
+});
+
+describe("SubagentManager — completion callbacks", () => {
+  let manager: SubagentManager;
+
+  afterEach(() => {
+    manager.dispose();
+  });
+
+  it("does not let onComplete errors turn a completed agent into a failed run", async () => {
+    ({ manager } = createManager({ observer: { onSubagentCompleted: () => {
+      throw new Error("stale extension context");
+    } } }));
+
+    const id = spawnBg(manager);
+    await expect(manager.getRecord(id)!.promise).resolves.toBeUndefined();
+
+    expect(manager.getRecord(id)!.status).toBe("completed");
+  });
+});
+
+describe("SubagentManager — cleanup timer", () => {
+  let manager: SubagentManager;
+
+  afterEach(() => {
+    manager.dispose();
+  });
+
+  it("does not keep the process alive on its own", () => {
+    ({ manager } = createManager());
+
+    expect((manager as any).cleanupInterval.hasRef()).toBe(false);
+  });
+});
+
+describe("SubagentManager — Bug 3 clearCompleted", () => {
+  let manager: SubagentManager;
+
+  afterEach(() => {
+    manager.dispose();
+  });
+
+  it("clearCompleted removes completed records", async () => {
+    ({ manager } = createManager());
+
+    const id = spawnBg(manager);
+    await manager.getRecord(id)!.promise;
+
+    expect(manager.listAgents()).toHaveLength(1);
+    manager.clearCompleted();
+    expect(manager.listAgents()).toHaveLength(0);
+  });
+
+  it("clearCompleted does not remove running or queued agents", async () => {
+    // Use maxConcurrent=1 to keep second agent queued; factory never resolves
+    ({ manager } = createManager({ getMaxConcurrent: () => 1, createSubagentSession: createBlockingFactory() }));
+
+    const id1 = spawnBg(manager, "test1", "running agent");
+    // Second agent should be queued (limit=1)
+    const id2 = spawnBg(manager, "test2", "queued agent");
+
+    expect(manager.getRecord(id1)!.status).toBe("running");
+    expect(manager.getRecord(id2)!.status).toBe("queued");
+
+    manager.clearCompleted();
+
+    // Both should still be present
+    expect(manager.getRecord(id1)).toBeDefined();
+    expect(manager.getRecord(id2)).toBeDefined();
+
+    // Abort to allow cleanup
+    manager.abort(id1);
+    manager.abort(id2);
+  });
+
+  it("clearCompleted calls dispose on sessions of removed records", async () => {
+    const disposeSpy = vi.fn();
+    const sess = createMockSession({ dispose: disposeSpy });
+    const { factory } = createSessionFactory(sess);
+    ({ manager } = createManager({ createSubagentSession: factory }));
+
+    const id = spawnBg(manager);
+    await manager.getRecord(id)!.promise;
+
+    manager.clearCompleted();
+
+    expect(disposeSpy).toHaveBeenCalledOnce();
+  });
+
+  it("clearCompleted removes error and stopped records", async () => {
+    const { factory, stub } = createSessionFactory();
+    stub.runTurnLoop.mockRejectedValue(new Error("boom"));
+    ({ manager } = createManager({ createSubagentSession: factory }));
+
+    const id = spawnBg(manager);
+    await manager.getRecord(id)!.promise;
+    expect(manager.getRecord(id)!.status).toBe("error");
+
+    manager.clearCompleted();
+    expect(manager.getRecord(id)).toBeUndefined();
+  });
+});
+
+describe("SubagentManager — evicted descriptors", () => {
+  let manager: SubagentManager;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    manager.dispose();
+  });
+
+  /** Spawn, await completion, then evict via the 10-minute cleanup sweep. */
+  async function spawnAndEvict(outputFile?: string): Promise<string> {
+    const { factory } = createSessionFactory(createMockSession(), outputFile);
+    ({ manager } = createManager({ createSubagentSession: factory }));
+    const id = spawnBg(manager, "test", "investigate the bug");
+    await manager.getRecord(id)!.promise;
+    const completedAt = manager.getRecord(id)!.completedAt!;
+    vi.spyOn(Date, "now").mockReturnValue(completedAt + 11 * 60_000);
+    (manager as any).cleanup();
+    return id;
+  }
+
+  it("retains a descriptor for an evicted agent with an outputFile", async () => {
+    const id = await spawnAndEvict("/tasks/agent.jsonl");
+
+    expect(manager.listAgents()).toHaveLength(0);
+    const evicted = manager.listEvicted();
+    expect(evicted).toHaveLength(1);
+    expect(evicted[0]).toMatchObject({
+      id,
+      type: "general-purpose",
+      description: "investigate the bug",
+      status: "completed",
+      toolUses: 0,
+      outputFile: "/tasks/agent.jsonl",
+    });
+    expect(typeof evicted[0].startedAt).toBe("number");
+  });
+
+  it("does not retain a descriptor for an evicted agent without an outputFile", async () => {
+    await spawnAndEvict(undefined);
+
+    expect(manager.listAgents()).toHaveLength(0);
+    expect(manager.listEvicted()).toEqual([]);
+  });
+
+  it("clearCompleted empties the evicted descriptors", async () => {
+    await spawnAndEvict("/tasks/agent.jsonl");
+    expect(manager.listEvicted()).toHaveLength(1);
+
+    manager.clearCompleted();
+    expect(manager.listEvicted()).toEqual([]);
+  });
+});
+
+// Eager init removes the optional/required asymmetry that previously required
+// `??=` defaults at the callback sites and `?? 0` / `?? 1` at the read sites.
+describe("SubagentManager — lifetime usage + compaction count are eagerly initialized", () => {
+  let manager: SubagentManager;
+
+  afterEach(() => {
+    manager.dispose();
+  });
+
+  it("spawn initializes lifetimeUsage to zeros and compactionCount to 0", () => {
+    // Factory never resolves — we just want to inspect the record at spawn time.
+    ({ manager } = createManager({ createSubagentSession: createBlockingFactory() }));
+
+    const id = spawnBg(manager);
+    const record = manager.getRecord(id)!;
+
+    expect(record.lifetimeUsage).toEqual({ input: 0, output: 0, cacheWrite: 0 });
+    expect(record.compactionCount).toBe(0);
+
+    manager.abort(id);
+  });
+
+  it("record observer accumulates assistant usage into record.lifetimeUsage", async () => {
+    // The record observer subscribes to session events via the wired subagentSession.
+    // Emitting message_end events from runTurnLoop drives stats.
+    const session = createMockSession();
+    const { factory, stub } = createSessionFactory(session);
+    stub.runTurnLoop.mockImplementation(async () => {
+      session.emit({ type: "message_end", message: { role: "assistant", usage: { input: 100, output: 50, cacheWrite: 10 } } });
+      session.emit({ type: "message_end", message: { role: "assistant", usage: { input: 200, output: 80, cacheWrite: 20 } } });
+      return { responseText: "done", aborted: false, steered: false };
+    });
+    ({ manager } = createManager({ createSubagentSession: factory }));
+
+    const id = spawnBg(manager);
+    await manager.getRecord(id)!.promise;
+
+    expect(manager.getRecord(id)!.lifetimeUsage).toEqual({
+      input: 300, output: 130, cacheWrite: 30,
+    });
+  });
+
+  it("record observer increments compactionCount on compaction_end events", async () => {
+    const compactSeen: any[] = [];
+
+    const session = createMockSession();
+    const { factory, stub } = createSessionFactory(session);
+    stub.runTurnLoop.mockImplementation(async () => {
+      // Compaction fires while the agent is still running — the record passed to
+      // onCompact should reflect the just-incremented count.
+      session.emit({ type: "compaction_end", aborted: false, result: { tokensBefore: 12345 }, reason: "threshold" });
+      session.emit({ type: "compaction_end", aborted: false, result: { tokensBefore: 22222 }, reason: "manual" });
+      return { responseText: "done", aborted: false, steered: false };
+    });
+
+    ({ manager } = createManager({ createSubagentSession: factory, observer: { onSubagentCompacted: (record, info) => {
+      compactSeen.push({ count: record.compactionCount, reason: info.reason });
+    } } }));
+
+    const id = spawnBg(manager);
+    await manager.getRecord(id)!.promise;
+
+    expect(compactSeen).toEqual([
+      { count: 1, reason: "threshold" },
+      { count: 2, reason: "manual" },
+    ]);
+    expect(manager.getRecord(id)!.compactionCount).toBe(2);
+  });
+
+  it("resume() also accumulates usage and increments compactions on the same record", async () => {
+    // Spawn with a subscribable session that resume can latch onto.
+    const session = createMockSession();
+    const { factory, stub } = createSessionFactory(session);
+    stub.resumeTurnLoop.mockImplementation(async () => {
+      // Emit events through the session — the record observer subscribed by
+      // SubagentManager.resume() will pick them up.
+      emitResumeUsageAndCompaction(session);
+      return "second";
+    });
+    ({ manager } = createManager({ createSubagentSession: factory }));
+
+    const id = spawnBg(manager);
+    await manager.getRecord(id)!.promise;
+
+    // Pre-resume: lifetimeUsage from spawn was zero (run did not emit usage events)
+    expect(manager.getRecord(id)!.lifetimeUsage).toEqual({ input: 0, output: 0, cacheWrite: 0 });
+    expect(manager.getRecord(id)!.compactionCount).toBe(0);
+
+    await manager.resume(id, "more");
+
+    expect(manager.getRecord(id)!.lifetimeUsage).toEqual({ input: 70, output: 30, cacheWrite: 5 });
+    expect(manager.getRecord(id)!.compactionCount).toBe(1);
+  });
+});
+
+describe("SubagentManager — getRunConfig threads defaultMaxTurns and graceTurns into the turn loop", () => {
+  let manager: SubagentManager;
+
+  afterEach(() => {
+    manager.dispose();
+  });
+
+  it("passes defaultMaxTurns and graceTurns from getRunConfig to runTurnLoop", async () => {
+    const getRunConfig = vi.fn(() => ({ defaultMaxTurns: 10, graceTurns: 3 }));
+    const { factory, stub } = createSessionFactory();
+    ({ manager } = createManager({ getRunConfig, createSubagentSession: factory }));
+
+    const id = spawnBg(manager);
+    await manager.getRecord(id)!.promise;
+
+    const turnOpts = stub.runTurnLoop.mock.calls[0][1];
+    expect(turnOpts.defaultMaxTurns).toBe(10);
+    expect(turnOpts.graceTurns).toBe(3);
+  });
+
+  it("omits defaultMaxTurns and graceTurns from runTurnLoop when no getRunConfig is provided", async () => {
+    const { factory, stub } = createSessionFactory();
+    ({ manager } = createManager({ createSubagentSession: factory }));
+
+    const id = spawnBg(manager);
+    await manager.getRecord(id)!.promise;
+
+    const turnOpts = stub.runTurnLoop.mock.calls[0][1];
+    expect(turnOpts.defaultMaxTurns).toBeUndefined();
+    expect(turnOpts.graceTurns).toBeUndefined();
+  });
+});
+
+describe("SubagentManager — parent session threading", () => {
+  let manager: SubagentManager;
+
+  afterEach(() => {
+    manager.dispose();
+  });
+
+  it("threads parentSession from AgentSpawnConfig to the factory params", async () => {
+    const { factory } = createSessionFactory();
+    ({ manager } = createManager({ createSubagentSession: factory }));
+
+    manager.spawn(STUB_SNAPSHOT, "general-purpose", "test", {
+      description: "test",
+      isBackground: true,
+      parentSession: { parentSessionFile: "/sessions/parent.jsonl", parentSessionId: "parent-session-123" },
+    });
+
+    await vi.waitFor(() => expect(factory).toHaveBeenCalled());
+
+    const params = vi.mocked(factory).mock.calls[0][0];
+    expect(params.parentSession?.parentSessionFile).toBe("/sessions/parent.jsonl");
+    expect(params.parentSession?.parentSessionId).toBe("parent-session-123");
+  });
+});
+
+describe("SubagentManager — dependency injection via options bag", () => {
+  let manager: SubagentManager;
+
+  afterEach(() => {
+    manager.dispose();
+  });
+
+  it("calls the injected factory when spawning an agent", async () => {
+    const { factory } = createSessionFactory();
+    ({ manager } = createManager({ createSubagentSession: factory }));
+
+    const id = spawnBg(manager);
+    await manager.getRecord(id)!.promise;
+
+    expect(factory).toHaveBeenCalledOnce();
+    expect(manager.getRecord(id)!.result).toBe("done");
+  });
+
+  it("calls resumeTurnLoop on the SubagentSession when resuming an agent", async () => {
+    const { factory, stub } = createSessionFactory();
+    stub.resumeTurnLoop.mockResolvedValue("second");
+    ({ manager } = createManager({ createSubagentSession: factory }));
+
+    const id = spawnBg(manager);
+    await manager.getRecord(id)!.promise;
+
+    await manager.resume(id, "continue");
+
+    expect(stub.resumeTurnLoop).toHaveBeenCalledOnce();
+    expect(manager.getRecord(id)!.result).toBe("second");
+  });
+
+});
+
+describe("SubagentManager — queueing and concurrency with injected stubs", () => {
+  let manager: SubagentManager;
+
+  afterEach(() => {
+    manager.dispose();
+  });
+
+  it("queues excess background agents and drains them in order", async () => {
+    const startOrder: string[] = [];
+    const { promise: gate1, resolve: resolve1 } = Promise.withResolvers<void>(); // eslint-disable-line @typescript-eslint/no-invalid-void-type -- Promise.withResolvers<void> is valid; rule does not allow void in generic fn call type args
+    const { promise: gate2, resolve: resolve2 } = Promise.withResolvers<void>(); // eslint-disable-line @typescript-eslint/no-invalid-void-type -- Promise.withResolvers<void> is valid; rule does not allow void in generic fn call type args
+
+    let callCount = 0;
+    const factory: SessionFactory = vi.fn(async () => {
+      callCount++;
+      const n = callCount;
+      startOrder.push(`start-${n}`);
+      const stub = createSubagentSessionStub();
+      stub.runTurnLoop.mockImplementation(async () => {
+        if (n === 1) await gate1;
+        if (n === 2) await gate2;
+        return { responseText: `result-${n}`, aborted: false, steered: false };
+      });
+      return toSubagentSession(stub);
+    });
+    ({ manager } = createManager({ createSubagentSession: factory, getMaxConcurrent: () => 1 }));
+
+    // Spawn two background agents — first runs, second queues
+    const id1 = spawnBg(manager, "test1", "first");
+    const id2 = spawnBg(manager, "test2", "second");
+
+    expect(manager.getRecord(id1)!.status).toBe("running");
+    expect(manager.getRecord(id2)!.status).toBe("queued");
+
+    // Complete first agent — second should start
+    resolve1();
+    await manager.getRecord(id1)!.promise;
+
+    // Wait for the second to start
+    await vi.waitFor(() => expect(manager.getRecord(id2)!.status).toBe("running"));
+
+    resolve2();
+    await manager.getRecord(id2)!.promise;
+
+    expect(startOrder).toEqual(["start-1", "start-2"]);
+    expect(manager.getRecord(id1)!.result).toBe("result-1");
+    expect(manager.getRecord(id2)!.result).toBe("result-2");
+  });
+
+  it("gives a queued agent an awaitable promise at spawn (before its slot opens)", () => {
+    const { manager: mgr, running, queued } = arrangeQueuedPair();
+    manager = mgr;
+
+    // A still-queued agent must already expose a settle-on-completion promise,
+    // so waitForAll can await it without relying on a re-poll. (Regression
+    // guard: #374 made the promise lazy; the limiter handle is captured eagerly.)
+    expect(manager.getRecord(queued)!.status).toBe("queued");
+    expect(manager.getRecord(queued)!.promise).toBeInstanceOf(Promise);
+
+    manager.abort(running);
+    manager.abort(queued);
+  });
+
+  it("abort removes a queued agent without ever running it", () => {
+    const { manager: mgr, factory, running, queued } = arrangeQueuedPair();
+    manager = mgr;
+
+    expect(manager.getRecord(queued)!.status).toBe("queued");
+
+    // Abort the queued agent
+    expect(manager.abort(queued)).toBe(true);
+    expect(manager.getRecord(queued)!.status).toBe("stopped");
+
+    // factory was called once (for the first agent), never for the aborted one
+    expect(factory).toHaveBeenCalledOnce();
+
+    manager.abort(running);
+  });
+
+  it("onStart fires when agent transitions from queued to running", async () => {
+    const startedIds: string[] = [];
+    const { promise: gate, resolve } = Promise.withResolvers<void>(); // eslint-disable-line @typescript-eslint/no-invalid-void-type -- Promise.withResolvers<void> is valid; rule does not allow void in generic fn call type args
+
+    let callCount = 0;
+    const factory: SessionFactory = vi.fn(async () => {
+      callCount++;
+      const n = callCount;
+      const stub = createSubagentSessionStub();
+      stub.runTurnLoop.mockImplementation(async () => {
+        if (n === 1) await gate;
+        return { responseText: "ok", aborted: false, steered: false };
+      });
+      return toSubagentSession(stub);
+    });
+    ({ manager } = createManager({
+      createSubagentSession: factory,
+      getMaxConcurrent: () => 1,
+      observer: { onSubagentStarted: (record) => { startedIds.push(record.id); } },
+    }));
+
+    const id1 = spawnBg(manager, "a");
+    const id2 = spawnBg(manager, "b");
+
+    // First agent started immediately
+    expect(startedIds).toEqual([id1]);
+
+    // Complete first — second should start and fire onStart
+    resolve();
+    await manager.getRecord(id1)!.promise;
+    await vi.waitFor(() => expect(startedIds).toHaveLength(2));
+
+    expect(startedIds).toEqual([id1, id2]);
+
+    await manager.getRecord(id2)!.promise;
+  });
+});
+
+describe("SubagentManager — subagent session state", () => {
+  let manager: SubagentManager;
+
+  afterEach(() => {
+    manager.dispose();
+  });
+
+  it("sets record.subagentSession with session and outputFile after session creation", async () => {
+    const session = createMockSession();
+    const { factory } = createSessionFactory(session, "/tmp/session.jsonl");
+    ({ manager } = createManager({ createSubagentSession: factory }));
+
+    const id = spawnBg(manager);
+    await manager.getRecord(id)!.promise;
+
+    const record = manager.getRecord(id)!;
+    expect(record.subagentSession).toBeDefined();
+    expect(record.subagentSession!.session).toBe(session);
+    expect(record.subagentSession!.outputFile).toBe("/tmp/session.jsonl");
+  });
+
+  it("record.subagentSession is undefined before the session is created", () => {
+    ({ manager } = createManager({ createSubagentSession: createBlockingFactory() }));
+
+    const id = spawnBg(manager);
+    const record = manager.getRecord(id)!;
+    expect(record.subagentSession).toBeUndefined();
+    manager.abort(id);
+  });
+});
+
+
+describe("SubagentManager — onSubagentCreated observer", () => {
+  let manager: SubagentManager;
+
+  afterEach(() => {
+    manager.dispose();
+  });
+
+  it("fires onSubagentCreated when a background agent is spawned", () => {
+    const onCreated = vi.fn();
+    ({ manager } = createManager({ observer: { onSubagentCreated: onCreated } }));
+
+    const id = manager.spawn(STUB_SNAPSHOT, "general-purpose", "test", {
+      description: "test agent",
+      isBackground: true,
+    });
+
+    expect(onCreated).toHaveBeenCalledOnce();
+    expect(onCreated).toHaveBeenCalledWith(manager.getRecord(id));
+
+    manager.abort(id);
+  });
+
+  it("does not fire onSubagentCreated for foreground agents", async () => {
+    const onCreated = vi.fn();
+    ({ manager } = createManager({ observer: { onSubagentCreated: onCreated } }));
+
+    await manager.spawnAndWait(STUB_SNAPSHOT, "general-purpose", "test", {
+      description: "foreground agent",
+    });
+
+    expect(onCreated).not.toHaveBeenCalled();
+  });
+
+  it("fires onSubagentCreated before onSubagentStarted for background agents", async () => {
+    const callOrder: string[] = [];
+    ({ manager } = createManager({
+      observer: {
+        onSubagentCreated: () => { callOrder.push("created"); },
+        onSubagentStarted: () => { callOrder.push("started"); },
+      },
+    }));
+
+    const id = manager.spawn(STUB_SNAPSHOT, "general-purpose", "test", {
+      description: "bg agent",
+      isBackground: true,
+    });
+    await manager.getRecord(id)!.promise;
+
+    expect(callOrder).toEqual(["created", "started"]);
+  });
+});
+
+describe("SubagentManager — lifecycle observer forwarding", () => {
+  let manager: SubagentManager;
+
+  afterEach(() => {
+    manager.dispose();
+  });
+
+  it("forwards onSessionCreated from spawn options observer to Agent", async () => {
+    const session = createMockSession();
+    const received: { agent: Subagent | undefined } = { agent: undefined };
+    const { factory } = createSessionFactory(session);
+    ({ manager } = createManager({ createSubagentSession: factory }));
+
+    const id = manager.spawn(STUB_SNAPSHOT, "general-purpose", "test", {
+      description: "test",
+      isBackground: true,
+      observer: {
+        onSessionCreated: (agent) => {
+          received.agent = agent;
+        },
+      },
+    });
+    await manager.getRecord(id)!.promise;
+
+    expect(received.agent).toBe(manager.getRecord(id));
+    expect(received.agent!.id).toBe(id);
+  });
+
+  it("forwards onSessionCreated for foreground agents", async () => {
+    const session = createMockSession();
+    const received: { agent: Subagent | undefined } = { agent: undefined };
+    const { factory } = createSessionFactory(session);
+    ({ manager } = createManager({ createSubagentSession: factory }));
+
+    await manager.spawnAndWait(STUB_SNAPSHOT, "general-purpose", "test", {
+      description: "fg",
+      observer: {
+        onSessionCreated: (agent) => {
+          received.agent = agent;
+        },
+      },
+    });
+
+    expect(received.agent).toBeDefined();
+    expect(received.agent!.type).toBe("general-purpose");
+  });
+});
+
+describe("SubagentManager — toolCallId notification wiring", () => {
+  let manager: SubagentManager;
+
+  afterEach(() => {
+    manager.dispose();
+  });
+
+  it("wires NotificationState on spawn when toolCallId is provided", () => {
+    ({ manager } = createManager());
+
+    const id = spawnBgWithToolCall(manager, "tc-42", "test", "bg");
+    const record = manager.getRecord(id)!;
+
+    expect(record.notification).toBeInstanceOf(NotificationState);
+    expect(record.notification!.toolCallId).toBe("tc-42");
+    expect(record.notification!.resultConsumed).toBe(false);
+    manager.abort(id);
+  });
+
+  it("does not wire NotificationState when toolCallId is absent", () => {
+    ({ manager } = createManager());
+
+    const id = manager.spawn(STUB_SNAPSHOT, "general-purpose", "test", {
+      description: "bg",
+      isBackground: true,
+    });
+    const record = manager.getRecord(id)!;
+
+    expect(record.notification).toBeUndefined();
+    manager.abort(id);
+  });
+});
+
+describe("SubagentManager — registerWorkspaceProvider", () => {
+  let manager: SubagentManager;
+
+  afterEach(() => {
+    manager.dispose();
+  });
+
+  function makeProvider(): WorkspaceProvider {
+    return { prepare: vi.fn(async () => undefined) };
+  }
+
+  it("returns a disposer and exposes the registered provider via getter", () => {
+    ({ manager } = createManager());
+    const provider = makeProvider();
+
+    const dispose = manager.registerWorkspaceProvider(provider);
+
+    expect(typeof dispose).toBe("function");
+    expect(manager.workspaceProvider).toBe(provider);
+  });
+
+  it("throws when a provider is already registered", () => {
+    ({ manager } = createManager());
+    manager.registerWorkspaceProvider(makeProvider());
+
+    expect(() => manager.registerWorkspaceProvider(makeProvider())).toThrow(
+      /already registered/i,
+    );
+  });
+
+  it("disposer clears the slot, allowing re-registration", () => {
+    ({ manager } = createManager());
+    const first = makeProvider();
+    const dispose = manager.registerWorkspaceProvider(first);
+
+    dispose();
+
+    expect(manager.workspaceProvider).toBeUndefined();
+    const second = makeProvider();
+    manager.registerWorkspaceProvider(second);
+    expect(manager.workspaceProvider).toBe(second);
+  });
+
+  it("stale disposer does not evict a later provider", () => {
+    ({ manager } = createManager());
+    const first = makeProvider();
+    const disposeFirst = manager.registerWorkspaceProvider(first);
+    disposeFirst();
+    const second = makeProvider();
+    manager.registerWorkspaceProvider(second);
+
+    // Calling the first disposer again must not clear the second provider.
+    disposeFirst();
+
+    expect(manager.workspaceProvider).toBe(second);
+  });
+});
