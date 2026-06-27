@@ -1,30 +1,32 @@
-# pi-lark Skills Package Implementation Plan
+# pi-lark Package Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 创建一个只包含 skills 的 pi package `pi-lark`，提供飞书（Lark）API skill 集合，通过 npm 分发给其他开发者使用。
+**Goal:** 创建纯 skills pi package `@yandy0725/pi-lark`，从飞书 well-known endpoint 下载 skills，通过 npm 分发。
 
-**Architecture:** 纯 skills package，无 TS 扩展代码。`scripts/update-skills.mjs` 从飞书开放平台 well-known endpoint 自动下载 skills 到 `skills/` 目录。`prepublishOnly` 钩子确保发布前自动拉取最新 skills。
+**Architecture:** 6 个文件（package.json、download-skills.mjs、.gitignore、README.md、README.zh.md、RELEASE.md）+ 2 个现有文件修改（根 package.json workspaces、publish.yml）。`skills/` gitignore，由 download-skills.mjs 生成。
 
-**Tech Stack:** Node.js (ESM), `package.json` pi manifest, `prepublishOnly` lifecycle hook
+**Tech Stack:** Node.js ESM（零外部依赖），npm workspaces monorepo，GitHub Actions OIDC publish
 
 ## Global Constraints
 
-- 仅包含 skills，无 extensions / prompts / themes
-- skills 从 `https://open.feishu.cn/.well-known/skills/index.json` (fallback: `/agent-skills/index.json`) 下载
-- 下载脚本参考 `/home/yandy/workspace/pri/pi-feishu-cli/scripts/update-skills.mjs`
-- `skills/` 目录不入 git，由 `update-skills` 脚本生成
-- 发布 npm 时自动先运行下载脚本（`prepublishOnly`）
+- 纯 skills 包，无 TS 代码、扩展、测试框架
+- skills 源：`https://open.feishu.cn/.well-known/skills/index.json`（fallback `/agent-skills/index.json`）
+- `skills/` 不入 git
+- `prepublishOnly` 自动下载 skills，失败则中止发布
+- peerDependency: `@larksuite/cli: "*"`（安装命令 `npm install -g @larksuite/cli`）
+- Release tag: `pi-lark-vX.Y.Z`
+- Package 名: `@yandy0725/pi-lark`
 
 ---
 
-### Task 1: 创建 pi-lark package.json
+### Task 1: 创建 pi-lark/package.json
 
 **Files:**
 - Create: `pi-lark/package.json`
 
 **Interfaces:**
-- Produces: `pi-lark` package with `pi.skills: ["./skills"]` manifest, `prepublishOnly` → `update-skills` script, `keywords: ["pi-package"]`, `files: ["skills/"]`
+- Produces: `@yandy0725/pi-lark` package manifest，声明 `pi.skills: ["./skills"]`、`prepublishOnly` → `download-skills`、`peerDependencies: { "@larksuite/cli": "*" }`、`files: ["skills/"]`、`type: "module"`
 
 - [ ] **Step 1: 创建 pi-lark/package.json**
 
@@ -43,54 +45,47 @@
 		"directory": "pi-lark"
 	},
 	"type": "module",
-	"keywords": [
-		"pi-package",
-		"lark",
-		"feishu",
-		"skills"
-	],
-	"files": [
-		"skills/"
-	],
+	"keywords": ["pi-package", "lark", "feishu", "skills"],
+	"files": ["skills/"],
+	"peerDependencies": {
+		"@larksuite/cli": "*"
+	},
 	"scripts": {
-		"update-skills": "node scripts/update-skills.mjs",
-		"prepublishOnly": "npm run update-skills"
+		"download-skills": "node scripts/download-skills.mjs",
+		"prepublishOnly": "npm run download-skills"
 	},
 	"pi": {
-		"skills": [
-			"./skills"
-		]
+		"skills": ["./skills"]
 	}
 }
 ```
 
-- [ ] **Step 2: 验证**
+- [ ] **Step 2: 验证 package.json 结构**
 
 ```bash
-node -e "const pkg = require('./pi-lark/package.json'); console.log(pkg.name, pkg.pi.skills)"
+node -e "const p = require('./pi-lark/package.json'); console.log(p.name, p.pi.skills, p.peerDependencies)"
 ```
 
-Expected: `@yandy0725/pi-lark [ './skills' ]`
+Expected: `@yandy0725/pi-lark [ './skills' ] { '@larksuite/cli': '*' }`
 
 ---
 
-### Task 2: 创建 update-skills.mjs 下载脚本
+### Task 2: 创建 pi-lark/scripts/download-skills.mjs
 
 **Files:**
-- Create: `pi-lark/scripts/update-skills.mjs`
+- Create: `pi-lark/scripts/download-skills.mjs`
 
 **Interfaces:**
-- Consumes: 飞书 well-known endpoint (`https://open.feishu.cn/.well-known/skills/index.json`, fallback `/agent-skills/index.json`)
-- Produces: `pi-lark/skills/<skill-name>/SKILL.md` + reference 文件，以及 `pi-lark/.skills-cache.json` 缓存文件
+- Consumes: `https://open.feishu.cn/.well-known/skills/index.json` 或 `/agent-skills/index.json`
+- Produces: `pi-lark/skills/<skill-name>/SKILL.md` + reference 文件
+- 零外部依赖（仅 `node:fs/promises`、`node:path`、`node:url`）
 
-参考脚本：`/home/yandy/workspace/pri/pi-feishu-cli/scripts/update-skills.mjs`（逻辑完全一致，仅调整路径到当前 package）
-
-- [ ] **Step 1: 创建 pi-lark/scripts/update-skills.mjs**
+- [ ] **Step 1: 创建 pi-lark/scripts/download-skills.mjs**
 
 ```js
 #!/usr/bin/env node
 
-import { mkdir, rename, rm, rmdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -102,9 +97,6 @@ const WELL_KNOWN_PATHS = [
 
 const PACKAGE_DIR = resolve(SCRIPT_DIR, "..");
 const SKILLS_DIR = resolve(PACKAGE_DIR, "skills");
-const TMP_DIR = resolve(PACKAGE_DIR, "skills.tmp");
-const CACHE_FILE = resolve(PACKAGE_DIR, ".skills-cache.json");
-
 const FEISHU_ORIGIN = "https://open.feishu.cn";
 
 async function probeEndpoint() {
@@ -143,11 +135,10 @@ async function main() {
 	console.log(`Using endpoint: ${endpoint} (${index.skills.length} skills)`);
 
 	console.log("Downloading skills...");
-	await mkdir(TMP_DIR, { recursive: true });
-
 	for (const skill of index.skills) {
-		const skillDir = resolve(TMP_DIR, skill.name);
+		const skillDir = resolve(SKILLS_DIR, skill.name);
 		console.log(`  ${skill.name}`);
+		await mkdir(skillDir, { recursive: true });
 		for (const file of skill.files) {
 			const url = buildDownloadUrl(endpoint, skill.name, file);
 			const dest = resolve(skillDir, file);
@@ -159,24 +150,6 @@ async function main() {
 		}
 	}
 
-	console.log("Updating index skills, preserving non-index directories...");
-	for (const skill of index.skills) {
-		const src = resolve(TMP_DIR, skill.name);
-		const dst = resolve(SKILLS_DIR, skill.name);
-		await rm(dst, { recursive: true, force: true });
-		await rename(src, dst);
-	}
-	await rmdir(TMP_DIR);
-
-	await writeFile(
-		CACHE_FILE,
-		JSON.stringify(
-			{ endpoint, updatedAt: new Date().toISOString() },
-			null,
-			2,
-		),
-	);
-
 	console.log("Done.");
 }
 
@@ -186,29 +159,25 @@ main().catch((err) => {
 });
 ```
 
-- [ ] **Step 2: 试运行确认脚本可执行（不依赖网络）**
+- [ ] **Step 2: 语法检查**
 
 ```bash
-node --check pi-lark/scripts/update-skills.mjs
+node --check pi-lark/scripts/download-skills.mjs
 ```
 
 Expected: 无输出（语法正确）
 
 ---
 
-### Task 3: 创建 .gitignore
+### Task 3: 创建 pi-lark/.gitignore
 
 **Files:**
 - Create: `pi-lark/.gitignore`
 
-**Interfaces:**
-- Produces: 确保 `skills/` 和 `.skills-cache.json` 不入 git
-
 - [ ] **Step 1: 创建 pi-lark/.gitignore**
 
-```gitignore
+```
 skills/
-.skills-cache.json
 ```
 
 - [ ] **Step 2: 验证**
@@ -217,7 +186,7 @@ skills/
 cat pi-lark/.gitignore
 ```
 
-Expected: 显示上述两行
+Expected: `skills/`
 
 ---
 
@@ -228,9 +197,6 @@ Expected: 显示上述两行
 - Create: `pi-lark/README.zh.md`
 - Create: `pi-lark/RELEASE.md`
 
-**Interfaces:**
-- Produces: 中英文 README 说明安装使用方式，RELEASE.md 说明发布流程
-
 - [ ] **Step 1: 创建 pi-lark/README.md**
 
 ```markdown
@@ -240,21 +206,25 @@ Pi package with Lark (Feishu) API skills for AI-powered Lark app development.
 
 Provides a collection of skills covering Lark/Feishu open platform APIs: Base, Docs, Sheets, Calendar, IM, Approval, Drive, Wiki, and more.
 
+## Prerequisites
+
+Install `@larksuite/cli` globally:
+
+```bash
+npm install -g @larksuite/cli
+```
+
 ## Install
 
 ```bash
 pi install npm:@yandy0725/pi-lark
 ```
 
-## Included Skills
-
-Skills are automatically downloaded from Feishu Open Platform well-known endpoints. See the [skills/](./skills/) directory for the complete list after installation.
-
 ## Development
 
 ```bash
 # Download/update skills from Feishu Open Platform
-npm run update-skills
+npm run download-skills
 ```
 
 ## License
@@ -271,21 +241,25 @@ MIT
 
 涵盖飞书开放平台各类 API：多维表格、文档、电子表格、日历、即时通讯、审批、云盘、知识库等。
 
+## 前置条件
+
+全局安装 `@larksuite/cli`：
+
+```bash
+npm install -g @larksuite/cli
+```
+
 ## 安装
 
 ```bash
 pi install npm:@yandy0725/pi-lark
 ```
 
-## 包含的 Skills
-
-Skills 在发布时自动从飞书开放平台 well-known endpoint 下载。安装后可在 `skills/` 目录查看完整列表。
-
 ## 开发
 
 ```bash
 # 从飞书开放平台下载/更新 skills
-npm run update-skills
+npm run download-skills
 ```
 
 ## License
@@ -328,23 +302,20 @@ gh release create pi-lark-v<新版本号> --target $COMMIT \
 - `npm version --workspace` 在 monorepo 中不会自动 commit/tag（已用 `--no-git-tag-version`），需手动提交
 - `gh release create` 会自动创建对应名称的 git tag，**无需手动 `git tag`**
 - `--target` 指定 tag 指向的 commit，确保 tag 落在版本升级的那个 commit 上
-- `--workspace` 参数可用 `-w` 简写
 - tag 格式必须是 `pi-lark-vX.Y.Z`
 ```
 
 ---
 
-### Task 5: 修改根 package.json 和 publish.yml
+### Task 5: Monorepo 集成
 
 **Files:**
-- Modify: `package.json` — 添加 `pi-lark` 到 workspaces
+- Modify: `package.json` — workspaces 数组添加 `"pi-lark"`
 - Modify: `.github/workflows/publish.yml` — 添加 `pi-lark-v*` 匹配分支
 
-**Interfaces:**
-- Consumes: 根 package.json workspaces 列表
-- Produces: monorepo workspace 已包含 pi-lark，publish workflow 能识别 pi-lark 的 release tag
-
 - [ ] **Step 1: 修改根 package.json workspaces**
+
+在 `"pi-vision-tools"` 之后添加 `"pi-lark"`：
 
 ```json
 "workspaces": [
@@ -357,11 +328,9 @@ gh release create pi-lark-v<新版本号> --target $COMMIT \
 ]
 ```
 
-具体操作：在 `"pi-vision-tools"` 行后添加 `"pi-lark"`。
-
 - [ ] **Step 2: 修改 .github/workflows/publish.yml**
 
-在 `case "$TAG" in` 块中添加：
+在 `pi-vision-tools-v*)` 分支之后、`esac` 之前添加：
 
 ```yaml
             pi-lark-v*)
@@ -369,12 +338,10 @@ gh release create pi-lark-v<新版本号> --target $COMMIT \
               ;;
 ```
 
-插入位置：在 `pi-vision-tools-v*)` 分支之后，`esac` 之前。
-
 - [ ] **Step 3: 验证 workspace 识别**
 
 ```bash
-npm ls --workspace=pi-lark 2>&1 | head -5
+npm ls --workspace=pi-lark 2>&1 | head -3
 ```
 
 Expected: 显示 `@yandy0725/pi-lark@0.1.0`
@@ -383,33 +350,19 @@ Expected: 显示 `@yandy0725/pi-lark@0.1.0`
 
 ### Task 6: 验证下载脚本
 
-**Files:**
-- 验证: `pi-lark/scripts/update-skills.mjs`
-
-- [ ] **Step 1: 运行下载脚本**
+- [ ] **Step 1: 试运行**
 
 ```bash
-cd pi-lark && node scripts/update-skills.mjs
+cd pi-lark && node scripts/download-skills.mjs
 ```
 
-Expected: 
-- 连接飞书开放平台探活
-- 下载所有 skills 到 `skills/` 目录
-- 生成 `.skills-cache.json`
-- 输出 `Done.`
+Expected: 连接飞书，下载所有 skills 到 `skills/`，输出 `Done.`
 
-- [ ] **Step 2: 验证 skills 目录结构**
+- [ ] **Step 2: 检查 skills 目录**
 
 ```bash
 ls pi-lark/skills/ | head -10
+cat pi-lark/skills/lark-base/SKILL.md | head -5
 ```
 
-Expected: 列出类似 `lark-base/`, `lark-im/`, `lark-doc/` 等目录
-
-- [ ] **Step 3: 验证单个 skill 结构**
-
-```bash
-cat pi-lark/skills/lark-base/SKILL.md | head -10
-```
-
-Expected: 显示 SKILL.md 的 frontmatter（`name: lark-base`, `version: ...`）
+Expected: 列出 skill 目录名，SKILL.md 有 frontmatter（`name: lark-base`）
