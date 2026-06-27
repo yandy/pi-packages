@@ -38,6 +38,9 @@ jobs:
             pi-vision-tools-v*)
               echo "dir=pi-vision-tools" >> "$GITHUB_OUTPUT"
               ;;
+            pi-lark-v*)
+              echo "dir=pi-lark" >> "$GITHUB_OUTPUT"
+              ;;
           esac
 
       - run: npm ci
