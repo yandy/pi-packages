@@ -1,314 +1,284 @@
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  AgentPrepHandler,
-  shouldExposeTool,
-} from "../../src/handlers/before-agent-start";
+import { AgentPrepHandler, shouldExposeTool } from "../../src/handlers/before-agent-start";
 import type { ToolRegistry } from "../../src/tool-registry";
 
 import { makeCheckResult, makeCtx } from "../helpers/handler-fixtures";
-import {
-  makeRealResolver,
-  makeRealSession,
-} from "../helpers/session-fixtures";
+import { makeRealResolver, makeRealSession } from "../helpers/session-fixtures";
 
 // ── SDK stubs ──────────────────────────────────────────────────────────────
 vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
-  const original =
-    await importOriginal<typeof import("@earendil-works/pi-coding-agent")>();
-  return {
-    ...original,
-    isToolCallEventType: vi.fn().mockReturnValue(false),
-  };
+	const original = await importOriginal<typeof import("@earendil-works/pi-coding-agent")>();
+	return {
+		...original,
+		isToolCallEventType: vi.fn().mockReturnValue(false),
+	};
 });
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
 function makeEvent(systemPrompt = "You are an assistant.") {
-  return { systemPrompt };
+	return { systemPrompt };
 }
 
 function makeToolRegistry(overrides: Partial<ToolRegistry> = {}): ToolRegistry {
-  return {
-    getAll: vi.fn().mockReturnValue([]),
-    getActive: vi.fn().mockReturnValue([]),
-    setActive: vi.fn(),
-    ...overrides,
-  };
+	return {
+		getAll: vi.fn().mockReturnValue([]),
+		getActive: vi.fn().mockReturnValue([]),
+		setActive: vi.fn(),
+		...overrides,
+	};
 }
 
-function makeSetup(opts?: {
-  toolPermission?: "allow" | "deny" | "ask";
-  toolRegistry?: Partial<ToolRegistry>;
-}) {
-  const { session, permissionManager, sessionRules, configStore, forwarding } =
-    makeRealSession();
-  const { resolver } = makeRealResolver(permissionManager, sessionRules);
-  if (opts?.toolPermission !== undefined) {
-    vi.mocked(permissionManager.getToolPermission).mockReturnValue(
-      opts.toolPermission,
-    );
-  }
-  // Default check returns allow (for skill-prompt sanitizer via resolver.checkPermission)
-  vi.mocked(permissionManager.check).mockReturnValue(makeCheckResult());
-  const toolRegistry = makeToolRegistry(opts?.toolRegistry);
-  const handler = new AgentPrepHandler(session, resolver, toolRegistry);
-  return {
-    handler,
-    session,
-    resolver,
-    permissionManager,
-    configStore,
-    forwarding,
-    toolRegistry,
-  };
+function makeSetup(opts?: { toolPermission?: "allow" | "deny" | "ask"; toolRegistry?: Partial<ToolRegistry> }) {
+	const { session, permissionManager, sessionRules, configStore, forwarding } = makeRealSession();
+	const { resolver } = makeRealResolver(permissionManager, sessionRules);
+	if (opts?.toolPermission !== undefined) {
+		vi.mocked(permissionManager.getToolPermission).mockReturnValue(opts.toolPermission);
+	}
+	// Default check returns allow (for skill-prompt sanitizer via resolver.checkPermission)
+	vi.mocked(permissionManager.check).mockReturnValue(makeCheckResult());
+	const toolRegistry = makeToolRegistry(opts?.toolRegistry);
+	const handler = new AgentPrepHandler(session, resolver, toolRegistry);
+	return {
+		handler,
+		session,
+		resolver,
+		permissionManager,
+		configStore,
+		forwarding,
+		toolRegistry,
+	};
 }
 
 // ── shouldExposeTool (pure helper) ─────────────────────────────────────────
 
 describe("shouldExposeTool", () => {
-  it("returns true when tool permission is allow", () => {
-    const getter = vi.fn().mockReturnValue("allow");
-    expect(shouldExposeTool("read", null, getter)).toBe(true);
-  });
+	it("returns true when tool permission is allow", () => {
+		const getter = vi.fn().mockReturnValue("allow");
+		expect(shouldExposeTool("read", null, getter)).toBe(true);
+	});
 
-  it("returns true when tool permission is ask", () => {
-    const getter = vi.fn().mockReturnValue("ask");
-    expect(shouldExposeTool("bash", "agent-x", getter)).toBe(true);
-  });
+	it("returns true when tool permission is ask", () => {
+		const getter = vi.fn().mockReturnValue("ask");
+		expect(shouldExposeTool("bash", "agent-x", getter)).toBe(true);
+	});
 
-  it("returns false when tool permission is deny", () => {
-    const getter = vi.fn().mockReturnValue("deny");
-    expect(shouldExposeTool("write", null, getter)).toBe(false);
-  });
+	it("returns false when tool permission is deny", () => {
+		const getter = vi.fn().mockReturnValue("deny");
+		expect(shouldExposeTool("write", null, getter)).toBe(false);
+	});
 
-  it("passes agentName through to getToolPermission", () => {
-    const getter = vi.fn().mockReturnValue("allow");
-    shouldExposeTool("read", "my-agent", getter);
-    expect(getter).toHaveBeenCalledWith("read", "my-agent");
-  });
+	it("passes agentName through to getToolPermission", () => {
+		const getter = vi.fn().mockReturnValue("allow");
+		shouldExposeTool("read", "my-agent", getter);
+		expect(getter).toHaveBeenCalledWith("read", "my-agent");
+	});
 
-  it("converts null agentName to undefined for getToolPermission", () => {
-    const getter = vi.fn().mockReturnValue("allow");
-    shouldExposeTool("read", null, getter);
-    expect(getter).toHaveBeenCalledWith("read", undefined);
-  });
+	it("converts null agentName to undefined for getToolPermission", () => {
+		const getter = vi.fn().mockReturnValue("allow");
+		shouldExposeTool("read", null, getter);
+		expect(getter).toHaveBeenCalledWith("read", undefined);
+	});
 });
 
 // ── AgentPrepHandler.handle ────────────────────────────────────────────────
 
 describe("AgentPrepHandler.handle", () => {
-  it("activates the session with ctx", async () => {
-    const ctx = makeCtx();
-    const { handler, forwarding } = makeSetup();
-    await handler.handle(makeEvent(), ctx);
-    // Real session.activate calls forwarding.start
-    expect(forwarding.start).toHaveBeenCalledWith(ctx);
-  });
+	it("activates the session with ctx", async () => {
+		const ctx = makeCtx();
+		const { handler, forwarding } = makeSetup();
+		await handler.handle(makeEvent(), ctx);
+		// Real session.activate calls forwarding.start
+		expect(forwarding.start).toHaveBeenCalledWith(ctx);
+	});
 
-  it("refreshes config with ctx", async () => {
-    const ctx = makeCtx();
-    const { handler, configStore } = makeSetup();
-    await handler.handle(makeEvent(), ctx);
-    expect(configStore.refresh).toHaveBeenCalledWith(ctx);
-  });
+	it("refreshes config with ctx", async () => {
+		const ctx = makeCtx();
+		const { handler, configStore } = makeSetup();
+		await handler.handle(makeEvent(), ctx);
+		expect(configStore.refresh).toHaveBeenCalledWith(ctx);
+	});
 
-  it("resolves agent name using systemPrompt", async () => {
-    const ctx = makeCtx();
-    const { handler, session } = makeSetup();
-    const spy = vi.spyOn(session, "resolveAgentName");
-    await handler.handle(makeEvent("<active_agent name='x'>"), ctx);
-    expect(spy).toHaveBeenCalledWith(ctx, "<active_agent name='x'>");
-  });
+	it("resolves agent name using systemPrompt", async () => {
+		const ctx = makeCtx();
+		const { handler, session } = makeSetup();
+		const spy = vi.spyOn(session, "resolveAgentName");
+		await handler.handle(makeEvent("<active_agent name='x'>"), ctx);
+		expect(spy).toHaveBeenCalledWith(ctx, "<active_agent name='x'>");
+	});
 
-  it("filters out denied tools from allowed list", async () => {
-    const { handler, toolRegistry } = makeSetup({
-      toolPermission: "deny",
-      toolRegistry: {
-        getActive: vi.fn().mockReturnValue(["write", "read"]),
-      },
-    });
-    await handler.handle(makeEvent(), makeCtx());
-    expect(toolRegistry.setActive).toHaveBeenCalledWith([]);
-  });
+	it("filters out denied tools from allowed list", async () => {
+		const { handler, toolRegistry } = makeSetup({
+			toolPermission: "deny",
+			toolRegistry: {
+				getActive: vi.fn().mockReturnValue(["write", "read"]),
+			},
+		});
+		await handler.handle(makeEvent(), makeCtx());
+		expect(toolRegistry.setActive).toHaveBeenCalledWith([]);
+	});
 
-  it("includes allowed and ask tools in the active list", async () => {
-    const { handler, toolRegistry } = makeSetup({
-      toolRegistry: {
-        getActive: vi.fn().mockReturnValue(["read", "write"]),
-      },
-    });
-    await handler.handle(makeEvent(), makeCtx());
-    expect(toolRegistry.setActive).toHaveBeenCalledWith(["read", "write"]);
-  });
+	it("includes allowed and ask tools in the active list", async () => {
+		const { handler, toolRegistry } = makeSetup({
+			toolRegistry: {
+				getActive: vi.fn().mockReturnValue(["read", "write"]),
+			},
+		});
+		await handler.handle(makeEvent(), makeCtx());
+		expect(toolRegistry.setActive).toHaveBeenCalledWith(["read", "write"]);
+	});
 
-  it("does not activate registered tools pi left inactive (find/grep/ls)", async () => {
-    // Regression for #385: the active set is the base, not the full registry.
-    const { handler, toolRegistry } = makeSetup({
-      toolRegistry: {
-        getActive: vi.fn().mockReturnValue(["read", "bash", "edit", "write"]),
-        getAll: vi
-          .fn()
-          .mockReturnValue([
-            { name: "read" },
-            { name: "bash" },
-            { name: "edit" },
-            { name: "write" },
-            { name: "find" },
-            { name: "grep" },
-            { name: "ls" },
-          ]),
-      },
-    });
-    await handler.handle(makeEvent(), makeCtx());
-    expect(toolRegistry.setActive).toHaveBeenCalledWith([
-      "read",
-      "bash",
-      "edit",
-      "write",
-    ]);
-  });
+	it("does not activate registered tools pi left inactive (find/grep/ls)", async () => {
+		// Regression for #385: the active set is the base, not the full registry.
+		const { handler, toolRegistry } = makeSetup({
+			toolRegistry: {
+				getActive: vi.fn().mockReturnValue(["read", "bash", "edit", "write"]),
+				getAll: vi
+					.fn()
+					.mockReturnValue([
+						{ name: "read" },
+						{ name: "bash" },
+						{ name: "edit" },
+						{ name: "write" },
+						{ name: "find" },
+						{ name: "grep" },
+						{ name: "ls" },
+					]),
+			},
+		});
+		await handler.handle(makeEvent(), makeCtx());
+		expect(toolRegistry.setActive).toHaveBeenCalledWith(["read", "bash", "edit", "write"]);
+	});
 
-  it("calls setActive on every turn (no dedup gate)", async () => {
-    const { handler, toolRegistry } = makeSetup({
-      toolRegistry: {
-        getActive: vi.fn().mockReturnValue(["read"]),
-      },
-    });
-    await handler.handle(makeEvent(), makeCtx());
-    await handler.handle(makeEvent(), makeCtx());
-    expect(toolRegistry.setActive).toHaveBeenCalledTimes(2);
-  });
+	it("calls setActive on every turn (no dedup gate)", async () => {
+		const { handler, toolRegistry } = makeSetup({
+			toolRegistry: {
+				getActive: vi.fn().mockReturnValue(["read"]),
+			},
+		});
+		await handler.handle(makeEvent(), makeCtx());
+		await handler.handle(makeEvent(), makeCtx());
+		expect(toolRegistry.setActive).toHaveBeenCalledTimes(2);
+	});
 
-  it("filters a denied skill from the systemPrompt on every turn, not just the first", async () => {
-    const systemPrompt = [
-      "You are an assistant.",
-      "",
-      "<available_skills>",
-      "  <skill>",
-      "    <name>secret</name>",
-      "    <description>A denied skill</description>",
-      "    <location>/skills/secret/SKILL.md</location>",
-      "  </skill>",
-      "</available_skills>",
-    ].join("\n");
-    const { handler, permissionManager } = makeSetup();
-    vi.mocked(permissionManager.check).mockImplementation((intent) =>
-      intent.surface === "skill"
-        ? makeCheckResult({ state: "deny" })
-        : makeCheckResult(),
-    );
+	it("filters a denied skill from the systemPrompt on every turn, not just the first", async () => {
+		const systemPrompt = [
+			"You are an assistant.",
+			"",
+			"<available_skills>",
+			"  <skill>",
+			"    <name>secret</name>",
+			"    <description>A denied skill</description>",
+			"    <location>/skills/secret/SKILL.md</location>",
+			"  </skill>",
+			"</available_skills>",
+		].join("\n");
+		const { handler, permissionManager } = makeSetup();
+		vi
+			.mocked(permissionManager.check)
+			.mockImplementation((intent) =>
+				intent.surface === "skill" ? makeCheckResult({ state: "deny" }) : makeCheckResult(),
+			);
 
-    const first = await handler.handle(makeEvent(systemPrompt), makeCtx());
-    const second = await handler.handle(makeEvent(systemPrompt), makeCtx());
+		const first = await handler.handle(makeEvent(systemPrompt), makeCtx());
+		const second = await handler.handle(makeEvent(systemPrompt), makeCtx());
 
-    expect(first).toHaveProperty("systemPrompt");
-    expect((first as { systemPrompt: string }).systemPrompt).not.toContain(
-      "secret",
-    );
-    expect(second).toHaveProperty("systemPrompt");
-    expect((second as { systemPrompt: string }).systemPrompt).not.toContain(
-      "secret",
-    );
-  });
+		expect(first).toHaveProperty("systemPrompt");
+		expect((first as { systemPrompt: string }).systemPrompt).not.toContain("secret");
+		expect(second).toHaveProperty("systemPrompt");
+		expect((second as { systemPrompt: string }).systemPrompt).not.toContain("secret");
+	});
 
-  it("returns empty object on repeated calls with unchanged inputs", async () => {
-    const { handler } = makeSetup();
-    await handler.handle(makeEvent(), makeCtx());
-    const result = await handler.handle(makeEvent(), makeCtx());
-    expect(result).toEqual({});
-  });
+	it("returns empty object on repeated calls with unchanged inputs", async () => {
+		const { handler } = makeSetup();
+		await handler.handle(makeEvent(), makeCtx());
+		const result = await handler.handle(makeEvent(), makeCtx());
+		expect(result).toEqual({});
+	});
 
-  it("stores resolved skill entries on the session", async () => {
-    const { handler, session } = makeSetup();
-    const spy = vi.spyOn(session, "setActiveSkillEntries");
-    await handler.handle(makeEvent(), makeCtx());
-    expect(spy).toHaveBeenCalledWith(expect.any(Array));
-  });
+	it("stores resolved skill entries on the session", async () => {
+		const { handler, session } = makeSetup();
+		const spy = vi.spyOn(session, "setActiveSkillEntries");
+		await handler.handle(makeEvent(), makeCtx());
+		expect(spy).toHaveBeenCalledWith(expect.any(Array));
+	});
 
-  it("returns modified systemPrompt when prompt changes", async () => {
-    const systemPrompt = `You are an assistant.\n\nAvailable tools:\n- read\n- write\n`;
-    const { handler } = makeSetup();
-    const result = await handler.handle(makeEvent(systemPrompt), makeCtx());
-    expect(result).toHaveProperty("systemPrompt");
-  });
+	it("returns modified systemPrompt when prompt changes", async () => {
+		const systemPrompt = `You are an assistant.\n\nAvailable tools:\n- read\n- write\n`;
+		const { handler } = makeSetup();
+		const result = await handler.handle(makeEvent(systemPrompt), makeCtx());
+		expect(result).toHaveProperty("systemPrompt");
+	});
 
-  it("returns empty object when systemPrompt is unchanged", async () => {
-    const prompt = "No tools section here.";
-    const { handler } = makeSetup();
-    const result = await handler.handle(makeEvent(prompt), makeCtx());
-    expect(result).toEqual({});
-  });
+	it("returns empty object when systemPrompt is unchanged", async () => {
+		const prompt = "No tools section here.";
+		const { handler } = makeSetup();
+		const result = await handler.handle(makeEvent(prompt), makeCtx());
+		expect(result).toEqual({});
+	});
 
-  it("narrows a denied tool out of the Available tools listing without removing the section", async () => {
-    const systemPrompt = [
-      "Available tools:",
-      "- read: Read file contents",
-      "- bash: Run shell commands",
-    ].join("\n");
-    const { handler, permissionManager } = makeSetup({
-      toolRegistry: {
-        getActive: vi.fn().mockReturnValue(["read", "bash"]),
-      },
-    });
-    vi.mocked(permissionManager.getToolPermission).mockImplementation((tool) =>
-      tool === "bash" ? "deny" : "allow",
-    );
+	it("narrows a denied tool out of the Available tools listing without removing the section", async () => {
+		const systemPrompt = ["Available tools:", "- read: Read file contents", "- bash: Run shell commands"].join("\n");
+		const { handler, permissionManager } = makeSetup({
+			toolRegistry: {
+				getActive: vi.fn().mockReturnValue(["read", "bash"]),
+			},
+		});
+		vi.mocked(permissionManager.getToolPermission).mockImplementation((tool) => (tool === "bash" ? "deny" : "allow"));
 
-    const result = await handler.handle(makeEvent(systemPrompt), makeCtx());
+		const result = await handler.handle(makeEvent(systemPrompt), makeCtx());
 
-    expect(result.systemPrompt).toBeDefined();
-    const out = result.systemPrompt ?? "";
-    expect(out).toContain("Available tools:");
-    expect(out).toContain("- read: Read file contents");
-    expect(out).not.toContain("- bash");
-  });
+		expect(result.systemPrompt).toBeDefined();
+		const out = result.systemPrompt ?? "";
+		expect(out).toContain("Available tools:");
+		expect(out).toContain("- read: Read file contents");
+		expect(out).not.toContain("- bash");
+	});
 
-  it("keeps the wire system prompt byte-stable across the tool-listing drift between turns", async () => {
-    const fullProse = [
-      "You are an assistant.",
-      "",
-      "Available tools:",
-      "- bash: Run shell commands",
-      "- read: Read file contents",
-      "- edit: Edit a file",
-      "- write: Write a file",
-      "",
-      "Guidelines:",
-      "- use bash for file operations like ls, rg, find",
-      "- use read to examine files instead of cat or sed.",
-      "- Be concise in your responses",
-    ].join("\n");
-    const narrowedProse = [
-      "You are an assistant.",
-      "",
-      "Available tools:",
-      "- read: Read file contents",
-      "- edit: Edit a file",
-      "- write: Write a file",
-      "",
-      "Guidelines:",
-      "- use read to examine files instead of cat or sed.",
-      "- Be concise in your responses",
-    ].join("\n");
-    const { handler, permissionManager } = makeSetup({
-      toolRegistry: {
-        getActive: vi.fn().mockReturnValue(["bash", "read", "edit", "write"]),
-      },
-    });
-    vi.mocked(permissionManager.getToolPermission).mockImplementation((tool) =>
-      tool === "bash" ? "deny" : "allow",
-    );
+	it("keeps the wire system prompt byte-stable across the tool-listing drift between turns", async () => {
+		const fullProse = [
+			"You are an assistant.",
+			"",
+			"Available tools:",
+			"- bash: Run shell commands",
+			"- read: Read file contents",
+			"- edit: Edit a file",
+			"- write: Write a file",
+			"",
+			"Guidelines:",
+			"- use bash for file operations like ls, rg, find",
+			"- use read to examine files instead of cat or sed.",
+			"- Be concise in your responses",
+		].join("\n");
+		const narrowedProse = [
+			"You are an assistant.",
+			"",
+			"Available tools:",
+			"- read: Read file contents",
+			"- edit: Edit a file",
+			"- write: Write a file",
+			"",
+			"Guidelines:",
+			"- use read to examine files instead of cat or sed.",
+			"- Be concise in your responses",
+		].join("\n");
+		const { handler, permissionManager } = makeSetup({
+			toolRegistry: {
+				getActive: vi.fn().mockReturnValue(["bash", "read", "edit", "write"]),
+			},
+		});
+		vi.mocked(permissionManager.getToolPermission).mockImplementation((tool) => (tool === "bash" ? "deny" : "allow"));
 
-    // Turn 1: Pi feeds the full default listing.
-    const first = await handler.handle(makeEvent(fullProse), makeCtx());
-    // Turn 2: Pi's setActive rebuild means the event now carries the narrowed
-    // listing, so the override the handler returns must still match turn 1.
-    const second = await handler.handle(makeEvent(narrowedProse), makeCtx());
+		// Turn 1: Pi feeds the full default listing.
+		const first = await handler.handle(makeEvent(fullProse), makeCtx());
+		// Turn 2: Pi's setActive rebuild means the event now carries the narrowed
+		// listing, so the override the handler returns must still match turn 1.
+		const second = await handler.handle(makeEvent(narrowedProse), makeCtx());
 
-    const wire1 = first.systemPrompt ?? fullProse;
-    const wire2 = second.systemPrompt ?? narrowedProse;
-    expect(wire1).toBe(narrowedProse);
-    expect(wire2).toBe(narrowedProse);
-  });
+		const wire1 = first.systemPrompt ?? fullProse;
+		const wire2 = second.systemPrompt ?? narrowedProse;
+		expect(wire1).toBe(narrowedProse);
+		expect(wire2).toBe(narrowedProse);
+	});
 });

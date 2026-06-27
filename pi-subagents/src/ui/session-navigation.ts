@@ -12,7 +12,12 @@
  * components require a `TUI`, `cwd`, and markdown theme.
  */
 
-import { buildSessionContext, parseSessionEntries, type SessionEntry, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import {
+	buildSessionContext,
+	parseSessionEntries,
+	type SessionEntry,
+	type ToolDefinition,
+} from "@earendil-works/pi-coding-agent";
 import type { AgentConfigLookup } from "../config/agent-types";
 import type { EvictedSubagent } from "../lifecycle/subagent-manager";
 import type { SubagentStatus } from "../lifecycle/subagent-state";
@@ -23,19 +28,19 @@ import { formatDuration, getDisplayName } from "../ui/display";
 
 /** The record fields the navigator reads to label and live-source a transcript. */
 export interface NavigableSubagent {
-  readonly id: string;
-  readonly type: SubagentType;
-  readonly description: string;
-  readonly status: SubagentStatus;
-  readonly startedAt: number;
-  readonly completedAt: number | undefined;
-  readonly toolUses: number;
-  readonly activeTools: ReadonlyMap<string, string>;
-  readonly responseText: string;
-  readonly agentMessages: readonly SessionMessage[];
-  isSessionReady(): boolean;
-  subscribeToUpdates(fn: (event: AgentSessionEvent) => void): (() => void) | undefined;
-  getToolDefinition(name: string): ToolDefinition | undefined;
+	readonly id: string;
+	readonly type: SubagentType;
+	readonly description: string;
+	readonly status: SubagentStatus;
+	readonly startedAt: number;
+	readonly completedAt: number | undefined;
+	readonly toolUses: number;
+	readonly activeTools: ReadonlyMap<string, string>;
+	readonly responseText: string;
+	readonly agentMessages: readonly SessionMessage[];
+	isSessionReady(): boolean;
+	subscribeToUpdates(fn: (event: AgentSessionEvent) => void): (() => void) | undefined;
+	getToolDefinition(name: string): ToolDefinition | undefined;
 }
 
 /**
@@ -45,35 +50,35 @@ export interface NavigableSubagent {
  * entry sources it from the persisted session file (the record is gone).
  */
 export type NavigationEntry =
-  | { readonly kind: "live"; readonly label: string; readonly record: NavigableSubagent }
-  | { readonly kind: "evicted"; readonly label: string; readonly outputFile: string };
+	| { readonly kind: "live"; readonly label: string; readonly record: NavigableSubagent }
+	| { readonly kind: "evicted"; readonly label: string; readonly outputFile: string };
 
 /** The fields `buildLabel` reads — shared by a live record and an evicted descriptor. */
 interface LabelFields {
-  readonly type: SubagentType;
-  readonly description: string;
-  readonly status: SubagentStatus;
-  readonly startedAt: number;
-  readonly completedAt: number | undefined;
-  readonly toolUses: number;
+	readonly type: SubagentType;
+	readonly description: string;
+	readonly status: SubagentStatus;
+	readonly startedAt: number;
+	readonly completedAt: number | undefined;
+	readonly toolUses: number;
 }
 
 /** Running-agent streaming state, surfaced by a live source. */
 export interface StreamingState {
-  readonly activeTools: ReadonlyMap<string, string>;
-  readonly responseText: string;
+	readonly activeTools: ReadonlyMap<string, string>;
+	readonly responseText: string;
 }
 
 /** Liveness-agnostic transcript source consumed by the renderer. */
 export interface TranscriptSource {
-  /** Current message history. */
-  getMessages(): readonly SessionMessage[];
-  /** Subscribe to changes; returns an unsubscribe, or undefined for a static snapshot. */
-  subscribe(onChange: () => void): (() => void) | undefined;
-  /** Running-agent streaming state, or undefined when not streaming. */
-  streaming(): StreamingState | undefined;
-  /** Resolve a registered tool definition by name, for Pi's tool-execution components. */
-  getToolDefinition(name: string): ToolDefinition | undefined;
+	/** Current message history. */
+	getMessages(): readonly SessionMessage[];
+	/** Subscribe to changes; returns an unsubscribe, or undefined for a static snapshot. */
+	subscribe(onChange: () => void): (() => void) | undefined;
+	/** Running-agent streaming state, or undefined when not streaming. */
+	streaming(): StreamingState | undefined;
+	/** Resolve a registered tool definition by name, for Pi's tool-execution components. */
+	getToolDefinition(name: string): ToolDefinition | undefined;
 }
 
 /**
@@ -81,22 +86,24 @@ export interface TranscriptSource {
  * session, then agents evicted by the cleanup sweep (deduped against live ids).
  */
 export function listNavigableAgents(
-  agents: readonly NavigableSubagent[],
-  evicted: readonly EvictedSubagent[],
-  registry: AgentConfigLookup,
+	agents: readonly NavigableSubagent[],
+	evicted: readonly EvictedSubagent[],
+	registry: AgentConfigLookup,
 ): NavigationEntry[] {
-  const live = agents
-    .filter((record) => record.isSessionReady())
-    .map((record): NavigationEntry => ({ kind: "live", record, label: buildLabel(record, registry) }));
-  const liveIds = new Set(agents.map((record) => record.id));
-  const evictedEntries = evicted
-    .filter((descriptor) => !liveIds.has(descriptor.id))
-    .map((descriptor): NavigationEntry => ({
-      kind: "evicted",
-      outputFile: descriptor.outputFile,
-      label: buildLabel(descriptor, registry, true),
-    }));
-  return [...live, ...evictedEntries];
+	const live = agents
+		.filter((record) => record.isSessionReady())
+		.map((record): NavigationEntry => ({ kind: "live", record, label: buildLabel(record, registry) }));
+	const liveIds = new Set(agents.map((record) => record.id));
+	const evictedEntries = evicted
+		.filter((descriptor) => !liveIds.has(descriptor.id))
+		.map(
+			(descriptor): NavigationEntry => ({
+				kind: "evicted",
+				outputFile: descriptor.outputFile,
+				label: buildLabel(descriptor, registry, true),
+			}),
+		);
+	return [...live, ...evictedEntries];
 }
 
 /**
@@ -109,37 +116,32 @@ export function listNavigableAgents(
  * streaming, no live tool registry. `readFile` is injected so this module makes
  * no `fs` calls.
  */
-export function fileSnapshotSource(
-  outputFile: string,
-  readFile: (path: string) => string,
-): TranscriptSource {
-  const entries = parseSessionEntries(readFile(outputFile));
-  const sessionEntries = entries.filter((entry): entry is SessionEntry => entry.type !== "session");
-  const { messages } = buildSessionContext(sessionEntries);
-  return {
-    getMessages: () => messages,
-    subscribe: () => undefined,
-    streaming: () => undefined,
-    getToolDefinition: () => undefined,
-  };
+export function fileSnapshotSource(outputFile: string, readFile: (path: string) => string): TranscriptSource {
+	const entries = parseSessionEntries(readFile(outputFile));
+	const sessionEntries = entries.filter((entry): entry is SessionEntry => entry.type !== "session");
+	const { messages } = buildSessionContext(sessionEntries);
+	return {
+		getMessages: () => messages,
+		subscribe: () => undefined,
+		streaming: () => undefined,
+		getToolDefinition: () => undefined,
+	};
 }
 
 /** Source a transcript live from an in-memory record (this slice's only source). */
 export function liveSource(record: NavigableSubagent): TranscriptSource {
-  return {
-    getMessages: () => record.agentMessages,
-    subscribe: (onChange) => record.subscribeToUpdates(() => onChange()),
-    streaming: () =>
-      record.status === "running"
-        ? { activeTools: record.activeTools, responseText: record.responseText }
-        : undefined,
-    getToolDefinition: (name) => record.getToolDefinition(name),
-  };
+	return {
+		getMessages: () => record.agentMessages,
+		subscribe: (onChange) => record.subscribeToUpdates(() => onChange()),
+		streaming: () =>
+			record.status === "running" ? { activeTools: record.activeTools, responseText: record.responseText } : undefined,
+		getToolDefinition: (name) => record.getToolDefinition(name),
+	};
 }
 
 function buildLabel(fields: LabelFields, registry: AgentConfigLookup, evicted = false): string {
-  const name = getDisplayName(fields.type, registry);
-  const duration = formatDuration(fields.startedAt, fields.completedAt);
-  const marker = evicted ? " · evicted (snapshot)" : "";
-  return `${name} (${fields.description}) · ${fields.toolUses} tools · ${fields.status} · ${duration}${marker}`;
+	const name = getDisplayName(fields.type, registry);
+	const duration = formatDuration(fields.startedAt, fields.completedAt);
+	const marker = evicted ? " · evicted (snapshot)" : "";
+	return `${name} (${fields.description}) · ${fields.toolUses} tools · ${fields.status} · ${duration}${marker}`;
 }

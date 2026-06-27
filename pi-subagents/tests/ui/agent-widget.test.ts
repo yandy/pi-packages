@@ -30,7 +30,7 @@ function makeWidget(
 	agents: Array<{ id: string; status: string; completedAt?: number; invocation?: { runInBackground: boolean } }>,
 ) {
 	const manager = {
-		listAgents: () => agents.map(a => ({ invocation: { runInBackground: true }, ...a })),
+		listAgents: () => agents.map((a) => ({ invocation: { runInBackground: true }, ...a })),
 	} as unknown as SubagentManager;
 	const registry = new AgentTypeRegistry(() => new Map());
 	const widget = new AgentWidget(manager, registry);
@@ -60,10 +60,7 @@ describe("assembleWidgetState", () => {
 
 	describe("running agents", () => {
 		it("counts a single running agent", () => {
-			const state = assembleWidgetState(
-				[makeAgent({ status: "running", completedAt: undefined })],
-				alwaysShow,
-			);
+			const state = assembleWidgetState([makeAgent({ status: "running", completedAt: undefined })], alwaysShow);
 			expect(state.runningCount).toBe(1);
 			expect(state.queuedCount).toBe(0);
 			expect(state.hasFinished).toBe(false);
@@ -82,10 +79,7 @@ describe("assembleWidgetState", () => {
 
 	describe("queued agents", () => {
 		it("counts a single queued agent", () => {
-			const state = assembleWidgetState(
-				[makeAgent({ status: "queued", completedAt: undefined })],
-				alwaysShow,
-			);
+			const state = assembleWidgetState([makeAgent({ status: "queued", completedAt: undefined })], alwaysShow);
 			expect(state.runningCount).toBe(0);
 			expect(state.queuedCount).toBe(1);
 			expect(state.hasFinished).toBe(false);
@@ -103,44 +97,32 @@ describe("assembleWidgetState", () => {
 
 	describe("finished agents", () => {
 		it("sets hasFinished when a completed agent has completedAt and shouldShowFinished returns true", () => {
-			const state = assembleWidgetState(
-				[makeAgent({ status: "completed", completedAt: 5000 })],
-				alwaysShow,
-			);
+			const state = assembleWidgetState([makeAgent({ status: "completed", completedAt: 5000 })], alwaysShow);
 			expect(state.hasFinished).toBe(true);
 			expect(state.hasActive).toBe(false);
 		});
 
 		it("does not set hasFinished when shouldShowFinished returns false", () => {
-			const state = assembleWidgetState(
-				[makeAgent({ status: "completed", completedAt: 5000 })],
-				neverShow,
-			);
+			const state = assembleWidgetState([makeAgent({ status: "completed", completedAt: 5000 })], neverShow);
 			expect(state.hasFinished).toBe(false);
 		});
 
 		it("does not set hasFinished when completedAt is absent", () => {
-			const state = assembleWidgetState(
-				[makeAgent({ status: "error", completedAt: undefined })],
-				alwaysShow,
-			);
+			const state = assembleWidgetState([makeAgent({ status: "error", completedAt: undefined })], alwaysShow);
 			expect(state.hasFinished).toBe(false);
 		});
 
 		it("passes agentId and status to shouldShowFinished", () => {
 			const calls: Array<{ id: string; status: string }> = [];
-			assembleWidgetState(
-				[makeAgent({ id: "agent-42", status: "error", completedAt: 9000 })],
-				(id, status) => { calls.push({ id, status }); return true; },
-			);
+			assembleWidgetState([makeAgent({ id: "agent-42", status: "error", completedAt: 9000 })], (id, status) => {
+				calls.push({ id, status });
+				return true;
+			});
 			expect(calls).toEqual([{ id: "agent-42", status: "error" }]);
 		});
 
 		it("sets hasFinished for error status agents when shouldShowFinished returns true", () => {
-			const state = assembleWidgetState(
-				[makeAgent({ status: "error", completedAt: 5000 })],
-				alwaysShow,
-			);
+			const state = assembleWidgetState([makeAgent({ status: "error", completedAt: 5000 })], alwaysShow);
 			expect(state.hasFinished).toBe(true);
 		});
 	});
@@ -173,10 +155,7 @@ describe("assembleWidgetState", () => {
 		it("running agents are not counted as finished even if completedAt is set", () => {
 			// Unusual but defensive: a running agent with a completedAt should
 			// be counted as running, not finished.
-			const state = assembleWidgetState(
-				[makeAgent({ status: "running", completedAt: 5000 })],
-				alwaysShow,
-			);
+			const state = assembleWidgetState([makeAgent({ status: "running", completedAt: 5000 })], alwaysShow);
 			expect(state.runningCount).toBe(1);
 			expect(state.hasFinished).toBe(false);
 		});
@@ -184,26 +163,17 @@ describe("assembleWidgetState", () => {
 
 	describe("hasActive derivation", () => {
 		it("is false when only finished agents exist", () => {
-			const state = assembleWidgetState(
-				[makeAgent({ status: "completed", completedAt: 5000 })],
-				alwaysShow,
-			);
+			const state = assembleWidgetState([makeAgent({ status: "completed", completedAt: 5000 })], alwaysShow);
 			expect(state.hasActive).toBe(false);
 		});
 
 		it("is true with any running agent", () => {
-			const state = assembleWidgetState(
-				[makeAgent({ status: "running", completedAt: undefined })],
-				neverShow,
-			);
+			const state = assembleWidgetState([makeAgent({ status: "running", completedAt: undefined })], neverShow);
 			expect(state.hasActive).toBe(true);
 		});
 
 		it("is true with any queued agent", () => {
-			const state = assembleWidgetState(
-				[makeAgent({ status: "queued", completedAt: undefined })],
-				neverShow,
-			);
+			const state = assembleWidgetState([makeAgent({ status: "queued", completedAt: undefined })], neverShow);
 			expect(state.hasActive).toBe(true);
 		});
 	});

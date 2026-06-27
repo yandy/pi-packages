@@ -20,7 +20,14 @@ import { WorkspaceBracket } from "../lifecycle/workspace-bracket";
 import { NotificationState } from "../observation/notification-state";
 import { subscribeSubagentObserver } from "../observation/record-observer";
 import type { RunConfig } from "../runtime";
-import type { AgentInvocation, CompactionInfo, ParentSessionInfo, SessionMessage, SubagentType, ThinkingLevel } from "../types";
+import type {
+	AgentInvocation,
+	CompactionInfo,
+	ParentSessionInfo,
+	SessionMessage,
+	SubagentType,
+	ThinkingLevel,
+} from "../types";
 
 /** Per-subagent lifecycle observer — created by SubagentManager for each spawn. */
 export interface SubagentLifecycleObserver {
@@ -86,22 +93,48 @@ export class Subagent {
 	// Lifecycle status and metrics — owned by a private value object; getters and
 	// mutation methods below delegate to it one line.
 	private readonly state: SubagentState;
-	get status(): SubagentStatus { return this.state.status; }
-	get result(): string | undefined { return this.state.result; }
-	get error(): string | undefined { return this.state.error; }
-	get startedAt(): number { return this.state.startedAt; }
-	get completedAt(): number | undefined { return this.state.completedAt; }
-	get toolUses(): number { return this.state.toolUses; }
-	get lifetimeUsage(): Readonly<LifetimeUsage> { return this.state.lifetimeUsage; }
-	get compactionCount(): number { return this.state.compactionCount; }
-	get turnCount(): number { return this.state.turnCount; }
-	get activeTools(): ReadonlyMap<string, string> { return this.state.activeTools; }
-	get responseText(): string { return this.state.responseText; }
-	get maxTurns(): number | undefined { return this.execution.maxTurns; }
+	get status(): SubagentStatus {
+		return this.state.status;
+	}
+	get result(): string | undefined {
+		return this.state.result;
+	}
+	get error(): string | undefined {
+		return this.state.error;
+	}
+	get startedAt(): number {
+		return this.state.startedAt;
+	}
+	get completedAt(): number | undefined {
+		return this.state.completedAt;
+	}
+	get toolUses(): number {
+		return this.state.toolUses;
+	}
+	get lifetimeUsage(): Readonly<LifetimeUsage> {
+		return this.state.lifetimeUsage;
+	}
+	get compactionCount(): number {
+		return this.state.compactionCount;
+	}
+	get turnCount(): number {
+		return this.state.turnCount;
+	}
+	get activeTools(): ReadonlyMap<string, string> {
+		return this.state.activeTools;
+	}
+	get responseText(): string {
+		return this.state.responseText;
+	}
+	get maxTurns(): number | undefined {
+		return this.execution.maxTurns;
+	}
 
 	readonly abortController: AbortController;
 	private _promise?: Promise<void>;
-	get promise(): Promise<void> | undefined { return this._promise; }
+	get promise(): Promise<void> | undefined {
+		return this._promise;
+	}
 
 	private readonly execution: SubagentExecution;
 	private readonly listeners = new RunListeners();
@@ -109,12 +142,16 @@ export class Subagent {
 
 	subagentSession?: SubagentSession;
 	private _notification?: NotificationState;
-	get notification(): NotificationState | undefined { return this._notification; }
+	get notification(): NotificationState | undefined {
+		return this._notification;
+	}
 
 	// Steer buffer — messages queued before the session is ready
 	private _pendingSteers: string[] = [];
 	/** Number of steer messages waiting to be delivered. */
-	get pendingSteerCount(): number { return this._pendingSteers.length; }
+	get pendingSteerCount(): number {
+		return this._pendingSteers.length;
+	}
 
 	/** Path to the agent's session JSONL file, or undefined if not yet available. */
 	get outputFile(): string | undefined {
@@ -189,9 +226,7 @@ export class Subagent {
 		this.execution = init.execution;
 
 		// Per-run lifecycle collaborators
-		this.workspaceBracket = new WorkspaceBracket(
-			this.execution.getWorkspaceProvider ?? (() => undefined),
-		);
+		this.workspaceBracket = new WorkspaceBracket(this.execution.getWorkspaceProvider ?? (() => undefined));
 
 		// Notification state — created from parentSession.toolCallId if present
 		const toolCallId = init.execution.parentSession?.toolCallId;
@@ -250,9 +285,11 @@ export class Subagent {
 		}
 
 		this.flushPendingSteers();
-		this.listeners.attachObserver(subscribeSubagentObserver(this.subagentSession, this.state, {
-			onCompact: (info) => this.execution.observer?.onCompacted?.(this, info),
-		}));
+		this.listeners.attachObserver(
+			subscribeSubagentObserver(this.subagentSession, this.state, {
+				onCompact: (info) => this.execution.observer?.onCompacted?.(this, info),
+			}),
+		);
 		this.execution.observer?.onSessionCreated?.(this);
 
 		const runConfig = this.execution.getRunConfig?.();
@@ -314,9 +351,11 @@ export class Subagent {
 		}
 
 		this.resetForResume(Date.now());
-		this.listeners.attachObserver(subscribeSubagentObserver(subagentSession, this.state, {
-			onCompact: (info) => this.execution.observer?.onCompacted?.(this, info),
-		}));
+		this.listeners.attachObserver(
+			subscribeSubagentObserver(subagentSession, this.state, {
+				onCompact: (info) => this.execution.observer?.onCompacted?.(this, info),
+			}),
+		);
 
 		try {
 			const responseText = await subagentSession.resumeTurnLoop(prompt, signal);
@@ -427,14 +466,9 @@ export class Subagent {
 	completeRun(result: TurnLoopResult): void {
 		this.listeners.release();
 
-		const finalStatus: SubagentStatus = result.aborted
-			? "aborted"
-			: result.steered
-				? "steered"
-				: "completed";
+		const finalStatus: SubagentStatus = result.aborted ? "aborted" : result.steered ? "steered" : "completed";
 		const finalResult =
-			result.responseText +
-			this.workspaceBracket.dispose({ status: finalStatus, description: this.description });
+			result.responseText + this.workspaceBracket.dispose({ status: finalStatus, description: this.description });
 
 		if (result.aborted) this.markAborted(finalResult);
 		else if (result.steered) this.markSteered(finalResult);
@@ -455,7 +489,9 @@ export class Subagent {
 
 		try {
 			this.workspaceBracket.dispose({ status: "error", description: this.description });
-		} catch (cleanupErr) { debugLog("workspace dispose on agent error", cleanupErr); }
+		} catch (cleanupErr) {
+			debugLog("workspace dispose on agent error", cleanupErr);
+		}
 
 		this.execution.observer?.onRunFinished?.(this);
 	}

@@ -21,14 +21,7 @@
 import type { LifetimeUsage } from "../lifecycle/usage";
 import { addUsage } from "../lifecycle/usage";
 
-export type SubagentStatus =
-	| "queued"
-	| "running"
-	| "completed"
-	| "steered"
-	| "aborted"
-	| "stopped"
-	| "error";
+export type SubagentStatus = "queued" | "running" | "completed" | "steered" | "aborted" | "stopped" | "error";
 
 export interface SubagentStateInit {
 	status?: SubagentStatus;
@@ -41,41 +34,63 @@ export interface SubagentStateInit {
 export class SubagentState {
 	// Transition state — encapsulated behind getters, mutated only via transition methods
 	private _status: SubagentStatus;
-	get status(): SubagentStatus { return this._status; }
+	get status(): SubagentStatus {
+		return this._status;
+	}
 
 	private _result?: string;
-	get result(): string | undefined { return this._result; }
+	get result(): string | undefined {
+		return this._result;
+	}
 
 	private _error?: string;
-	get error(): string | undefined { return this._error; }
+	get error(): string | undefined {
+		return this._error;
+	}
 
 	private _startedAt: number;
-	get startedAt(): number { return this._startedAt; }
+	get startedAt(): number {
+		return this._startedAt;
+	}
 
 	private _completedAt?: number;
-	get completedAt(): number | undefined { return this._completedAt; }
+	get completedAt(): number | undefined {
+		return this._completedAt;
+	}
 
 	// Stats — accumulated via mutation methods, readable via getters
 	private _toolUses = 0;
-	get toolUses(): number { return this._toolUses; }
+	get toolUses(): number {
+		return this._toolUses;
+	}
 
 	private _lifetimeUsage: LifetimeUsage = { input: 0, output: 0, cacheWrite: 0 };
-	get lifetimeUsage(): Readonly<LifetimeUsage> { return this._lifetimeUsage; }
+	get lifetimeUsage(): Readonly<LifetimeUsage> {
+		return this._lifetimeUsage;
+	}
 
 	private _compactionCount = 0;
-	get compactionCount(): number { return this._compactionCount; }
+	get compactionCount(): number {
+		return this._compactionCount;
+	}
 
 	// Live activity — accumulated via transition methods, readable via getters
 	private _turnCount = 1;
-	get turnCount(): number { return this._turnCount; }
+	get turnCount(): number {
+		return this._turnCount;
+	}
 
 	private _activeTools = new Map<string, string>();
-	get activeTools(): ReadonlyMap<string, string> { return this._activeTools; }
+	get activeTools(): ReadonlyMap<string, string> {
+		return this._activeTools;
+	}
 
 	private _toolKeySeq = 0;
 
 	private _responseText = "";
-	get responseText(): string { return this._responseText; }
+	get responseText(): string {
+		return this._responseText;
+	}
 
 	constructor(init: SubagentStateInit = {}) {
 		this._status = init.status ?? "queued";
@@ -107,7 +122,7 @@ export class SubagentState {
 
 	/** Record a tool starting. Called by record-observer on tool_execution_start. */
 	addActiveTool(toolName: string): void {
-		this._activeTools.set(toolName + "_" + (++this._toolKeySeq), toolName);
+		this._activeTools.set(toolName + "_" + ++this._toolKeySeq, toolName);
 	}
 
 	/** Remove one active tool by name (first match). Called by record-observer on tool_execution_end. */

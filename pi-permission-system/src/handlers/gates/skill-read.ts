@@ -14,68 +14,61 @@ import type { ToolCallContext } from "./types";
  * Returns a GateDescriptor with preResolved state from the matched skill entry.
  */
 export function describeSkillReadGate(
-  tcc: ToolCallContext,
-  getActiveSkillEntries: () => SkillPromptEntry[],
+	tcc: ToolCallContext,
+	getActiveSkillEntries: () => SkillPromptEntry[],
 ): GateDescriptor | null {
-  const activeSkillEntries = getActiveSkillEntries();
+	const activeSkillEntries = getActiveSkillEntries();
 
-  if (tcc.toolName !== "read" || activeSkillEntries.length === 0) {
-    return null;
-  }
+	if (tcc.toolName !== "read" || activeSkillEntries.length === 0) {
+		return null;
+	}
 
-  const inputRecord = toRecord(tcc.input);
-  const path = typeof inputRecord.path === "string" ? inputRecord.path : "";
-  if (!path) {
-    return null;
-  }
+	const inputRecord = toRecord(tcc.input);
+	const path = typeof inputRecord.path === "string" ? inputRecord.path : "";
+	if (!path) {
+		return null;
+	}
 
-  const normalizedReadPath = normalizePathForComparison(path, tcc.cwd);
-  const matchedSkill = findSkillPathMatch(
-    normalizedReadPath,
-    activeSkillEntries,
-  );
+	const normalizedReadPath = normalizePathForComparison(path, tcc.cwd);
+	const matchedSkill = findSkillPathMatch(normalizedReadPath, activeSkillEntries);
 
-  if (!matchedSkill) {
-    return null;
-  }
+	if (!matchedSkill) {
+		return null;
+	}
 
-  const skillReadMessage = formatSkillPathAskPrompt(
-    matchedSkill,
-    path,
-    tcc.agentName ?? undefined,
-  );
+	const skillReadMessage = formatSkillPathAskPrompt(matchedSkill, path, tcc.agentName ?? undefined);
 
-  return {
-    surface: "skill",
-    input: { name: matchedSkill.name },
-    denialContext: {
-      kind: "skill_read",
-      skillName: matchedSkill.name,
-      readPath: path,
-      agentName: tcc.agentName ?? undefined,
-    },
-    promptDetails: {
-      source: "skill_read",
-      agentName: tcc.agentName,
-      message: skillReadMessage,
-      toolCallId: tcc.toolCallId,
-      toolName: tcc.toolName,
-      skillName: matchedSkill.name,
-      path,
-    },
-    logContext: {
-      source: "skill_read",
-      skillName: matchedSkill.name,
-      agentName: tcc.agentName,
-      path,
-      message: skillReadMessage,
-    },
-    decision: {
-      surface: "skill",
-      value: matchedSkill.name,
-    },
-    preResolved: {
-      state: matchedSkill.state,
-    },
-  };
+	return {
+		surface: "skill",
+		input: { name: matchedSkill.name },
+		denialContext: {
+			kind: "skill_read",
+			skillName: matchedSkill.name,
+			readPath: path,
+			agentName: tcc.agentName ?? undefined,
+		},
+		promptDetails: {
+			source: "skill_read",
+			agentName: tcc.agentName,
+			message: skillReadMessage,
+			toolCallId: tcc.toolCallId,
+			toolName: tcc.toolName,
+			skillName: matchedSkill.name,
+			path,
+		},
+		logContext: {
+			source: "skill_read",
+			skillName: matchedSkill.name,
+			agentName: tcc.agentName,
+			path,
+			message: skillReadMessage,
+		},
+		decision: {
+			surface: "skill",
+			value: matchedSkill.name,
+		},
+		preResolved: {
+			state: matchedSkill.state,
+		},
+	};
 }

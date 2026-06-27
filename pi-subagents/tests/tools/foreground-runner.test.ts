@@ -35,9 +35,7 @@ describe("runForeground", () => {
 		const deps = createToolDeps({
 			manager: {
 				...createToolDeps().manager,
-				spawnAndWait: vi.fn().mockResolvedValue(
-					createTestSubagent({ status: "error", error: "Context window exceeded" }),
-				),
+				spawnAndWait: vi.fn().mockResolvedValue(createTestSubagent({ status: "error", error: "Context window exceeded" })),
 			},
 		});
 		const result = await runForeground(deps.manager, makeParams(), undefined, undefined);
@@ -71,7 +69,9 @@ describe("runForeground", () => {
 
 	it("calls onUpdate with streaming details while running", async () => {
 		let resolve!: (r: any) => void;
-		const promise = new Promise<any>((res) => { resolve = res; });
+		const promise = new Promise<any>((res) => {
+			resolve = res;
+		});
 		const deps = createToolDeps({
 			manager: {
 				...createToolDeps().manager,

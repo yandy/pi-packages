@@ -1,11 +1,7 @@
 import { vi } from "vitest";
 import { AgentTypeRegistry } from "../../src/config/agent-types";
 import type { ParentSnapshot } from "../../src/lifecycle/parent-snapshot";
-import {
-	type AgentToolManager,
-	type AgentToolRuntime,
-	type AgentToolSettings,
-} from "../../src/tools/agent-tool";
+import type { AgentToolManager, AgentToolRuntime, AgentToolSettings } from "../../src/tools/agent-tool";
 import { createTestSubagent } from "./make-subagent";
 import { STUB_SNAPSHOT } from "./stub-ctx";
 

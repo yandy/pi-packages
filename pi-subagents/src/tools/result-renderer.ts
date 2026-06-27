@@ -44,12 +44,7 @@ export function renderBackground(details: AgentDetails, theme: Theme): string {
 }
 
 /** Render completed or steered status with optional expanded result text. */
-export function renderCompleted(
-	details: AgentDetails,
-	resultText: string,
-	expanded: boolean,
-	theme: Theme,
-): string {
+export function renderCompleted(details: AgentDetails, resultText: string, expanded: boolean, theme: Theme): string {
 	const duration = formatMs(details.durationMs);
 	const isSteered = details.status === "steered";
 	const icon = isSteered ? theme.fg("warning", "\u2713") : theme.fg("success", "\u2713");
@@ -64,12 +59,7 @@ export function renderCompleted(
 				line += "\n" + theme.fg("dim", `  ${l}`);
 			}
 			if (resultText.split("\n").length > 50) {
-				line +=
-					"\n" +
-					theme.fg(
-						"muted",
-						"  ... (use get_subagent_result with verbose for full output)",
-					);
+				line += "\n" + theme.fg("muted", "  ... (use get_subagent_result with verbose for full output)");
 			}
 		}
 	} else {
@@ -113,10 +103,7 @@ export function renderStats(details: AgentDetails, theme: Theme): string {
 	if (details.turnCount != null && details.turnCount > 0) {
 		parts.push(formatTurns(details.turnCount, details.maxTurns));
 	}
-	if (details.toolUses > 0)
-		parts.push(`${details.toolUses} tool use${details.toolUses === 1 ? "" : "s"}`);
+	if (details.toolUses > 0) parts.push(`${details.toolUses} tool use${details.toolUses === 1 ? "" : "s"}`);
 	if (details.tokens) parts.push(details.tokens);
-	return parts
-		.map((p) => theme.fg("dim", p))
-		.join(" " + theme.fg("dim", "\u00B7") + " ");
+	return parts.map((p) => theme.fg("dim", p)).join(" " + theme.fg("dim", "\u00B7") + " ");
 }

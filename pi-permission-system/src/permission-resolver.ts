@@ -1,7 +1,4 @@
-import type {
-  AccessIntent,
-  ResolvedAccessIntent,
-} from "./access-intent/access-intent";
+import type { AccessIntent, ResolvedAccessIntent } from "./access-intent/access-intent";
 import type { ScopedPermissionManager } from "./permission-manager";
 import type { Rule } from "./rule";
 import type { SessionRules } from "./session-rules";
@@ -17,7 +14,7 @@ import type { PermissionCheckResult, PermissionState } from "./types";
  * forget another (the #393 false-green class) — #478.
  */
 export interface ScopedPermissionResolver {
-  resolve(intent: AccessIntent): PermissionCheckResult;
+	resolve(intent: AccessIntent): PermissionCheckResult;
 }
 
 /**
@@ -28,15 +25,15 @@ export interface ScopedPermissionResolver {
  * so the low-level manager never imports the value object.
  */
 function toResolvedIntent(intent: AccessIntent): ResolvedAccessIntent {
-  if (intent.kind === "access-path") {
-    return {
-      kind: "path-values",
-      surface: intent.surface,
-      values: intent.path.matchValues(),
-      agentName: intent.agentName,
-    };
-  }
-  return intent;
+	if (intent.kind === "access-path") {
+		return {
+			kind: "path-values",
+			surface: intent.surface,
+			values: intent.path.matchValues(),
+			agentName: intent.agentName,
+		};
+	}
+	return intent;
 }
 
 /**
@@ -49,49 +46,36 @@ function toResolvedIntent(intent: AccessIntent): ResolvedAccessIntent {
  * - `permissionManager` — the narrow session-scoped permission-checking interface
  * - `sessionRules` — narrowed to `getRuleset` (ISP: the resolver only reads, never records)
  */
-export class PermissionResolver
-  implements ScopedPermissionResolver, SkillPermissionChecker
-{
-  constructor(
-    private readonly permissionManager: ScopedPermissionManager,
-    private readonly sessionRules: Pick<SessionRules, "getRuleset">,
-  ) {}
+export class PermissionResolver implements ScopedPermissionResolver, SkillPermissionChecker {
+	constructor(
+		private readonly permissionManager: ScopedPermissionManager,
+		private readonly sessionRules: Pick<SessionRules, "getRuleset">,
+	) {}
 
-  /**
-   * Answer a gate-emitted access intent, composing the current session ruleset
-   * so callers never thread it by hand. Unwraps the `access-path` variant via
-   * `matchValues()` before handing a string-based intent to the manager.
-   */
-  resolve(intent: AccessIntent): PermissionCheckResult {
-    return this.permissionManager.check(
-      toResolvedIntent(intent),
-      this.sessionRules.getRuleset(),
-    );
-  }
+	/**
+	 * Answer a gate-emitted access intent, composing the current session ruleset
+	 * so callers never thread it by hand. Unwraps the `access-path` variant via
+	 * `matchValues()` before handing a string-based intent to the manager.
+	 */
+	resolve(intent: AccessIntent): PermissionCheckResult {
+		return this.permissionManager.check(toResolvedIntent(intent), this.sessionRules.getRuleset());
+	}
 
-  /**
-   * Raw permission check without session rules — the no-session-rules path
-   * consumed by `SkillInputGateInputs` / `SkillPermissionChecker`.
-   *
-   * Not on `ScopedPermissionResolver` (ISP: gates do not use this).
-   */
-  checkPermission(
-    surface: string,
-    input: unknown,
-    agentName?: string,
-    sessionRules?: Rule[],
-  ): PermissionCheckResult {
-    return this.permissionManager.check(
-      { kind: "tool", surface, input, agentName },
-      sessionRules,
-    );
-  }
+	/**
+	 * Raw permission check without session rules — the no-session-rules path
+	 * consumed by `SkillInputGateInputs` / `SkillPermissionChecker`.
+	 *
+	 * Not on `ScopedPermissionResolver` (ISP: gates do not use this).
+	 */
+	checkPermission(surface: string, input: unknown, agentName?: string, sessionRules?: Rule[]): PermissionCheckResult {
+		return this.permissionManager.check({ kind: "tool", surface, input, agentName }, sessionRules);
+	}
 
-  getToolPermission(toolName: string, agentName?: string): PermissionState {
-    return this.permissionManager.getToolPermission(toolName, agentName);
-  }
+	getToolPermission(toolName: string, agentName?: string): PermissionState {
+		return this.permissionManager.getToolPermission(toolName, agentName);
+	}
 
-  getConfigIssues(agentName?: string): string[] {
-    return this.permissionManager.getConfigIssues(agentName);
-  }
+	getConfigIssues(agentName?: string): string[] {
+		return this.permissionManager.getConfigIssues(agentName);
+	}
 }

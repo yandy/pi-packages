@@ -11,8 +11,8 @@ import type { ParentSnapshot } from "../../src/lifecycle/parent-snapshot";
 export const STUB_CTX = {} as unknown as ExtensionContext;
 
 export const STUB_SNAPSHOT: ParentSnapshot = {
-  cwd: "/test",
-  systemPrompt: "test prompt",
-  model: undefined,
-  modelRegistry: { find: () => undefined },
+	cwd: "/test",
+	systemPrompt: "test prompt",
+	model: undefined,
+	modelRegistry: { find: () => undefined },
 };

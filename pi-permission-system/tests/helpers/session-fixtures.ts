@@ -29,54 +29,47 @@ import type { PermissionCheckResult, PermissionState } from "../../src/types";
 
 // ── Per-collaborator fake factories ────────────────────────────────────────
 
-export function makePaths(
-  overrides: Partial<ExtensionPaths> = {},
-): ExtensionPaths {
-  return {
-    agentDir: "/test/agent",
-    sessionsDir: "/test/agent/sessions",
-    subagentSessionsDir: "/test/agent/subagent-sessions",
-    forwardingDir: "/test/agent/sessions/permission-forwarding",
-    globalLogsDir: "/test/agent/logs",
-    piInfrastructureDirs: ["/test/agent", "/test/agent/git"],
-    ...overrides,
-  };
+export function makePaths(overrides: Partial<ExtensionPaths> = {}): ExtensionPaths {
+	return {
+		agentDir: "/test/agent",
+		sessionsDir: "/test/agent/sessions",
+		subagentSessionsDir: "/test/agent/subagent-sessions",
+		forwardingDir: "/test/agent/sessions/permission-forwarding",
+		globalLogsDir: "/test/agent/logs",
+		piInfrastructureDirs: ["/test/agent", "/test/agent/git"],
+		...overrides,
+	};
 }
 
 export function makeLogger(): SessionLogger {
-  return {
-    debug: vi.fn(),
-    review: vi.fn(),
-    warn: vi.fn(),
-  };
+	return {
+		debug: vi.fn(),
+		review: vi.fn(),
+		warn: vi.fn(),
+	};
 }
 
-export function makeConfigStore(
-  overrides: Partial<SessionConfigStore> = {},
-): SessionConfigStore {
-  return {
-    current:
-      overrides.current ??
-      vi
-        .fn<() => typeof DEFAULT_EXTENSION_CONFIG>()
-        .mockReturnValue({ ...DEFAULT_EXTENSION_CONFIG }),
-    refresh: overrides.refresh ?? vi.fn<(ctx?: ExtensionContext) => void>(),
-    logResolvedPaths: overrides.logResolvedPaths ?? vi.fn<() => void>(),
-  };
+export function makeConfigStore(overrides: Partial<SessionConfigStore> = {}): SessionConfigStore {
+	return {
+		current:
+			overrides.current ?? vi.fn<() => typeof DEFAULT_EXTENSION_CONFIG>().mockReturnValue({ ...DEFAULT_EXTENSION_CONFIG }),
+		refresh: overrides.refresh ?? vi.fn<(ctx?: ExtensionContext) => void>(),
+		logResolvedPaths: overrides.logResolvedPaths ?? vi.fn<() => void>(),
+	};
 }
 
 export function makeGateway(): PromptingGatewayLifecycle {
-  return {
-    activate: vi.fn<PromptingGatewayLifecycle["activate"]>(),
-    deactivate: vi.fn<PromptingGatewayLifecycle["deactivate"]>(),
-  };
+	return {
+		activate: vi.fn<PromptingGatewayLifecycle["activate"]>(),
+		deactivate: vi.fn<PromptingGatewayLifecycle["deactivate"]>(),
+	};
 }
 
 export function makeForwarding(): ForwardingController {
-  return {
-    start: vi.fn(),
-    stop: vi.fn(),
-  };
+	return {
+		start: vi.fn(),
+		stop: vi.fn(),
+	};
 }
 
 /**
@@ -86,26 +79,17 @@ export function makeForwarding(): ForwardingController {
  * mock access (`mock.calls`, `toHaveBeenCalledWith`, `mockReturnValue`, etc.).
  */
 export function makeFakePermissionManager() {
-  return {
-    configureForCwd: vi.fn<(cwd: string | undefined | null) => void>(),
-    check: vi
-      .fn<
-        (
-          intent: ResolvedAccessIntent,
-          sessionRules?: Ruleset,
-        ) => PermissionCheckResult
-      >()
-      .mockReturnValue({
-        state: "allow",
-        toolName: "read",
-        source: "tool",
-        origin: "builtin",
-      }),
-    getToolPermission: vi
-      .fn<(toolName: string, agentName?: string) => PermissionState>()
-      .mockReturnValue("allow"),
-    getConfigIssues: vi.fn((): string[] => []),
-  };
+	return {
+		configureForCwd: vi.fn<(cwd: string | undefined | null) => void>(),
+		check: vi.fn<(intent: ResolvedAccessIntent, sessionRules?: Ruleset) => PermissionCheckResult>().mockReturnValue({
+			state: "allow",
+			toolName: "read",
+			source: "tool",
+			origin: "builtin",
+		}),
+		getToolPermission: vi.fn<(toolName: string, agentName?: string) => PermissionState>().mockReturnValue("allow"),
+		getConfigIssues: vi.fn((): string[] => []),
+	};
 }
 
 // ── Real-instance factories ────────────────────────────────────────────────
@@ -119,51 +103,43 @@ export function makeFakePermissionManager() {
  * the caller passes an explicit `ScopedPermissionManager`.
  */
 export function makeRealSession(overrides?: {
-  paths?: Partial<ExtensionPaths>;
-  logger?: SessionLogger;
-  forwarding?: ForwardingController;
-  permissionManager?: ScopedPermissionManager;
-  sessionRules?: SessionRules;
-  configStore?: SessionConfigStore;
-  gateway?: PromptingGatewayLifecycle;
+	paths?: Partial<ExtensionPaths>;
+	logger?: SessionLogger;
+	forwarding?: ForwardingController;
+	permissionManager?: ScopedPermissionManager;
+	sessionRules?: SessionRules;
+	configStore?: SessionConfigStore;
+	gateway?: PromptingGatewayLifecycle;
 }): {
-  session: PermissionSession;
-  paths: ExtensionPaths;
-  logger: SessionLogger;
-  forwarding: ForwardingController;
-  permissionManager: ReturnType<typeof makeFakePermissionManager>;
-  sessionRules: SessionRules;
-  configStore: SessionConfigStore;
-  gateway: PromptingGatewayLifecycle;
+	session: PermissionSession;
+	paths: ExtensionPaths;
+	logger: SessionLogger;
+	forwarding: ForwardingController;
+	permissionManager: ReturnType<typeof makeFakePermissionManager>;
+	sessionRules: SessionRules;
+	configStore: SessionConfigStore;
+	gateway: PromptingGatewayLifecycle;
 } {
-  const paths = makePaths(overrides?.paths);
-  const logger = overrides?.logger ?? makeLogger();
-  const forwarding = overrides?.forwarding ?? makeForwarding();
-  const permissionManager =
-    (overrides?.permissionManager as
-      | ReturnType<typeof makeFakePermissionManager>
-      | undefined) ?? makeFakePermissionManager();
-  const sessionRules = overrides?.sessionRules ?? new SessionRules();
-  const configStore = overrides?.configStore ?? makeConfigStore();
-  const gateway = overrides?.gateway ?? makeGateway();
-  const session = new PermissionSession(
-    paths,
-    forwarding,
-    permissionManager,
-    sessionRules,
-    configStore,
-    gateway,
-  );
-  return {
-    session,
-    paths,
-    logger,
-    forwarding,
-    permissionManager,
-    sessionRules,
-    configStore,
-    gateway,
-  };
+	const paths = makePaths(overrides?.paths);
+	const logger = overrides?.logger ?? makeLogger();
+	const forwarding = overrides?.forwarding ?? makeForwarding();
+	const permissionManager =
+		(overrides?.permissionManager as ReturnType<typeof makeFakePermissionManager> | undefined) ??
+		makeFakePermissionManager();
+	const sessionRules = overrides?.sessionRules ?? new SessionRules();
+	const configStore = overrides?.configStore ?? makeConfigStore();
+	const gateway = overrides?.gateway ?? makeGateway();
+	const session = new PermissionSession(paths, forwarding, permissionManager, sessionRules, configStore, gateway);
+	return {
+		session,
+		paths,
+		logger,
+		forwarding,
+		permissionManager,
+		sessionRules,
+		configStore,
+		gateway,
+	};
 }
 
 /**
@@ -175,15 +151,15 @@ export function makeRealSession(overrides?: {
  * manager/rules used by a real session.
  */
 export function makeRealResolver(
-  manager?: ReturnType<typeof makeFakePermissionManager>,
-  sessionRules?: SessionRules,
+	manager?: ReturnType<typeof makeFakePermissionManager>,
+	sessionRules?: SessionRules,
 ): {
-  resolver: PermissionResolver;
-  manager: ReturnType<typeof makeFakePermissionManager>;
-  sessionRules: SessionRules;
+	resolver: PermissionResolver;
+	manager: ReturnType<typeof makeFakePermissionManager>;
+	sessionRules: SessionRules;
 } {
-  const resolvedManager = manager ?? makeFakePermissionManager();
-  const resolvedRules = sessionRules ?? new SessionRules();
-  const resolver = new PermissionResolver(resolvedManager, resolvedRules);
-  return { resolver, manager: resolvedManager, sessionRules: resolvedRules };
+	const resolvedManager = manager ?? makeFakePermissionManager();
+	const resolvedRules = sessionRules ?? new SessionRules();
+	const resolver = new PermissionResolver(resolvedManager, resolvedRules);
+	return { resolver, manager: resolvedManager, sessionRules: resolvedRules };
 }

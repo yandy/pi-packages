@@ -3,7 +3,7 @@ import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { AgentTypeRegistry } from "../config/agent-types";
+import type { AgentTypeRegistry } from "../config/agent-types";
 import type { ParentSnapshot } from "../lifecycle/parent-snapshot";
 import type { AgentSpawnConfig } from "../lifecycle/subagent-manager";
 import { spawnBackground } from "../tools/background-spawner";
@@ -19,7 +19,12 @@ import { type AgentDetails, getDisplayName } from "../ui/display";
 /** Narrow manager interface — only the methods the Agent tool calls. */
 export interface AgentToolManager {
 	spawn: (snapshot: ParentSnapshot, type: string, prompt: string, opts: AgentSpawnConfig) => string;
-	spawnAndWait: (snapshot: ParentSnapshot, type: string, prompt: string, opts: Omit<AgentSpawnConfig, "isBackground">) => Promise<Subagent>;
+	spawnAndWait: (
+		snapshot: ParentSnapshot,
+		type: string,
+		prompt: string,
+		opts: Omit<AgentSpawnConfig, "isBackground">,
+	) => Promise<Subagent>;
 	resume: (id: string, prompt: string, signal: AbortSignal) => Promise<Subagent | undefined>;
 	getRecord: (id: string) => Subagent | undefined;
 }
@@ -65,12 +70,7 @@ export class AgentTool {
 		this.registry.reload();
 
 		// ---- Config resolution (pure) ----
-		const config = resolveSpawnConfig(
-			params,
-			this.registry,
-			this.runtime.getModelInfo(),
-			this.settings,
-		);
+		const config = resolveSpawnConfig(params, this.registry, this.runtime.getModelInfo(), this.settings);
 		if ("error" in config) return textResult(config.error);
 
 		// ---- Boundary extraction (after config so inheritContext is resolved) ----
@@ -82,14 +82,10 @@ export class AgentTool {
 		if (params.resume) {
 			const existing = this.manager.getRecord(params.resume as string);
 			if (!existing) {
-				return textResult(
-					`Agent not found: "${params.resume}". It may have been cleaned up.`,
-				);
+				return textResult(`Agent not found: "${params.resume}". It may have been cleaned up.`);
 			}
 			if (!existing.isSessionReady()) {
-				return textResult(
-					`Agent "${params.resume}" has no active session to resume.`,
-				);
+				return textResult(`Agent "${params.resume}" has no active session to resume.`);
 			}
 			const record = await this.manager.resume(
 				params.resume as string,
@@ -107,19 +103,11 @@ export class AgentTool {
 
 		// ---- Background execution ----
 		if (config.execution.runInBackground) {
-			return spawnBackground(
-				this.manager,
-				{ config, snapshot, parentSession, settings: this.settings },
-			);
+			return spawnBackground(this.manager, { config, snapshot, parentSession, settings: this.settings });
 		}
 
 		// ---- Foreground execution — stream progress via onUpdate ----
-		return runForeground(
-			this.manager,
-			{ config, snapshot, parentSession },
-			signal,
-			onUpdate,
-		);
+		return runForeground(this.manager, { config, snapshot, parentSession }, signal, onUpdate);
 	}
 
 	toToolDefinition() {
@@ -171,14 +159,12 @@ Guidelines:
 				),
 				thinking: Type.Optional(
 					Type.String({
-						description:
-							"Thinking level: off, minimal, low, medium, high, xhigh. Overrides agent default.",
+						description: "Thinking level: off, minimal, low, medium, high, xhigh. Overrides agent default.",
 					}),
 				),
 				max_turns: Type.Optional(
 					Type.Number({
-						description:
-							"Maximum number of agentic turns before stopping. Omit for unlimited (default).",
+						description: "Maximum number of agentic turns before stopping. Omit for unlimited (default).",
 						minimum: 1,
 					}),
 				),
@@ -195,8 +181,7 @@ Guidelines:
 				),
 				inherit_context: Type.Optional(
 					Type.Boolean({
-						description:
-							"If true, fork parent conversation into the agent. Default: false (fresh context).",
+						description: "If true, fork parent conversation into the agent. Default: false (fresh context).",
 					}),
 				),
 			}),
@@ -204,14 +189,10 @@ Guidelines:
 			// ---- Custom rendering: inline subagent results ----
 
 			renderCall(args: Record<string, unknown>, theme: any) {
-				const displayName = args.subagent_type
-					? getDisplayName(args.subagent_type as string, registry)
-					: "Subagent";
+				const displayName = args.subagent_type ? getDisplayName(args.subagent_type as string, registry) : "Subagent";
 				const desc = (args.description as string | undefined) ?? "";
 				return new Text(
-					"▸ " +
-						theme.fg("toolTitle", theme.bold(displayName)) +
-						(desc ? "  " + theme.fg("muted", desc) : ""),
+					"▸ " + theme.fg("toolTitle", theme.bold(displayName)) + (desc ? "  " + theme.fg("muted", desc) : ""),
 					0,
 					0,
 				);
@@ -224,11 +205,7 @@ Guidelines:
 					return new Text(text, 0, 0);
 				}
 				const resultText = result.content[0]?.type === "text" ? result.content[0].text : "";
-				return new Text(
-					renderAgentResult(details, resultText, expanded, isPartial, theme),
-					0,
-					0,
-				);
+				return new Text(renderAgentResult(details, resultText, expanded, isPartial, theme), 0, 0);
 			},
 
 			execute: (

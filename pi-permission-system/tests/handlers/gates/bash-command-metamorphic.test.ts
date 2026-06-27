@@ -19,66 +19,49 @@ import { makeCheckResult } from "../../helpers/handler-fixtures";
 
 /** Decision strength ordering: deny (2) > ask (1) > allow (0). */
 const STRENGTH: Record<PermissionState, number> = {
-  allow: 0,
-  ask: 1,
-  deny: 2,
+	allow: 0,
+	ask: 1,
+	deny: 2,
 };
 
 /**
  * Resolver whose decision keys on a command substring → state map. A command
  * matching no entry resolves to allow (the permissive top-level `*`).
  */
-function makeKeyedResolver(
-  rules: { match: string; state: PermissionState }[],
-): ScopedPermissionResolver {
-  return {
-    resolve: (intent) => {
-      const command =
-        intent.kind === "tool"
-          ? ((intent.input as { command?: string }).command ?? "")
-          : "";
-      const rule = rules.find((r) => command.includes(r.match));
-      const state: PermissionState = rule?.state ?? "allow";
-      return makeCheckResult({ state, source: "bash", command });
-    },
-  };
+function makeKeyedResolver(rules: { match: string; state: PermissionState }[]): ScopedPermissionResolver {
+	return {
+		resolve: (intent) => {
+			const command = intent.kind === "tool" ? ((intent.input as { command?: string }).command ?? "") : "";
+			const rule = rules.find((r) => command.includes(r.match));
+			const state: PermissionState = rule?.state ?? "allow";
+			return makeCheckResult({ state, source: "bash", command });
+		},
+	};
 }
 
-async function decide(
-  command: string,
-  resolver: ScopedPermissionResolver,
-): Promise<PermissionState> {
-  const program = await BashProgram.parse(command, "/cwd");
-  return resolveBashCommandCheck(
-    command,
-    program.commands(),
-    undefined,
-    resolver,
-  ).state;
+async function decide(command: string, resolver: ScopedPermissionResolver): Promise<PermissionState> {
+	const program = await BashProgram.parse(command, "/cwd");
+	return resolveBashCommandCheck(command, program.commands(), undefined, resolver).state;
 }
 
 describe("bash command gate — metamorphic totality", () => {
-  const cases: { bare: string; state: PermissionState }[] = [
-    { bare: "git push", state: "ask" },
-    { bare: "git commit -m wip", state: "ask" },
-    { bare: "rm -rf build", state: "deny" },
-    { bare: "npm install pkg", state: "deny" },
-    { bare: "gh pr create", state: "ask" },
-  ];
+	const cases: { bare: string; state: PermissionState }[] = [
+		{ bare: "git push", state: "ask" },
+		{ bare: "git commit -m wip", state: "ask" },
+		{ bare: "rm -rf build", state: "deny" },
+		{ bare: "npm install pkg", state: "deny" },
+		{ bare: "gh pr create", state: "ask" },
+	];
 
-  for (const { bare, state } of cases) {
-    it(`wrapping "${bare}" in a cd prefix does not weaken its ${state} decision`, async () => {
-      const resolver = makeKeyedResolver([
-        { match: bare.split(" ")[0] ?? bare, state },
-      ]);
+	for (const { bare, state } of cases) {
+		it(`wrapping "${bare}" in a cd prefix does not weaken its ${state} decision`, async () => {
+			const resolver = makeKeyedResolver([{ match: bare.split(" ")[0] ?? bare, state }]);
 
-      const bareDecision = await decide(bare, resolver);
-      const wrappedDecision = await decide(`cd /repo && ${bare}`, resolver);
+			const bareDecision = await decide(bare, resolver);
+			const wrappedDecision = await decide(`cd /repo && ${bare}`, resolver);
 
-      expect(STRENGTH[wrappedDecision]).toBeGreaterThanOrEqual(
-        STRENGTH[bareDecision],
-      );
-      expect(wrappedDecision).toBe(state);
-    });
-  }
+			expect(STRENGTH[wrappedDecision]).toBeGreaterThanOrEqual(STRENGTH[bareDecision]);
+			expect(wrappedDecision).toBe(state);
+		});
+	}
 });

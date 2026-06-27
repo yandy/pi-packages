@@ -90,8 +90,7 @@ export class GetResultTool {
 		return defineTool({
 			name: "get_subagent_result" as const,
 			label: "Get Agent Result",
-			promptSnippet:
-				"get_subagent_result: Check status and retrieve results from a background agent.",
+			promptSnippet: "get_subagent_result: Check status and retrieve results from a background agent.",
 			description:
 				"Check status and retrieve results from a background agent. Use the agent ID returned by Agent with run_in_background.",
 			parameters: Type.Object({
@@ -100,14 +99,12 @@ export class GetResultTool {
 				}),
 				wait: Type.Optional(
 					Type.Boolean({
-						description:
-							"If true, wait for the agent to complete before returning. Default: false.",
+						description: "If true, wait for the agent to complete before returning. Default: false.",
 					}),
 				),
 				verbose: Type.Optional(
 					Type.Boolean({
-						description:
-							"If true, include the agent's full conversation (messages + tool calls). Default: false.",
+						description: "If true, include the agent's full conversation (messages + tool calls). Default: false.",
 					}),
 				),
 			}),

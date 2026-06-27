@@ -13,7 +13,7 @@ type ToolCallResult = { block?: true; reason?: string };
  * entry is dropped when the toggle is off (no per-call spam in normal use).
  */
 export interface DecisionTracer {
-  debug(event: string, details?: Record<string, unknown>): void;
+	debug(event: string, details?: Record<string, unknown>): void;
 }
 
 /**
@@ -35,56 +35,54 @@ export interface DecisionTracer {
  * hard block is the unambiguous safe outcome.
  */
 export function createFailClosedToolCall(
-  gate: (event: unknown, ctx: ExtensionContext) => Promise<GateOutcome>,
-  reporter: DecisionReporter,
-  audit: DecisionRecorder,
-  tracer: DecisionTracer,
+	gate: (event: unknown, ctx: ExtensionContext) => Promise<GateOutcome>,
+	reporter: DecisionReporter,
+	audit: DecisionRecorder,
+	tracer: DecisionTracer,
 ): (event: unknown, ctx: ExtensionContext) => Promise<ToolCallResult> {
-  return async (event, ctx) => {
-    try {
-      const outcome = await gate(event, ctx);
-      audit.recordDecision(outcome.action);
-      tracer.debug("permission.decision", {
-        toolName: bestEffortToolName(event),
-        action: outcome.action,
-        ...(outcome.action === "block" ? { reason: outcome.reason } : {}),
-      });
-      return outcome.action === "block"
-        ? { block: true, reason: outcome.reason }
-        : {};
-    } catch (error) {
-      audit.recordError();
-      reporter.writeReviewLog("permission_request.blocked", {
-        toolName: bestEffortToolName(event),
-        command: bestEffortCommand(event),
-        resolution: "gate_error",
-        error: errorMessage(error),
-      });
-      return { block: true, reason: formatGateErrorReason(error) };
-    }
-  };
+	return async (event, ctx) => {
+		try {
+			const outcome = await gate(event, ctx);
+			audit.recordDecision(outcome.action);
+			tracer.debug("permission.decision", {
+				toolName: bestEffortToolName(event),
+				action: outcome.action,
+				...(outcome.action === "block" ? { reason: outcome.reason } : {}),
+			});
+			return outcome.action === "block" ? { block: true, reason: outcome.reason } : {};
+		} catch (error) {
+			audit.recordError();
+			reporter.writeReviewLog("permission_request.blocked", {
+				toolName: bestEffortToolName(event),
+				command: bestEffortCommand(event),
+				resolution: "gate_error",
+				error: errorMessage(error),
+			});
+			return { block: true, reason: formatGateErrorReason(error) };
+		}
+	};
 }
 
 // ── Defensive event readers (never throw) ──────────────────────────────────
 
 /** Best-effort tool name from a raw event; never throws. */
 function bestEffortToolName(event: unknown): string {
-  const record = toRecord(event);
-  const name = record.name ?? record.toolName;
-  return typeof name === "string" && name ? name : "<unknown>";
+	const record = toRecord(event);
+	const name = record.name ?? record.toolName;
+	return typeof name === "string" && name ? name : "<unknown>";
 }
 
 /** Best-effort bash command from a raw event; never throws. */
 function bestEffortCommand(event: unknown): string | undefined {
-  const record = toRecord(event);
-  const input = toRecord(record.input ?? record.arguments);
-  return typeof input.command === "string" ? input.command : undefined;
+	const record = toRecord(event);
+	const input = toRecord(record.input ?? record.arguments);
+	return typeof input.command === "string" ? input.command : undefined;
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+	return error instanceof Error ? error.message : String(error);
 }
 
 function formatGateErrorReason(error: unknown): string {
-  return `Permission gate failed and blocked the tool call (fail-closed): ${errorMessage(error)}`;
+	return `Permission gate failed and blocked the tool call (fail-closed): ${errorMessage(error)}`;
 }

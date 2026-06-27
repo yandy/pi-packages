@@ -6,34 +6,36 @@ import { BUILTIN_TOOL_NAMES } from "../../src/config/agent-types";
 import { loadCustomAgents } from "../../src/config/custom-agents";
 
 describe("loadCustomAgents", () => {
-  let tmpDir: string;
-  let originalHome: string | undefined;
+	let tmpDir: string;
+	let originalHome: string | undefined;
 
-  beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "pi-test-"));
-    originalHome = process.env.HOME;
-    process.env.HOME = tmpDir;
-  });
+	beforeEach(() => {
+		tmpDir = mkdtempSync(join(tmpdir(), "pi-test-"));
+		originalHome = process.env.HOME;
+		process.env.HOME = tmpDir;
+	});
 
-  afterEach(() => {
-    if (originalHome == null) delete process.env.HOME;
-    else process.env.HOME = originalHome;
-    rmSync(tmpDir, { recursive: true, force: true });
-  });
+	afterEach(() => {
+		if (originalHome == null) delete process.env.HOME;
+		else process.env.HOME = originalHome;
+		rmSync(tmpDir, { recursive: true, force: true });
+	});
 
-  function writeAgent(name: string, content: string) {
-    const dir = join(tmpDir, ".pi", "agents");
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, `${name}.md`), content);
-  }
+	function writeAgent(name: string, content: string) {
+		const dir = join(tmpDir, ".pi", "agents");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, `${name}.md`), content);
+	}
 
-  it("returns empty map when .pi/agents/ does not exist", () => {
-    const result = loadCustomAgents(tmpDir);
-    expect(result.size).toBe(0);
-  });
+	it("returns empty map when .pi/agents/ does not exist", () => {
+		const result = loadCustomAgents(tmpDir);
+		expect(result.size).toBe(0);
+	});
 
-  it("loads a basic agent with all frontmatter fields", () => {
-    writeAgent("auditor", `---
+	it("loads a basic agent with all frontmatter fields", () => {
+		writeAgent(
+			"auditor",
+			`---
 description: Security Auditor
 tools: read, grep, find
 model: anthropic/claude-opus-4-6
@@ -44,243 +46,289 @@ inherit_context: true
 run_in_background: true
 ---
 
-You are a security auditor.`);
+You are a security auditor.`,
+		);
 
-    const result = loadCustomAgents(tmpDir);
-    expect(result.size).toBe(1);
+		const result = loadCustomAgents(tmpDir);
+		expect(result.size).toBe(1);
 
-    const agent = result.get("auditor")!;
-    expect(agent.name).toBe("auditor");
-    expect(agent.description).toBe("Security Auditor");
-    expect(agent.builtinToolNames).toEqual(["read", "grep", "find"]);
-    expect(agent.model).toBe("anthropic/claude-opus-4-6");
-    expect(agent.thinking).toBe("high");
-    expect(agent.maxTurns).toBe(30);
-    expect(agent.promptMode).toBe("replace");
-    expect(agent.inheritContext).toBe(true);
-    expect(agent.runInBackground).toBe(true);
-    expect(agent.systemPrompt).toBe("You are a security auditor.");
-  });
+		const agent = result.get("auditor")!;
+		expect(agent.name).toBe("auditor");
+		expect(agent.description).toBe("Security Auditor");
+		expect(agent.builtinToolNames).toEqual(["read", "grep", "find"]);
+		expect(agent.model).toBe("anthropic/claude-opus-4-6");
+		expect(agent.thinking).toBe("high");
+		expect(agent.maxTurns).toBe(30);
+		expect(agent.promptMode).toBe("replace");
+		expect(agent.inheritContext).toBe(true);
+		expect(agent.runInBackground).toBe(true);
+		expect(agent.systemPrompt).toBe("You are a security auditor.");
+	});
 
-  it("uses sensible defaults when frontmatter is empty", () => {
-    writeAgent("minimal", `---
+	it("uses sensible defaults when frontmatter is empty", () => {
+		writeAgent(
+			"minimal",
+			`---
 ---
 
-Just a prompt.`);
+Just a prompt.`,
+		);
 
-    const result = loadCustomAgents(tmpDir);
-    const agent = result.get("minimal")!;
+		const result = loadCustomAgents(tmpDir);
+		const agent = result.get("minimal")!;
 
-    expect(agent.name).toBe("minimal");
-    expect(agent.description).toBe("minimal"); // defaults to filename
-    expect(agent.builtinToolNames).toEqual(BUILTIN_TOOL_NAMES); // all tools
-    expect(agent.model).toBeUndefined();
-    expect(agent.thinking).toBeUndefined();
-    expect(agent.maxTurns).toBeUndefined();
-    expect(agent.promptMode).toBe("append");
-    expect(agent.inheritContext).toBeUndefined();
-    expect(agent.runInBackground).toBeUndefined();
-    expect(agent.systemPrompt).toBe("Just a prompt.");
-  });
+		expect(agent.name).toBe("minimal");
+		expect(agent.description).toBe("minimal"); // defaults to filename
+		expect(agent.builtinToolNames).toEqual(BUILTIN_TOOL_NAMES); // all tools
+		expect(agent.model).toBeUndefined();
+		expect(agent.thinking).toBeUndefined();
+		expect(agent.maxTurns).toBeUndefined();
+		expect(agent.promptMode).toBe("append");
+		expect(agent.inheritContext).toBeUndefined();
+		expect(agent.runInBackground).toBeUndefined();
+		expect(agent.systemPrompt).toBe("Just a prompt.");
+	});
 
-  it("uses sensible defaults when no frontmatter at all", () => {
-    writeAgent("bare", "Just a system prompt, no frontmatter.");
+	it("uses sensible defaults when no frontmatter at all", () => {
+		writeAgent("bare", "Just a system prompt, no frontmatter.");
 
-    const result = loadCustomAgents(tmpDir);
-    const agent = result.get("bare")!;
+		const result = loadCustomAgents(tmpDir);
+		const agent = result.get("bare")!;
 
-    expect(agent.name).toBe("bare");
-    expect(agent.description).toBe("bare");
-    expect(agent.builtinToolNames).toEqual(BUILTIN_TOOL_NAMES);
-    expect(agent.promptMode).toBe("append");
-    expect(agent.systemPrompt).toBe("Just a system prompt, no frontmatter.");
-  });
+		expect(agent.name).toBe("bare");
+		expect(agent.description).toBe("bare");
+		expect(agent.builtinToolNames).toEqual(BUILTIN_TOOL_NAMES);
+		expect(agent.promptMode).toBe("append");
+		expect(agent.systemPrompt).toBe("Just a system prompt, no frontmatter.");
+	});
 
-  it("handles tools: none → empty array", () => {
-    writeAgent("notool", `---
+	it("handles tools: none → empty array", () => {
+		writeAgent(
+			"notool",
+			`---
 tools: none
 ---
 
-No tools.`);
+No tools.`,
+		);
 
-    const result = loadCustomAgents(tmpDir);
-    expect(result.get("notool")!.builtinToolNames).toEqual([]);
-  });
+		const result = loadCustomAgents(tmpDir);
+		expect(result.get("notool")!.builtinToolNames).toEqual([]);
+	});
 
-  it("passes through unknown tool names (not filtered)", () => {
-    writeAgent("custom-tools", `---
+	it("passes through unknown tool names (not filtered)", () => {
+		writeAgent(
+			"custom-tools",
+			`---
 tools: read, my_custom_tool, grep
 ---
 
-Custom tools.`);
+Custom tools.`,
+		);
 
-    const result = loadCustomAgents(tmpDir);
-    // Unknown tool names are passed through — filtering happens at tool creation time
-    expect(result.get("custom-tools")!.builtinToolNames).toEqual(["read", "my_custom_tool", "grep"]);
-  });
+		const result = loadCustomAgents(tmpDir);
+		// Unknown tool names are passed through — filtering happens at tool creation time
+		expect(result.get("custom-tools")!.builtinToolNames).toEqual(["read", "my_custom_tool", "grep"]);
+	});
 
-  it("passes through thinking level as-is (no validation)", () => {
-    writeAgent("anythink", `---
+	it("passes through thinking level as-is (no validation)", () => {
+		writeAgent(
+			"anythink",
+			`---
 thinking: turbo
 ---
 
-Any thinking.`);
+Any thinking.`,
+		);
 
-    const result = loadCustomAgents(tmpDir);
-    // Pi validates at session creation — we just pass through
-    expect(result.get("anythink")!.thinking).toBe("turbo");
-  });
+		const result = loadCustomAgents(tmpDir);
+		// Pi validates at session creation — we just pass through
+		expect(result.get("anythink")!.thinking).toBe("turbo");
+	});
 
-  it("accepts max_turns: 0 as unlimited", () => {
-    writeAgent("unlimited", `---
+	it("accepts max_turns: 0 as unlimited", () => {
+		writeAgent(
+			"unlimited",
+			`---
 max_turns: 0
 ---
 
-Unlimited turns.`);
+Unlimited turns.`,
+		);
 
-    const result = loadCustomAgents(tmpDir);
-    expect(result.get("unlimited")!.maxTurns).toBe(0);
-  });
+		const result = loadCustomAgents(tmpDir);
+		expect(result.get("unlimited")!.maxTurns).toBe(0);
+	});
 
-  it("rejects negative max_turns", () => {
-    writeAgent("negturns", `---
+	it("rejects negative max_turns", () => {
+		writeAgent(
+			"negturns",
+			`---
 max_turns: -5
 ---
 
-Negative turns.`);
+Negative turns.`,
+		);
 
-    const result = loadCustomAgents(tmpDir);
-    expect(result.get("negturns")!.maxTurns).toBeUndefined();
-  });
+		const result = loadCustomAgents(tmpDir);
+		expect(result.get("negturns")!.maxTurns).toBeUndefined();
+	});
 
-  it("handles prompt_mode: append", () => {
-    writeAgent("appender", `---
+	it("handles prompt_mode: append", () => {
+		writeAgent(
+			"appender",
+			`---
 prompt_mode: append
 ---
 
-Extra instructions.`);
+Extra instructions.`,
+		);
 
-    const result = loadCustomAgents(tmpDir);
-    expect(result.get("appender")!.promptMode).toBe("append");
-  });
+		const result = loadCustomAgents(tmpDir);
+		expect(result.get("appender")!.promptMode).toBe("append");
+	});
 
-  it("defaults unknown prompt_mode to append", () => {
-    writeAgent("badmode", `---
+	it("defaults unknown prompt_mode to append", () => {
+		writeAgent(
+			"badmode",
+			`---
 prompt_mode: merge
 ---
 
-Unknown mode.`);
+Unknown mode.`,
+		);
 
-    const result = loadCustomAgents(tmpDir);
-    expect(result.get("badmode")!.promptMode).toBe("append");
-  });
+		const result = loadCustomAgents(tmpDir);
+		expect(result.get("badmode")!.promptMode).toBe("append");
+	});
 
-  it("loads multiple agents", () => {
-    writeAgent("agent1", `---
+	it("loads multiple agents", () => {
+		writeAgent(
+			"agent1",
+			`---
 description: First
 ---
 
-First agent.`);
-    writeAgent("agent2", `---
+First agent.`,
+		);
+		writeAgent(
+			"agent2",
+			`---
 description: Second
 ---
 
-Second agent.`);
+Second agent.`,
+		);
 
-    const result = loadCustomAgents(tmpDir);
-    expect(result.size).toBe(2);
-    expect(result.has("agent1")).toBe(true);
-    expect(result.has("agent2")).toBe(true);
-  });
+		const result = loadCustomAgents(tmpDir);
+		expect(result.size).toBe(2);
+		expect(result.has("agent1")).toBe(true);
+		expect(result.has("agent2")).toBe(true);
+	});
 
-  it("skips non-.md files", () => {
-    const dir = join(tmpDir, ".pi", "agents");
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "notes.txt"), "not an agent");
-    writeFileSync(join(dir, "real.md"), `---
+	it("skips non-.md files", () => {
+		const dir = join(tmpDir, ".pi", "agents");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "notes.txt"), "not an agent");
+		writeFileSync(
+			join(dir, "real.md"),
+			`---
 description: Real Agent
 ---
 
-Real.`);
+Real.`,
+		);
 
-    const result = loadCustomAgents(tmpDir);
-    expect(result.size).toBe(1);
-    expect(result.has("real")).toBe(true);
-  });
+		const result = loadCustomAgents(tmpDir);
+		expect(result.size).toBe(1);
+		expect(result.has("real")).toBe(true);
+	});
 
-  it("allows agents with names matching defaults (overrides them)", () => {
-    writeAgent("Explore", `---
+	it("allows agents with names matching defaults (overrides them)", () => {
+		writeAgent(
+			"Explore",
+			`---
 description: Custom Explore
 ---
 
-Custom explore agent.`);
-    writeAgent("custom", `---
+Custom explore agent.`,
+		);
+		writeAgent(
+			"custom",
+			`---
 description: Custom Agent
 ---
 
-Should be loaded.`);
+Should be loaded.`,
+		);
 
-    const result = loadCustomAgents(tmpDir);
-    expect(result.has("Explore")).toBe(true);
-    expect(result.get("Explore")!.description).toBe("Custom Explore");
-    expect(result.has("custom")).toBe(true);
-  });
+		const result = loadCustomAgents(tmpDir);
+		expect(result.has("Explore")).toBe(true);
+		expect(result.get("Explore")!.description).toBe("Custom Explore");
+		expect(result.has("custom")).toBe(true);
+	});
 
-  it("handles empty body with frontmatter", () => {
-    writeAgent("nobody", `---
+	it("handles empty body with frontmatter", () => {
+		writeAgent(
+			"nobody",
+			`---
 description: No body
 tools: read
 ---
-`);
+`,
+		);
 
-    const result = loadCustomAgents(tmpDir);
-    expect(result.get("nobody")!.systemPrompt).toBe("");
-  });
+		const result = loadCustomAgents(tmpDir);
+		expect(result.get("nobody")!.systemPrompt).toBe("");
+	});
 
-  it("handles enabled: false frontmatter", () => {
-    writeAgent("disabled", `---
+	it("handles enabled: false frontmatter", () => {
+		writeAgent(
+			"disabled",
+			`---
 enabled: false
 ---
-`);
+`,
+		);
 
-    const result = loadCustomAgents(tmpDir);
-    const agent = result.get("disabled")!;
-    expect(agent.enabled).toBe(false);
-  });
+		const result = loadCustomAgents(tmpDir);
+		const agent = result.get("disabled")!;
+		expect(agent.enabled).toBe(false);
+	});
 
-  it("parses display_name frontmatter", () => {
-    writeAgent("myagent", `---
+	it("parses display_name frontmatter", () => {
+		writeAgent(
+			"myagent",
+			`---
 description: My Agent
 display_name: MyAgent
 ---
 
-Agent prompt.`);
+Agent prompt.`,
+		);
 
-    const result = loadCustomAgents(tmpDir);
-    expect(result.get("myagent")!.displayName).toBe("MyAgent");
-  });
+		const result = loadCustomAgents(tmpDir);
+		expect(result.get("myagent")!.displayName).toBe("MyAgent");
+	});
 
-  it("honors PI_CODING_AGENT_DIR for global custom agent discovery", () => {
-    const altAgentDir = mkdtempSync(join(tmpdir(), "pi-alt-agent-"));
-    const originalEnv = process.env.PI_CODING_AGENT_DIR;
-    process.env.PI_CODING_AGENT_DIR = altAgentDir;
-    try {
-      const globalAgentsDir = join(altAgentDir, "agents");
-      mkdirSync(globalAgentsDir, { recursive: true });
-      writeFileSync(
-        join(globalAgentsDir, "via-env.md"),
-        "---\ndescription: Discovered via env var\n---\n\nTest body.",
-      );
+	it("honors PI_CODING_AGENT_DIR for global custom agent discovery", () => {
+		const altAgentDir = mkdtempSync(join(tmpdir(), "pi-alt-agent-"));
+		const originalEnv = process.env.PI_CODING_AGENT_DIR;
+		process.env.PI_CODING_AGENT_DIR = altAgentDir;
+		try {
+			const globalAgentsDir = join(altAgentDir, "agents");
+			mkdirSync(globalAgentsDir, { recursive: true });
+			writeFileSync(join(globalAgentsDir, "via-env.md"), "---\ndescription: Discovered via env var\n---\n\nTest body.");
 
-      const result = loadCustomAgents(tmpDir);
+			const result = loadCustomAgents(tmpDir);
 
-      // Agent is found at $PI_CODING_AGENT_DIR/agents, not at $HOME/.pi/agent/agents
-      expect(result.has("via-env")).toBe(true);
-      expect(result.get("via-env")!.description).toBe("Discovered via env var");
-    } finally {
-      if (originalEnv == null) delete process.env.PI_CODING_AGENT_DIR;
-      else process.env.PI_CODING_AGENT_DIR = originalEnv;
-      rmSync(altAgentDir, { recursive: true, force: true });
-    }
-  });
+			// Agent is found at $PI_CODING_AGENT_DIR/agents, not at $HOME/.pi/agent/agents
+			expect(result.has("via-env")).toBe(true);
+			expect(result.get("via-env")!.description).toBe("Discovered via env var");
+		} finally {
+			if (originalEnv == null) delete process.env.PI_CODING_AGENT_DIR;
+			else process.env.PI_CODING_AGENT_DIR = originalEnv;
+			rmSync(altAgentDir, { recursive: true, force: true });
+		}
+	});
 });

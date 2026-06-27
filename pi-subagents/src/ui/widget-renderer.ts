@@ -47,11 +47,7 @@ export interface WidgetAgent {
 // ── Per-agent rendering ──────────────────────────────────────────────────────
 
 /** Render a single finished agent line (no tree connector prefix). */
-export function renderFinishedLine(
-	agent: WidgetAgent,
-	registry: AgentConfigLookup,
-	theme: Theme,
-): string {
+export function renderFinishedLine(agent: WidgetAgent, registry: AgentConfigLookup, theme: Theme): string {
 	const name = getDisplayName(agent.type, registry);
 	const modeLabel = getPromptModeLabel(agent.type, registry);
 	const duration = formatMs((agent.completedAt ?? Date.now()) - agent.startedAt);
@@ -134,11 +130,11 @@ function categorizeAgents(
 	shouldShowFinished: (agentId: string, status: string) => boolean,
 ): AgentCategories {
 	return {
-		running: agents.filter(a => a.status === "running"),
-		queued: agents.filter(a => a.status === "queued"),
+		running: agents.filter((a) => a.status === "running"),
+		queued: agents.filter((a) => a.status === "queued"),
 		finished: agents.filter(
-			a => a.status !== "running" && a.status !== "queued" && a.completedAt != null
-				&& shouldShowFinished(a.id, a.status),
+			(a) =>
+				a.status !== "running" && a.status !== "queued" && a.completedAt != null && shouldShowFinished(a.id, a.status),
 		),
 	};
 }
@@ -171,9 +167,13 @@ function buildSections(
 		]);
 	}
 
-	const queuedLine = categories.queued.length > 0
-		? truncate(theme.fg("dim", "\u251C\u2500") + ` ${theme.fg("muted", "\u25E6")} ${theme.fg("dim", `${categories.queued.length} queued`)}`)
-		: undefined;
+	const queuedLine =
+		categories.queued.length > 0
+			? truncate(
+					theme.fg("dim", "\u251C\u2500") +
+						` ${theme.fg("muted", "\u25E6")} ${theme.fg("dim", `${categories.queued.length} queued`)}`,
+				)
+			: undefined;
 
 	return { finishedLines, runningLines, queuedLine };
 }
@@ -246,7 +246,11 @@ function assembleOverflow(
 	if (hiddenRunning > 0) overflowParts.push(`${hiddenRunning} running`);
 	if (hiddenFinished > 0) overflowParts.push(`${hiddenFinished} finished`);
 	const overflowText = overflowParts.join(", ");
-	lines.push(truncate(theme.fg("dim", "\u2514\u2500") + ` ${theme.fg("dim", `+${hiddenRunning + hiddenFinished} more (${overflowText})`)}`));
+	lines.push(
+		truncate(
+			theme.fg("dim", "\u2514\u2500") + ` ${theme.fg("dim", `+${hiddenRunning + hiddenFinished} more (${overflowText})`)}`,
+		),
+	);
 	return lines;
 }
 

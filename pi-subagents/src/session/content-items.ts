@@ -11,8 +11,8 @@ import type { TextContent, ToolCall } from "@earendil-works/pi-ai";
 
 /** Extracted text parts and tool names from assistant message content. */
 export interface AssistantContentParts {
-  textParts: string[];
-  toolNames: string[];
+	textParts: string[];
+	toolNames: string[];
 }
 
 // ── Functions ─────────────────────────────────────────────────────────────────
@@ -24,8 +24,8 @@ export interface AssistantContentParts {
  * The Pi SDK's ToolCall.name is always present — no fallback chain needed.
  */
 export function getToolCallName(c: { type: string }): string {
-  if (c.type !== "toolCall") return "unknown";
-  return (c as ToolCall).name;
+	if (c.type !== "toolCall") return "unknown";
+	return (c as ToolCall).name;
 }
 
 /**
@@ -36,18 +36,16 @@ export function getToolCallName(c: { type: string }): string {
  * Pure data extraction — consumers apply their own presentation formatting.
  * Skips items of unknown types (e.g. thinking blocks, images) and empty text.
  */
-export function extractAssistantContent(
-  content: ReadonlyArray<{ type: string }>,
-): AssistantContentParts {
-  const textParts: string[] = [];
-  const toolNames: string[] = [];
-  for (const c of content) {
-    if (c.type === "text") {
-      const text = (c as TextContent).text;
-      if (text) textParts.push(text);
-    } else if (c.type === "toolCall") {
-      toolNames.push(getToolCallName(c));
-    }
-  }
-  return { textParts, toolNames };
+export function extractAssistantContent(content: ReadonlyArray<{ type: string }>): AssistantContentParts {
+	const textParts: string[] = [];
+	const toolNames: string[] = [];
+	for (const c of content) {
+		if (c.type === "text") {
+			const text = (c as TextContent).text;
+			if (text) textParts.push(text);
+		} else if (c.type === "toolCall") {
+			toolNames.push(getToolCallName(c));
+		}
+	}
+	return { textParts, toolNames };
 }

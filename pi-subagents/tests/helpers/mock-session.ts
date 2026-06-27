@@ -43,10 +43,7 @@ export function toAgentSession(session: MockSession): AgentSession {
  * turn-driving methods are inert vi.fn() spies, and `steer`/`dispose` delegate
  * to the underlying MockSession so existing session-spy assertions keep working.
  */
-export function createSubagentSessionStub(
-	session: MockSession = createMockSession(),
-	outputFile?: string,
-) {
+export function createSubagentSessionStub(session: MockSession = createMockSession(), outputFile?: string) {
 	return {
 		session,
 		outputFile,
@@ -63,8 +60,12 @@ export function createSubagentSessionStub(
 			tokens: { input: 0, output: 0, cacheWrite: 0 },
 			contextUsage: { percent: null as number | null },
 		})),
-		get messages(): readonly unknown[] { return session.messages; },
-		get agentMessages(): readonly unknown[] { return session.messages; },
+		get messages(): readonly unknown[] {
+			return session.messages;
+		},
+		get agentMessages(): readonly unknown[] {
+			return session.messages;
+		},
 		getToolDefinition: vi.fn((name: string): unknown => session.getToolDefinition(name)),
 	};
 }

@@ -50,23 +50,23 @@ import { join } from "node:path";
  * @public
  */
 export interface LayeredSettingsSource<T> {
-  /** Directory holding the global settings file (typically the Pi agent dir). */
-  agentDir: string;
-  /** Project root; the project file lives at `<cwd>/.pi/<filename>`. */
-  cwd: string;
-  /** Base filename for both layers, e.g. `"subagents.json"`. */
-  filename: string;
-  /**
-   * Validate and coerce parsed JSON into a partial settings object.
-   * Unknown or invalid fields should be silently dropped — return `{}` for
-   * unrecognised shapes. Never throw.
-   */
-  sanitize: (raw: unknown) => Partial<T>;
-  /**
-   * Short label used in the malformed-file warning prefix,
-   * e.g. `"pi-subagents"` → `"[pi-subagents] Ignoring malformed settings at …"`.
-   */
-  warnLabel: string;
+	/** Directory holding the global settings file (typically the Pi agent dir). */
+	agentDir: string;
+	/** Project root; the project file lives at `<cwd>/.pi/<filename>`. */
+	cwd: string;
+	/** Base filename for both layers, e.g. `"subagents.json"`. */
+	filename: string;
+	/**
+	 * Validate and coerce parsed JSON into a partial settings object.
+	 * Unknown or invalid fields should be silently dropped — return `{}` for
+	 * unrecognised shapes. Never throw.
+	 */
+	sanitize: (raw: unknown) => Partial<T>;
+	/**
+	 * Short label used in the malformed-file warning prefix,
+	 * e.g. `"pi-subagents"` → `"[pi-subagents] Ignoring malformed settings at …"`.
+	 */
+	warnLabel: string;
 }
 
 /**
@@ -82,10 +82,10 @@ export interface LayeredSettingsSource<T> {
  * @public
  */
 export function loadLayeredSettings<T>(source: LayeredSettingsSource<T>): Partial<T> {
-  const { agentDir, cwd, filename, sanitize, warnLabel } = source;
-  const global = readLayer(join(agentDir, filename), sanitize, warnLabel);
-  const project = readLayer(join(cwd, ".pi", filename), sanitize, warnLabel);
-  return { ...global, ...project };
+	const { agentDir, cwd, filename, sanitize, warnLabel } = source;
+	const global = readLayer(join(agentDir, filename), sanitize, warnLabel);
+	const project = readLayer(join(cwd, ".pi", filename), sanitize, warnLabel);
+	return { ...global, ...project };
 }
 
 // ── Private helpers ──────────────────────────────────────────────────────────
@@ -94,12 +94,12 @@ export function loadLayeredSettings<T>(source: LayeredSettingsSource<T>): Partia
  * Read one settings file. Missing → `{}` (silent). Malformed → `{}` + warn.
  */
 function readLayer<T>(path: string, sanitize: (raw: unknown) => Partial<T>, warnLabel: string): Partial<T> {
-  if (!existsSync(path)) return {};
-  try {
-    return sanitize(JSON.parse(readFileSync(path, "utf-8")));
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    console.warn(`[${warnLabel}] Ignoring malformed settings at ${path}: ${reason}`);
-    return {};
-  }
+	if (!existsSync(path)) return {};
+	try {
+		return sanitize(JSON.parse(readFileSync(path, "utf-8")));
+	} catch (err) {
+		const reason = err instanceof Error ? err.message : String(err);
+		console.warn(`[${warnLabel}] Ignoring malformed settings at ${path}: ${reason}`);
+		return {};
+	}
 }

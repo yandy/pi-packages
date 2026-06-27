@@ -8,6 +8,6 @@
 
 /** Normalize max turns. undefined or 0 = unlimited, otherwise minimum 1. */
 export function normalizeMaxTurns(n: number | undefined): number | undefined {
-  if (n == null || n === 0) return undefined;
-  return Math.max(1, n);
+	if (n == null || n === 0) return undefined;
+	return Math.max(1, n);
 }

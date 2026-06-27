@@ -1,11 +1,4 @@
-import {
-  join,
-  normalize,
-  posix as posixPath,
-  relative,
-  resolve,
-  win32 as winPath,
-} from "node:path";
+import { join, normalize, posix as posixPath, relative, resolve, win32 as winPath } from "node:path";
 
 import { canonicalizePath } from "./canonicalize-path";
 import { expandHomePath } from "./expand-home";
@@ -13,23 +6,18 @@ import type { ToolAccessExtractorLookup } from "./tool-access-extractor-registry
 import { getNonEmptyString, toRecord } from "./value-guards";
 import { wildcardMatch } from "./wildcard-matcher";
 
-export function normalizePathForComparison(
-  pathValue: string,
-  cwd: string,
-): string {
-  const trimmed = pathValue.trim().replace(/^['"]|['"]$/g, "");
-  if (!trimmed) {
-    return "";
-  }
+export function normalizePathForComparison(pathValue: string, cwd: string): string {
+	const trimmed = pathValue.trim().replace(/^['"]|['"]$/g, "");
+	if (!trimmed) {
+		return "";
+	}
 
-  let normalizedPath = trimmed.startsWith("@") ? trimmed.slice(1) : trimmed;
-  normalizedPath = expandHomePath(normalizedPath);
+	let normalizedPath = trimmed.startsWith("@") ? trimmed.slice(1) : trimmed;
+	normalizedPath = expandHomePath(normalizedPath);
 
-  const absolutePath = resolve(cwd, normalizedPath);
-  const normalizedAbsolutePath = normalize(absolutePath);
-  return process.platform === "win32"
-    ? normalizedAbsolutePath.toLowerCase()
-    : normalizedAbsolutePath;
+	const absolutePath = resolve(cwd, normalizedPath);
+	const normalizedAbsolutePath = normalize(absolutePath);
+	return process.platform === "win32" ? normalizedAbsolutePath.toLowerCase() : normalizedAbsolutePath;
 }
 
 /**
@@ -42,39 +30,34 @@ export function normalizePathForComparison(
  * behavior is testable on a POSIX CI.
  */
 export function isPathWithinDirectory(
-  pathValue: string,
-  directory: string,
-  platform: NodeJS.Platform = process.platform,
+	pathValue: string,
+	directory: string,
+	platform: NodeJS.Platform = process.platform,
 ): boolean {
-  if (!pathValue || !directory) {
-    return false;
-  }
+	if (!pathValue || !directory) {
+		return false;
+	}
 
-  if (pathValue === directory) {
-    return true;
-  }
+	if (pathValue === directory) {
+		return true;
+	}
 
-  const impl = platform === "win32" ? winPath : posixPath;
-  const rel = impl.relative(directory, pathValue);
-  return (
-    rel !== "" &&
-    rel !== ".." &&
-    !rel.startsWith(`..${impl.sep}`) &&
-    !impl.isAbsolute(rel)
-  );
+	const impl = platform === "win32" ? winPath : posixPath;
+	const rel = impl.relative(directory, pathValue);
+	return rel !== "" && rel !== ".." && !rel.startsWith(`..${impl.sep}`) && !impl.isAbsolute(rel);
 }
 
 export interface PathPolicyValueOptions {
-  /**
-   * Current Pi working directory. When provided, returned values include a
-   * project-relative alias for paths that resolve inside this directory.
-   */
-  cwd?: string;
-  /**
-   * Directory used to resolve `pathValue` into an absolute policy value.
-   * Defaults to `cwd`. Bash uses this for tokens seen after a literal `cd`.
-   */
-  resolveBase?: string;
+	/**
+	 * Current Pi working directory. When provided, returned values include a
+	 * project-relative alias for paths that resolve inside this directory.
+	 */
+	cwd?: string;
+	/**
+	 * Directory used to resolve `pathValue` into an absolute policy value.
+	 * Defaults to `cwd`. Bash uses this for tokens seen after a literal `cd`.
+	 */
+	resolveBase?: string;
 }
 
 /**
@@ -86,10 +69,10 @@ export interface PathPolicyValueOptions {
  * strip the OpenCode-style leading `@`, and expand `~` / `$HOME`.
  */
 export function normalizePathPolicyLiteral(pathValue: string): string {
-  const trimmed = pathValue.trim().replace(/^['"]|['"]$/g, "");
-  if (!trimmed) return "";
-  const unprefixed = trimmed.startsWith("@") ? trimmed.slice(1) : trimmed;
-  return expandHomePath(unprefixed);
+	const trimmed = pathValue.trim().replace(/^['"]|['"]$/g, "");
+	if (!trimmed) return "";
+	const unprefixed = trimmed.startsWith("@") ? trimmed.slice(1) : trimmed;
+	return expandHomePath(unprefixed);
 }
 
 /**
@@ -99,49 +82,35 @@ export function normalizePathPolicyLiteral(pathValue: string): string {
  * base is available. The later values preserve project-relative and raw
  * relative forms so existing rules like `src/*` and `*.env` continue to match.
  */
-export function getPathPolicyValues(
-  pathValue: string,
-  options: PathPolicyValueOptions = {},
-): string[] {
-  const literal = normalizePathPolicyLiteral(pathValue);
-  if (!literal) return [];
-  if (literal === "*") return ["*"];
+export function getPathPolicyValues(pathValue: string, options: PathPolicyValueOptions = {}): string[] {
+	const literal = normalizePathPolicyLiteral(pathValue);
+	if (!literal) return [];
+	if (literal === "*") return ["*"];
 
-  return [
-    ...new Set([...getAbsolutePathPolicyValues(pathValue, options), literal]),
-  ];
+	return [...new Set([...getAbsolutePathPolicyValues(pathValue, options), literal])];
 }
 
-function getAbsolutePathPolicyValues(
-  pathValue: string,
-  options: PathPolicyValueOptions,
-): string[] {
-  const resolveBase = options.resolveBase ?? options.cwd;
-  if (!resolveBase) return [];
+function getAbsolutePathPolicyValues(pathValue: string, options: PathPolicyValueOptions): string[] {
+	const resolveBase = options.resolveBase ?? options.cwd;
+	if (!resolveBase) return [];
 
-  const absolute = normalizePathForComparison(pathValue, resolveBase);
-  if (!absolute) return [];
+	const absolute = normalizePathForComparison(pathValue, resolveBase);
+	if (!absolute) return [];
 
-  return [absolute, ...getCwdRelativePathPolicyValues(absolute, options.cwd)];
+	return [absolute, ...getCwdRelativePathPolicyValues(absolute, options.cwd)];
 }
 
-function getCwdRelativePathPolicyValues(
-  absolute: string,
-  cwd: string | undefined,
-): string[] {
-  if (!cwd) return [];
+function getCwdRelativePathPolicyValues(absolute: string, cwd: string | undefined): string[] {
+	if (!cwd) return [];
 
-  const normalizedCwd = normalizePathForComparison(cwd, cwd);
-  if (!normalizedCwd) return [];
-  if (
-    absolute !== normalizedCwd &&
-    !isPathWithinDirectory(absolute, normalizedCwd)
-  ) {
-    return [];
-  }
+	const normalizedCwd = normalizePathForComparison(cwd, cwd);
+	if (!normalizedCwd) return [];
+	if (absolute !== normalizedCwd && !isPathWithinDirectory(absolute, normalizedCwd)) {
+		return [];
+	}
 
-  const relativeValue = relative(normalizedCwd, absolute);
-  return relativeValue ? [relativeValue] : [];
+	const relativeValue = relative(normalizedCwd, absolute);
+	return relativeValue ? [relativeValue] : [];
 }
 
 /**
@@ -149,10 +118,10 @@ function getCwdRelativePathPolicyValues(
  * These are OS device files: read returns EOF or process streams, write discards or goes to process streams.
  */
 export const SAFE_SYSTEM_PATHS: ReadonlySet<string> = new Set([
-  "/dev/null",
-  "/dev/stdin",
-  "/dev/stdout",
-  "/dev/stderr",
+	"/dev/null",
+	"/dev/stdin",
+	"/dev/stdout",
+	"/dev/stderr",
 ]);
 
 /**
@@ -160,49 +129,30 @@ export const SAFE_SYSTEM_PATHS: ReadonlySet<string> = new Set([
  * that should never trigger external-directory checks.
  */
 export function isSafeSystemPath(normalizedPath: string): boolean {
-  return SAFE_SYSTEM_PATHS.has(normalizedPath);
+	return SAFE_SYSTEM_PATHS.has(normalizedPath);
 }
 
 /**
  * File tools that only read — never write — the filesystem.
  * Only these tools are eligible for the Pi infrastructure auto-allow.
  */
-export const READ_ONLY_PATH_BEARING_TOOLS: ReadonlySet<string> = new Set([
-  "read",
-  "find",
-  "grep",
-  "ls",
-]);
+export const READ_ONLY_PATH_BEARING_TOOLS: ReadonlySet<string> = new Set(["read", "find", "grep", "ls"]);
 
-export const PATH_BEARING_TOOLS = new Set([
-  "read",
-  "write",
-  "edit",
-  "find",
-  "grep",
-  "ls",
-]);
+export const PATH_BEARING_TOOLS = new Set(["read", "write", "edit", "find", "grep", "ls"]);
 
 /**
  * Surfaces whose patterns are matched against filesystem paths and therefore
  * fold case (and separators) on Windows: the path-bearing tools plus the
  * cross-cutting `path` gate and the `external_directory` boundary gate.
  */
-export const PATH_SURFACES: ReadonlySet<string> = new Set([
-  ...PATH_BEARING_TOOLS,
-  "external_directory",
-  "path",
-]);
+export const PATH_SURFACES: ReadonlySet<string> = new Set([...PATH_BEARING_TOOLS, "external_directory", "path"]);
 
-export function getPathBearingToolPath(
-  toolName: string,
-  input: unknown,
-): string | null {
-  if (!PATH_BEARING_TOOLS.has(toolName)) {
-    return null;
-  }
+export function getPathBearingToolPath(toolName: string, input: unknown): string | null {
+	if (!PATH_BEARING_TOOLS.has(toolName)) {
+		return null;
+	}
 
-  return getNonEmptyString(toRecord(input).path);
+	return getNonEmptyString(toRecord(input).path);
 }
 
 /**
@@ -219,30 +169,30 @@ export function getPathBearingToolPath(
  *   default `input.path` convention.
  */
 export function getToolInputPath(
-  toolName: string,
-  input: unknown,
-  extractors?: ToolAccessExtractorLookup,
+	toolName: string,
+	input: unknown,
+	extractors?: ToolAccessExtractorLookup,
 ): string | null {
-  if (toolName === "bash") {
-    return null;
-  }
+	if (toolName === "bash") {
+		return null;
+	}
 
-  const record = toRecord(input);
+	const record = toRecord(input);
 
-  if (PATH_BEARING_TOOLS.has(toolName)) {
-    return getNonEmptyString(record.path);
-  }
+	if (PATH_BEARING_TOOLS.has(toolName)) {
+		return getNonEmptyString(record.path);
+	}
 
-  if (toolName === "mcp") {
-    return getNonEmptyString(toRecord(record.arguments).path);
-  }
+	if (toolName === "mcp") {
+		return getNonEmptyString(toRecord(record.arguments).path);
+	}
 
-  const custom = extractors?.get(toolName);
-  if (custom) {
-    return getNonEmptyString(custom(record));
-  }
+	const custom = extractors?.get(toolName);
+	if (custom) {
+		return getNonEmptyString(custom(record));
+	}
 
-  return getNonEmptyString(record.path);
+	return getNonEmptyString(record.path);
 }
 
 /**
@@ -250,33 +200,27 @@ export function getToolInputPath(
  * `realpathSync` (best-effort). Use this for containment decisions where the
  * OS-followed path matters, not for pattern matching.
  */
-export function canonicalNormalizePathForComparison(
-  pathValue: string,
-  cwd: string,
-): string {
-  const lexical = normalizePathForComparison(pathValue, cwd);
-  if (!lexical) return "";
-  const canonical = canonicalizePath(lexical);
-  return process.platform === "win32" ? canonical.toLowerCase() : canonical;
+export function canonicalNormalizePathForComparison(pathValue: string, cwd: string): string {
+	const lexical = normalizePathForComparison(pathValue, cwd);
+	if (!lexical) return "";
+	const canonical = canonicalizePath(lexical);
+	return process.platform === "win32" ? canonical.toLowerCase() : canonical;
 }
 
-export function isPathOutsideWorkingDirectory(
-  pathValue: string,
-  cwd: string,
-): boolean {
-  const normalizedCwd = canonicalNormalizePathForComparison(cwd, cwd);
-  const normalizedPath = canonicalNormalizePathForComparison(pathValue, cwd);
-  if (!normalizedCwd || !normalizedPath) {
-    return false;
-  }
-  if (isSafeSystemPath(normalizedPath)) {
-    return false;
-  }
-  return !isPathWithinDirectory(normalizedPath, normalizedCwd);
+export function isPathOutsideWorkingDirectory(pathValue: string, cwd: string): boolean {
+	const normalizedCwd = canonicalNormalizePathForComparison(cwd, cwd);
+	const normalizedPath = canonicalNormalizePathForComparison(pathValue, cwd);
+	if (!normalizedCwd || !normalizedPath) {
+		return false;
+	}
+	if (isSafeSystemPath(normalizedPath)) {
+		return false;
+	}
+	return !isPathWithinDirectory(normalizedPath, normalizedCwd);
 }
 
 function containsGlobChars(value: string): boolean {
-  return value.includes("*") || value.includes("?");
+	return value.includes("*") || value.includes("?");
 }
 
 /**
@@ -295,41 +239,37 @@ function containsGlobChars(value: string): boolean {
  * follow working-directory changes without a runtime rebuild.
  */
 export function isPiInfrastructureRead(
-  toolName: string,
-  normalizedPath: string,
-  infrastructureDirs: readonly string[],
-  cwd: string,
-  platform: NodeJS.Platform = process.platform,
+	toolName: string,
+	normalizedPath: string,
+	infrastructureDirs: readonly string[],
+	cwd: string,
+	platform: NodeJS.Platform = process.platform,
 ): boolean {
-  if (!READ_ONLY_PATH_BEARING_TOOLS.has(toolName)) {
-    return false;
-  }
+	if (!READ_ONLY_PATH_BEARING_TOOLS.has(toolName)) {
+		return false;
+	}
 
-  // On Windows the path value is canonicalized + lowercased; fold case (and
-  // separators) so mixed-case infra dirs and glob patterns still match.
-  const matchOptions =
-    platform === "win32"
-      ? { caseInsensitive: true, windowsSeparators: true }
-      : undefined;
+	// On Windows the path value is canonicalized + lowercased; fold case (and
+	// separators) so mixed-case infra dirs and glob patterns still match.
+	const matchOptions = platform === "win32" ? { caseInsensitive: true, windowsSeparators: true } : undefined;
 
-  for (const dir of infrastructureDirs) {
-    if (containsGlobChars(dir)) {
-      if (wildcardMatch(dir, normalizedPath, matchOptions)) return true;
-    } else {
-      if (isPathWithinDirectory(normalizedPath, expandHomePath(dir), platform))
-        return true;
-    }
-  }
+	for (const dir of infrastructureDirs) {
+		if (containsGlobChars(dir)) {
+			if (wildcardMatch(dir, normalizedPath, matchOptions)) return true;
+		} else {
+			if (isPathWithinDirectory(normalizedPath, expandHomePath(dir), platform)) return true;
+		}
+	}
 
-  // Project-local Pi packages — checked fresh every call so CWD changes work.
-  const projectNpmDir = join(cwd, ".pi", "npm");
-  const projectGitDir = join(cwd, ".pi", "git");
-  if (isPathWithinDirectory(normalizedPath, projectNpmDir, platform)) {
-    return true;
-  }
-  if (isPathWithinDirectory(normalizedPath, projectGitDir, platform)) {
-    return true;
-  }
+	// Project-local Pi packages — checked fresh every call so CWD changes work.
+	const projectNpmDir = join(cwd, ".pi", "npm");
+	const projectGitDir = join(cwd, ".pi", "git");
+	if (isPathWithinDirectory(normalizedPath, projectNpmDir, platform)) {
+		return true;
+	}
+	if (isPathWithinDirectory(normalizedPath, projectGitDir, platform)) {
+		return true;
+	}
 
-  return false;
+	return false;
 }

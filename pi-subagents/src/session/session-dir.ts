@@ -20,19 +20,19 @@ import { basename, dirname, join } from "node:path";
  * Falls back to a temp directory when the parent session is not persisted
  * (e.g. API/headless mode where the parent uses `SessionManager.inMemory()`).
  */
-export function deriveSubagentSessionDir(
-  parentSessionFile: string | undefined,
-  cwd: string,
-): string {
-  if (parentSessionFile) {
-    const dir = dirname(parentSessionFile);
-    const base = basename(parentSessionFile, ".jsonl");
-    return join(dir, base, "tasks");
-  }
+export function deriveSubagentSessionDir(parentSessionFile: string | undefined, cwd: string): string {
+	if (parentSessionFile) {
+		const dir = dirname(parentSessionFile);
+		const base = basename(parentSessionFile, ".jsonl");
+		return join(dir, base, "tasks");
+	}
 
-  // Fallback: use a temp directory keyed by uid and cwd so different
-  // projects don't collide when the parent session is not persisted.
-  const encoded = cwd.replace(/[/\\]/g, "-").replace(/^[A-Za-z]:-/, "").replace(/^-+/, "");
-  const root = join(tmpdir(), `pi-subagents-${process.getuid?.() ?? 0}`);
-  return join(root, encoded, "tasks");
+	// Fallback: use a temp directory keyed by uid and cwd so different
+	// projects don't collide when the parent session is not persisted.
+	const encoded = cwd
+		.replace(/[/\\]/g, "-")
+		.replace(/^[A-Za-z]:-/, "")
+		.replace(/^-+/, "");
+	const root = join(tmpdir(), `pi-subagents-${process.getuid?.() ?? 0}`);
+	return join(root, encoded, "tasks");
 }

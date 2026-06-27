@@ -30,9 +30,7 @@ export class SteerTool {
 	) {
 		const record = this.manager.getRecord(params.agent_id);
 		if (!record) {
-			return textResult(
-				`Agent not found: "${params.agent_id}". It may have been cleaned up.`,
-			);
+			return textResult(`Agent not found: "${params.agent_id}". It may have been cleaned up.`);
 		}
 		if (record.status !== "running") {
 			return textResult(
@@ -52,20 +50,15 @@ export class SteerTool {
 			const stateParts: string[] = [];
 			if (tokens) stateParts.push(tokens);
 			stateParts.push(`${record.toolUses} tool ${record.toolUses === 1 ? "use" : "uses"}`);
-			if (contextPercent !== null)
-				stateParts.push(`context ${Math.round(contextPercent)}% full`);
+			if (contextPercent !== null) stateParts.push(`context ${Math.round(contextPercent)}% full`);
 			if (record.compactionCount)
-				stateParts.push(
-					`${record.compactionCount} compaction${record.compactionCount === 1 ? "" : "s"}`,
-				);
+				stateParts.push(`${record.compactionCount} compaction${record.compactionCount === 1 ? "" : "s"}`);
 			return textResult(
 				`Steering message sent to agent ${record.id}. The agent will process it after its current tool execution.\n` +
 					`Current state: ${stateParts.join(" · ")}`,
 			);
 		} catch (err) {
-			return textResult(
-				`Failed to steer agent: ${err instanceof Error ? err.message : String(err)}`,
-			);
+			return textResult(`Failed to steer agent: ${err instanceof Error ? err.message : String(err)}`);
 		}
 	}
 
@@ -73,8 +66,7 @@ export class SteerTool {
 		return defineTool({
 			name: "steer_subagent" as const,
 			label: "Steer Agent",
-			promptSnippet:
-				"steer_subagent: Send a mid-run message to redirect a running background agent.",
+			promptSnippet: "steer_subagent: Send a mid-run message to redirect a running background agent.",
 			description:
 				"Send a steering message to a running agent. The message will interrupt the agent after its current tool execution " +
 				"and be injected into its conversation, allowing you to redirect its work mid-run. Only works on running agents.",
@@ -83,8 +75,7 @@ export class SteerTool {
 					description: "The agent ID to steer (must be currently running).",
 				}),
 				message: Type.String({
-					description:
-						"The steering message to send. This will appear as a user message in the agent's conversation.",
+					description: "The steering message to send. This will appear as a user message in the agent's conversation.",
 				}),
 			}),
 			execute: (

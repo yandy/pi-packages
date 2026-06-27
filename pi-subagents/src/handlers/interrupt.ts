@@ -11,12 +11,12 @@
 
 /** Narrow manager interface — only the method the interrupt handler calls. */
 export interface InterruptManager {
-  abortAll(): number;
+	abortAll(): number;
 }
 
 /** Minimal context shape — only the field the handler reads. */
 interface InterruptCtx {
-  signal: AbortSignal | undefined;
+	signal: AbortSignal | undefined;
 }
 
 /**
@@ -26,24 +26,24 @@ interface InterruptCtx {
  * run's signal triggers a detach-and-rewire. The `abort` listener is one-shot.
  */
 export class InterruptHandler {
-  private latched?: AbortSignal;
-  private detach?: () => void;
+	private latched?: AbortSignal;
+	private detach?: () => void;
 
-  constructor(private readonly manager: InterruptManager) {}
+	constructor(private readonly manager: InterruptManager) {}
 
-  handleTurnStart(ctx: InterruptCtx): void {
-    const signal = ctx.signal;
-    if (signal === this.latched) return;
+	handleTurnStart(ctx: InterruptCtx): void {
+		const signal = ctx.signal;
+		if (signal === this.latched) return;
 
-    this.detach?.();
-    this.detach = undefined;
-    this.latched = signal;
-    if (!signal) return;
+		this.detach?.();
+		this.detach = undefined;
+		this.latched = signal;
+		if (!signal) return;
 
-    const onAbort = (): void => {
-      this.manager.abortAll();
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-    this.detach = () => signal.removeEventListener("abort", onAbort);
-  }
+		const onAbort = (): void => {
+			this.manager.abortAll();
+		};
+		signal.addEventListener("abort", onAbort, { once: true });
+		this.detach = () => signal.removeEventListener("abort", onAbort);
+	}
 }

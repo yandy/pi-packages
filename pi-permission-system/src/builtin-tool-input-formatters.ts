@@ -5,10 +5,7 @@
  * through exactly the same path a third-party extension would use.
  */
 
-import type {
-  ToolInputFormatter,
-  ToolInputFormatterRegistry,
-} from "./tool-input-formatter-registry";
+import type { ToolInputFormatter, ToolInputFormatterRegistry } from "./tool-input-formatter-registry";
 import { truncateInlineText } from "./tool-input-preview";
 import { toRecord } from "./value-guards";
 
@@ -28,19 +25,19 @@ const MCP_ARG_VALUE_MAX_LENGTH = 60;
  * - Everything else: plain string conversion.
  */
 function renderArgValue(value: unknown): string {
-  if (typeof value === "string") {
-    return `"${truncateInlineText(value, MCP_ARG_VALUE_MAX_LENGTH)}"`;
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.length} items]`;
-  }
-  if (typeof value === "object" && value !== null) {
-    return "{…}";
-  }
-  return String(value);
+	if (typeof value === "string") {
+		return `"${truncateInlineText(value, MCP_ARG_VALUE_MAX_LENGTH)}"`;
+	}
+	if (typeof value === "number" || typeof value === "boolean") {
+		return String(value);
+	}
+	if (Array.isArray(value)) {
+		return `[${value.length} items]`;
+	}
+	if (typeof value === "object" && value !== null) {
+		return "{…}";
+	}
+	return String(value);
 }
 
 /**
@@ -52,21 +49,14 @@ function renderArgValue(value: unknown): string {
  * Intended to be registered as the `"mcp"` formatter via
  * `registerBuiltinToolInputFormatters`.
  */
-export const formatMcpInputForPrompt: ToolInputFormatter = (
-  input: Record<string, unknown>,
-): string | undefined => {
-  const args = toRecord(input.arguments);
-  const entries = Object.entries(args);
-  if (entries.length === 0) return undefined;
+export const formatMcpInputForPrompt: ToolInputFormatter = (input: Record<string, unknown>): string | undefined => {
+	const args = toRecord(input.arguments);
+	const entries = Object.entries(args);
+	if (entries.length === 0) return undefined;
 
-  const parts = entries.map(
-    ([key, value]) => `${key}: ${renderArgValue(value)}`,
-  );
-  const summary = truncateInlineText(
-    parts.join(", "),
-    MCP_ARGS_SUMMARY_MAX_LENGTH,
-  );
-  return `with ${summary}`;
+	const parts = entries.map(([key, value]) => `${key}: ${renderArgValue(value)}`);
+	const summary = truncateInlineText(parts.join(", "), MCP_ARGS_SUMMARY_MAX_LENGTH);
+	return `with ${summary}`;
 };
 
 /**
@@ -75,8 +65,6 @@ export const formatMcpInputForPrompt: ToolInputFormatter = (
  * Called once from the extension factory (`index.ts`) immediately after the
  * registry is constructed, before any third-party registration can occur.
  */
-export function registerBuiltinToolInputFormatters(
-  registry: ToolInputFormatterRegistry,
-): void {
-  registry.register("mcp", formatMcpInputForPrompt);
+export function registerBuiltinToolInputFormatters(registry: ToolInputFormatterRegistry): void {
+	registry.register("mcp", formatMcpInputForPrompt);
 }

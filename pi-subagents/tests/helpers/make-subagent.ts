@@ -55,8 +55,22 @@ export interface TestSubagentOptions {
 }
 
 export function createTestSubagent(overrides: TestSubagentOptions = {}): Subagent {
-	const { id, type, description, invocation, execution, toolCallId, toolUses, lifetimeUsage, compactionCount, turnCount, activeTools, responseText, maxTurns, ...stateOverrides } =
-		overrides;
+	const {
+		id,
+		type,
+		description,
+		invocation,
+		execution,
+		toolCallId,
+		toolUses,
+		lifetimeUsage,
+		compactionCount,
+		turnCount,
+		activeTools,
+		responseText,
+		maxTurns,
+		...stateOverrides
+	} = overrides;
 	const state = new SubagentState({
 		status: "completed",
 		result: "All done.",
@@ -69,10 +83,12 @@ export function createTestSubagent(overrides: TestSubagentOptions = {}): Subagen
 		type: type ?? "general-purpose",
 		description: description ?? "Test task",
 		invocation,
-		execution: execution ?? makeStubExecution({
-			...(toolCallId ? { parentSession: { toolCallId } } : {}),
-			...(maxTurns !== undefined ? { maxTurns } : {}),
-		}),
+		execution:
+			execution ??
+			makeStubExecution({
+				...(toolCallId ? { parentSession: { toolCallId } } : {}),
+				...(maxTurns !== undefined ? { maxTurns } : {}),
+			}),
 		state,
 	});
 	// Apply stat overrides via mutation methods

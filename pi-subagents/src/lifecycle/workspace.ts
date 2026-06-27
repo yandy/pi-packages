@@ -16,32 +16,32 @@ import type { AgentInvocation, SubagentType } from "../types";
 
 /** Context the core hands a provider when a child run starts. */
 export interface WorkspacePrepareContext {
-  agentId: string;
-  agentType: SubagentType;
-  baseCwd: string;
-  invocation?: AgentInvocation;
+	agentId: string;
+	agentType: SubagentType;
+	baseCwd: string;
+	invocation?: AgentInvocation;
 }
 
 /** Outcome the core reports to a workspace when the run ends. */
 export interface WorkspaceDisposeOutcome {
-  status: SubagentStatus;
-  description: string;
+	status: SubagentStatus;
+	description: string;
 }
 
 /** What dispose may hand back for the core to fold into the child result. */
 export interface WorkspaceDisposeResult {
-  /** Appended verbatim to the child's result text — the provider owns the wording. */
-  resultAddendum?: string;
+	/** Appended verbatim to the child's result text — the provider owns the wording. */
+	resultAddendum?: string;
 }
 
 /** A prepared working directory plus its bracketed teardown. Born complete. */
 export interface Workspace {
-  /** The working directory — already exists when the workspace is handed back. */
-  readonly cwd: string;
-  dispose(outcome: WorkspaceDisposeOutcome): WorkspaceDisposeResult | undefined;
+	/** The working directory — already exists when the workspace is handed back. */
+	readonly cwd: string;
+	dispose(outcome: WorkspaceDisposeOutcome): WorkspaceDisposeResult | undefined;
 }
 
 /** The single generative seam: supplies a child's workspace. */
 export interface WorkspaceProvider {
-  prepare(ctx: WorkspacePrepareContext): Promise<Workspace | undefined>;
+	prepare(ctx: WorkspacePrepareContext): Promise<Workspace | undefined>;
 }

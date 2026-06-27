@@ -7,20 +7,20 @@ import { getNonEmptyString, toRecord } from "./value-guards";
  * wins). `toArray` returns the ordered result as an independent copy.
  */
 export class McpTargetList {
-  private readonly targets: string[] = [];
+	private readonly targets: string[] = [];
 
-  add(value: string | null): void {
-    if (!value) {
-      return;
-    }
-    if (!this.targets.includes(value)) {
-      this.targets.push(value);
-    }
-  }
+	add(value: string | null): void {
+		if (!value) {
+			return;
+		}
+		if (!this.targets.includes(value)) {
+			this.targets.push(value);
+		}
+	}
 
-  toArray(): string[] {
-    return [...this.targets];
-  }
+	toArray(): string[] {
+		return [...this.targets];
+	}
 }
 
 /**
@@ -29,78 +29,76 @@ export class McpTargetList {
  * Returns `{ server, tool }` when the string contains exactly one colon with
  * non-empty text on both sides; otherwise returns `null`.
  */
-export function parseQualifiedMcpToolName(
-  value: string,
-): { server: string; tool: string } | null {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
+export function parseQualifiedMcpToolName(value: string): { server: string; tool: string } | null {
+	const trimmed = value.trim();
+	if (!trimmed) {
+		return null;
+	}
 
-  const colonIndex = trimmed.indexOf(":");
-  if (colonIndex <= 0 || colonIndex >= trimmed.length - 1) {
-    return null;
-  }
+	const colonIndex = trimmed.indexOf(":");
+	if (colonIndex <= 0 || colonIndex >= trimmed.length - 1) {
+		return null;
+	}
 
-  const server = trimmed.slice(0, colonIndex).trim();
-  const tool = trimmed.slice(colonIndex + 1).trim();
-  if (!server || !tool) {
-    return null;
-  }
+	const server = trimmed.slice(0, colonIndex).trim();
+	const tool = trimmed.slice(colonIndex + 1).trim();
+	if (!server || !tool) {
+		return null;
+	}
 
-  return { server, tool };
+	return { server, tool };
 }
 
 function addDerivedMcpServerTargets(
-  toolName: string,
-  configuredServerNames: readonly string[],
-  targets: McpTargetList,
+	toolName: string,
+	configuredServerNames: readonly string[],
+	targets: McpTargetList,
 ): void {
-  const trimmedToolName = toolName.trim();
-  if (!trimmedToolName) {
-    return;
-  }
+	const trimmedToolName = toolName.trim();
+	if (!trimmedToolName) {
+		return;
+	}
 
-  for (const serverName of configuredServerNames) {
-    const trimmedServerName = serverName.trim();
-    if (!trimmedServerName) {
-      continue;
-    }
+	for (const serverName of configuredServerNames) {
+		const trimmedServerName = serverName.trim();
+		if (!trimmedServerName) {
+			continue;
+		}
 
-    if (!trimmedToolName.endsWith(`_${trimmedServerName}`)) {
-      continue;
-    }
+		if (!trimmedToolName.endsWith(`_${trimmedServerName}`)) {
+			continue;
+		}
 
-    if (trimmedToolName.startsWith(`${trimmedServerName}_`)) {
-      continue;
-    }
+		if (trimmedToolName.startsWith(`${trimmedServerName}_`)) {
+			continue;
+		}
 
-    targets.add(`${trimmedServerName}_${trimmedToolName}`);
-    targets.add(`${trimmedServerName}:${trimmedToolName}`);
-    targets.add(trimmedServerName);
-  }
+		targets.add(`${trimmedServerName}_${trimmedToolName}`);
+		targets.add(`${trimmedServerName}:${trimmedToolName}`);
+		targets.add(trimmedServerName);
+	}
 }
 
 function pushMcpToolPermissionTargets(
-  rawReference: string,
-  serverHint: string | null,
-  configuredServerNames: readonly string[],
-  targets: McpTargetList,
+	rawReference: string,
+	serverHint: string | null,
+	configuredServerNames: readonly string[],
+	targets: McpTargetList,
 ): void {
-  const qualified = parseQualifiedMcpToolName(rawReference);
-  const resolvedServer = serverHint ?? qualified?.server ?? null;
-  const resolvedTool = qualified?.tool ?? rawReference;
+	const qualified = parseQualifiedMcpToolName(rawReference);
+	const resolvedServer = serverHint ?? qualified?.server ?? null;
+	const resolvedTool = qualified?.tool ?? rawReference;
 
-  if (resolvedServer) {
-    targets.add(`${resolvedServer}_${resolvedTool}`);
-    targets.add(`${resolvedServer}:${resolvedTool}`);
-    targets.add(resolvedServer);
-  } else {
-    addDerivedMcpServerTargets(resolvedTool, configuredServerNames, targets);
-  }
+	if (resolvedServer) {
+		targets.add(`${resolvedServer}_${resolvedTool}`);
+		targets.add(`${resolvedServer}:${resolvedTool}`);
+		targets.add(resolvedServer);
+	} else {
+		addDerivedMcpServerTargets(resolvedTool, configuredServerNames, targets);
+	}
 
-  targets.add(resolvedTool);
-  targets.add(rawReference);
+	targets.add(resolvedTool);
+	targets.add(rawReference);
 }
 
 /**
@@ -110,61 +108,53 @@ function pushMcpToolPermissionTargets(
  * Candidates are ordered from most-specific to least-specific so that
  * `evaluateFirst()` stops at the first non-default match.
  */
-export function createMcpPermissionTargets(
-  input: unknown,
-  configuredServerNames: readonly string[] = [],
-): string[] {
-  const record = toRecord(input);
-  const tool = getNonEmptyString(record.tool);
-  const server = getNonEmptyString(record.server);
-  const connect = getNonEmptyString(record.connect);
-  const describe = getNonEmptyString(record.describe);
-  const search = getNonEmptyString(record.search);
+export function createMcpPermissionTargets(input: unknown, configuredServerNames: readonly string[] = []): string[] {
+	const record = toRecord(input);
+	const tool = getNonEmptyString(record.tool);
+	const server = getNonEmptyString(record.server);
+	const connect = getNonEmptyString(record.connect);
+	const describe = getNonEmptyString(record.describe);
+	const search = getNonEmptyString(record.search);
 
-  const targets = new McpTargetList();
+	const targets = new McpTargetList();
 
-  if (tool) {
-    pushMcpToolPermissionTargets(tool, server, configuredServerNames, targets);
-    targets.add("mcp_call");
-    return targets.toArray();
-  }
+	if (tool) {
+		pushMcpToolPermissionTargets(tool, server, configuredServerNames, targets);
+		targets.add("mcp_call");
+		return targets.toArray();
+	}
 
-  if (connect) {
-    targets.add(`mcp_connect_${connect}`);
-    targets.add(connect);
-    targets.add("mcp_connect");
-    return targets.toArray();
-  }
+	if (connect) {
+		targets.add(`mcp_connect_${connect}`);
+		targets.add(connect);
+		targets.add("mcp_connect");
+		return targets.toArray();
+	}
 
-  if (describe) {
-    pushMcpToolPermissionTargets(
-      describe,
-      server,
-      configuredServerNames,
-      targets,
-    );
-    targets.add("mcp_describe");
-    return targets.toArray();
-  }
+	if (describe) {
+		pushMcpToolPermissionTargets(describe, server, configuredServerNames, targets);
+		targets.add("mcp_describe");
+		return targets.toArray();
+	}
 
-  if (search) {
-    if (server) {
-      targets.add(`mcp_server_${server}`);
-      targets.add(server);
-    }
+	if (search) {
+		if (server) {
+			targets.add(`mcp_server_${server}`);
+			targets.add(server);
+		}
 
-    targets.add(search);
-    targets.add("mcp_search");
-    return targets.toArray();
-  }
+		targets.add(search);
+		targets.add("mcp_search");
+		return targets.toArray();
+	}
 
-  if (server) {
-    targets.add(`mcp_server_${server}`);
-    targets.add(server);
-    targets.add("mcp_list");
-    return targets.toArray();
-  }
+	if (server) {
+		targets.add(`mcp_server_${server}`);
+		targets.add(server);
+		targets.add("mcp_list");
+		return targets.toArray();
+	}
 
-  targets.add("mcp_status");
-  return targets.toArray();
+	targets.add("mcp_status");
+	return targets.toArray();
 }

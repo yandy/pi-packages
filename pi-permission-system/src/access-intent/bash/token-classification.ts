@@ -23,13 +23,13 @@
  * Returns the raw token string if it qualifies, or `null` to skip.
  */
 export function classifyTokenAsPathCandidate(token: string): string | null {
-  if (rejectNonPathToken(token)) return null;
+	if (rejectNonPathToken(token)) return null;
 
-  if (token.startsWith("/")) return token;
-  if (token.startsWith("~/")) return token;
-  if (token.includes("..")) return token;
+	if (token.startsWith("/")) return token;
+	if (token.startsWith("~/")) return token;
+	if (token.includes("..")) return token;
 
-  return null;
+	return null;
 }
 
 /**
@@ -47,13 +47,13 @@ export function classifyTokenAsPathCandidate(token: string): string | null {
  * Returns the raw token string if it qualifies, or `null` to skip.
  */
 export function classifyTokenAsRuleCandidate(token: string): string | null {
-  if (rejectNonPathToken(token)) return null;
+	if (rejectNonPathToken(token)) return null;
 
-  if (token.startsWith(".")) return token;
-  if (token.includes("/")) return token; // covers ~/ paths and all relative paths with /
-  if (token.includes("..")) return token; // bare ".." (no slash)
+	if (token.startsWith(".")) return token;
+	if (token.includes("/")) return token; // covers ~/ paths and all relative paths with /
+	if (token.includes("..")) return token; // bare ".." (no slash)
 
-  return null;
+	return null;
 }
 
 // ── Private rejection predicate ────────────────────────────────────────────
@@ -79,27 +79,26 @@ const REGEX_METACHAR_PATTERN = /\.\*|\.\+|\\\||\\\(|\\\)|\[.*?\]|\^\//;
  * sequences.
  */
 function rejectNonPathToken(token: string): boolean {
-  if (!token) return true;
-  if (token.startsWith("-")) return true;
+	if (!token) return true;
+	if (token.startsWith("-")) return true;
 
-  // Env assignment: = appears before any /  (FOO=/bar is an assignment,
-  // /foo=bar is not because the slash comes first).
-  const eqIndex = token.indexOf("=");
-  const slashIndex = token.indexOf("/");
-  if (eqIndex !== -1 && (slashIndex === -1 || eqIndex < slashIndex))
-    return true;
+	// Env assignment: = appears before any /  (FOO=/bar is an assignment,
+	// /foo=bar is not because the slash comes first).
+	const eqIndex = token.indexOf("=");
+	const slashIndex = token.indexOf("/");
+	if (eqIndex !== -1 && (slashIndex === -1 || eqIndex < slashIndex)) return true;
 
-  if (URL_PATTERN.test(token)) return true;
+	if (URL_PATTERN.test(token)) return true;
 
-  // @scope/package patterns (npm scoped packages) — but @/ is allowed through
-  // since it looks like an absolute-rooted path, not an npm scope.
-  if (token.startsWith("@") && !token.startsWith("@/")) return true;
+	// @scope/package patterns (npm scoped packages) — but @/ is allowed through
+	// since it looks like an absolute-rooted path, not an npm scope.
+	if (token.startsWith("@") && !token.startsWith("@/")) return true;
 
-  // Bare-slash tokens (/, //, ///) resolve to filesystem root and are never
-  // meaningful path arguments in practice.
-  if (/^\/+$/.test(token)) return true;
+	// Bare-slash tokens (/, //, ///) resolve to filesystem root and are never
+	// meaningful path arguments in practice.
+	if (/^\/+$/.test(token)) return true;
 
-  if (REGEX_METACHAR_PATTERN.test(token)) return true;
+	if (REGEX_METACHAR_PATTERN.test(token)) return true;
 
-  return false;
+	return false;
 }

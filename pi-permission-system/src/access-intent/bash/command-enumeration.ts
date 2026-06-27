@@ -12,18 +12,18 @@ import type { BashCommandContext } from "../../types";
  * #307 adds per-command path candidates and an effective working directory.
  */
 export interface BashCommand {
-  readonly text: string;
-  /**
-   * Execution context for a nested command (substitution or subshell); absent
-   * for a current-shell (top-level) command.
-   */
-  readonly context?: BashCommandContext;
-  /**
-   * True when this is an opaque-payload wrapper (`bash -c`/`eval`) whose inner
-   * program is not re-parsed; its decision is floored to at least `ask` so it
-   * cannot ride a permissive `allow`.
-   */
-  readonly opaque?: boolean;
+	readonly text: string;
+	/**
+	 * Execution context for a nested command (substitution or subshell); absent
+	 * for a current-shell (top-level) command.
+	 */
+	readonly context?: BashCommandContext;
+	/**
+	 * True when this is an opaque-payload wrapper (`bash -c`/`eval`) whose inner
+	 * program is not re-parsed; its decision is floored to at least `ask` so it
+	 * cannot ride a permissive `allow`.
+	 */
+	readonly opaque?: boolean;
 }
 
 // ── Command enumeration ──────────────────────────────────────────────────────
@@ -31,12 +31,7 @@ export interface BashCommand {
 /**
  * Container node types descended into when enumerating command units.
  */
-const COMMAND_ENUM_DESCEND = new Set([
-  "program",
-  "list",
-  "pipeline",
-  "redirected_statement",
-]);
+const COMMAND_ENUM_DESCEND = new Set(["program", "list", "pipeline", "redirected_statement"]);
 
 /**
  * Named node types skipped during command enumeration: redirect targets,
@@ -46,12 +41,12 @@ const COMMAND_ENUM_DESCEND = new Set([
  * listed here.
  */
 const COMMAND_ENUM_SKIP = new Set([
-  "file_redirect",
-  "heredoc_redirect",
-  "herestring_redirect",
-  "comment",
-  "heredoc_body",
-  "heredoc_end",
+	"file_redirect",
+	"heredoc_redirect",
+	"herestring_redirect",
+	"comment",
+	"heredoc_body",
+	"heredoc_end",
 ]);
 
 /**
@@ -62,8 +57,8 @@ const COMMAND_ENUM_SKIP = new Set([
  * whole.
  */
 const NESTED_EXECUTION_CONTEXTS = new Map<string, BashCommandContext>([
-  ["command_substitution", "command_substitution"],
-  ["process_substitution", "process_substitution"],
+	["command_substitution", "command_substitution"],
+	["process_substitution", "process_substitution"],
 ]);
 
 /**
@@ -86,54 +81,44 @@ const NESTED_EXECUTION_CONTEXTS = new Map<string, BashCommandContext>([
  * stripped (so an env-var prefix cannot defeat a command-pattern rule).
  */
 export function collectCommands(node: TSNode): BashCommand[] {
-  const out: BashCommand[] = [];
-  collectCommandsInto(node, undefined, out);
-  return out;
+	const out: BashCommand[] = [];
+	collectCommandsInto(node, undefined, out);
+	return out;
 }
 
-function collectCommandsInto(
-  node: TSNode,
-  context: BashCommandContext | undefined,
-  out: BashCommand[],
-): void {
-  // Anonymous tokens (operators `&&`/`;`/`|`, delimiters `$(`/`)`/`` ` ``/`(`)
-  // carry no command.
-  if (!node.isNamed) return;
-  if (COMMAND_ENUM_SKIP.has(node.type)) return;
+function collectCommandsInto(node: TSNode, context: BashCommandContext | undefined, out: BashCommand[]): void {
+	// Anonymous tokens (operators `&&`/`;`/`|`, delimiters `$(`/`)`/`` ` ``/`(`)
+	// carry no command.
+	if (!node.isNamed) return;
+	if (COMMAND_ENUM_SKIP.has(node.type)) return;
 
-  if (node.type === "command") {
-    out.push(
-      makeUnit(commandUnitText(node), context, isOpaqueWrapperCommand(node)),
-    );
-    // A command's text already contains any substitution; descend its subtree
-    // to ALSO emit the inner commands of command/process substitutions.
-    collectSubstitutionCommands(node, out);
-    return;
-  }
+	if (node.type === "command") {
+		out.push(makeUnit(commandUnitText(node), context, isOpaqueWrapperCommand(node)));
+		// A command's text already contains any substitution; descend its subtree
+		// to ALSO emit the inner commands of command/process substitutions.
+		collectSubstitutionCommands(node, out);
+		return;
+	}
 
-  if (node.type === "subshell") {
-    out.push(makeUnit(node.text, context)); // never-weaker whole emit
-    descendCommandChildren(node, "subshell", out);
-    return;
-  }
+	if (node.type === "subshell") {
+		out.push(makeUnit(node.text, context)); // never-weaker whole emit
+		descendCommandChildren(node, "subshell", out);
+		return;
+	}
 
-  if (COMMAND_ENUM_DESCEND.has(node.type)) {
-    descendCommandChildren(node, context, out);
-    return;
-  }
+	if (COMMAND_ENUM_DESCEND.has(node.type)) {
+		descendCommandChildren(node, context, out);
+		return;
+	}
 
-  // Any other named statement (compound_statement `{ … }`, if/while/for/case,
-  // function_definition): emit whole, do not descend — deferred (#306).
-  out.push(makeUnit(node.text, context));
+	// Any other named statement (compound_statement `{ … }`, if/while/for/case,
+	// function_definition): emit whole, do not descend — deferred (#306).
+	out.push(makeUnit(node.text, context));
 }
 
-function makeUnit(
-  text: string,
-  context: BashCommandContext | undefined,
-  opaque = false,
-): BashCommand {
-  const unit: BashCommand = context ? { text, context } : { text };
-  return opaque ? { ...unit, opaque } : unit;
+function makeUnit(text: string, context: BashCommandContext | undefined, opaque = false): BashCommand {
+	const unit: BashCommand = context ? { text, context } : { text };
+	return opaque ? { ...unit, opaque } : unit;
 }
 
 /**
@@ -152,31 +137,31 @@ const SHELL_WRAPPER_NAMES = new Set(["bash", "sh", "dash", "zsh", "ksh"]);
  * A leading `variable_assignment` prefix is skipped, matching `commandUnitText`.
  */
 function isOpaqueWrapperCommand(node: TSNode): boolean {
-  let commandName: string | undefined;
-  let sawShortFlagC = false;
-  for (let i = 0; i < node.childCount; i++) {
-    const child = node.child(i);
-    if (!child?.isNamed) continue;
-    if (child.type === "variable_assignment") continue;
-    if (commandName === undefined) {
-      commandName = basename(child.text);
-      continue;
-    }
-    const text = child.text;
-    if (text === "--") break;
-    if (text.startsWith("-") && !text.startsWith("--") && text.includes("c")) {
-      sawShortFlagC = true;
-    }
-  }
-  if (commandName === undefined) return false;
-  if (commandName === "eval") return true;
-  return SHELL_WRAPPER_NAMES.has(commandName) && sawShortFlagC;
+	let commandName: string | undefined;
+	let sawShortFlagC = false;
+	for (let i = 0; i < node.childCount; i++) {
+		const child = node.child(i);
+		if (!child?.isNamed) continue;
+		if (child.type === "variable_assignment") continue;
+		if (commandName === undefined) {
+			commandName = basename(child.text);
+			continue;
+		}
+		const text = child.text;
+		if (text === "--") break;
+		if (text.startsWith("-") && !text.startsWith("--") && text.includes("c")) {
+			sawShortFlagC = true;
+		}
+	}
+	if (commandName === undefined) return false;
+	if (commandName === "eval") return true;
+	return SHELL_WRAPPER_NAMES.has(commandName) && sawShortFlagC;
 }
 
 /** The final path segment of a command name (`/bin/bash` → `bash`). */
 function basename(name: string): string {
-  const slash = name.lastIndexOf("/");
-  return slash === -1 ? name : name.slice(slash + 1);
+	const slash = name.lastIndexOf("/");
+	return slash === -1 ? name : name.slice(slash + 1);
 }
 
 /**
@@ -191,24 +176,20 @@ function basename(name: string): string {
  * unchanged.
  */
 function commandUnitText(node: TSNode): string {
-  for (let i = 0; i < node.childCount; i++) {
-    const child = node.child(i);
-    if (child?.isNamed && child.type !== "variable_assignment") {
-      return node.text.slice(child.startIndex - node.startIndex);
-    }
-  }
-  return node.text;
+	for (let i = 0; i < node.childCount; i++) {
+		const child = node.child(i);
+		if (child?.isNamed && child.type !== "variable_assignment") {
+			return node.text.slice(child.startIndex - node.startIndex);
+		}
+	}
+	return node.text;
 }
 
-function descendCommandChildren(
-  node: TSNode,
-  context: BashCommandContext | undefined,
-  out: BashCommand[],
-): void {
-  for (let i = 0; i < node.childCount; i++) {
-    const child = node.child(i);
-    if (child) collectCommandsInto(child, context, out);
-  }
+function descendCommandChildren(node: TSNode, context: BashCommandContext | undefined, out: BashCommand[]): void {
+	for (let i = 0; i < node.childCount; i++) {
+		const child = node.child(i);
+		if (child) collectCommandsInto(child, context, out);
+	}
 }
 
 /**
@@ -218,14 +199,14 @@ function descendCommandChildren(
  * `$(…)`) or under an argument, so the entire subtree is searched.
  */
 function collectSubstitutionCommands(node: TSNode, out: BashCommand[]): void {
-  for (let i = 0; i < node.childCount; i++) {
-    const child = node.child(i);
-    if (!child) continue;
-    const nestedContext = NESTED_EXECUTION_CONTEXTS.get(child.type);
-    if (nestedContext) {
-      descendCommandChildren(child, nestedContext, out);
-    } else {
-      collectSubstitutionCommands(child, out);
-    }
-  }
+	for (let i = 0; i < node.childCount; i++) {
+		const child = node.child(i);
+		if (!child) continue;
+		const nestedContext = NESTED_EXECUTION_CONTEXTS.get(child.type);
+		if (nestedContext) {
+			descendCommandChildren(child, nestedContext, out);
+		} else {
+			collectSubstitutionCommands(child, out);
+		}
+	}
 }

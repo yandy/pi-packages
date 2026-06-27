@@ -111,7 +111,9 @@ describe("WorkspaceBracket — dispose", () => {
 	it("propagates a throwing dispose (does not swallow)", async () => {
 		const workspace: Workspace = {
 			cwd: "/ws/dir",
-			dispose: vi.fn(() => { throw new Error("dispose failed"); }),
+			dispose: vi.fn(() => {
+				throw new Error("dispose failed");
+			}),
 		};
 		const bracket = new WorkspaceBracket(() => makeProvider(workspace));
 		await bracket.prepare(ctx);

@@ -25,12 +25,7 @@ import type { AgentPromptConfig, SubagentType, ThinkingLevel } from "../types";
  * at the edge (`create-subagent-session.ts`) or stubs in tests.
  */
 export interface AssemblerIO {
-  buildAgentPrompt: (
-    config: AgentPromptConfig,
-    cwd: string,
-    env: EnvInfo,
-    parentPrompt?: string,
-  ) => string;
+	buildAgentPrompt: (config: AgentPromptConfig, cwd: string, env: EnvInfo, parentPrompt?: string) => string;
 }
 
 /**
@@ -43,17 +38,17 @@ export interface AssemblerIO {
  * `resolveDefaultModel`.
  */
 export interface AssemblerContext {
-  /** Parent working directory (overridable via options.cwd). */
-  cwd: string;
-  /** Parent's effective system prompt (for append-mode agents). */
-  parentSystemPrompt: string;
-  /** Parent's current model instance (fallback when agent config has no model). */
-  parentModel?: unknown;
-  /** Model registry for resolving config.model strings. */
-  modelRegistry: {
-    find(provider: string, modelId: string): unknown;
-    getAvailable?(): Array<{ provider: string; id: string }>;
-  };
+	/** Parent working directory (overridable via options.cwd). */
+	cwd: string;
+	/** Parent's effective system prompt (for append-mode agents). */
+	parentSystemPrompt: string;
+	/** Parent's current model instance (fallback when agent config has no model). */
+	parentModel?: unknown;
+	/** Model registry for resolving config.model strings. */
+	modelRegistry: {
+		find(provider: string, modelId: string): unknown;
+		getAvailable?(): Array<{ provider: string; id: string }>;
+	};
 }
 
 /**
@@ -61,12 +56,12 @@ export interface AssemblerContext {
  * All fields are optional — callers pass only what they have.
  */
 export interface AssemblerOptions {
-  /** Override working directory (e.g. for worktree isolation). */
-  cwd?: string;
-  /** Explicit model override — wins over agentConfig.model and parent model. */
-  model?: unknown;
-  /** Explicit thinking level — wins over agentConfig.thinking. */
-  thinkingLevel?: ThinkingLevel;
+	/** Override working directory (e.g. for worktree isolation). */
+	cwd?: string;
+	/** Explicit model override — wins over agentConfig.model and parent model. */
+	model?: unknown;
+	/** Explicit thinking level — wins over agentConfig.thinking. */
+	thinkingLevel?: ThinkingLevel;
 }
 
 /**
@@ -75,22 +70,22 @@ export interface AssemblerOptions {
  * with no SDK object references.
  */
 export interface SessionConfig {
-  /** Resolved working directory (`options.cwd ?? ctx.cwd`). */
-  effectiveCwd: string;
-  /** Fully-assembled system prompt string (ready for `systemPromptOverride`). */
-  systemPrompt: string;
-  /** Built-in tool name allowlist for this agent type. */
-  toolNames: string[];
-  /**
-   * Resolved model instance (undefined → use parent model as passed to SDK).
-   * Opaque handle — the assembler passes it through without inspection.
-   * Caller casts to the SDK’s Model<any> at the session-creation boundary.
-   */
-  model: unknown;
-  /** Resolved thinking level (undefined → inherit from session). */
-  thinkingLevel: ThinkingLevel | undefined;
-  /** Per-agent configured max turns (from agentConfig.maxTurns). */
-  agentMaxTurns: number | undefined;
+	/** Resolved working directory (`options.cwd ?? ctx.cwd`). */
+	effectiveCwd: string;
+	/** Fully-assembled system prompt string (ready for `systemPromptOverride`). */
+	systemPrompt: string;
+	/** Built-in tool name allowlist for this agent type. */
+	toolNames: string[];
+	/**
+	 * Resolved model instance (undefined → use parent model as passed to SDK).
+	 * Opaque handle — the assembler passes it through without inspection.
+	 * Caller casts to the SDK’s Model<any> at the session-creation boundary.
+	 */
+	model: unknown;
+	/** Resolved thinking level (undefined → inherit from session). */
+	thinkingLevel: ThinkingLevel | undefined;
+	/** Per-agent configured max turns (from agentConfig.maxTurns). */
+	agentMaxTurns: number | undefined;
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
@@ -103,28 +98,25 @@ export interface SessionConfig {
  * that model instead.
  */
 function resolveDefaultModel(
-  parentModel: unknown,
-  registry: AssemblerContext["modelRegistry"],
-  configModel?: string,
+	parentModel: unknown,
+	registry: AssemblerContext["modelRegistry"],
+	configModel?: string,
 ): unknown {
-  if (configModel) {
-    const slashIdx = configModel.indexOf("/");
-    if (slashIdx !== -1) {
-      const provider = configModel.slice(0, slashIdx);
-      const modelId = configModel.slice(slashIdx + 1);
+	if (configModel) {
+		const slashIdx = configModel.indexOf("/");
+		if (slashIdx !== -1) {
+			const provider = configModel.slice(0, slashIdx);
+			const modelId = configModel.slice(slashIdx + 1);
 
-      const available = registry.getAvailable?.();
-      const availableKeys = available
-        ? new Set(available.map((m) => `${m.provider}/${m.id}`))
-        : undefined;
-      const isAvailable = (p: string, id: string) =>
-        !availableKeys || availableKeys.has(`${p}/${id}`);
+			const available = registry.getAvailable?.();
+			const availableKeys = available ? new Set(available.map((m) => `${m.provider}/${m.id}`)) : undefined;
+			const isAvailable = (p: string, id: string) => !availableKeys || availableKeys.has(`${p}/${id}`);
 
-      const found = registry.find(provider, modelId);
-      if (found && isAvailable(provider, modelId)) return found;
-    }
-  }
-  return parentModel;
+			const found = registry.find(provider, modelId);
+			if (found && isAvailable(provider, modelId)) return found;
+		}
+	}
+	return parentModel;
 }
 
 // ── Public function ──────────────────────────────────────────────────────────
@@ -144,44 +136,37 @@ function resolveDefaultModel(
  * @param io         IO collaborators (skill loader, memory builder, prompt builder).
  */
 export function assembleSessionConfig(
-  type: SubagentType,
-  ctx: AssemblerContext,
-  options: AssemblerOptions,
-  env: EnvInfo,
-  registry: AgentConfigLookup,
-  io: AssemblerIO,
+	type: SubagentType,
+	ctx: AssemblerContext,
+	options: AssemblerOptions,
+	env: EnvInfo,
+	registry: AgentConfigLookup,
+	io: AssemblerIO,
 ): SessionConfig {
-  const agentConfig = registry.resolveAgentConfig(type);
+	const agentConfig = registry.resolveAgentConfig(type);
 
-  const effectiveCwd = options.cwd ?? ctx.cwd;
+	const effectiveCwd = options.cwd ?? ctx.cwd;
 
-  const toolNames = registry.getToolNamesForType(type);
+	const toolNames = registry.getToolNamesForType(type);
 
-  // Build system prompt from the resolved agent config
-  const systemPrompt = io.buildAgentPrompt(
-    agentConfig,
-    effectiveCwd,
-    env,
-    ctx.parentSystemPrompt,
-  );
+	// Build system prompt from the resolved agent config
+	const systemPrompt = io.buildAgentPrompt(agentConfig, effectiveCwd, env, ctx.parentSystemPrompt);
 
-  // Model resolution: explicit option > config model string > parent model
-  const model =
-    options.model ??
-    resolveDefaultModel(ctx.parentModel, ctx.modelRegistry, agentConfig.model);
+	// Model resolution: explicit option > config model string > parent model
+	const model = options.model ?? resolveDefaultModel(ctx.parentModel, ctx.modelRegistry, agentConfig.model);
 
-  // Thinking level: explicit option > agent config > undefined (inherit)
-  const thinkingLevel = options.thinkingLevel ?? agentConfig.thinking;
+	// Thinking level: explicit option > agent config > undefined (inherit)
+	const thinkingLevel = options.thinkingLevel ?? agentConfig.thinking;
 
-  // Per-agent max turns (combined with per-call maxTurns and defaultMaxTurns by SubagentSession.runTurnLoop)
-  const agentMaxTurns = agentConfig.maxTurns;
+	// Per-agent max turns (combined with per-call maxTurns and defaultMaxTurns by SubagentSession.runTurnLoop)
+	const agentMaxTurns = agentConfig.maxTurns;
 
-  return {
-    effectiveCwd,
-    systemPrompt,
-    toolNames,
-    model,
-    thinkingLevel,
-    agentMaxTurns,
-  };
+	return {
+		effectiveCwd,
+		systemPrompt,
+		toolNames,
+		model,
+		thinkingLevel,
+		agentMaxTurns,
+	};
 }

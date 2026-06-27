@@ -18,16 +18,8 @@ import type { SessionLogger } from "../../src/session-logger";
 import type { PermissionCheckResult, PermissionState } from "../../src/types";
 import { wildcardMatch } from "../../src/wildcard-matcher";
 
-import {
-  getDecisionEvents,
-  makeEvents,
-  makeSurfaceCheck,
-  makeToolRegistry,
-} from "../helpers/handler-fixtures";
-import {
-  makeRealResolver,
-  makeRealSession,
-} from "../helpers/session-fixtures";
+import { getDecisionEvents, makeEvents, makeSurfaceCheck, makeToolRegistry } from "../helpers/handler-fixtures";
+import { makeRealResolver, makeRealSession } from "../helpers/session-fixtures";
 
 // ── Shared constants ───────────────────────────────────────────────────────
 
@@ -38,14 +30,7 @@ export const EXT_DIR_CWD = "/test/project";
 export const EXTERNAL_PATH = "/outside/project/file.ts";
 
 /** All path-bearing tools subject to the external-directory gate. */
-export const ALL_PATH_BEARING_TOOLS = [
-  "read",
-  "write",
-  "edit",
-  "find",
-  "grep",
-  "ls",
-];
+export const ALL_PATH_BEARING_TOOLS = ["read", "write", "edit", "find", "grep", "ls"];
 
 /** Path-bearing tools where the path is optional (no input → gate is skipped). */
 export const OPTIONAL_PATH_TOOLS = ["find", "grep", "ls"];
@@ -62,27 +47,22 @@ export const ALL_TOOLS = [...ALL_PATH_BEARING_TOOLS, "bash"];
  * with `source: "special"` (so the cross-cutting path gate is transparent),
  * and every other surface to `toolState` (default: allow).
  */
-export function makeExtDirCheck(
-  externalDirectoryState: PermissionState,
-  toolState: PermissionState = "allow",
-) {
-  return makeSurfaceCheck(
-    {
-      external_directory: { state: externalDirectoryState },
-      path: { state: "allow", source: "special" },
-    },
-    { state: toolState },
-  );
+export function makeExtDirCheck(externalDirectoryState: PermissionState, toolState: PermissionState = "allow") {
+	return makeSurfaceCheck(
+		{
+			external_directory: { state: externalDirectoryState },
+			path: { state: "allow", source: "special" },
+		},
+		{ state: toolState },
+	);
 }
 
 /** GatePrompter stub that approves with `state: "approved"`. */
 export function makeApprovingPrompter(): GatePrompter {
-  return {
-    canConfirm: vi.fn().mockReturnValue(true),
-    prompt: vi
-      .fn<GatePrompter["prompt"]>()
-      .mockResolvedValue({ approved: true, state: "approved" }),
-  };
+	return {
+		canConfirm: vi.fn().mockReturnValue(true),
+		prompt: vi.fn<GatePrompter["prompt"]>().mockResolvedValue({ approved: true, state: "approved" }),
+	};
 }
 
 /**
@@ -91,40 +71,38 @@ export function makeApprovingPrompter(): GatePrompter {
  * Pass `denialReason` to simulate a user who explains the refusal.
  */
 export function makeDenyingPrompter(denialReason?: string): GatePrompter {
-  return {
-    canConfirm: vi.fn().mockReturnValue(true),
-    prompt: vi
-      .fn<GatePrompter["prompt"]>()
-      .mockResolvedValue(
-        denialReason !== undefined
-          ? { approved: false, state: "denied", denialReason }
-          : { approved: false, state: "denied" },
-      ),
-  };
+	return {
+		canConfirm: vi.fn().mockReturnValue(true),
+		prompt: vi
+			.fn<GatePrompter["prompt"]>()
+			.mockResolvedValue(
+				denialReason !== undefined
+					? { approved: false, state: "denied", denialReason }
+					: { approved: false, state: "denied" },
+			),
+	};
 }
 
 /** GatePrompter stub that reports no UI is available (`canConfirm: false`). */
 export function makeUnavailablePrompter(): GatePrompter {
-  return {
-    canConfirm: vi.fn().mockReturnValue(false),
-    prompt: vi.fn<GatePrompter["prompt"]>(),
-  };
+	return {
+		canConfirm: vi.fn().mockReturnValue(false),
+		prompt: vi.fn<GatePrompter["prompt"]>(),
+	};
 }
 
 // ── Query helpers ──────────────────────────────────────────────────────────
 
 /** Find the `external_directory` decision event from the events mock. */
 export function findExtDirDecision(events: ReturnType<typeof makeEvents>) {
-  return getDecisionEvents(events).find(
-    (d) => d.surface === "external_directory",
-  );
+	return getDecisionEvents(events).find((d) => d.surface === "external_directory");
 }
 
 /** Return the `permission_request.blocked` review-log entries from the logger mock. */
 export function blockReviewEntries(logger: SessionLogger) {
-  return (logger.review as ReturnType<typeof vi.fn>).mock.calls.filter(
-    ([eventName]: string[]) => eventName === "permission_request.blocked",
-  );
+	return (logger.review as ReturnType<typeof vi.fn>).mock.calls.filter(
+		([eventName]: string[]) => eventName === "permission_request.blocked",
+	);
 }
 
 // ── Session-dedup wiring ──────────────────────────────────────────────────
@@ -136,58 +114,47 @@ export function blockReviewEntries(logger: SessionLogger) {
  * session rules on subsequent calls and returns `allow` (source: "session")
  * when a `wildcardMatch` covers the path.
  */
-export function makeExtDirDedupCheck(
-  permissionManager: ScopedPermissionManager,
-): void {
-  vi.mocked(permissionManager.check).mockImplementation(
-    (intent, rules): PermissionCheckResult => {
-      const { surface } = intent;
-      const pathValue =
-        intent.kind === "path-values" ? (intent.values[0] ?? null) : null;
+export function makeExtDirDedupCheck(permissionManager: ScopedPermissionManager): void {
+	vi.mocked(permissionManager.check).mockImplementation((intent, rules): PermissionCheckResult => {
+		const { surface } = intent;
+		const pathValue = intent.kind === "path-values" ? (intent.values[0] ?? null) : null;
 
-      if (surface === "external_directory") {
-        if (pathValue && rules && rules.length > 0) {
-          const match = rules.findLast(
-            (r) =>
-              r.surface === "external_directory" &&
-              wildcardMatch(r.pattern, pathValue),
-          );
-          if (match) {
-            return {
-              state: "allow",
-              toolName: surface,
-              source: "session",
-              origin: "session",
-              matchedPattern: match.pattern,
-            };
-          }
-        }
-        return {
-          state: "ask",
-          toolName: surface,
-          source: "special",
-          origin: "global",
-        };
-      }
+		if (surface === "external_directory") {
+			if (pathValue && rules && rules.length > 0) {
+				const match = rules.findLast((r) => r.surface === "external_directory" && wildcardMatch(r.pattern, pathValue));
+				if (match) {
+					return {
+						state: "allow",
+						toolName: surface,
+						source: "session",
+						origin: "session",
+						matchedPattern: match.pattern,
+					};
+				}
+			}
+			return {
+				state: "ask",
+				toolName: surface,
+				source: "special",
+				origin: "global",
+			};
+		}
 
-      return {
-        state: "allow",
-        toolName: surface,
-        source: "tool",
-        origin: "builtin",
-      };
-    },
-  );
+		return {
+			state: "allow",
+			toolName: surface,
+			source: "tool",
+			origin: "builtin",
+		};
+	});
 }
 
 /** GatePrompter stub that approves for the session (`state: "approved_for_session"`). */
 function makeSessionApprovingPrompter(): GatePrompter {
-  return {
-    canConfirm: vi.fn().mockReturnValue(true),
-    prompt: vi
-      .fn<GatePrompter["prompt"]>()
-      .mockResolvedValue({ approved: true, state: "approved_for_session" }),
-  };
+	return {
+		canConfirm: vi.fn().mockReturnValue(true),
+		prompt: vi.fn<GatePrompter["prompt"]>().mockResolvedValue({ approved: true, state: "approved_for_session" }),
+	};
 }
 
 /**
@@ -199,37 +166,23 @@ function makeSessionApprovingPrompter(): GatePrompter {
  * Returns `{ handler, prompter, session }`.
  */
 export function makeDedupWiring(prompter?: GatePrompter) {
-  const { session, permissionManager, sessionRules, logger } =
-    makeRealSession();
-  const { resolver } = makeRealResolver(permissionManager, sessionRules);
-  makeExtDirDedupCheck(permissionManager);
-  const events = makeEvents();
-  const reporter = new GateDecisionReporter(logger, events);
-  const resolvedPrompter: GatePrompter =
-    prompter ?? makeSessionApprovingPrompter();
-  const runner = new GateRunner(
-    resolver,
-    sessionRules,
-    resolvedPrompter,
-    reporter,
-  );
-  const handler = new PermissionGateHandler(
-    session,
-    makeToolRegistry({
-      getAll: vi
-        .fn()
-        .mockReturnValue([
-          { name: "read" },
-          { name: "write" },
-          { name: "edit" },
-          { name: "bash" },
-        ]),
-    }),
-    new ToolCallGatePipeline(resolver, session),
-    new SkillInputGatePipeline(resolver),
-    runner,
-  );
-  return { handler, prompter: resolvedPrompter, session };
+	const { session, permissionManager, sessionRules, logger } = makeRealSession();
+	const { resolver } = makeRealResolver(permissionManager, sessionRules);
+	makeExtDirDedupCheck(permissionManager);
+	const events = makeEvents();
+	const reporter = new GateDecisionReporter(logger, events);
+	const resolvedPrompter: GatePrompter = prompter ?? makeSessionApprovingPrompter();
+	const runner = new GateRunner(resolver, sessionRules, resolvedPrompter, reporter);
+	const handler = new PermissionGateHandler(
+		session,
+		makeToolRegistry({
+			getAll: vi.fn().mockReturnValue([{ name: "read" }, { name: "write" }, { name: "edit" }, { name: "bash" }]),
+		}),
+		new ToolCallGatePipeline(resolver, session),
+		new SkillInputGatePipeline(resolver),
+		runner,
+	);
+	return { handler, prompter: resolvedPrompter, session };
 }
 
 /**
@@ -239,8 +192,8 @@ export function makeDedupWiring(prompter?: GatePrompter) {
  * Use `makeDedupWiring` when the test also needs `session.shutdown()`.
  */
 export function makeDeduplicatingHandler(prompter?: GatePrompter) {
-  const { handler, prompter: resolvedPrompter } = makeDedupWiring(prompter);
-  return { handler, prompter: resolvedPrompter };
+	const { handler, prompter: resolvedPrompter } = makeDedupWiring(prompter);
+	return { handler, prompter: resolvedPrompter };
 }
 
 // ── Event builders ─────────────────────────────────────────────────────────
@@ -250,20 +203,16 @@ export function makeDeduplicatingHandler(prompter?: GatePrompter) {
  * tests use — `toolName` field (not `name`); both are accepted by
  * `getToolNameFromValue`.
  */
-export function makeExtDirToolEvent(
-  toolName: string,
-  path: string,
-  toolCallId = "tc-1",
-) {
-  return { type: "tool_call" as const, toolCallId, toolName, input: { path } };
+export function makeExtDirToolEvent(toolName: string, path: string, toolCallId = "tc-1") {
+	return { type: "tool_call" as const, toolCallId, toolName, input: { path } };
 }
 
 /** Builds a bash tool-call event for external-directory session-dedup tests. */
 export function makeExtDirBashEvent(command: string, toolCallId = "tc-1") {
-  return {
-    type: "tool_call" as const,
-    toolCallId,
-    toolName: "bash",
-    input: { command },
-  };
+	return {
+		type: "tool_call" as const,
+		toolCallId,
+		toolName: "bash",
+		input: { command },
+	};
 }

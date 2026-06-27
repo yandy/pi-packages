@@ -27,31 +27,31 @@ import { vi } from "vitest";
 export type RecordedHandler = (event: unknown, ctx: unknown) => unknown;
 
 export interface FakePi {
-  /** Real event bus so cross-extension pub/sub and RPC behave as in production. */
-  events: EventBus;
-  /** Every `pi.on(event, handler)` registration, keyed by event name. */
-  handlers: Map<string, RecordedHandler>;
-  /** Every `pi.registerCommand(name, …)` registration, keyed by command name. */
-  commands: Map<string, unknown>;
-  /**
-   * Drive a registered handler; resolves to its (possibly async) result.
-   *
-   * Throws if no handler is registered for `event` so a typo in a test surfaces
-   * loudly instead of silently resolving to `undefined`.
-   */
-  fire(event: string, input?: unknown, ctx?: unknown): Promise<unknown>;
-  /** Minimal tool registry — returns the configured tool names. */
-  getAllTools(): { name: string }[];
-  /** Active tool names (`pi.getActiveTools()` shape — bare strings). */
-  getActiveTools(): string[];
-  setActiveTools(names: string[]): void;
+	/** Real event bus so cross-extension pub/sub and RPC behave as in production. */
+	events: EventBus;
+	/** Every `pi.on(event, handler)` registration, keyed by event name. */
+	handlers: Map<string, RecordedHandler>;
+	/** Every `pi.registerCommand(name, …)` registration, keyed by command name. */
+	commands: Map<string, unknown>;
+	/**
+	 * Drive a registered handler; resolves to its (possibly async) result.
+	 *
+	 * Throws if no handler is registered for `event` so a typo in a test surfaces
+	 * loudly instead of silently resolving to `undefined`.
+	 */
+	fire(event: string, input?: unknown, ctx?: unknown): Promise<unknown>;
+	/** Minimal tool registry — returns the configured tool names. */
+	getAllTools(): { name: string }[];
+	/** Active tool names (`pi.getActiveTools()` shape — bare strings). */
+	getActiveTools(): string[];
+	setActiveTools(names: string[]): void;
 }
 
 export interface MakeFakePiOptions {
-  /** Inject a shared bus to model parent/child instances; defaults to a fresh bus. */
-  events?: EventBus;
-  /** Tool names returned by `getAllTools()`; defaults to a small set. */
-  toolNames?: readonly string[];
+	/** Inject a shared bus to model parent/child instances; defaults to a fresh bus. */
+	events?: EventBus;
+	/** Tool names returned by `getAllTools()`; defaults to a small set. */
+	toolNames?: readonly string[];
 }
 
 const DEFAULT_TOOL_NAMES = ["read", "write", "edit", "bash", "ls", "grep"];
@@ -63,38 +63,38 @@ const DEFAULT_TOOL_NAMES = ["read", "write", "edit", "bash", "ls", "grep"];
  * `piPermissionSystemExtension(pi as unknown as ExtensionAPI)`.
  */
 export function makeFakePi(options: MakeFakePiOptions = {}): FakePi {
-  const events = options.events ?? createEventBus();
-  const toolNames = options.toolNames ?? DEFAULT_TOOL_NAMES;
-  const handlers = new Map<string, RecordedHandler>();
-  const commands = new Map<string, unknown>();
+	const events = options.events ?? createEventBus();
+	const toolNames = options.toolNames ?? DEFAULT_TOOL_NAMES;
+	const handlers = new Map<string, RecordedHandler>();
+	const commands = new Map<string, unknown>();
 
-  return {
-    events,
-    handlers,
-    commands,
-    fire(event, input, ctx): Promise<unknown> {
-      const handler = handlers.get(event);
-      if (!handler) {
-        throw new Error(`No handler registered for event "${event}"`);
-      }
-      return Promise.resolve(handler(input, ctx));
-    },
-    getAllTools(): { name: string }[] {
-      return toolNames.map((name) => ({ name }));
-    },
-    getActiveTools(): string[] {
-      return [...toolNames];
-    },
-    setActiveTools: vi.fn(),
-    // ── ExtensionAPI methods the factory touches (recorded) ────────────────
-    on(event: string, handler: RecordedHandler): void {
-      handlers.set(event, handler);
-    },
-    registerCommand(name: string, optionsArg: unknown): void {
-      commands.set(name, optionsArg);
-    },
-    // ── ExtensionAPI methods present for the cast but unused by the factory ─
-    registerProvider: vi.fn(),
-    exec: vi.fn(),
-  } as FakePi & Record<string, unknown>;
+	return {
+		events,
+		handlers,
+		commands,
+		fire(event, input, ctx): Promise<unknown> {
+			const handler = handlers.get(event);
+			if (!handler) {
+				throw new Error(`No handler registered for event "${event}"`);
+			}
+			return Promise.resolve(handler(input, ctx));
+		},
+		getAllTools(): { name: string }[] {
+			return toolNames.map((name) => ({ name }));
+		},
+		getActiveTools(): string[] {
+			return [...toolNames];
+		},
+		setActiveTools: vi.fn(),
+		// ── ExtensionAPI methods the factory touches (recorded) ────────────────
+		on(event: string, handler: RecordedHandler): void {
+			handlers.set(event, handler);
+		},
+		registerCommand(name: string, optionsArg: unknown): void {
+			commands.set(name, optionsArg);
+		},
+		// ── ExtensionAPI methods present for the cast but unused by the factory ─
+		registerProvider: vi.fn(),
+		exec: vi.fn(),
+	} as FakePi & Record<string, unknown>;
 }

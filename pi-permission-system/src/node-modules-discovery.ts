@@ -11,19 +11,19 @@ import { fileURLToPath } from "node:url";
  * no `node_modules` ancestor exists.
  */
 function walkUpToNodeModules(fromUrl: string): string | null {
-  try {
-    const thisFile = fileURLToPath(fromUrl);
-    let dir = dirname(thisFile);
-    while (dir !== dirname(dir)) {
-      if (basename(dir) === "node_modules") {
-        return dir;
-      }
-      dir = dirname(dir);
-    }
-    return null;
-  } catch {
-    return null;
-  }
+	try {
+		const thisFile = fileURLToPath(fromUrl);
+		let dir = dirname(thisFile);
+		while (dir !== dirname(dir)) {
+			if (basename(dir) === "node_modules") {
+				return dir;
+			}
+			dir = dirname(dir);
+		}
+		return null;
+	} catch {
+		return null;
+	}
 }
 
 /**
@@ -34,20 +34,20 @@ function walkUpToNodeModules(fromUrl: string): string | null {
  * running from a local development checkout, not a global install).
  */
 function discoverGlobalNodeModulesViaSubprocess(): string | null {
-  try {
-    const result = spawnSync("npm", ["root", "-g"], {
-      encoding: "utf-8",
-      timeout: 5000,
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    const root = result.stdout.trim();
-    if (result.status === 0 && root && existsSync(root)) {
-      return root;
-    }
-    return null;
-  } catch {
-    return null;
-  }
+	try {
+		const result = spawnSync("npm", ["root", "-g"], {
+			encoding: "utf-8",
+			timeout: 5000,
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+		const root = result.stdout.trim();
+		if (result.status === 0 && root && existsSync(root)) {
+			return root;
+		}
+		return null;
+	} catch {
+		return null;
+	}
 }
 
 /**
@@ -67,10 +67,8 @@ function discoverGlobalNodeModulesViaSubprocess(): string | null {
  *
  * Returns `null` when both strategies fail — callers must degrade gracefully.
  */
-export function discoverGlobalNodeModulesRoot(
-  fromUrl = import.meta.url,
-): string | null {
-  const fromSelf = walkUpToNodeModules(fromUrl);
-  if (fromSelf) return fromSelf;
-  return discoverGlobalNodeModulesViaSubprocess();
+export function discoverGlobalNodeModulesRoot(fromUrl = import.meta.url): string | null {
+	const fromSelf = walkUpToNodeModules(fromUrl);
+	if (fromSelf) return fromSelf;
+	return discoverGlobalNodeModulesViaSubprocess();
 }

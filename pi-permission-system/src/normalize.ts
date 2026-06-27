@@ -16,28 +16,28 @@ import { isDenyWithReason, isPermissionState } from "./value-guards";
  * calling this function.
  */
 export function normalizeFlatConfig(permission: FlatPermissionConfig): Ruleset {
-  const rules: Rule[] = [];
-  for (const [surface, value] of Object.entries(permission)) {
-    if (typeof value === "string") {
-      if (isPermissionState(value)) {
-        rules.push({ surface, pattern: "*", action: value, origin: "builtin" });
-      }
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- defensive null check; value type does not include null but runtime JSON may
-    } else if (typeof value === "object" && value !== null) {
-      for (const [pattern, action] of Object.entries(value)) {
-        if (isDenyWithReason(action)) {
-          rules.push({
-            surface,
-            pattern,
-            action: "deny",
-            reason: action.reason,
-            origin: "builtin",
-          });
-        } else if (isPermissionState(action)) {
-          rules.push({ surface, pattern, action, origin: "builtin" });
-        }
-      }
-    }
-  }
-  return rules;
+	const rules: Rule[] = [];
+	for (const [surface, value] of Object.entries(permission)) {
+		if (typeof value === "string") {
+			if (isPermissionState(value)) {
+				rules.push({ surface, pattern: "*", action: value, origin: "builtin" });
+			}
+			// eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- defensive null check; value type does not include null but runtime JSON may
+		} else if (typeof value === "object" && value !== null) {
+			for (const [pattern, action] of Object.entries(value)) {
+				if (isDenyWithReason(action)) {
+					rules.push({
+						surface,
+						pattern,
+						action: "deny",
+						reason: action.reason,
+						origin: "builtin",
+					});
+				} else if (isPermissionState(action)) {
+					rules.push({ surface, pattern, action, origin: "builtin" });
+				}
+			}
+		}
+	}
+	return rules;
 }

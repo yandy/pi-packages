@@ -11,11 +11,6 @@ import { BashProgram } from "../../access-intent/bash/program";
  * test suite in `bash-external-directory.test.ts` can assert path values
  * without migrating every call site.
  */
-export async function extractExternalPathsFromBashCommand(
-  command: string,
-  cwd: string,
-): Promise<string[]> {
-  return (await BashProgram.parse(command, cwd))
-    .externalPaths()
-    .map((p) => p.value());
+export async function extractExternalPathsFromBashCommand(command: string, cwd: string): Promise<string[]> {
+	return (await BashProgram.parse(command, cwd)).externalPaths().map((p) => p.value());
 }

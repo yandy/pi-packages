@@ -15,76 +15,73 @@ import { normalizePermissionSystemConfig } from "../src/extension-config";
  * silently dropped by the UnifiedPermissionConfig intermediate.
  */
 describe("config pipeline seam", () => {
-  let tempDir: string;
-  let agentDir: string;
-  let cwd: string;
-  let extensionRoot: string;
+	let tempDir: string;
+	let agentDir: string;
+	let cwd: string;
+	let extensionRoot: string;
 
-  beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), "config-pipeline-test-"));
-    agentDir = join(tempDir, "agent");
-    cwd = join(tempDir, "project");
-    extensionRoot = join(tempDir, "ext");
-  });
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "config-pipeline-test-"));
+		agentDir = join(tempDir, "agent");
+		cwd = join(tempDir, "project");
+		extensionRoot = join(tempDir, "ext");
+	});
 
-  afterEach(() => {
-    rmSync(tempDir, { recursive: true, force: true });
-  });
+	afterEach(() => {
+		rmSync(tempDir, { recursive: true, force: true });
+	});
 
-  function writeGlobal(content: Record<string, unknown>): void {
-    const dir = join(agentDir, "extensions", "pi-permission-system");
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "config.json"), JSON.stringify(content));
-  }
+	function writeGlobal(content: Record<string, unknown>): void {
+		const dir = join(agentDir, "extensions", "pi-permission-system");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "config.json"), JSON.stringify(content));
+	}
 
-  it("runtime knob and preview-length field both survive the full pipeline", () => {
-    writeGlobal({
-      debugLog: true,
-      toolInputPreviewMaxLength: 1000,
-    });
+	it("runtime knob and preview-length field both survive the full pipeline", () => {
+		writeGlobal({
+			debugLog: true,
+			toolInputPreviewMaxLength: 1000,
+		});
 
-    const mergeResult = loadAndMergeConfigs(agentDir, cwd, extensionRoot);
-    const config = normalizePermissionSystemConfig(mergeResult.merged);
+		const mergeResult = loadAndMergeConfigs(agentDir, cwd, extensionRoot);
+		const config = normalizePermissionSystemConfig(mergeResult.merged);
 
-    expect(config.debugLog).toBe(true);
-    expect(config.toolInputPreviewMaxLength).toBe(1000);
-  });
+		expect(config.debugLog).toBe(true);
+		expect(config.toolInputPreviewMaxLength).toBe(1000);
+	});
 
-  it("text summary length field survives the full pipeline", () => {
-    writeGlobal({
-      toolTextSummaryMaxLength: 250,
-    });
+	it("text summary length field survives the full pipeline", () => {
+		writeGlobal({
+			toolTextSummaryMaxLength: 250,
+		});
 
-    const mergeResult = loadAndMergeConfigs(agentDir, cwd, extensionRoot);
-    const config = normalizePermissionSystemConfig(mergeResult.merged);
+		const mergeResult = loadAndMergeConfigs(agentDir, cwd, extensionRoot);
+		const config = normalizePermissionSystemConfig(mergeResult.merged);
 
-    expect(config.toolTextSummaryMaxLength).toBe(250);
-  });
+		expect(config.toolTextSummaryMaxLength).toBe(250);
+	});
 
-  it("project config overrides global preview-length field end to end", () => {
-    writeGlobal({ toolInputPreviewMaxLength: 200 });
-    const projectDir = join(cwd, ".pi", "extensions", "pi-permission-system");
-    mkdirSync(projectDir, { recursive: true });
-    writeFileSync(
-      join(projectDir, "config.json"),
-      JSON.stringify({ toolInputPreviewMaxLength: 500 }),
-    );
+	it("project config overrides global preview-length field end to end", () => {
+		writeGlobal({ toolInputPreviewMaxLength: 200 });
+		const projectDir = join(cwd, ".pi", "extensions", "pi-permission-system");
+		mkdirSync(projectDir, { recursive: true });
+		writeFileSync(join(projectDir, "config.json"), JSON.stringify({ toolInputPreviewMaxLength: 500 }));
 
-    const mergeResult = loadAndMergeConfigs(agentDir, cwd, extensionRoot);
-    const config = normalizePermissionSystemConfig(mergeResult.merged);
+		const mergeResult = loadAndMergeConfigs(agentDir, cwd, extensionRoot);
+		const config = normalizePermissionSystemConfig(mergeResult.merged);
 
-    expect(config.toolInputPreviewMaxLength).toBe(500);
-  });
+		expect(config.toolInputPreviewMaxLength).toBe(500);
+	});
 
-  it("defaults apply when config file is absent", () => {
-    // No config files written — agentDir and cwd directories don't exist.
-    const mergeResult = loadAndMergeConfigs(agentDir, cwd, extensionRoot);
-    const config = normalizePermissionSystemConfig(mergeResult.merged);
+	it("defaults apply when config file is absent", () => {
+		// No config files written — agentDir and cwd directories don't exist.
+		const mergeResult = loadAndMergeConfigs(agentDir, cwd, extensionRoot);
+		const config = normalizePermissionSystemConfig(mergeResult.merged);
 
-    expect(config.debugLog).toBe(false);
-    expect(config.permissionReviewLog).toBe(true);
-    expect(config.yoloMode).toBe(false);
-    expect(config.toolInputPreviewMaxLength).toBeUndefined();
-    expect(config.toolTextSummaryMaxLength).toBeUndefined();
-  });
+		expect(config.debugLog).toBe(false);
+		expect(config.permissionReviewLog).toBe(true);
+		expect(config.yoloMode).toBe(false);
+		expect(config.toolInputPreviewMaxLength).toBeUndefined();
+		expect(config.toolTextSummaryMaxLength).toBeUndefined();
+	});
 });

@@ -1,7 +1,4 @@
-import type {
-  PermissionDecisionEvent,
-  PermissionDecisionResolution,
-} from "../../permission-events";
+import type { PermissionDecisionEvent, PermissionDecisionResolution } from "../../permission-events";
 import type { PermissionCheckResult } from "../../types";
 
 /**
@@ -10,14 +7,14 @@ import type { PermissionCheckResult } from "../../types";
  * path-bearing tools → file path; others → tool name.
  */
 export function deriveDecisionValue(
-  toolName: string,
-  check: Pick<PermissionCheckResult, "command" | "target">,
-  path?: string,
+	toolName: string,
+	check: Pick<PermissionCheckResult, "command" | "target">,
+	path?: string,
 ): string {
-  if (toolName === "bash") return check.command ?? toolName;
-  if (toolName === "mcp") return check.target ?? toolName;
-  if (path) return path;
-  return toolName;
+	if (toolName === "bash") return check.command ?? toolName;
+	if (toolName === "mcp") return check.target ?? toolName;
+	if (path) return path;
+	return toolName;
 }
 
 /**
@@ -28,22 +25,22 @@ export function deriveDecisionValue(
  * path in `runGateCheck`.
  */
 export function buildDecisionEvent(
-  decision: { surface: string; value: string },
-  check: Pick<PermissionCheckResult, "origin" | "matchedPattern">,
-  agentName: string | null,
-  result: "allow" | "deny",
-  resolution: PermissionDecisionResolution,
+	decision: { surface: string; value: string },
+	check: Pick<PermissionCheckResult, "origin" | "matchedPattern">,
+	agentName: string | null,
+	result: "allow" | "deny",
+	resolution: PermissionDecisionResolution,
 ): PermissionDecisionEvent {
-  return {
-    surface: decision.surface,
-    value: decision.value,
-    result,
-    resolution,
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ?? null normalises undefined to null for the log record
-    origin: check.origin ?? null,
-    agentName: agentName ?? null,
-    matchedPattern: check.matchedPattern ?? null,
-  };
+	return {
+		surface: decision.surface,
+		value: decision.value,
+		result,
+		resolution,
+		// eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ?? null normalises undefined to null for the log record
+		origin: check.origin ?? null,
+		agentName: agentName ?? null,
+		matchedPattern: check.matchedPattern ?? null,
+	};
 }
 
 /**
@@ -56,18 +53,18 @@ export function buildDecisionEvent(
  * @param canConfirm - Whether an interactive prompt was available.
  */
 export function deriveResolution(
-  state: "allow" | "deny" | "ask",
-  action: "allow" | "block",
-  hasSession: boolean,
-  canConfirm: boolean,
-  autoApproved = false,
+	state: "allow" | "deny" | "ask",
+	action: "allow" | "block",
+	hasSession: boolean,
+	canConfirm: boolean,
+	autoApproved = false,
 ): PermissionDecisionResolution {
-  if (state === "allow") return "policy_allow";
-  if (state === "deny") return "policy_deny";
-  // state === "ask"
-  if (action === "allow") {
-    if (autoApproved) return "auto_approved";
-    return hasSession ? "user_approved_for_session" : "user_approved";
-  }
-  return canConfirm ? "user_denied" : "confirmation_unavailable";
+	if (state === "allow") return "policy_allow";
+	if (state === "deny") return "policy_deny";
+	// state === "ask"
+	if (action === "allow") {
+		if (autoApproved) return "auto_approved";
+		return hasSession ? "user_approved_for_session" : "user_approved";
+	}
+	return canConfirm ? "user_denied" : "confirmation_unavailable";
 }

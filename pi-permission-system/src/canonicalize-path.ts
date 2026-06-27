@@ -12,19 +12,19 @@ import { join } from "node:path";
  * containment for paths that cannot be resolved.
  */
 export function canonicalizePath(absolutePath: string): string {
-  if (!absolutePath) return absolutePath;
+	if (!absolutePath) return absolutePath;
 
-  const parts = absolutePath.split("/").filter(Boolean);
-  for (let i = parts.length; i >= 0; i--) {
-    const candidate = "/" + parts.slice(0, i).join("/");
-    try {
-      const real = realpathSync(candidate);
-      const tail = parts.slice(i);
-      return tail.length === 0 ? real : join(real, ...tail);
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code !== "ENOENT" && code !== "ENOTDIR") return absolutePath;
-    }
-  }
-  return absolutePath;
+	const parts = absolutePath.split("/").filter(Boolean);
+	for (let i = parts.length; i >= 0; i--) {
+		const candidate = "/" + parts.slice(0, i).join("/");
+		try {
+			const real = realpathSync(candidate);
+			const tail = parts.slice(i);
+			return tail.length === 0 ? real : join(real, ...tail);
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code !== "ENOENT" && code !== "ENOTDIR") return absolutePath;
+		}
+	}
+	return absolutePath;
 }

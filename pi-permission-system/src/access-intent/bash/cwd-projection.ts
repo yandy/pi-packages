@@ -1,26 +1,23 @@
 import { isAbsolute, join, resolve } from "node:path";
 import { AccessPath } from "../../access-intent/access-path";
-import {
-  ARG_NODE_TYPES,
-  SKIP_SUBTREE_TYPES,
-} from "../../access-intent/bash/node-text";
+import { ARG_NODE_TYPES, SKIP_SUBTREE_TYPES } from "../../access-intent/bash/node-text";
 import type { TSNode } from "../../access-intent/bash/parser";
 import {
-  classifyTokenAsPathCandidate,
-  classifyTokenAsRuleCandidate,
+	classifyTokenAsPathCandidate,
+	classifyTokenAsRuleCandidate,
 } from "../../access-intent/bash/token-classification";
 import {
-  collectCommandTokens,
-  collectPathCandidateTokens,
-  collectRedirectTokens,
-  extractCommandName,
+	collectCommandTokens,
+	collectPathCandidateTokens,
+	collectRedirectTokens,
+	extractCommandName,
 } from "../../access-intent/bash/token-collection";
 import { canonicalizePath } from "../../canonicalize-path";
 import {
-  isPathWithinDirectory,
-  isSafeSystemPath,
-  normalizePathForComparison,
-  normalizePathPolicyLiteral,
+	isPathWithinDirectory,
+	isSafeSystemPath,
+	normalizePathForComparison,
+	normalizePathPolicyLiteral,
 } from "../../path-utils";
 
 // ── Internal types ───────────────────────────────────────────────────────────
@@ -35,26 +32,24 @@ import {
  * An `unknown` base marks a non-literal `cd` target (`cd "$DIR"`, `cd $(…)`,
  * `cd -`, bare `cd`, `cd ~…`) that made the effective directory unresolvable.
  */
-type EffectiveBase =
-  | { readonly kind: "known"; readonly offset: string }
-  | { readonly kind: "unknown" };
+type EffectiveBase = { readonly kind: "known"; readonly offset: string } | { readonly kind: "unknown" };
 
 /**
  * A path-candidate token paired with the effective working directory projected
  * onto the point in the command stream where it appears.
  */
 interface PathCandidate {
-  readonly token: string;
-  readonly base: EffectiveBase;
+	readonly token: string;
+	readonly base: EffectiveBase;
 }
 
 // ── Public output type ───────────────────────────────────────────────────────
 
 export interface BashPathRuleCandidate {
-  /** Raw path-like token shown in prompts, logs, and session approvals. */
-  readonly token: string;
-  /** The path's lexical and canonical forms for permission policy matching. */
-  readonly path: AccessPath;
+	/** Raw path-like token shown in prompts, logs, and session approvals. */
+	readonly token: string;
+	/** The path's lexical and canonical forms for permission policy matching. */
+	readonly path: AccessPath;
 }
 
 // ── Walk-time constants ──────────────────────────────────────────────────────
@@ -80,9 +75,9 @@ const UNKNOWN_BASE: EffectiveBase = { kind: "unknown" };
  * first tier).
  */
 export function collectPathCandidates(rootNode: TSNode): PathCandidate[] {
-  const out: PathCandidate[] = [];
-  walkForCandidates(rootNode, CWD_BASE, out);
-  return out;
+	const out: PathCandidate[] = [];
+	walkForCandidates(rootNode, CWD_BASE, out);
+	return out;
 }
 
 /**
@@ -90,45 +85,41 @@ export function collectPathCandidates(rootNode: TSNode): PathCandidate[] {
  * effective base in force *after* the node (the input base unless the node is
  * a current-shell `cd <literal>` that folds the running directory).
  */
-function walkForCandidates(
-  node: TSNode,
-  base: EffectiveBase,
-  out: PathCandidate[],
-): EffectiveBase {
-  switch (node.type) {
-    case "program":
-    case "list":
-    case "redirected_statement":
-      return walkCurrentShellSequence(node, base, out);
-    case "command":
-      tagTokens(collectCommandTokens(node), base, out);
-      return foldCd(node, base);
-    case "pipeline":
-      // tree-sitter-bash mis-groups a redirect-bearing `&&`/`;` list as the
-      // first stage of a pipeline (`cd a && pnpm x 2>&1 | tail` parses as
-      // `(cd a && pnpm x 2>&1) | tail`), burying a current-shell `cd` inside
-      // a node the `default` case treats as non-folding. Recover bash operator
-      // precedence (`|` binds tighter than `&&`/`||`/`;`): fold the first
-      // stage's leading current-shell commands while keeping its terminal
-      // command and every downstream stage as non-folding subshells (#454).
-      return walkPipeline(node, base, out);
-    case "subshell":
-      // A subshell runs in a child shell: its interior `cd`s fold within the
-      // subshell but reset on exit, so the folded base is discarded.
-      walkCurrentShellSequence(node, base, out);
-      return base;
-    case "compound_statement":
-      // A `{ … }` brace group runs in the current shell, so its `cd`s persist
-      // to following commands — thread and return the folded base.
-      return walkCurrentShellSequence(node, base, out);
-    default:
-      // Pipelines, control-flow bodies, redirect targets, and command/process
-      // substitution interiors: collect every candidate in the subtree tagged
-      // with the enclosing base and do not fold their internal `cd`s. (Folding
-      // inside substitutions is deferred — conservative, never under-flags.)
-      tagTokens(collectPathCandidateTokens(node), base, out);
-      return base;
-  }
+function walkForCandidates(node: TSNode, base: EffectiveBase, out: PathCandidate[]): EffectiveBase {
+	switch (node.type) {
+		case "program":
+		case "list":
+		case "redirected_statement":
+			return walkCurrentShellSequence(node, base, out);
+		case "command":
+			tagTokens(collectCommandTokens(node), base, out);
+			return foldCd(node, base);
+		case "pipeline":
+			// tree-sitter-bash mis-groups a redirect-bearing `&&`/`;` list as the
+			// first stage of a pipeline (`cd a && pnpm x 2>&1 | tail` parses as
+			// `(cd a && pnpm x 2>&1) | tail`), burying a current-shell `cd` inside
+			// a node the `default` case treats as non-folding. Recover bash operator
+			// precedence (`|` binds tighter than `&&`/`||`/`;`): fold the first
+			// stage's leading current-shell commands while keeping its terminal
+			// command and every downstream stage as non-folding subshells (#454).
+			return walkPipeline(node, base, out);
+		case "subshell":
+			// A subshell runs in a child shell: its interior `cd`s fold within the
+			// subshell but reset on exit, so the folded base is discarded.
+			walkCurrentShellSequence(node, base, out);
+			return base;
+		case "compound_statement":
+			// A `{ … }` brace group runs in the current shell, so its `cd`s persist
+			// to following commands — thread and return the folded base.
+			return walkCurrentShellSequence(node, base, out);
+		default:
+			// Pipelines, control-flow bodies, redirect targets, and command/process
+			// substitution interiors: collect every candidate in the subtree tagged
+			// with the enclosing base and do not fold their internal `cd`s. (Folding
+			// inside substitutions is deferred — conservative, never under-flags.)
+			tagTokens(collectPathCandidateTokens(node), base, out);
+			return base;
+	}
 }
 
 /**
@@ -138,20 +129,16 @@ function walkForCandidates(
  * A statement immediately followed by the background operator (`&`) runs in a
  * subshell, so its folded base is discarded.
  */
-function walkCurrentShellSequence(
-  seqNode: TSNode,
-  base: EffectiveBase,
-  out: PathCandidate[],
-): EffectiveBase {
-  let current = base;
-  for (let i = 0; i < seqNode.childCount; i++) {
-    const child = seqNode.child(i);
-    if (!child?.isNamed) continue;
-    if (SKIP_SUBTREE_TYPES.has(child.type)) continue;
-    const after = walkForCandidates(child, current, out);
-    current = isBackgrounded(seqNode, i) ? current : after;
-  }
-  return current;
+function walkCurrentShellSequence(seqNode: TSNode, base: EffectiveBase, out: PathCandidate[]): EffectiveBase {
+	let current = base;
+	for (let i = 0; i < seqNode.childCount; i++) {
+		const child = seqNode.child(i);
+		if (!child?.isNamed) continue;
+		if (SKIP_SUBTREE_TYPES.has(child.type)) continue;
+		const after = walkForCandidates(child, current, out);
+		current = isBackgrounded(seqNode, i) ? current : after;
+	}
+	return current;
 }
 
 /**
@@ -168,27 +155,23 @@ function walkCurrentShellSequence(
  * and must not fold; every stage after a `|` is a downstream subshell stage
  * and collects tokens against the folded base without folding (#454).
  */
-function walkPipeline(
-  node: TSNode,
-  base: EffectiveBase,
-  out: PathCandidate[],
-): EffectiveBase {
-  let current = base;
-  let first = true;
-  for (let i = 0; i < node.childCount; i++) {
-    const child = node.child(i);
-    if (!child?.isNamed) continue;
-    if (SKIP_SUBTREE_TYPES.has(child.type)) continue;
-    if (first) {
-      current = foldPipelineFirstStage(child, current, out);
-      first = false;
-      continue;
-    }
-    // Downstream stage (after a `|`): subshell — collect against the folded
-    // base, do not fold.
-    tagTokens(collectPathCandidateTokens(child), current, out);
-  }
-  return current;
+function walkPipeline(node: TSNode, base: EffectiveBase, out: PathCandidate[]): EffectiveBase {
+	let current = base;
+	let first = true;
+	for (let i = 0; i < node.childCount; i++) {
+		const child = node.child(i);
+		if (!child?.isNamed) continue;
+		if (SKIP_SUBTREE_TYPES.has(child.type)) continue;
+		if (first) {
+			current = foldPipelineFirstStage(child, current, out);
+			first = false;
+			continue;
+		}
+		// Downstream stage (after a `|`): subshell — collect against the folded
+		// base, do not fold.
+		tagTokens(collectPathCandidateTokens(child), current, out);
+	}
+	return current;
 }
 
 /**
@@ -201,32 +184,28 @@ function walkPipeline(
  * `cd nested | cat ../b`) is a subshell: it collects against the input base
  * and does not fold.
  */
-function foldPipelineFirstStage(
-  node: TSNode,
-  base: EffectiveBase,
-  out: PathCandidate[],
-): EffectiveBase {
-  if (node.type === "list") return foldListExceptTerminal(node, base, out);
-  if (node.type === "redirected_statement") {
-    let current = base;
-    for (let i = 0; i < node.childCount; i++) {
-      const child = node.child(i);
-      if (!child?.isNamed) continue;
-      if (child.type === "file_redirect") {
-        // Redirect destinations are part of the piped stage; collect them
-        // against the folded base without folding.
-        tagTokens(collectRedirectTokens(child), current, out);
-        continue;
-      }
-      // The inner statement is the `list`/`command` being redirected; fold its
-      // leading current-shell commands via the terminal-excluding walk.
-      current = foldPipelineFirstStage(child, current, out);
-    }
-    return current;
-  }
-  // Bare `command` or any other shape: a true subshell first stage.
-  tagTokens(collectPathCandidateTokens(node), base, out);
-  return base;
+function foldPipelineFirstStage(node: TSNode, base: EffectiveBase, out: PathCandidate[]): EffectiveBase {
+	if (node.type === "list") return foldListExceptTerminal(node, base, out);
+	if (node.type === "redirected_statement") {
+		let current = base;
+		for (let i = 0; i < node.childCount; i++) {
+			const child = node.child(i);
+			if (!child?.isNamed) continue;
+			if (child.type === "file_redirect") {
+				// Redirect destinations are part of the piped stage; collect them
+				// against the folded base without folding.
+				tagTokens(collectRedirectTokens(child), current, out);
+				continue;
+			}
+			// The inner statement is the `list`/`command` being redirected; fold its
+			// leading current-shell commands via the terminal-excluding walk.
+			current = foldPipelineFirstStage(child, current, out);
+		}
+		return current;
+	}
+	// Bare `command` or any other shape: a true subshell first stage.
+	tagTokens(collectPathCandidateTokens(node), base, out);
+	return base;
 }
 
 /**
@@ -234,29 +213,25 @@ function foldPipelineFirstStage(
  * effective base left-to-right through the leading current-shell commands; the
  * terminal child is the real pipe stage and is collected without folding.
  */
-function foldListExceptTerminal(
-  node: TSNode,
-  base: EffectiveBase,
-  out: PathCandidate[],
-): EffectiveBase {
-  const namedChildren: TSNode[] = [];
-  for (let i = 0; i < node.childCount; i++) {
-    const child = node.child(i);
-    if (child?.isNamed && !SKIP_SUBTREE_TYPES.has(child.type)) {
-      namedChildren.push(child);
-    }
-  }
-  let current = base;
-  for (let i = 0; i < namedChildren.length; i++) {
-    const child = namedChildren[i];
-    if (i < namedChildren.length - 1) {
-      current = walkForCandidates(child, current, out);
-    } else {
-      // Terminal child = the real pipe stage; collect without folding.
-      tagTokens(collectPathCandidateTokens(child), current, out);
-    }
-  }
-  return current;
+function foldListExceptTerminal(node: TSNode, base: EffectiveBase, out: PathCandidate[]): EffectiveBase {
+	const namedChildren: TSNode[] = [];
+	for (let i = 0; i < node.childCount; i++) {
+		const child = node.child(i);
+		if (child?.isNamed && !SKIP_SUBTREE_TYPES.has(child.type)) {
+			namedChildren.push(child);
+		}
+	}
+	let current = base;
+	for (let i = 0; i < namedChildren.length; i++) {
+		const child = namedChildren[i];
+		if (i < namedChildren.length - 1) {
+			current = walkForCandidates(child, current, out);
+		} else {
+			// Terminal child = the real pipe stage; collect without folding.
+			tagTokens(collectPathCandidateTokens(child), current, out);
+		}
+	}
+	return current;
 }
 
 /**
@@ -265,17 +240,13 @@ function foldListExceptTerminal(
  * separators.
  */
 function isBackgrounded(seqNode: TSNode, index: number): boolean {
-  const next = seqNode.child(index + 1);
-  if (!next || next.isNamed) return false;
-  return next.type === "&";
+	const next = seqNode.child(index + 1);
+	if (!next || next.isNamed) return false;
+	return next.type === "&";
 }
 
-function tagTokens(
-  tokens: readonly string[],
-  base: EffectiveBase,
-  out: PathCandidate[],
-): void {
-  for (const token of tokens) out.push({ token, base });
+function tagTokens(tokens: readonly string[], base: EffectiveBase, out: PathCandidate[]): void {
+	for (const token of tokens) out.push({ token, base });
 }
 
 // ── cd-fold helpers ──────────────────────────────────────────────────────────
@@ -292,12 +263,12 @@ function tagTokens(
  *   unknown.
  */
 function foldCd(commandNode: TSNode, base: EffectiveBase): EffectiveBase {
-  if (extractCommandName(commandNode) !== "cd") return base;
-  const target = cdLiteralTarget(commandNode);
-  if (target === null) return UNKNOWN_BASE;
-  if (isAbsolute(target)) return { kind: "known", offset: target };
-  if (base.kind === "unknown") return UNKNOWN_BASE;
-  return { kind: "known", offset: join(base.offset, target) };
+	if (extractCommandName(commandNode) !== "cd") return base;
+	const target = cdLiteralTarget(commandNode);
+	if (target === null) return UNKNOWN_BASE;
+	if (isAbsolute(target)) return { kind: "known", offset: target };
+	if (base.kind === "unknown") return UNKNOWN_BASE;
+	return { kind: "known", offset: join(base.offset, target) };
 }
 
 /**
@@ -307,18 +278,17 @@ function foldCd(commandNode: TSNode, base: EffectiveBase): EffectiveBase {
  * `cd ~…`, bare `cd`).
  */
 function cdLiteralTarget(commandNode: TSNode): string | null {
-  for (let i = 0; i < commandNode.childCount; i++) {
-    const child = commandNode.child(i);
-    if (!child) continue;
-    if (child.type === "command_name" || child.type === "variable_assignment")
-      continue;
-    if (!child.isNamed) continue;
-    // Skip the `--` end-of-flags marker; the next argument is the target.
-    if (child.type === "word" && child.text === "--") continue;
-    if (!ARG_NODE_TYPES.has(child.type)) return null;
-    return literalTextOf(child);
-  }
-  return null;
+	for (let i = 0; i < commandNode.childCount; i++) {
+		const child = commandNode.child(i);
+		if (!child) continue;
+		if (child.type === "command_name" || child.type === "variable_assignment") continue;
+		if (!child.isNamed) continue;
+		// Skip the `--` end-of-flags marker; the next argument is the target.
+		if (child.type === "word" && child.text === "--") continue;
+		if (!ARG_NODE_TYPES.has(child.type)) return null;
+		return literalTextOf(child);
+	}
+	return null;
 }
 
 /**
@@ -327,43 +297,41 @@ function cdLiteralTarget(commandNode: TSNode): string | null {
  * destination (`-`, `~…`).
  */
 function literalTextOf(node: TSNode): string | null {
-  switch (node.type) {
-    case "word": {
-      const text = node.text;
-      if (text === "-" || text.startsWith("~")) return null;
-      return text;
-    }
-    case "raw_string": {
-      const text = node.text;
-      return text.length >= 2 && text.startsWith("'") && text.endsWith("'")
-        ? text.slice(1, -1)
-        : text;
-    }
-    case "concatenation": {
-      let result = "";
-      for (let i = 0; i < node.childCount; i++) {
-        const child = node.child(i);
-        if (!child) continue;
-        const part = literalTextOf(child);
-        if (part === null) return null;
-        result += part;
-      }
-      return result;
-    }
-    case "string": {
-      let result = "";
-      for (let i = 0; i < node.childCount; i++) {
-        const child = node.child(i);
-        if (!child) continue;
-        if (child.type === '"') continue;
-        if (child.type !== "string_content") return null;
-        result += child.text;
-      }
-      return result;
-    }
-    default:
-      return null;
-  }
+	switch (node.type) {
+		case "word": {
+			const text = node.text;
+			if (text === "-" || text.startsWith("~")) return null;
+			return text;
+		}
+		case "raw_string": {
+			const text = node.text;
+			return text.length >= 2 && text.startsWith("'") && text.endsWith("'") ? text.slice(1, -1) : text;
+		}
+		case "concatenation": {
+			let result = "";
+			for (let i = 0; i < node.childCount; i++) {
+				const child = node.child(i);
+				if (!child) continue;
+				const part = literalTextOf(child);
+				if (part === null) return null;
+				result += part;
+			}
+			return result;
+		}
+		case "string": {
+			let result = "";
+			for (let i = 0; i < node.childCount; i++) {
+				const child = node.child(i);
+				if (!child) continue;
+				if (child.type === '"') continue;
+				if (child.type !== "string_content") return null;
+				result += child.text;
+			}
+			return result;
+		}
+		default:
+			return null;
+	}
 }
 
 // ── Per-candidate helpers ────────────────────────────────────────────────────
@@ -375,23 +343,19 @@ function literalTextOf(node: TSNode): string | null {
  * Used to decide which candidates an unknown base affects.
  */
 function isRelativeCandidate(candidate: string): boolean {
-  return !candidate.startsWith("/") && !candidate.startsWith("~");
+	return !candidate.startsWith("/") && !candidate.startsWith("~");
 }
 
-function buildRuleCandidatePath(
-  candidate: string,
-  base: EffectiveBase,
-  cwd: string,
-): AccessPath {
-  // An unknown base + relative candidate stays literal-only: a resolved
-  // absolute or canonical alias would resolve against the wrong directory and
-  // could spuriously match a rule (#393).
-  if (base.kind === "unknown" && isRelativeCandidate(candidate)) {
-    return AccessPath.forLiteral(normalizePathPolicyLiteral(candidate));
-  }
+function buildRuleCandidatePath(candidate: string, base: EffectiveBase, cwd: string): AccessPath {
+	// An unknown base + relative candidate stays literal-only: a resolved
+	// absolute or canonical alias would resolve against the wrong directory and
+	// could spuriously match a rule (#393).
+	if (base.kind === "unknown" && isRelativeCandidate(candidate)) {
+		return AccessPath.forLiteral(normalizePathPolicyLiteral(candidate));
+	}
 
-  const resolveBase = base.kind === "known" ? resolve(cwd, base.offset) : cwd;
-  return AccessPath.forPath(candidate, { cwd, resolveBase });
+	const resolveBase = base.kind === "known" ? resolve(cwd, base.offset) : cwd;
+	return AccessPath.forPath(candidate, { cwd, resolveBase });
 }
 
 // ── Projection functions ─────────────────────────────────────────────────────
@@ -408,61 +372,53 @@ function buildRuleCandidatePath(
  * (symlink-resolved) form so `external_directory` config patterns match the
  * path as the user typed it (#418).
  */
-export function projectExternalPaths(
-  candidates: readonly PathCandidate[],
-  cwd: string,
-): AccessPath[] {
-  const normalizedCwd = canonicalizePath(normalizePathForComparison(cwd, cwd));
+export function projectExternalPaths(candidates: readonly PathCandidate[], cwd: string): AccessPath[] {
+	const normalizedCwd = canonicalizePath(normalizePathForComparison(cwd, cwd));
 
-  const seen = new Set<string>();
-  const externalPaths: AccessPath[] = [];
+	const seen = new Set<string>();
+	const externalPaths: AccessPath[] = [];
 
-  for (const { token, base } of candidates) {
-    const candidate = classifyTokenAsPathCandidate(token);
-    if (!candidate) continue;
+	for (const { token, base } of candidates) {
+		const candidate = classifyTokenAsPathCandidate(token);
+		if (!candidate) continue;
 
-    // Unknown effective directory: a relative candidate could resolve anywhere,
-    // so flag it conservatively (resolving against `cwd` only for a display
-    // path). Absolute / `~` candidates are base-independent and resolve below.
-    if (base.kind === "unknown" && isRelativeCandidate(candidate)) {
-      const lexical = normalizePathForComparison(candidate, cwd);
-      const canonical = canonicalizePath(lexical);
-      if (
-        canonical &&
-        normalizedCwd !== "" &&
-        !isSafeSystemPath(canonical) &&
-        !seen.has(canonical)
-      ) {
-        seen.add(canonical);
-        // The factory recomputes the canonical via canonicalNormalizePathForComparison
-        // (win32-lowercased, #382) rather than reusing the raw canonicalizePath output.
-        externalPaths.push(AccessPath.forPath(lexical, { cwd }));
-      }
-      continue;
-    }
+		// Unknown effective directory: a relative candidate could resolve anywhere,
+		// so flag it conservatively (resolving against `cwd` only for a display
+		// path). Absolute / `~` candidates are base-independent and resolve below.
+		if (base.kind === "unknown" && isRelativeCandidate(candidate)) {
+			const lexical = normalizePathForComparison(candidate, cwd);
+			const canonical = canonicalizePath(lexical);
+			if (canonical && normalizedCwd !== "" && !isSafeSystemPath(canonical) && !seen.has(canonical)) {
+				seen.add(canonical);
+				// The factory recomputes the canonical via canonicalNormalizePathForComparison
+				// (win32-lowercased, #382) rather than reusing the raw canonicalizePath output.
+				externalPaths.push(AccessPath.forPath(lexical, { cwd }));
+			}
+			continue;
+		}
 
-    const resolveBase = base.kind === "known" ? resolve(cwd, base.offset) : cwd;
-    const lexical = normalizePathForComparison(candidate, resolveBase);
-    if (!lexical) continue;
-    // The boundary decision and dedup identity use the canonical
-    // (symlink-resolved) form, but the returned value is the lexical form so
-    // config patterns match the path as the user typed it (#418).
-    const canonical = canonicalizePath(lexical);
+		const resolveBase = base.kind === "known" ? resolve(cwd, base.offset) : cwd;
+		const lexical = normalizePathForComparison(candidate, resolveBase);
+		if (!lexical) continue;
+		// The boundary decision and dedup identity use the canonical
+		// (symlink-resolved) form, but the returned value is the lexical form so
+		// config patterns match the path as the user typed it (#418).
+		const canonical = canonicalizePath(lexical);
 
-    if (
-      normalizedCwd !== "" &&
-      !isSafeSystemPath(canonical) &&
-      !isPathWithinDirectory(canonical, normalizedCwd) &&
-      !seen.has(canonical)
-    ) {
-      seen.add(canonical);
-      // The factory recomputes the canonical via canonicalNormalizePathForComparison
-      // (win32-lowercased, #382) rather than reusing the raw canonicalizePath output.
-      externalPaths.push(AccessPath.forPath(lexical, { cwd }));
-    }
-  }
+		if (
+			normalizedCwd !== "" &&
+			!isSafeSystemPath(canonical) &&
+			!isPathWithinDirectory(canonical, normalizedCwd) &&
+			!seen.has(canonical)
+		) {
+			seen.add(canonical);
+			// The factory recomputes the canonical via canonicalNormalizePathForComparison
+			// (win32-lowercased, #382) rather than reusing the raw canonicalizePath output.
+			externalPaths.push(AccessPath.forPath(lexical, { cwd }));
+		}
+	}
 
-  return externalPaths;
+	return externalPaths;
 }
 
 /**
@@ -475,26 +431,23 @@ export function projectExternalPaths(
  * A token after a non-literal `cd` keeps only its literal value so no
  * spurious absolute rule can match (#393).
  */
-export function projectRuleCandidates(
-  candidates: readonly PathCandidate[],
-  cwd: string,
-): BashPathRuleCandidate[] {
-  const seen = new Set<string>();
-  const result: BashPathRuleCandidate[] = [];
+export function projectRuleCandidates(candidates: readonly PathCandidate[], cwd: string): BashPathRuleCandidate[] {
+	const seen = new Set<string>();
+	const result: BashPathRuleCandidate[] = [];
 
-  for (const { token, base } of candidates) {
-    const candidate = classifyTokenAsRuleCandidate(token);
-    if (!candidate) continue;
+	for (const { token, base } of candidates) {
+		const candidate = classifyTokenAsRuleCandidate(token);
+		if (!candidate) continue;
 
-    const path = buildRuleCandidatePath(candidate, base, cwd);
-    const matchValues = path.matchValues();
-    if (matchValues.length === 0) continue;
+		const path = buildRuleCandidatePath(candidate, base, cwd);
+		const matchValues = path.matchValues();
+		if (matchValues.length === 0) continue;
 
-    const key = matchValues.join("\0");
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push({ token: candidate, path });
-  }
+		const key = matchValues.join("\0");
+		if (seen.has(key)) continue;
+		seen.add(key);
+		result.push({ token: candidate, path });
+	}
 
-  return result;
+	return result;
 }

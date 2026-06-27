@@ -29,23 +29,22 @@ import type { AgentPromptConfig } from "../types";
  * @param parentSystemPrompt  The parent agent's effective system prompt.
  */
 export function buildAgentPrompt(
-  config: AgentPromptConfig,
-  cwd: string,
-  env: EnvInfo,
-  parentSystemPrompt?: string,
+	config: AgentPromptConfig,
+	cwd: string,
+	env: EnvInfo,
+	parentSystemPrompt?: string,
 ): string {
-  const activeAgentTag = `<active_agent name="${config.name}"/>\n\n`;
+	const activeAgentTag = `<active_agent name="${config.name}"/>\n\n`;
 
-  const envBlock = `# Environment
+	const envBlock = `# Environment
 Working directory: ${cwd}
 ${env.isGitRepo ? `Git repository: yes\nBranch: ${env.branch}` : "Not a git repository"}
 Platform: ${env.platform}`;
 
-  const identity = parentSystemPrompt ?? genericBase;
+	const identity = parentSystemPrompt ?? genericBase;
 
-  if (config.promptMode === "append") {
-
-    const bridge = `<sub_agent_context>
+	if (config.promptMode === "append") {
+		const bridge = `<sub_agent_context>
 You are operating as a sub-agent invoked to handle a specific task.
 - Use the read tool instead of cat/head/tail
 - Use the edit tool instead of sed/awk
@@ -58,31 +57,23 @@ You are operating as a sub-agent invoked to handle a specific task.
 - Be concise but complete
 </sub_agent_context>`;
 
-    const customSection = config.systemPrompt.trim()
-      ? `\n\n<agent_instructions>\n${config.systemPrompt}\n</agent_instructions>`
-      : "";
+		const customSection = config.systemPrompt.trim()
+			? `\n\n<agent_instructions>\n${config.systemPrompt}\n</agent_instructions>`
+			: "";
 
-    // Place shared/stable content first so the LLM's KV cache can reuse the
-    // inherited prefix across all subagent invocations. The parent prompt is
-    // placed verbatim (no wrapper tag) so it forms an identical byte prefix
-    // with the parent session, maximising KV cache hits. The <active_agent>
-    // tag and env block vary per call and are placed after the cached prefix.
-    return (
-      identity +
-      "\n\n" +
-      bridge +
-      "\n\n" +
-      activeAgentTag +
-      envBlock +
-      customSection
-    );
-  }
+		// Place shared/stable content first so the LLM's KV cache can reuse the
+		// inherited prefix across all subagent invocations. The parent prompt is
+		// placed verbatim (no wrapper tag) so it forms an identical byte prefix
+		// with the parent session, maximising KV cache hits. The <active_agent>
+		// tag and env block vary per call and are placed after the cached prefix.
+		return identity + "\n\n" + bridge + "\n\n" + activeAgentTag + envBlock + customSection;
+	}
 
-  // "replace" mode — parent/genericBase prefix first for KV cache reuse, then
-  // the active_agent tag, env block, and the config's full system prompt.
-  // Unlike append mode, no <sub_agent_context> bridge or <agent_instructions>
-  // wrapper is injected — the custom prompt retains full control.
-  return identity + "\n\n" + activeAgentTag + envBlock + "\n\n" + config.systemPrompt;
+	// "replace" mode — parent/genericBase prefix first for KV cache reuse, then
+	// the active_agent tag, env block, and the config's full system prompt.
+	// Unlike append mode, no <sub_agent_context> bridge or <agent_instructions>
+	// wrapper is injected — the custom prompt retains full control.
+	return identity + "\n\n" + activeAgentTag + envBlock + "\n\n" + config.systemPrompt;
 }
 
 /** Fallback base prompt when parent system prompt is unavailable (both modes). */

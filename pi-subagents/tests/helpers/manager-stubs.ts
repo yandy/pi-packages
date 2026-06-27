@@ -10,10 +10,10 @@ import { vi } from "vitest";
 import type { CreateSubagentSessionParams } from "../../src/lifecycle/create-subagent-session";
 import type { SubagentSession } from "../../src/lifecycle/subagent-session";
 import {
-  createMockSession,
-  createSubagentSessionStub,
-  type MockSession,
-  toSubagentSession,
+	createMockSession,
+	createSubagentSessionStub,
+	type MockSession,
+	toSubagentSession,
 } from "../helpers/mock-session";
 
 // ── createBlockingFactory ────────────────────────────────────────────────────
@@ -25,7 +25,7 @@ import {
  * (e.g., to inspect queued records or test abort behavior).
  */
 export function createBlockingFactory() {
-  return vi.fn((_params: CreateSubagentSessionParams) => new Promise<SubagentSession>(() => {}));
+	return vi.fn((_params: CreateSubagentSessionParams) => new Promise<SubagentSession>(() => {}));
 }
 
 // ── createSessionFactory ─────────────────────────────────────────────────────
@@ -36,7 +36,7 @@ export function createBlockingFactory() {
  * `runTurnLoop`/`resumeTurnLoop` and emit session events.
  */
 export function createSessionFactory(session: MockSession = createMockSession(), outputFile?: string) {
-  const stub = createSubagentSessionStub(session, outputFile);
-  const factory = vi.fn(async (_params: CreateSubagentSessionParams) => toSubagentSession(stub));
-  return { factory, stub, session };
+	const stub = createSubagentSessionStub(session, outputFile);
+	const factory = vi.fn(async (_params: CreateSubagentSessionParams) => toSubagentSession(stub));
+	return { factory, stub, session };
 }

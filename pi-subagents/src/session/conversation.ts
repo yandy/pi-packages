@@ -14,36 +14,31 @@ import { extractText } from "../session/context";
  * Get the subagent's conversation messages as formatted text.
  */
 export function getAgentConversation(session: AgentSession): string {
-  const parts: string[] = [];
+	const parts: string[] = [];
 
-  for (const msg of session.messages) {
-    if (msg.role === "user") {
-      const text =
-        typeof msg.content === "string"
-          ? msg.content
-          : extractText(msg.content);
-      if (text.trim()) parts.push(`[User]: ${text.trim()}`);
-    } else if (msg.role === "assistant") {
-      const { textParts, toolNames } = extractAssistantContent(msg.content);
-      const attribution = formatAttribution(msg);
-      if (textParts.length > 0)
-        parts.push(`[Assistant${attribution}]: ${textParts.join("\n")}`);
-      if (toolNames.length > 0)
-        parts.push(`[Tool Calls]:\n${toolNames.map((n) => `  Tool: ${n}`).join("\n")}`);
-    } else if (msg.role === "toolResult") {
-      const text = extractText(msg.content);
-      const truncated = text.length > 200 ? text.slice(0, 200) + "..." : text;
-      parts.push(`[Tool Result (${msg.toolName})]: ${truncated}`);
-    }
-  }
+	for (const msg of session.messages) {
+		if (msg.role === "user") {
+			const text = typeof msg.content === "string" ? msg.content : extractText(msg.content);
+			if (text.trim()) parts.push(`[User]: ${text.trim()}`);
+		} else if (msg.role === "assistant") {
+			const { textParts, toolNames } = extractAssistantContent(msg.content);
+			const attribution = formatAttribution(msg);
+			if (textParts.length > 0) parts.push(`[Assistant${attribution}]: ${textParts.join("\n")}`);
+			if (toolNames.length > 0) parts.push(`[Tool Calls]:\n${toolNames.map((n) => `  Tool: ${n}`).join("\n")}`);
+		} else if (msg.role === "toolResult") {
+			const text = extractText(msg.content);
+			const truncated = text.length > 200 ? text.slice(0, 200) + "..." : text;
+			parts.push(`[Tool Result (${msg.toolName})]: ${truncated}`);
+		}
+	}
 
-  return parts.join("\n\n");
+	return parts.join("\n\n");
 }
 
 /** Build a `(provider/model)` attribution suffix for assistant messages. */
 function formatAttribution(msg: { provider?: string; model?: string }): string {
-  const { provider, model } = msg;
-  if (!provider && !model) return "";
-  if (provider && model) return ` (${provider}/${model})`;
-  return ` (${provider ?? model})`;
+	const { provider, model } = msg;
+	if (!provider && !model) return "";
+	if (provider && model) return ` (${provider}/${model})`;
+	return ` (${provider ?? model})`;
 }

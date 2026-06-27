@@ -17,11 +17,7 @@ import type { GateOutcome } from "./types";
  * import from the domain module into the handler layer.
  */
 export interface SkillInputGateInputs {
-  checkPermission(
-    surface: string,
-    input: unknown,
-    agentName?: string,
-  ): PermissionCheckResult;
+	checkPermission(surface: string, input: unknown, agentName?: string): PermissionCheckResult;
 }
 
 /**
@@ -33,7 +29,7 @@ export interface SkillInputGateInputs {
  * decides whether a UI is present).
  */
 export interface GateNotifier {
-  warn(message: string): void;
+	warn(message: string): void;
 }
 
 // ── Pipeline ─────────────────────────────────────────────────────────────────
@@ -51,28 +47,20 @@ export interface GateNotifier {
  * an `async` body with no `await`).
  */
 export class SkillInputGatePipeline {
-  constructor(private readonly inputs: SkillInputGateInputs) {}
+	constructor(private readonly inputs: SkillInputGateInputs) {}
 
-  evaluate(
-    skillName: string,
-    agentName: string | null,
-    notifier: GateNotifier,
-    runner: GateRunner,
-  ): Promise<GateOutcome> {
-    const check = this.inputs.checkPermission(
-      "skill",
-      { name: skillName },
-      agentName ?? undefined,
-    );
-    if (check.state === "deny") {
-      notifier.warn(formatSkillDenyNotice(skillName, agentName));
-    }
-    return runner.run(
-      describeSkillInputGate(skillName, agentName, check),
-      agentName,
-      createSkillInputRequestId(),
-    );
-  }
+	evaluate(
+		skillName: string,
+		agentName: string | null,
+		notifier: GateNotifier,
+		runner: GateRunner,
+	): Promise<GateOutcome> {
+		const check = this.inputs.checkPermission("skill", { name: skillName }, agentName ?? undefined);
+		if (check.state === "deny") {
+			notifier.warn(formatSkillDenyNotice(skillName, agentName));
+		}
+		return runner.run(describeSkillInputGate(skillName, agentName, check), agentName, createSkillInputRequestId());
+	}
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -84,7 +72,7 @@ export class SkillInputGatePipeline {
  * `createPermissionRequestId("skill-input")` pattern it replaces (#330).
  */
 export function createSkillInputRequestId(): string {
-  return `skill-input-${Date.now()}-${Math.random().toString(36).slice(2, 10)}-${process.pid}`;
+	return `skill-input-${Date.now()}-${Math.random().toString(36).slice(2, 10)}-${process.pid}`;
 }
 
 /**
@@ -94,11 +82,8 @@ export function createSkillInputRequestId(): string {
  * UI notify distinct from the gate deny reasons the runner routes through
  * `formatDenyReason`.
  */
-export function formatSkillDenyNotice(
-  skillName: string,
-  agentName: string | null,
-): string {
-  return agentName
-    ? `Skill '${skillName}' is not permitted for agent '${agentName}'.`
-    : `Skill '${skillName}' is not permitted by the current skill policy.`;
+export function formatSkillDenyNotice(skillName: string, agentName: string | null): string {
+	return agentName
+		? `Skill '${skillName}' is not permitted for agent '${agentName}'.`
+		: `Skill '${skillName}' is not permitted by the current skill policy.`;
 }

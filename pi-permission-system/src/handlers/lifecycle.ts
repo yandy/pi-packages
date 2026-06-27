@@ -9,12 +9,12 @@ import { PERMISSION_SYSTEM_STATUS_KEY } from "../status";
 
 /** Minimal subset of SessionStartEvent used by this handler. */
 interface SessionStartPayload {
-  reason: string;
+	reason: string;
 }
 
 /** Minimal subset of ResourcesDiscoverEvent used by this handler. */
 interface ResourcesDiscoverPayload {
-  reason: string;
+	reason: string;
 }
 
 /**
@@ -30,66 +30,63 @@ interface ResourcesDiscoverPayload {
  * - `audit` — per-session decision counters; its summary is written on shutdown
  */
 export class SessionLifecycleHandler {
-  constructor(
-    private readonly session: PermissionSession,
-    private readonly resolver: PermissionResolver,
-    private readonly serviceLifecycle: ServiceLifecycle,
-    private readonly logger: SessionLogger,
-    private readonly audit: DecisionSummaryWriter,
-  ) {}
+	constructor(
+		private readonly session: PermissionSession,
+		private readonly resolver: PermissionResolver,
+		private readonly serviceLifecycle: ServiceLifecycle,
+		private readonly logger: SessionLogger,
+		private readonly audit: DecisionSummaryWriter,
+	) {}
 
-  handleSessionStart(
-    event: SessionStartPayload,
-    ctx: ExtensionContext,
-  ): Promise<void> {
-    this.session.refreshConfig(ctx);
-    this.session.resetForNewSession(ctx);
-    this.session.logResolvedConfigPaths();
+	handleSessionStart(event: SessionStartPayload, ctx: ExtensionContext): Promise<void> {
+		this.session.refreshConfig(ctx);
+		this.session.resetForNewSession(ctx);
+		this.session.logResolvedConfigPaths();
 
-    const agentName = this.session.resolveAgentName(ctx);
-    const policyIssues = this.resolver.getConfigIssues(agentName ?? undefined);
-    for (const issue of policyIssues) {
-      this.logger.warn(issue);
-    }
+		const agentName = this.session.resolveAgentName(ctx);
+		const policyIssues = this.resolver.getConfigIssues(agentName ?? undefined);
+		for (const issue of policyIssues) {
+			this.logger.warn(issue);
+		}
 
-    if (event.reason === "reload") {
-      this.logger.debug("lifecycle.reload", {
-        triggeredBy: "session_start",
-        reason: event.reason,
-        cwd: ctx.cwd,
-      });
-    }
+		if (event.reason === "reload") {
+			this.logger.debug("lifecycle.reload", {
+				triggeredBy: "session_start",
+				reason: event.reason,
+				cwd: ctx.cwd,
+			});
+		}
 
-    // Publish the process-global service now that a ctx (and therefore the
-    // session id) is available, so an in-process subagent child can be
-    // identified and excluded. Emitting ready here keeps the
-    // service-resolvable-when-ready ordering contract.
-    this.serviceLifecycle.activate(ctx);
-    return Promise.resolve();
-  }
+		// Publish the process-global service now that a ctx (and therefore the
+		// session id) is available, so an in-process subagent child can be
+		// identified and excluded. Emitting ready here keeps the
+		// service-resolvable-when-ready ordering contract.
+		this.serviceLifecycle.activate(ctx);
+		return Promise.resolve();
+	}
 
-  handleResourcesDiscover(event: ResourcesDiscoverPayload): Promise<void> {
-    if (event.reason !== "reload") {
-      return Promise.resolve();
-    }
+	handleResourcesDiscover(event: ResourcesDiscoverPayload): Promise<void> {
+		if (event.reason !== "reload") {
+			return Promise.resolve();
+		}
 
-    this.session.reload();
-    this.logger.debug("lifecycle.reload", {
-      triggeredBy: "resources_discover",
-      reason: event.reason,
-      cwd: this.session.getRuntimeContext()?.cwd ?? null,
-    });
-    return Promise.resolve();
-  }
+		this.session.reload();
+		this.logger.debug("lifecycle.reload", {
+			triggeredBy: "resources_discover",
+			reason: event.reason,
+			cwd: this.session.getRuntimeContext()?.cwd ?? null,
+		});
+		return Promise.resolve();
+	}
 
-  handleSessionShutdown(): Promise<void> {
-    const ctx = this.session.getRuntimeContext();
-    if (ctx) {
-      ctx.ui.setStatus(PERMISSION_SYSTEM_STATUS_KEY, undefined);
-    }
-    this.audit.writeSummary(this.logger);
-    this.session.shutdown();
-    this.serviceLifecycle.teardown();
-    return Promise.resolve();
-  }
+	handleSessionShutdown(): Promise<void> {
+		const ctx = this.session.getRuntimeContext();
+		if (ctx) {
+			ctx.ui.setStatus(PERMISSION_SYSTEM_STATUS_KEY, undefined);
+		}
+		this.audit.writeSummary(this.logger);
+		this.session.shutdown();
+		this.serviceLifecycle.teardown();
+		return Promise.resolve();
+	}
 }

@@ -1,8 +1,4 @@
-import {
-  emitDecisionEvent,
-  type PermissionDecisionEvent,
-  type PermissionEventBus,
-} from "./permission-events";
+import { emitDecisionEvent, type PermissionDecisionEvent, type PermissionEventBus } from "./permission-events";
 import type { SessionLogger } from "./session-logger";
 
 /**
@@ -11,8 +7,8 @@ import type { SessionLogger } from "./session-logger";
  * writing a structured review-log entry and broadcasting a decision event.
  */
 export interface DecisionReporter {
-  writeReviewLog(event: string, details: Record<string, unknown>): void;
-  emitDecision(event: PermissionDecisionEvent): void;
+	writeReviewLog(event: string, details: Record<string, unknown>): void;
+	emitDecision(event: PermissionDecisionEvent): void;
 }
 
 /**
@@ -26,16 +22,16 @@ export interface DecisionReporter {
  * Answers "who owns the event bus" — the reporter does, not the session.
  */
 export class GateDecisionReporter implements DecisionReporter {
-  constructor(
-    private readonly logger: SessionLogger,
-    private readonly events: PermissionEventBus,
-  ) {}
+	constructor(
+		private readonly logger: SessionLogger,
+		private readonly events: PermissionEventBus,
+	) {}
 
-  writeReviewLog(event: string, details: Record<string, unknown>): void {
-    this.logger.review(event, details);
-  }
+	writeReviewLog(event: string, details: Record<string, unknown>): void {
+		this.logger.review(event, details);
+	}
 
-  emitDecision(event: PermissionDecisionEvent): void {
-    emitDecisionEvent(this.events, event);
-  }
+	emitDecision(event: PermissionDecisionEvent): void {
+		emitDecisionEvent(this.events, event);
+	}
 }

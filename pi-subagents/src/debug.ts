@@ -6,9 +6,9 @@
  */
 
 export function isDebug(): boolean {
-  return process.env.PI_SUBAGENTS_DEBUG === "1";
+	return process.env.PI_SUBAGENTS_DEBUG === "1";
 }
 
 export function debugLog(context: string, err: unknown): void {
-  if (isDebug()) console.warn(`[pi-subagents:debug] ${context}:`, err);
+	if (isDebug()) console.warn(`[pi-subagents:debug] ${context}:`, err);
 }

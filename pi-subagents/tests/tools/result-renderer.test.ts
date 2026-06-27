@@ -141,9 +141,7 @@ describe("renderBackground", () => {
 
 	it("wraps entire message in dim styling with agent ID", () => {
 		const details = makeDetails({ status: "background", agentId: "agent-42" });
-		expect(renderBackground(details, theme)).toBe(
-			"[dim:  \u23BF  Running in background (ID: agent-42)]",
-		);
+		expect(renderBackground(details, theme)).toBe("[dim:  \u23BF  Running in background (ID: agent-42)]");
 	});
 });
 
@@ -172,9 +170,7 @@ describe("renderCompleted", () => {
 
 	it("collapsed view shows 'Wrapped up (turn limit)' for steered", () => {
 		const details = makeDetails({ status: "steered", durationMs: 2000 });
-		expect(renderCompleted(details, "", false, theme)).toContain(
-			"[dim:  \u23BF  Wrapped up (turn limit)]",
-		);
+		expect(renderCompleted(details, "", false, theme)).toContain("[dim:  \u23BF  Wrapped up (turn limit)]");
 	});
 
 	it("expanded view shows result text lines with dim styling", () => {
@@ -190,9 +186,7 @@ describe("renderCompleted", () => {
 		const result = renderCompleted(details, manyLines, true, theme);
 		expect(result).toContain("[dim:  line 50]");
 		expect(result).not.toContain("[dim:  line 51]");
-		expect(result).toContain(
-			"[muted:  ... (use get_subagent_result with verbose for full output)]",
-		);
+		expect(result).toContain("[muted:  ... (use get_subagent_result with verbose for full output)]");
 	});
 
 	it("expanded view with empty result text shows no content lines", () => {
@@ -241,9 +235,7 @@ describe("renderFailed", () => {
 
 	it("shows aborted message with warning color for aborted status", () => {
 		const details = makeDetails({ status: "aborted" });
-		expect(renderFailed(details, theme)).toContain(
-			"[warning:  \u23BF  Aborted (max turns exceeded)]",
-		);
+		expect(renderFailed(details, theme)).toContain("[warning:  \u23BF  Aborted (max turns exceeded)]");
 	});
 });
 

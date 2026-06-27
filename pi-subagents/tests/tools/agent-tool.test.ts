@@ -20,13 +20,7 @@ async function execute(
 	params: Record<string, unknown>,
 	ctx?: ReturnType<typeof makeCtx>,
 ) {
-	return makeTool(deps).execute(
-		"tc-1",
-		params,
-		new AbortController().signal,
-		vi.fn(),
-		ctx ?? makeCtx(),
-	);
+	return makeTool(deps).execute("tc-1", params, new AbortController().signal, vi.fn(), ctx ?? makeCtx());
 }
 
 describe("AgentTool", () => {
@@ -38,9 +32,7 @@ describe("AgentTool", () => {
 
 	it("includes promptSnippet", () => {
 		const def = makeTool(createToolDeps()).toToolDefinition();
-		expect(def.promptSnippet).toBe(
-			"subagent: Launch a specialized agent for complex, multi-step tasks.",
-		);
+		expect(def.promptSnippet).toBe("subagent: Launch a specialized agent for complex, multi-step tasks.");
 	});
 
 	it("derives type list from registry — includes default agents in description", () => {
@@ -61,7 +53,6 @@ describe("AgentTool", () => {
 		expect(reloadSpy).toHaveBeenCalledOnce();
 		reloadSpy.mockRestore();
 	});
-
 });
 
 describe("AgentTool — resume path", () => {
@@ -109,15 +100,12 @@ describe("AgentTool — resume path", () => {
 describe("AgentTool — model resolution error", () => {
 	it("returns error when model resolution fails", async () => {
 		const deps = createToolDeps();
-		const result = await execute(
-			deps,
-			{
-				prompt: "test",
-				description: "test",
-				subagent_type: "general-purpose",
-				model: "nonexistent-model-xyz",
-			},
-		);
+		const result = await execute(deps, {
+			prompt: "test",
+			description: "test",
+			subagent_type: "general-purpose",
+			model: "nonexistent-model-xyz",
+		});
 		// User-specified model that doesn't resolve → error message
 		expect(result.content[0].text).toContain("nonexistent-model-xyz");
 	});
@@ -173,9 +161,7 @@ describe("AgentTool — background execution", () => {
 describe("AgentTool — foreground execution", () => {
 	it("returns completion message with stats", async () => {
 		const deps = createToolDeps();
-		deps.manager.spawnAndWait = vi.fn().mockResolvedValue(
-			createTestSubagent({ result: "Task complete.", toolUses: 5 }),
-		);
+		deps.manager.spawnAndWait = vi.fn().mockResolvedValue(createTestSubagent({ result: "Task complete.", toolUses: 5 }));
 		const result = await execute(deps, {
 			prompt: "do task",
 			description: "fg task",
@@ -188,9 +174,9 @@ describe("AgentTool — foreground execution", () => {
 
 	it("returns error message when agent fails", async () => {
 		const deps = createToolDeps();
-		deps.manager.spawnAndWait = vi.fn().mockResolvedValue(
-			createTestSubagent({ status: "error", error: "Out of context" }),
-		);
+		deps.manager.spawnAndWait = vi
+			.fn()
+			.mockResolvedValue(createTestSubagent({ status: "error", error: "Out of context" }));
 		const result = await execute(deps, {
 			prompt: "do task",
 			description: "fg task",

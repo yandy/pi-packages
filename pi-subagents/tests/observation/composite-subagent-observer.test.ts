@@ -69,11 +69,15 @@ describe("CompositeSubagentObserver", () => {
 			const calls: string[] = [];
 			const a: SubagentManagerObserver = {
 				...makeDelegate(),
-				onSubagentStarted: () => { calls.push("a"); },
+				onSubagentStarted: () => {
+					calls.push("a");
+				},
 			};
 			const b: SubagentManagerObserver = {
 				...makeDelegate(),
-				onSubagentStarted: () => { calls.push("b"); },
+				onSubagentStarted: () => {
+					calls.push("b");
+				},
 			};
 			const composite = new CompositeSubagentObserver([a, b]);
 
@@ -101,7 +105,9 @@ describe("CompositeSubagentObserver", () => {
 		it("continues to later delegates when an earlier one throws", () => {
 			const throwing: SubagentManagerObserver = {
 				...makeDelegate(),
-				onSubagentStarted: vi.fn(() => { throw new Error("boom"); }),
+				onSubagentStarted: vi.fn(() => {
+					throw new Error("boom");
+				}),
 			};
 			const after = makeDelegate();
 			const composite = new CompositeSubagentObserver([throwing, after]);

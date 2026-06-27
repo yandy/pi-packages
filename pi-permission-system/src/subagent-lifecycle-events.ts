@@ -27,20 +27,20 @@ export const SUBAGENT_CHILD_DISPOSED = "subagents:child:disposed";
 
 /** Minimal event-bus surface this module needs (subscribe only). */
 interface LifecycleEventBus {
-  on(channel: string, handler: (data: unknown) => void): () => void;
+	on(channel: string, handler: (data: unknown) => void): () => void;
 }
 
 /** Fields read from the `session-created` payload (ISP). */
 interface ChildSessionCreatedEvent {
-  /** Child session id — the registry key. Must match the publisher. */
-  sessionId: string;
-  parentSessionId?: string;
+	/** Child session id — the registry key. Must match the publisher. */
+	sessionId: string;
+	parentSessionId?: string;
 }
 
 /** Fields read from the `disposed` payload (ISP). */
 interface ChildDisposedEvent {
-  /** Child session id — the registry key. Must match the publisher. */
-  sessionId: string;
+	/** Child session id — the registry key. Must match the publisher. */
+	sessionId: string;
 }
 
 /**
@@ -49,24 +49,21 @@ interface ChildDisposedEvent {
  * @returns an unsubscribe that detaches both handlers (call during
  *          `session_shutdown`).
  */
-export function subscribeSubagentLifecycle(
-  events: LifecycleEventBus,
-  registry: SubagentSessionRegistry,
-): () => void {
-  const unsubCreated = events.on(SUBAGENT_CHILD_SESSION_CREATED, (data) => {
-    const event = data as ChildSessionCreatedEvent;
-    registry.register(event.sessionId, {
-      parentSessionId: event.parentSessionId,
-    });
-  });
+export function subscribeSubagentLifecycle(events: LifecycleEventBus, registry: SubagentSessionRegistry): () => void {
+	const unsubCreated = events.on(SUBAGENT_CHILD_SESSION_CREATED, (data) => {
+		const event = data as ChildSessionCreatedEvent;
+		registry.register(event.sessionId, {
+			parentSessionId: event.parentSessionId,
+		});
+	});
 
-  const unsubDisposed = events.on(SUBAGENT_CHILD_DISPOSED, (data) => {
-    const event = data as ChildDisposedEvent;
-    registry.unregister(event.sessionId);
-  });
+	const unsubDisposed = events.on(SUBAGENT_CHILD_DISPOSED, (data) => {
+		const event = data as ChildDisposedEvent;
+		registry.unregister(event.sessionId);
+	});
 
-  return () => {
-    unsubCreated();
-    unsubDisposed();
-  };
+	return () => {
+		unsubCreated();
+		unsubDisposed();
+	};
 }

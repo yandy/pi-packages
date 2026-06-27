@@ -16,21 +16,21 @@ import type { ToolInputFormatter } from "./tool-input-formatter-registry";
 import type { PermissionCheckResult, PermissionState } from "./types";
 
 export type {
-  ForwardedPromptContext,
-  PermissionDecisionEvent,
-  PermissionsPromptReplyData,
-  PermissionsPromptRequest,
-  PermissionsReadyEvent,
-  PermissionsRpcReply,
-  PermissionUiPromptEvent,
-  PermissionUiPromptSource,
+	ForwardedPromptContext,
+	PermissionDecisionEvent,
+	PermissionsPromptReplyData,
+	PermissionsPromptRequest,
+	PermissionsReadyEvent,
+	PermissionsRpcReply,
+	PermissionUiPromptEvent,
+	PermissionUiPromptSource,
 } from "./permission-events";
 export {
-  PERMISSIONS_DECISION_CHANNEL,
-  PERMISSIONS_PROTOCOL_VERSION,
-  PERMISSIONS_READY_CHANNEL,
-  PERMISSIONS_RPC_PROMPT_CHANNEL,
-  PERMISSIONS_UI_PROMPT_CHANNEL,
+	PERMISSIONS_DECISION_CHANNEL,
+	PERMISSIONS_PROTOCOL_VERSION,
+	PERMISSIONS_READY_CHANNEL,
+	PERMISSIONS_RPC_PROMPT_CHANNEL,
+	PERMISSIONS_UI_PROMPT_CHANNEL,
 } from "./permission-events";
 export type { PermissionCheckResult, PermissionState, ToolInputFormatter };
 
@@ -45,77 +45,67 @@ const SERVICE_KEY = Symbol.for("@yandy0725/pi-permission-system:service");
  * current session rules internally.
  */
 export interface PermissionsService {
-  /**
-   * Query the permission policy for a surface and value.
-   *
-   * @param surface   - Permission surface: "bash", "read", "mcp", "skill",
-   *                    "external_directory", etc.
-   * @param value     - The value to evaluate: command string, tool name, skill
-   *                    name, or path. Omit or pass `undefined` for a
-   *                    surface-level query.
-   * @param agentName - Optional agent name for per-agent policy resolution.
-   * @returns Full check result including state, matched pattern, and origin.
-   */
-  checkPermission(
-    surface: string,
-    value?: string,
-    agentName?: string,
-  ): PermissionCheckResult;
+	/**
+	 * Query the permission policy for a surface and value.
+	 *
+	 * @param surface   - Permission surface: "bash", "read", "mcp", "skill",
+	 *                    "external_directory", etc.
+	 * @param value     - The value to evaluate: command string, tool name, skill
+	 *                    name, or path. Omit or pass `undefined` for a
+	 *                    surface-level query.
+	 * @param agentName - Optional agent name for per-agent policy resolution.
+	 * @returns Full check result including state, matched pattern, and origin.
+	 */
+	checkPermission(surface: string, value?: string, agentName?: string): PermissionCheckResult;
 
-  /**
-   * Register a custom preview formatter for a specific tool name.
-   *
-   * The formatter is consulted first inside `ToolPreviewFormatter.formatToolInputForPrompt`;
-   * returning `undefined` falls through to the built-in switch (and ultimately
-   * the JSON default).
-   *
-   * Only one formatter may be registered per tool name — a second call for the
-   * same name throws.  The returned disposer unregisters the formatter.
-   *
-   * @param toolName  - Exact tool name to register for (e.g. `"mcp"`, `"my-server:run"`).
-   * @param formatter - Receives the raw `input` record; return a string to use
-   *                    as the prompt preview, or `undefined` to decline.
-   */
-  registerToolInputFormatter(
-    toolName: string,
-    formatter: ToolInputFormatter,
-  ): () => void;
+	/**
+	 * Register a custom preview formatter for a specific tool name.
+	 *
+	 * The formatter is consulted first inside `ToolPreviewFormatter.formatToolInputForPrompt`;
+	 * returning `undefined` falls through to the built-in switch (and ultimately
+	 * the JSON default).
+	 *
+	 * Only one formatter may be registered per tool name — a second call for the
+	 * same name throws.  The returned disposer unregisters the formatter.
+	 *
+	 * @param toolName  - Exact tool name to register for (e.g. `"mcp"`, `"my-server:run"`).
+	 * @param formatter - Receives the raw `input` record; return a string to use
+	 *                    as the prompt preview, or `undefined` to decline.
+	 */
+	registerToolInputFormatter(toolName: string, formatter: ToolInputFormatter): () => void;
 
-  /**
-   * Register a custom access-intent extractor for a specific tool name.
-   *
-   * The extractor declares the filesystem path a tool will access so the
-   * cross-cutting `path` and `external_directory` gates can see it. Use it for
-   * tools whose path lives under a non-standard key — built-in file tools and
-   * any tool exposing `input.path` (plus MCP via `input.arguments.path`) are
-   * already covered by convention without registration.
-   *
-   * The extractor receives the raw `input` record and returns the path string,
-   * or `undefined` to decline. Only one extractor may be registered per tool
-   * name — a second call for the same name throws. The returned disposer
-   * unregisters the extractor.
-   *
-   * @param toolName  - Exact tool name to register for (e.g. `"ffgrep"`).
-   * @param extractor - Receives the raw `input` record; return the path string,
-   *                    or `undefined` to decline.
-   */
-  registerToolAccessExtractor(
-    toolName: string,
-    extractor: ToolAccessExtractor,
-  ): () => void;
+	/**
+	 * Register a custom access-intent extractor for a specific tool name.
+	 *
+	 * The extractor declares the filesystem path a tool will access so the
+	 * cross-cutting `path` and `external_directory` gates can see it. Use it for
+	 * tools whose path lives under a non-standard key — built-in file tools and
+	 * any tool exposing `input.path` (plus MCP via `input.arguments.path`) are
+	 * already covered by convention without registration.
+	 *
+	 * The extractor receives the raw `input` record and returns the path string,
+	 * or `undefined` to decline. Only one extractor may be registered per tool
+	 * name — a second call for the same name throws. The returned disposer
+	 * unregisters the extractor.
+	 *
+	 * @param toolName  - Exact tool name to register for (e.g. `"ffgrep"`).
+	 * @param extractor - Receives the raw `input` record; return the path string,
+	 *                    or `undefined` to decline.
+	 */
+	registerToolAccessExtractor(toolName: string, extractor: ToolAccessExtractor): () => void;
 
-  /**
-   * Query the tool-level permission state for pre-filtering tools before
-   * creating a child session.
-   *
-   * Returns `"deny"` | `"allow"` | `"ask"` based on the composed policy.
-   * Does not consider command-level rules (e.g. per-bash-command patterns) —
-   * use `checkPermission` for runtime invocation gates.
-   *
-   * @param toolName  - Tool name (e.g. `"bash"`, `"read"`, `"my-extension:tool"`).
-   * @param agentName - Optional agent name for per-agent policy resolution.
-   */
-  getToolPermission(toolName: string, agentName?: string): PermissionState;
+	/**
+	 * Query the tool-level permission state for pre-filtering tools before
+	 * creating a child session.
+	 *
+	 * Returns `"deny"` | `"allow"` | `"ask"` based on the composed policy.
+	 * Does not consider command-level rules (e.g. per-bash-command patterns) —
+	 * use `checkPermission` for runtime invocation gates.
+	 *
+	 * @param toolName  - Tool name (e.g. `"bash"`, `"read"`, `"my-extension:tool"`).
+	 * @param agentName - Optional agent name for per-agent policy resolution.
+	 */
+	getToolPermission(toolName: string, agentName?: string): PermissionState;
 }
 
 /**
@@ -128,7 +118,7 @@ export interface PermissionsService {
  * working: a reloaded parent re-publishes its fresh service.
  */
 export function publishPermissionsService(service: PermissionsService): void {
-  (globalThis as Record<symbol, unknown>)[SERVICE_KEY] = service;
+	(globalThis as Record<symbol, unknown>)[SERVICE_KEY] = service;
 }
 
 /**
@@ -136,9 +126,7 @@ export function publishPermissionsService(service: PermissionsService): void {
  * permission-system extension has not loaded (or has been unloaded).
  */
 export function getPermissionsService(): PermissionsService | undefined {
-  return (globalThis as Record<symbol, unknown>)[SERVICE_KEY] as
-    | PermissionsService
-    | undefined;
+	return (globalThis as Record<symbol, unknown>)[SERVICE_KEY] as PermissionsService | undefined;
 }
 
 /**
@@ -155,9 +143,9 @@ export function getPermissionsService(): PermissionsService | undefined {
  *   shutdown cannot wipe the new generation's freshly published service.
  */
 export function unpublishPermissionsService(service: PermissionsService): void {
-  if (getPermissionsService() !== service) {
-    return;
-  }
-  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- Symbol-keyed global property; Map.delete() is not applicable
-  delete (globalThis as Record<symbol, unknown>)[SERVICE_KEY];
+	if (getPermissionsService() !== service) {
+		return;
+	}
+	// eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- Symbol-keyed global property; Map.delete() is not applicable
+	delete (globalThis as Record<symbol, unknown>)[SERVICE_KEY];
 }

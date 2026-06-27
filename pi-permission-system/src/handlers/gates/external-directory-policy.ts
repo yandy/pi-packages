@@ -5,15 +5,15 @@ import { pickMostRestrictive } from "./candidate-check";
 
 /** An external path whose resolved `external_directory` state is not "allow". */
 export interface UncoveredExternalPath {
-  path: AccessPath;
-  check: PermissionCheckResult;
+	path: AccessPath;
+	check: PermissionCheckResult;
 }
 
 /** The uncovered external paths plus the most restrictive check among them. */
 export interface UncoveredExternalPaths {
-  uncovered: UncoveredExternalPath[];
-  /** Worst check among uncovered paths; `undefined` only when none are uncovered. */
-  worstCheck: PermissionCheckResult | undefined;
+	uncovered: UncoveredExternalPath[];
+	/** Worst check among uncovered paths; `undefined` only when none are uncovered. */
+	worstCheck: PermissionCheckResult | undefined;
 }
 
 /**
@@ -26,16 +26,16 @@ export interface UncoveredExternalPaths {
  * duplicated.
  */
 export function resolveExternalDirectoryPolicy(
-  path: AccessPath,
-  resolver: ScopedPermissionResolver,
-  agentName: string | undefined,
+	path: AccessPath,
+	resolver: ScopedPermissionResolver,
+	agentName: string | undefined,
 ): PermissionCheckResult {
-  return resolver.resolve({
-    kind: "access-path",
-    surface: "external_directory",
-    path,
-    agentName,
-  });
+	return resolver.resolve({
+		kind: "access-path",
+		surface: "external_directory",
+		path,
+		agentName,
+	});
 }
 
 /**
@@ -48,19 +48,19 @@ export function resolveExternalDirectoryPolicy(
  * "deny" is not downgraded to the catch-all "ask".
  */
 export function selectUncoveredExternalPaths(
-  paths: readonly AccessPath[],
-  resolver: ScopedPermissionResolver,
-  agentName: string | undefined,
+	paths: readonly AccessPath[],
+	resolver: ScopedPermissionResolver,
+	agentName: string | undefined,
 ): UncoveredExternalPaths {
-  const uncovered: UncoveredExternalPath[] = [];
-  for (const path of paths) {
-    const check = resolveExternalDirectoryPolicy(path, resolver, agentName);
-    if (check.state !== "allow") {
-      uncovered.push({ path, check });
-    }
-  }
-  return {
-    uncovered,
-    worstCheck: pickMostRestrictive(uncovered.map(({ check }) => check)),
-  };
+	const uncovered: UncoveredExternalPath[] = [];
+	for (const path of paths) {
+		const check = resolveExternalDirectoryPolicy(path, resolver, agentName);
+		if (check.state !== "allow") {
+			uncovered.push({ path, check });
+		}
+	}
+	return {
+		uncovered,
+		worstCheck: pickMostRestrictive(uncovered.map(({ check }) => check)),
+	};
 }

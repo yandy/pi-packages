@@ -7,11 +7,11 @@ import type { AccessPath } from "../access-intent/access-path";
  * an MCP server name).
  */
 export interface ToolAccessIntent {
-  kind: "tool";
-  /** Tool name fed to input normalization. */
-  surface: string;
-  input: unknown;
-  agentName?: string;
+	kind: "tool";
+	/** Tool name fed to input normalization. */
+	surface: string;
+	input: unknown;
+	agentName?: string;
 }
 
 /**
@@ -22,11 +22,11 @@ export interface ToolAccessIntent {
  * string-based (it never imports `AccessPath`). See {@link ResolvedAccessIntent}.
  */
 export interface PathValuesAccessIntent {
-  kind: "path-values";
-  /** `"path"` or `"external_directory"`. */
-  surface: string;
-  values: readonly string[];
-  agentName?: string;
+	kind: "path-values";
+	/** `"path"` or `"external_directory"`. */
+	surface: string;
+	values: readonly string[];
+	agentName?: string;
 }
 
 /**
@@ -37,10 +37,10 @@ export interface PathValuesAccessIntent {
  * resolver — not the gate — asks it for `matchValues()` (Tell-Don't-Ask).
  */
 export interface AccessPathAccessIntent {
-  kind: "access-path";
-  surface: string;
-  path: AccessPath;
-  agentName?: string;
+	kind: "access-path";
+	surface: string;
+	path: AccessPath;
+	agentName?: string;
 }
 
 /** What a gate emits — a raw tool input or an `AccessPath`. */

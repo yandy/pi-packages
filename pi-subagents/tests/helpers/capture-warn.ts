@@ -10,11 +10,11 @@ import { vi } from "vitest";
  * expected `console.warn` output (`captureWarn(() => { ... })`).
  */
 export function captureWarn(run: () => void): string[] {
-  const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
-  try {
-    run();
-    return spy.mock.calls.map((call) => String(call[0]));
-  } finally {
-    spy.mockRestore();
-  }
+	const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+	try {
+		run();
+		return spy.mock.calls.map((call) => String(call[0]));
+	} finally {
+		spy.mockRestore();
+	}
 }

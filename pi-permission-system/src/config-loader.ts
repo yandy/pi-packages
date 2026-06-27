@@ -1,20 +1,20 @@
 import { existsSync, readFileSync } from "node:fs";
 import { normalize } from "node:path";
 import {
-  getGlobalConfigPath,
-  getLegacyExtensionConfigPath,
-  getLegacyGlobalPolicyPath,
-  getLegacyProjectPolicyPath,
-  getProjectConfigPath,
+	getGlobalConfigPath,
+	getLegacyExtensionConfigPath,
+	getLegacyGlobalPolicyPath,
+	getLegacyProjectPolicyPath,
+	getProjectConfigPath,
 } from "./config-paths";
 import { mergeFlatPermissions } from "./permission-merge";
 import type { FlatPermissionConfig, PatternValue } from "./types";
 import {
-  isDenyWithReason,
-  isPermissionState,
-  normalizeOptionalPositiveInt,
-  normalizeOptionalStringArray,
-  toRecord,
+	isDenyWithReason,
+	isPermissionState,
+	normalizeOptionalPositiveInt,
+	normalizeOptionalStringArray,
+	toRecord,
 } from "./value-guards";
 
 /**
@@ -22,73 +22,73 @@ import {
  * All fields are optional so partial configs (project-only, global-only) work.
  */
 export interface UnifiedPermissionConfig {
-  // Runtime knobs
-  debugLog?: boolean;
-  permissionReviewLog?: boolean;
-  yoloMode?: boolean;
-  toolInputPreviewMaxLength?: number;
-  toolTextSummaryMaxLength?: number;
-  piInfrastructureReadPaths?: string[];
+	// Runtime knobs
+	debugLog?: boolean;
+	permissionReviewLog?: boolean;
+	yoloMode?: boolean;
+	toolInputPreviewMaxLength?: number;
+	toolTextSummaryMaxLength?: number;
+	piInfrastructureReadPaths?: string[];
 
-  // Flat permission policy
-  permission?: FlatPermissionConfig;
+	// Flat permission policy
+	permission?: FlatPermissionConfig;
 }
 
 export interface UnifiedConfigLoadResult {
-  config: UnifiedPermissionConfig;
-  issues: string[];
+	config: UnifiedPermissionConfig;
+	issues: string[];
 }
 
 export function stripJsonComments(input: string): string {
-  let output = "";
-  let i = 0;
-  while (i < input.length) {
-    const char = input[i];
-    const next = input[i + 1] ?? "";
+	let output = "";
+	let i = 0;
+	while (i < input.length) {
+		const char = input[i];
+		const next = input[i + 1] ?? "";
 
-    if (char === "/" && next === "/") {
-      const seg = consumeLineComment(input, i);
-      output += seg.output;
-      i = seg.nextIndex;
-      continue;
-    }
-    if (char === "/" && next === "*") {
-      const seg = consumeBlockComment(input, i);
-      output += seg.output;
-      i = seg.nextIndex;
-      continue;
-    }
-    if (char === '"' || char === "'") {
-      const seg = consumeString(input, i);
-      output += seg.output;
-      i = seg.nextIndex;
-      continue;
-    }
+		if (char === "/" && next === "/") {
+			const seg = consumeLineComment(input, i);
+			output += seg.output;
+			i = seg.nextIndex;
+			continue;
+		}
+		if (char === "/" && next === "*") {
+			const seg = consumeBlockComment(input, i);
+			output += seg.output;
+			i = seg.nextIndex;
+			continue;
+		}
+		if (char === '"' || char === "'") {
+			const seg = consumeString(input, i);
+			output += seg.output;
+			i = seg.nextIndex;
+			continue;
+		}
 
-    output += char;
-    i++;
-  }
-  return output;
+		output += char;
+		i++;
+	}
+	return output;
 }
 
 /** A consumed run of source: the text to emit and the index to resume scanning. */
 interface ScanSegment {
-  output: string;
-  nextIndex: number;
+	output: string;
+	nextIndex: number;
 }
 
 /** Consume a `//` line comment starting at `start`; drop the body, keep the newline. */
 function consumeLineComment(input: string, start: number): ScanSegment {
-  const newlineIndex = input.indexOf("\n", start);
-  if (newlineIndex === -1) return { output: "", nextIndex: input.length };
-  return { output: "\n", nextIndex: newlineIndex + 1 };
+	const newlineIndex = input.indexOf("\n", start);
+	if (newlineIndex === -1) return { output: "", nextIndex: input.length };
+	return { output: "\n", nextIndex: newlineIndex + 1 };
 }
 
 /** Consume a block comment starting at `start`; drop it entirely. */
 function consumeBlockComment(input: string, start: number): ScanSegment {
-  const closeIndex = input.indexOf("*/", start + 2);
-  if (closeIndex === -1) return { output: "", nextIndex: input.length };
-  return { output: "", nextIndex: closeIndex + 2 };
+	const closeIndex = input.indexOf("*/", start + 2);
+	if (closeIndex === -1) return { output: "", nextIndex: input.length };
+	return { output: "", nextIndex: closeIndex + 2 };
 }
 
 /**
@@ -97,32 +97,32 @@ function consumeBlockComment(input: string, start: number): ScanSegment {
  * Emits the opening quote, body, and closing quote verbatim.
  */
 function consumeString(input: string, start: number): ScanSegment {
-  const quote = input[start];
-  let output = quote;
-  let i = start + 1;
-  let escaping = false;
-  while (i < input.length) {
-    const char = input[i];
-    output += char;
-    i++;
-    if (escaping) {
-      escaping = false;
-      continue;
-    }
-    if (char === "\\") {
-      escaping = true;
-      continue;
-    }
-    if (char === quote) break;
-  }
-  return { output, nextIndex: i };
+	const quote = input[start];
+	let output = quote;
+	let i = start + 1;
+	let escaping = false;
+	while (i < input.length) {
+		const char = input[i];
+		output += char;
+		i++;
+		if (escaping) {
+			escaping = false;
+			continue;
+		}
+		if (char === "\\") {
+			escaping = true;
+			continue;
+		}
+		if (char === quote) break;
+	}
+	return { output, nextIndex: i };
 }
 
 function normalizeOptionalBoolean(value: unknown): boolean | undefined {
-  if (typeof value === "boolean") {
-    return value;
-  }
-  return undefined;
+	if (typeof value === "boolean") {
+		return value;
+	}
+	return undefined;
 }
 
 /**
@@ -131,93 +131,77 @@ function normalizeOptionalBoolean(value: unknown): boolean | undefined {
  * maps. Drops non-object top-level values, invalid PermissionState strings, and
  * invalid action values inside object maps.
  */
-function normalizeFlatPermissionValue(
-  value: unknown,
-): FlatPermissionConfig | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  const normalized: FlatPermissionConfig = {};
-  let hasAny = false;
+function normalizeFlatPermissionValue(value: unknown): FlatPermissionConfig | undefined {
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		return undefined;
+	}
+	const record = value as Record<string, unknown>;
+	const normalized: FlatPermissionConfig = {};
+	let hasAny = false;
 
-  for (const [key, val] of Object.entries(record)) {
-    if (typeof val === "string") {
-      if (isPermissionState(val)) {
-        normalized[key] = val;
-        hasAny = true;
-      }
-    } else if (typeof val === "object" && val !== null && !Array.isArray(val)) {
-      const map: Record<string, PatternValue> = {};
-      let mapHasAny = false;
-      for (const [pattern, action] of Object.entries(
-        val as Record<string, unknown>,
-      )) {
-        if (isDenyWithReason(action)) {
-          map[pattern] = action;
-          mapHasAny = true;
-        } else if (isPermissionState(action)) {
-          map[pattern] = action;
-          mapHasAny = true;
-        }
-      }
-      if (mapHasAny) {
-        normalized[key] = map;
-        hasAny = true;
-      }
-    }
-  }
+	for (const [key, val] of Object.entries(record)) {
+		if (typeof val === "string") {
+			if (isPermissionState(val)) {
+				normalized[key] = val;
+				hasAny = true;
+			}
+		} else if (typeof val === "object" && val !== null && !Array.isArray(val)) {
+			const map: Record<string, PatternValue> = {};
+			let mapHasAny = false;
+			for (const [pattern, action] of Object.entries(val as Record<string, unknown>)) {
+				if (isDenyWithReason(action)) {
+					map[pattern] = action;
+					mapHasAny = true;
+				} else if (isPermissionState(action)) {
+					map[pattern] = action;
+					mapHasAny = true;
+				}
+			}
+			if (mapHasAny) {
+				normalized[key] = map;
+				hasAny = true;
+			}
+		}
+	}
 
-  return hasAny ? normalized : undefined;
+	return hasAny ? normalized : undefined;
 }
 
 /**
  * Normalize raw parsed JSON into the unified config shape.
  */
 export function normalizeUnifiedConfig(raw: unknown): {
-  config: UnifiedPermissionConfig;
-  issues: string[];
+	config: UnifiedPermissionConfig;
+	issues: string[];
 } {
-  const record = toRecord(raw);
-  const issues: string[] = [];
-  const config: UnifiedPermissionConfig = {};
+	const record = toRecord(raw);
+	const issues: string[] = [];
+	const config: UnifiedPermissionConfig = {};
 
-  // Runtime knobs
-  const debugLog = normalizeOptionalBoolean(record.debugLog);
-  if (debugLog !== undefined) config.debugLog = debugLog;
+	// Runtime knobs
+	const debugLog = normalizeOptionalBoolean(record.debugLog);
+	if (debugLog !== undefined) config.debugLog = debugLog;
 
-  const permissionReviewLog = normalizeOptionalBoolean(
-    record.permissionReviewLog,
-  );
-  if (permissionReviewLog !== undefined)
-    config.permissionReviewLog = permissionReviewLog;
+	const permissionReviewLog = normalizeOptionalBoolean(record.permissionReviewLog);
+	if (permissionReviewLog !== undefined) config.permissionReviewLog = permissionReviewLog;
 
-  const yoloMode = normalizeOptionalBoolean(record.yoloMode);
-  if (yoloMode !== undefined) config.yoloMode = yoloMode;
+	const yoloMode = normalizeOptionalBoolean(record.yoloMode);
+	if (yoloMode !== undefined) config.yoloMode = yoloMode;
 
-  const toolInputPreviewMaxLength = normalizeOptionalPositiveInt(
-    record.toolInputPreviewMaxLength,
-  );
-  if (toolInputPreviewMaxLength !== undefined)
-    config.toolInputPreviewMaxLength = toolInputPreviewMaxLength;
+	const toolInputPreviewMaxLength = normalizeOptionalPositiveInt(record.toolInputPreviewMaxLength);
+	if (toolInputPreviewMaxLength !== undefined) config.toolInputPreviewMaxLength = toolInputPreviewMaxLength;
 
-  const toolTextSummaryMaxLength = normalizeOptionalPositiveInt(
-    record.toolTextSummaryMaxLength,
-  );
-  if (toolTextSummaryMaxLength !== undefined)
-    config.toolTextSummaryMaxLength = toolTextSummaryMaxLength;
+	const toolTextSummaryMaxLength = normalizeOptionalPositiveInt(record.toolTextSummaryMaxLength);
+	if (toolTextSummaryMaxLength !== undefined) config.toolTextSummaryMaxLength = toolTextSummaryMaxLength;
 
-  const piInfrastructureReadPaths = normalizeOptionalStringArray(
-    record.piInfrastructureReadPaths,
-  );
-  if (piInfrastructureReadPaths !== undefined)
-    config.piInfrastructureReadPaths = piInfrastructureReadPaths;
+	const piInfrastructureReadPaths = normalizeOptionalStringArray(record.piInfrastructureReadPaths);
+	if (piInfrastructureReadPaths !== undefined) config.piInfrastructureReadPaths = piInfrastructureReadPaths;
 
-  // Flat permission policy
-  const permission = normalizeFlatPermissionValue(record.permission);
-  if (permission !== undefined) config.permission = permission;
+	// Flat permission policy
+	const permission = normalizeFlatPermissionValue(record.permission);
+	if (permission !== undefined) config.permission = permission;
 
-  return { config, issues };
+	return { config, issues };
 }
 
 /**
@@ -229,56 +213,52 @@ export function normalizeUnifiedConfig(raw: unknown): {
  *   the override (override-wins, same as scalars).
  */
 export function mergeUnifiedConfigs(
-  base: UnifiedPermissionConfig,
-  override: UnifiedPermissionConfig,
+	base: UnifiedPermissionConfig,
+	override: UnifiedPermissionConfig,
 ): UnifiedPermissionConfig {
-  const merged: UnifiedPermissionConfig = {};
+	const merged: UnifiedPermissionConfig = {};
 
-  // Boolean scalars: override replaces base when defined
-  for (const key of ["debugLog", "permissionReviewLog", "yoloMode"] as const) {
-    const value = override[key] ?? base[key];
-    if (value !== undefined) {
-      merged[key] = value;
-    }
-  }
+	// Boolean scalars: override replaces base when defined
+	for (const key of ["debugLog", "permissionReviewLog", "yoloMode"] as const) {
+		const value = override[key] ?? base[key];
+		if (value !== undefined) {
+			merged[key] = value;
+		}
+	}
 
-  // Number scalars: override replaces base when defined
-  for (const key of [
-    "toolInputPreviewMaxLength",
-    "toolTextSummaryMaxLength",
-  ] as const) {
-    const value = override[key] ?? base[key];
-    if (value !== undefined) {
-      merged[key] = value;
-    }
-  }
+	// Number scalars: override replaces base when defined
+	for (const key of ["toolInputPreviewMaxLength", "toolTextSummaryMaxLength"] as const) {
+		const value = override[key] ?? base[key];
+		if (value !== undefined) {
+			merged[key] = value;
+		}
+	}
 
-  // Array fields: override replaces base when defined
-  const piInfrastructureReadPaths =
-    override.piInfrastructureReadPaths ?? base.piInfrastructureReadPaths;
-  if (piInfrastructureReadPaths !== undefined) {
-    merged.piInfrastructureReadPaths = piInfrastructureReadPaths;
-  }
+	// Array fields: override replaces base when defined
+	const piInfrastructureReadPaths = override.piInfrastructureReadPaths ?? base.piInfrastructureReadPaths;
+	if (piInfrastructureReadPaths !== undefined) {
+		merged.piInfrastructureReadPaths = piInfrastructureReadPaths;
+	}
 
-  // Permission: deep-shallow merge
-  const basePerm = base.permission;
-  const overridePerm = override.permission;
-  if (basePerm && overridePerm) {
-    merged.permission = mergeFlatPermissions(basePerm, overridePerm);
-  } else if (basePerm) {
-    merged.permission = basePerm;
-  } else if (overridePerm) {
-    merged.permission = overridePerm;
-  }
+	// Permission: deep-shallow merge
+	const basePerm = base.permission;
+	const overridePerm = override.permission;
+	if (basePerm && overridePerm) {
+		merged.permission = mergeFlatPermissions(basePerm, overridePerm);
+	} else if (basePerm) {
+		merged.permission = basePerm;
+	} else if (overridePerm) {
+		merged.permission = overridePerm;
+	}
 
-  return merged;
+	return merged;
 }
 
 export interface MergedConfigResult {
-  global: UnifiedPermissionConfig;
-  project: UnifiedPermissionConfig;
-  merged: UnifiedPermissionConfig;
-  issues: string[];
+	global: UnifiedPermissionConfig;
+	project: UnifiedPermissionConfig;
+	merged: UnifiedPermissionConfig;
+	issues: string[];
 }
 
 /**
@@ -296,84 +276,77 @@ export interface MergedConfigResult {
  * flat-format parser — legacy-format keys (defaultPolicy, tools, bash, etc.)
  * are not translated and contribute no permission rules.
  */
-export function loadAndMergeConfigs(
-  agentDir: string,
-  cwd: string,
-  extensionRoot: string,
-): MergedConfigResult {
-  const allIssues: string[] = [];
+export function loadAndMergeConfigs(agentDir: string, cwd: string, extensionRoot: string): MergedConfigResult {
+	const allIssues: string[] = [];
 
-  const newGlobalPath = getGlobalConfigPath(agentDir);
-  const newProjectPath = getProjectConfigPath(cwd);
-  const legacyGlobalPolicyPath = getLegacyGlobalPolicyPath(agentDir);
-  const legacyProjectPolicyPath = getLegacyProjectPolicyPath(cwd);
-  const legacyExtConfigPath = getLegacyExtensionConfigPath(extensionRoot);
+	const newGlobalPath = getGlobalConfigPath(agentDir);
+	const newProjectPath = getProjectConfigPath(cwd);
+	const legacyGlobalPolicyPath = getLegacyGlobalPolicyPath(agentDir);
+	const legacyProjectPolicyPath = getLegacyProjectPolicyPath(cwd);
+	const legacyExtConfigPath = getLegacyExtensionConfigPath(extensionRoot);
 
-  // Start with empty
-  let merged: UnifiedPermissionConfig = {};
+	// Start with empty
+	let merged: UnifiedPermissionConfig = {};
 
-  // 1. Legacy global policy
-  if (existsSync(legacyGlobalPolicyPath)) {
-    const legacy = loadUnifiedConfig(legacyGlobalPolicyPath);
-    allIssues.push(
-      `Legacy global policy found at '${legacyGlobalPolicyPath}'. ` +
-        `Move it to '${newGlobalPath}':\n` +
-        `  mv '${legacyGlobalPolicyPath}' '${newGlobalPath}'`,
-    );
-    allIssues.push(...legacy.issues);
-    merged = mergeUnifiedConfigs(merged, legacy.config);
-  }
+	// 1. Legacy global policy
+	if (existsSync(legacyGlobalPolicyPath)) {
+		const legacy = loadUnifiedConfig(legacyGlobalPolicyPath);
+		allIssues.push(
+			`Legacy global policy found at '${legacyGlobalPolicyPath}'. ` +
+				`Move it to '${newGlobalPath}':\n` +
+				`  mv '${legacyGlobalPolicyPath}' '${newGlobalPath}'`,
+		);
+		allIssues.push(...legacy.issues);
+		merged = mergeUnifiedConfigs(merged, legacy.config);
+	}
 
-  // 2. Legacy extension runtime config (only if different from new global path)
-  const normalizedLegacyExt = normalize(legacyExtConfigPath);
-  const normalizedNewGlobal = normalize(newGlobalPath);
-  if (
-    normalizedLegacyExt !== normalizedNewGlobal &&
-    existsSync(legacyExtConfigPath)
-  ) {
-    const legacy = loadUnifiedConfig(legacyExtConfigPath);
-    allIssues.push(
-      `Legacy extension config found at '${legacyExtConfigPath}'. ` +
-        `Move runtime settings to '${newGlobalPath}':\n` +
-        `  mv '${legacyExtConfigPath}' '${newGlobalPath}'`,
-    );
-    allIssues.push(...legacy.issues);
-    merged = mergeUnifiedConfigs(merged, legacy.config);
-  }
+	// 2. Legacy extension runtime config (only if different from new global path)
+	const normalizedLegacyExt = normalize(legacyExtConfigPath);
+	const normalizedNewGlobal = normalize(newGlobalPath);
+	if (normalizedLegacyExt !== normalizedNewGlobal && existsSync(legacyExtConfigPath)) {
+		const legacy = loadUnifiedConfig(legacyExtConfigPath);
+		allIssues.push(
+			`Legacy extension config found at '${legacyExtConfigPath}'. ` +
+				`Move runtime settings to '${newGlobalPath}':\n` +
+				`  mv '${legacyExtConfigPath}' '${newGlobalPath}'`,
+		);
+		allIssues.push(...legacy.issues);
+		merged = mergeUnifiedConfigs(merged, legacy.config);
+	}
 
-  // 3. New global config
-  const globalResult = loadUnifiedConfig(newGlobalPath);
-  allIssues.push(...globalResult.issues);
-  const globalConfig = globalResult.config;
-  merged = mergeUnifiedConfigs(merged, globalConfig);
+	// 3. New global config
+	const globalResult = loadUnifiedConfig(newGlobalPath);
+	allIssues.push(...globalResult.issues);
+	const globalConfig = globalResult.config;
+	merged = mergeUnifiedConfigs(merged, globalConfig);
 
-  // 4. Legacy project policy
-  if (existsSync(legacyProjectPolicyPath)) {
-    const legacy = loadUnifiedConfig(legacyProjectPolicyPath);
-    allIssues.push(
-      `Legacy project policy found at '${legacyProjectPolicyPath}'. ` +
-        `Move it to '${newProjectPath}':\n` +
-        `  mv '${legacyProjectPolicyPath}' '${newProjectPath}'`,
-    );
-    allIssues.push(...legacy.issues);
-    merged = mergeUnifiedConfigs(merged, legacy.config);
-  }
+	// 4. Legacy project policy
+	if (existsSync(legacyProjectPolicyPath)) {
+		const legacy = loadUnifiedConfig(legacyProjectPolicyPath);
+		allIssues.push(
+			`Legacy project policy found at '${legacyProjectPolicyPath}'. ` +
+				`Move it to '${newProjectPath}':\n` +
+				`  mv '${legacyProjectPolicyPath}' '${newProjectPath}'`,
+		);
+		allIssues.push(...legacy.issues);
+		merged = mergeUnifiedConfigs(merged, legacy.config);
+	}
 
-  // 5. New project config
-  const projectResult = loadUnifiedConfig(newProjectPath);
-  allIssues.push(...projectResult.issues);
-  const projectConfig = projectResult.config;
-  merged = mergeUnifiedConfigs(merged, projectConfig);
+	// 5. New project config
+	const projectResult = loadUnifiedConfig(newProjectPath);
+	allIssues.push(...projectResult.issues);
+	const projectConfig = projectResult.config;
+	merged = mergeUnifiedConfigs(merged, projectConfig);
 
-  const bashFallbackIssue = detectPermissiveBashFallback(merged.permission);
-  if (bashFallbackIssue) allIssues.push(bashFallbackIssue);
+	const bashFallbackIssue = detectPermissiveBashFallback(merged.permission);
+	if (bashFallbackIssue) allIssues.push(bashFallbackIssue);
 
-  return {
-    global: globalConfig,
-    project: projectConfig,
-    merged,
-    issues: allIssues,
-  };
+	return {
+		global: globalConfig,
+		project: projectConfig,
+		merged,
+		issues: allIssues,
+	};
 }
 
 /**
@@ -386,26 +359,24 @@ export function loadAndMergeConfigs(
  * is pure: it takes the merged permission map and returns a message; the caller
  * owns pushing it onto the issue list.
  */
-export function detectPermissiveBashFallback(
-  permission: FlatPermissionConfig | undefined,
-): string | undefined {
-  if (permission?.["*"] !== "allow") return undefined;
+export function detectPermissiveBashFallback(permission: FlatPermissionConfig | undefined): string | undefined {
+	if (permission?.["*"] !== "allow") return undefined;
 
-  // The Record index signature reports an absent surface as the value type, not
-  // `undefined`; read through a Partial view so the absent-bash guard is honest
-  // (an unguarded Object.hasOwn(undefined, …) would throw at runtime).
-  const surfaces: Partial<FlatPermissionConfig> = permission;
-  const bash = surfaces.bash;
-  // A bare string surface is shorthand for `{ "*": action }` — explicitly gated.
-  if (typeof bash === "string") return undefined;
-  // An object map with an explicit `"*"` key is explicitly gated.
-  if (bash && Object.hasOwn(bash, "*")) return undefined;
+	// The Record index signature reports an absent surface as the value type, not
+	// `undefined`; read through a Partial view so the absent-bash guard is honest
+	// (an unguarded Object.hasOwn(undefined, …) would throw at runtime).
+	const surfaces: Partial<FlatPermissionConfig> = permission;
+	const bash = surfaces.bash;
+	// A bare string surface is shorthand for `{ "*": action }` — explicitly gated.
+	if (typeof bash === "string") return undefined;
+	// An object map with an explicit `"*"` key is explicitly gated.
+	if (bash && Object.hasOwn(bash, "*")) return undefined;
 
-  return (
-    "Permission config sets a permissive top-level '*': 'allow' with no 'bash' '*' policy, " +
-    "so bash commands silently inherit 'allow'. Set an explicit 'bash' policy " +
-    '(e.g. "bash": { "*": "ask" }) to gate bash commands.'
-  );
+	return (
+		"Permission config sets a permissive top-level '*': 'allow' with no 'bash' '*' policy, " +
+		"so bash commands silently inherit 'allow'. Set an explicit 'bash' policy " +
+		'(e.g. "bash": { "*": "ask" }) to gate bash commands.'
+	);
 }
 
 /**
@@ -414,19 +385,19 @@ export function detectPermissiveBashFallback(
  * Returns an empty config with an issue if the file cannot be parsed.
  */
 export function loadUnifiedConfig(path: string): UnifiedConfigLoadResult {
-  if (!existsSync(path)) {
-    return { config: {}, issues: [] };
-  }
+	if (!existsSync(path)) {
+		return { config: {}, issues: [] };
+	}
 
-  try {
-    const raw = readFileSync(path, "utf-8");
-    const parsed = JSON.parse(stripJsonComments(raw)) as unknown;
-    return normalizeUnifiedConfig(parsed);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      config: {},
-      issues: [`Failed to read config at '${path}': ${message}`],
-    };
-  }
+	try {
+		const raw = readFileSync(path, "utf-8");
+		const parsed = JSON.parse(stripJsonComments(raw)) as unknown;
+		return normalizeUnifiedConfig(parsed);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		return {
+			config: {},
+			issues: [`Failed to read config at '${path}': ${message}`],
+		};
+	}
 }

@@ -26,9 +26,7 @@
  */
 
 /** Process-global key for the shared registry slot. */
-const SUBAGENT_SESSION_REGISTRY_KEY = Symbol.for(
-  "@yandy0725/pi-permission-system:subagent-registry",
-);
+const SUBAGENT_SESSION_REGISTRY_KEY = Symbol.for("@yandy0725/pi-permission-system:subagent-registry");
 
 /**
  * Return the process-global SubagentSessionRegistry, creating it on first call.
@@ -44,22 +42,20 @@ const SUBAGENT_SESSION_REGISTRY_KEY = Symbol.for(
  * `subagents:child:disposed` subscription.
  */
 export function getSubagentSessionRegistry(): SubagentSessionRegistry {
-  const store = globalThis as Record<symbol, unknown>;
-  const existing = store[SUBAGENT_SESSION_REGISTRY_KEY] as
-    | SubagentSessionRegistry
-    | undefined;
-  if (existing) {
-    return existing;
-  }
-  const registry = new SubagentSessionRegistry();
-  store[SUBAGENT_SESSION_REGISTRY_KEY] = registry;
-  return registry;
+	const store = globalThis as Record<symbol, unknown>;
+	const existing = store[SUBAGENT_SESSION_REGISTRY_KEY] as SubagentSessionRegistry | undefined;
+	if (existing) {
+		return existing;
+	}
+	const registry = new SubagentSessionRegistry();
+	store[SUBAGENT_SESSION_REGISTRY_KEY] = registry;
+	return registry;
 }
 
 /** Signal stored per registered in-process subagent session. */
 export interface SubagentSessionInfo {
-  /** Parent session ID for permission forwarding. Omit when unknown. */
-  parentSessionId?: string;
+	/** Parent session ID for permission forwarding. Omit when unknown. */
+	parentSessionId?: string;
 }
 
 /**
@@ -76,30 +72,30 @@ export interface SubagentSessionInfo {
  * distinct keys and one sibling's `disposed` cannot evict another's entry.
  */
 export class SubagentSessionRegistry {
-  private readonly sessions = new Map<string, SubagentSessionInfo>();
+	private readonly sessions = new Map<string, SubagentSessionInfo>();
 
-  /**
-   * Register an in-process subagent session.
-   *
-   * If a previous entry exists for `sessionId`, it is overwritten
-   * (last-write-wins; single-writer expected per key).
-   */
-  register(sessionId: string, info: SubagentSessionInfo): void {
-    this.sessions.set(sessionId, info);
-  }
+	/**
+	 * Register an in-process subagent session.
+	 *
+	 * If a previous entry exists for `sessionId`, it is overwritten
+	 * (last-write-wins; single-writer expected per key).
+	 */
+	register(sessionId: string, info: SubagentSessionInfo): void {
+		this.sessions.set(sessionId, info);
+	}
 
-  /** Remove a previously registered session. No-op if the key is absent. */
-  unregister(sessionId: string): void {
-    this.sessions.delete(sessionId);
-  }
+	/** Remove a previously registered session. No-op if the key is absent. */
+	unregister(sessionId: string): void {
+		this.sessions.delete(sessionId);
+	}
 
-  /** Return the registered info for `sessionId`, or `undefined` if absent. */
-  get(sessionId: string): SubagentSessionInfo | undefined {
-    return this.sessions.get(sessionId);
-  }
+	/** Return the registered info for `sessionId`, or `undefined` if absent. */
+	get(sessionId: string): SubagentSessionInfo | undefined {
+		return this.sessions.get(sessionId);
+	}
 
-  /** Return `true` when `sessionId` has a registered entry. */
-  has(sessionId: string): boolean {
-    return this.sessions.has(sessionId);
-  }
+	/** Return `true` when `sessionId` has a registered entry. */
+	has(sessionId: string): boolean {
+		return this.sessions.has(sessionId);
+	}
 }

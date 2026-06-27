@@ -10,32 +10,25 @@ import { wildcardMatch } from "./wildcard-matcher";
  *                "baseline" (conditional MCP metadata auto-allow).
  * Runtime:       "session" (session approvals).
  */
-export type RuleOrigin =
-  | "global"
-  | "project"
-  | "agent"
-  | "project-agent"
-  | "builtin"
-  | "baseline"
-  | "session";
+export type RuleOrigin = "global" | "project" | "agent" | "project-agent" | "builtin" | "baseline" | "session";
 
 /** A single permission rule — the atomic unit of policy. */
 export interface Rule {
-  /** The permission surface: "bash", "read", "mcp", "skill", "external_directory", etc. */
-  surface: string;
-  /** The match pattern: a command glob, tool name, skill name, or "*". */
-  pattern: string;
-  /** The permission decision. */
-  action: PermissionState;
-  /** Custom denial reason for deny rules (optional). */
-  reason?: string;
-  /**
-   * Origin layer — used to derive PermissionCheckResult.source after evaluation.
-   * Not used by evaluate(); purely informational metadata.
-   */
-  layer?: "default" | "baseline" | "config" | "session";
-  /** Which source contributed this rule. */
-  origin: RuleOrigin;
+	/** The permission surface: "bash", "read", "mcp", "skill", "external_directory", etc. */
+	surface: string;
+	/** The match pattern: a command glob, tool name, skill name, or "*". */
+	pattern: string;
+	/** The permission decision. */
+	action: PermissionState;
+	/** Custom denial reason for deny rules (optional). */
+	reason?: string;
+	/**
+	 * Origin layer — used to derive PermissionCheckResult.source after evaluation.
+	 * Not used by evaluate(); purely informational metadata.
+	 */
+	layer?: "default" | "baseline" | "config" | "session";
+	/** Which source contributed this rule. */
+	origin: RuleOrigin;
 }
 
 /** An ordered list of rules. Later rules take priority (last-match-wins). */
@@ -51,22 +44,20 @@ export type Ruleset = Rule[];
  * (defaults to "ask" — least privilege).
  */
 export function evaluate(
-  surface: string,
-  pattern: string,
-  rules: Ruleset,
-  defaultAction?: PermissionState,
-  platform: NodeJS.Platform = process.platform,
+	surface: string,
+	pattern: string,
+	rules: Ruleset,
+	defaultAction?: PermissionState,
+	platform: NodeJS.Platform = process.platform,
 ): Rule {
-  const rule = rules.findLast((r) =>
-    ruleMatches(r, surface, pattern, platform),
-  );
-  if (rule !== undefined) return rule;
-  return {
-    surface,
-    pattern,
-    action: defaultAction ?? "ask",
-    origin: "builtin",
-  };
+	const rule = rules.findLast((r) => ruleMatches(r, surface, pattern, platform));
+	if (rule !== undefined) return rule;
+	return {
+		surface,
+		pattern,
+		action: defaultAction ?? "ask",
+		origin: "builtin",
+	};
 }
 
 /**
@@ -75,25 +66,17 @@ export function evaluate(
  * overrides still match. The surface→surface match stays exact.
  */
 function pathMatchOptions(
-  surface: string,
-  platform: NodeJS.Platform,
+	surface: string,
+	platform: NodeJS.Platform,
 ): { caseInsensitive: true; windowsSeparators: true } | undefined {
-  return platform === "win32" && PATH_SURFACES.has(surface)
-    ? { caseInsensitive: true, windowsSeparators: true }
-    : undefined;
+	return platform === "win32" && PATH_SURFACES.has(surface)
+		? { caseInsensitive: true, windowsSeparators: true }
+		: undefined;
 }
 
-function ruleMatches(
-  rule: Rule,
-  surface: string,
-  value: string,
-  platform: NodeJS.Platform,
-): boolean {
-  const matchOptions = pathMatchOptions(surface, platform);
-  return (
-    wildcardMatch(rule.surface, surface) &&
-    wildcardMatch(rule.pattern, value, matchOptions)
-  );
+function ruleMatches(rule: Rule, surface: string, value: string, platform: NodeJS.Platform): boolean {
+	const matchOptions = pathMatchOptions(surface, platform);
+	return wildcardMatch(rule.surface, surface) && wildcardMatch(rule.pattern, value, matchOptions);
 }
 
 /**
@@ -121,38 +104,34 @@ function ruleMatches(
  * Returns the first `ask` if no `deny` is found.
  */
 export function evaluateMostRestrictive(
-  surface: string,
-  values: string[],
-  rules: Ruleset,
+	surface: string,
+	values: string[],
+	rules: Ruleset,
 ): { rule: Rule; value: string } | null {
-  let worst: { rule: Rule; value: string } | null = null;
-  for (const value of values) {
-    const rule = evaluate(surface, value, rules);
-    if (rule.action === "deny") return { rule, value };
-    if (rule.action === "ask" && worst?.rule.action !== "ask") {
-      worst = { rule, value };
-    }
-  }
-  return worst;
+	let worst: { rule: Rule; value: string } | null = null;
+	for (const value of values) {
+		const rule = evaluate(surface, value, rules);
+		if (rule.action === "deny") return { rule, value };
+		if (rule.action === "ask" && worst?.rule.action !== "ask") {
+			worst = { rule, value };
+		}
+	}
+	return worst;
 }
 
-export function evaluateFirst(
-  surface: string,
-  values: string[],
-  rules: Ruleset,
-): { rule: Rule; value: string } {
-  for (const value of values) {
-    const rule = evaluate(surface, value, rules);
-    if (rule.layer !== "default") {
-      return { rule, value };
-    }
-  }
-  // All candidates matched only the synthesized default — use the first.
-  const fallbackValue = values[0] ?? "*";
-  return {
-    rule: evaluate(surface, fallbackValue, rules),
-    value: fallbackValue,
-  };
+export function evaluateFirst(surface: string, values: string[], rules: Ruleset): { rule: Rule; value: string } {
+	for (const value of values) {
+		const rule = evaluate(surface, value, rules);
+		if (rule.layer !== "default") {
+			return { rule, value };
+		}
+	}
+	// All candidates matched only the synthesized default — use the first.
+	const fallbackValue = values[0] ?? "*";
+	return {
+		rule: evaluate(surface, fallbackValue, rules),
+		value: fallbackValue,
+	};
 }
 
 /**
@@ -164,25 +143,21 @@ export function evaluateFirst(
  * masking a later, more specific rule on another alias.
  */
 export function evaluateAnyValue(
-  surface: string,
-  values: string[],
-  rules: Ruleset,
-  platform: NodeJS.Platform = process.platform,
+	surface: string,
+	values: string[],
+	rules: Ruleset,
+	platform: NodeJS.Platform = process.platform,
 ): { rule: Rule; value: string } {
-  const fallbackValue = values[0] ?? "*";
-  const rule = rules.findLast((r) =>
-    values.some((value) => ruleMatches(r, surface, value, platform)),
-  );
-  if (rule !== undefined) {
-    return {
-      rule,
-      value:
-        values.find((value) => ruleMatches(rule, surface, value, platform)) ??
-        fallbackValue,
-    };
-  }
-  return {
-    rule: evaluate(surface, fallbackValue, rules),
-    value: fallbackValue,
-  };
+	const fallbackValue = values[0] ?? "*";
+	const rule = rules.findLast((r) => values.some((value) => ruleMatches(r, surface, value, platform)));
+	if (rule !== undefined) {
+		return {
+			rule,
+			value: values.find((value) => ruleMatches(rule, surface, value, platform)) ?? fallbackValue,
+		};
+	}
+	return {
+		rule: evaluate(surface, fallbackValue, rules),
+		value: fallbackValue,
+	};
 }

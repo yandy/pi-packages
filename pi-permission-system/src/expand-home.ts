@@ -15,14 +15,14 @@ import { join } from "node:path";
  * All other patterns are returned unchanged.
  */
 export function expandHomePath(pattern: string): string {
-  if (pattern === "~" || pattern === "$HOME") {
-    return homedir();
-  }
-  if (pattern.startsWith("~/") || pattern.startsWith("~\\")) {
-    return join(homedir(), pattern.slice(2));
-  }
-  if (pattern.startsWith("$HOME/") || pattern.startsWith("$HOME\\")) {
-    return join(homedir(), pattern.slice(6));
-  }
-  return pattern;
+	if (pattern === "~" || pattern === "$HOME") {
+		return homedir();
+	}
+	if (pattern.startsWith("~/") || pattern.startsWith("~\\")) {
+		return join(homedir(), pattern.slice(2));
+	}
+	if (pattern.startsWith("$HOME/") || pattern.startsWith("$HOME\\")) {
+		return join(homedir(), pattern.slice(6));
+	}
+	return pattern;
 }

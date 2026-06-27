@@ -30,32 +30,32 @@ export const SUBAGENT_CHILD_DISPOSED = "subagents:child:disposed";
 
 /** Payload for `subagents:child:spawning`. */
 export interface ChildSpawningEvent {
-  agentName: string;
-  parentSessionId?: string;
+	agentName: string;
+	parentSessionId?: string;
 }
 
 /** Payload for `subagents:child:session-created`. */
 export interface ChildSessionCreatedEvent {
-  /** Child session id — the registry key. Unique per child; concurrent
-   * siblings of the same parent occupy distinct keys. */
-  sessionId: string;
-  parentSessionId?: string;
+	/** Child session id — the registry key. Unique per child; concurrent
+	 * siblings of the same parent occupy distinct keys. */
+	sessionId: string;
+	parentSessionId?: string;
 }
 
 /** Payload for `subagents:child:completed`. */
 export interface ChildCompletedEvent {
-  sessionDir: string;
-  agentName: string;
-  /** True if the run was hard-aborted (max turns + grace exceeded). */
-  aborted: boolean;
-  /** True if the run was steered to wrap up (soft turn limit) but finished. */
-  steered: boolean;
+	sessionDir: string;
+	agentName: string;
+	/** True if the run was hard-aborted (max turns + grace exceeded). */
+	aborted: boolean;
+	/** True if the run was steered to wrap up (soft turn limit) but finished. */
+	steered: boolean;
 }
 
 /** Payload for `subagents:child:disposed`. */
 export interface ChildDisposedEvent {
-  /** Child session id — the registry key. Must match `session-created`. */
-  sessionId: string;
+	/** Child session id — the registry key. Must match `session-created`. */
+	sessionId: string;
 }
 
 /** Narrow emit seam — injected, never imports the Pi SDK. */
@@ -63,28 +63,26 @@ export type LifecycleEmit = (channel: string, data: unknown) => void;
 
 /** Publishes the child-execution lifecycle on the event bus. */
 export interface ChildLifecyclePublisher {
-  spawning(event: ChildSpawningEvent): void;
-  sessionCreated(event: ChildSessionCreatedEvent): void;
-  completed(event: ChildCompletedEvent): void;
-  disposed(event: ChildDisposedEvent): void;
+	spawning(event: ChildSpawningEvent): void;
+	sessionCreated(event: ChildSessionCreatedEvent): void;
+	completed(event: ChildCompletedEvent): void;
+	disposed(event: ChildDisposedEvent): void;
 }
 
 /** Build a publisher backed by an injected `emit` callback. */
-export function createChildLifecyclePublisher(
-  emit: LifecycleEmit,
-): ChildLifecyclePublisher {
-  return {
-    spawning(event) {
-      emit(SUBAGENT_CHILD_SPAWNING, event);
-    },
-    sessionCreated(event) {
-      emit(SUBAGENT_CHILD_SESSION_CREATED, event);
-    },
-    completed(event) {
-      emit(SUBAGENT_CHILD_COMPLETED, event);
-    },
-    disposed(event) {
-      emit(SUBAGENT_CHILD_DISPOSED, event);
-    },
-  };
+export function createChildLifecyclePublisher(emit: LifecycleEmit): ChildLifecyclePublisher {
+	return {
+		spawning(event) {
+			emit(SUBAGENT_CHILD_SPAWNING, event);
+		},
+		sessionCreated(event) {
+			emit(SUBAGENT_CHILD_SESSION_CREATED, event);
+		},
+		completed(event) {
+			emit(SUBAGENT_CHILD_COMPLETED, event);
+		},
+		disposed(event) {
+			emit(SUBAGENT_CHILD_DISPOSED, event);
+		},
+	};
 }

@@ -1,11 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import {
-  loadUnifiedConfig,
-  normalizeUnifiedConfig,
-  stripJsonComments,
-} from "./config-loader";
+import { loadUnifiedConfig, normalizeUnifiedConfig, stripJsonComments } from "./config-loader";
 import { getGlobalConfigPath } from "./config-paths";
 import type { ScopeConfig } from "./types";
 import { toRecord } from "./value-guards";
@@ -16,48 +12,42 @@ import { extractFrontmatter, parseSimpleYamlMap } from "./yaml-frontmatter";
 // ---------------------------------------------------------------------------
 
 function getFileStamp(path: string): string {
-  try {
-    return String(statSync(path).mtimeMs);
-  } catch {
-    return "missing";
-  }
+	try {
+		return String(statSync(path).mtimeMs);
+	} catch {
+		return "missing";
+	}
 }
 
 // ---------------------------------------------------------------------------
 // MCP server-name reading helpers
 // ---------------------------------------------------------------------------
 
-function readConfiguredMcpServerNamesFromConfigPath(
-  configPath: string,
-): string[] {
-  try {
-    const raw = readFileSync(configPath, "utf-8");
-    const parsed = JSON.parse(stripJsonComments(raw)) as unknown;
-    const root = toRecord(parsed);
-    const serverRecord = toRecord(root.mcpServers ?? root["mcp-servers"]);
+function readConfiguredMcpServerNamesFromConfigPath(configPath: string): string[] {
+	try {
+		const raw = readFileSync(configPath, "utf-8");
+		const parsed = JSON.parse(stripJsonComments(raw)) as unknown;
+		const root = toRecord(parsed);
+		const serverRecord = toRecord(root.mcpServers ?? root["mcp-servers"]);
 
-    return Object.keys(serverRecord)
-      .map((name) => name.trim())
-      .filter((name) => name.length > 0);
-  } catch {
-    return [];
-  }
+		return Object.keys(serverRecord)
+			.map((name) => name.trim())
+			.filter((name) => name.length > 0);
+	} catch {
+		return [];
+	}
 }
 
-function getConfiguredMcpServerNamesFromPaths(
-  paths: readonly string[],
-): string[] {
-  const seen = new Set<string>();
+function getConfiguredMcpServerNamesFromPaths(paths: readonly string[]): string[] {
+	const seen = new Set<string>();
 
-  for (const path of paths) {
-    for (const name of readConfiguredMcpServerNamesFromConfigPath(path)) {
-      seen.add(name);
-    }
-  }
+	for (const path of paths) {
+		for (const name of readConfiguredMcpServerNamesFromConfigPath(path)) {
+			seen.add(name);
+		}
+	}
 
-  return [...seen].sort(
-    (left, right) => right.length - left.length || left.localeCompare(right),
-  );
+	return [...seen].sort((left, right) => right.length - left.length || left.localeCompare(right));
 }
 
 // ---------------------------------------------------------------------------
@@ -65,14 +55,14 @@ function getConfiguredMcpServerNamesFromPaths(
 // ---------------------------------------------------------------------------
 
 export interface ResolvedPolicyPaths {
-  globalConfigPath: string;
-  globalConfigExists: boolean;
-  projectConfigPath: string | null;
-  projectConfigExists: boolean;
-  agentsDir: string;
-  agentsDirExists: boolean;
-  projectAgentsDir: string | null;
-  projectAgentsDirExists: boolean;
+	globalConfigPath: string;
+	globalConfigExists: boolean;
+	projectConfigPath: string | null;
+	projectConfigExists: boolean;
+	agentsDir: string;
+	agentsDirExists: boolean;
+	projectAgentsDir: string | null;
+	projectAgentsDirExists: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,17 +76,17 @@ export interface ResolvedPolicyPaths {
  * merge + evaluation logic can be tested with an in-memory stub.
  */
 export interface PolicyLoader {
-  loadGlobalConfig(): ScopeConfig;
-  loadProjectConfig(): ScopeConfig;
-  loadAgentConfig(agentName?: string): ScopeConfig;
-  loadProjectAgentConfig(agentName?: string): ScopeConfig;
-  getConfiguredMcpServerNames(): readonly string[];
-  /** Combined mtime stamp for cache invalidation. */
-  getCacheStamp(agentName?: string): string;
-  /** Accumulated config-parse issues across all loads. */
-  getConfigIssues(): string[];
-  /** Resolved paths for the /permission-system show command. */
-  getResolvedPolicyPaths(): ResolvedPolicyPaths;
+	loadGlobalConfig(): ScopeConfig;
+	loadProjectConfig(): ScopeConfig;
+	loadAgentConfig(agentName?: string): ScopeConfig;
+	loadProjectAgentConfig(agentName?: string): ScopeConfig;
+	getConfiguredMcpServerNames(): readonly string[];
+	/** Combined mtime stamp for cache invalidation. */
+	getCacheStamp(agentName?: string): string;
+	/** Accumulated config-parse issues across all loads. */
+	getConfigIssues(): string[];
+	/** Resolved paths for the /permission-system show command. */
+	getResolvedPolicyPaths(): ResolvedPolicyPaths;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,13 +94,13 @@ export interface PolicyLoader {
 // ---------------------------------------------------------------------------
 
 function defaultGlobalConfigPath(): string {
-  return getGlobalConfigPath(getAgentDir());
+	return getGlobalConfigPath(getAgentDir());
 }
 function defaultAgentsDir(): string {
-  return join(getAgentDir(), "agents");
+	return join(getAgentDir(), "agents");
 }
 function defaultGlobalMcpConfigPath(): string {
-  return join(getAgentDir(), "mcp.json");
+	return join(getAgentDir(), "mcp.json");
 }
 
 // ---------------------------------------------------------------------------
@@ -118,8 +108,8 @@ function defaultGlobalMcpConfigPath(): string {
 // ---------------------------------------------------------------------------
 
 type FileCacheEntry<TValue> = {
-  stamp: string;
-  value: TValue;
+	stamp: string;
+	value: TValue;
 };
 
 // ---------------------------------------------------------------------------
@@ -128,12 +118,12 @@ type FileCacheEntry<TValue> = {
 // ---------------------------------------------------------------------------
 
 export interface PolicyLoaderOptions {
-  globalConfigPath?: string;
-  agentsDir?: string;
-  projectGlobalConfigPath?: string;
-  projectAgentsDir?: string;
-  globalMcpConfigPath?: string;
-  mcpServerNames?: readonly string[];
+	globalConfigPath?: string;
+	agentsDir?: string;
+	projectGlobalConfigPath?: string;
+	projectAgentsDir?: string;
+	globalMcpConfigPath?: string;
+	mcpServerNames?: readonly string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -145,206 +135,170 @@ export interface PolicyLoaderOptions {
  * mtime-based caching.
  */
 export class FilePolicyLoader implements PolicyLoader {
-  private readonly globalConfigPath: string;
-  private readonly agentsDir: string;
-  private readonly projectGlobalConfigPath: string | null;
-  private readonly projectAgentsDir: string | null;
-  private readonly globalMcpConfigPath: string;
-  private readonly configuredMcpServerNamesOverride: readonly string[] | null;
+	private readonly globalConfigPath: string;
+	private readonly agentsDir: string;
+	private readonly projectGlobalConfigPath: string | null;
+	private readonly projectAgentsDir: string | null;
+	private readonly globalMcpConfigPath: string;
+	private readonly configuredMcpServerNamesOverride: readonly string[] | null;
 
-  private globalConfigCache: FileCacheEntry<ScopeConfig> | null = null;
-  private projectGlobalConfigCache: FileCacheEntry<ScopeConfig> | null = null;
-  private readonly agentConfigCache = new Map<
-    string,
-    FileCacheEntry<ScopeConfig>
-  >();
-  private readonly projectAgentConfigCache = new Map<
-    string,
-    FileCacheEntry<ScopeConfig>
-  >();
-  private configuredMcpServerNamesCache: FileCacheEntry<
-    readonly string[]
-  > | null = null;
-  private accumulatedConfigIssues: string[] = [];
+	private globalConfigCache: FileCacheEntry<ScopeConfig> | null = null;
+	private projectGlobalConfigCache: FileCacheEntry<ScopeConfig> | null = null;
+	private readonly agentConfigCache = new Map<string, FileCacheEntry<ScopeConfig>>();
+	private readonly projectAgentConfigCache = new Map<string, FileCacheEntry<ScopeConfig>>();
+	private configuredMcpServerNamesCache: FileCacheEntry<readonly string[]> | null = null;
+	private accumulatedConfigIssues: string[] = [];
 
-  constructor(options: PolicyLoaderOptions = {}) {
-    this.globalConfigPath =
-      options.globalConfigPath ?? defaultGlobalConfigPath();
-    this.agentsDir = options.agentsDir ?? defaultAgentsDir();
-    this.projectGlobalConfigPath = options.projectGlobalConfigPath ?? null;
-    this.projectAgentsDir = options.projectAgentsDir ?? null;
-    this.globalMcpConfigPath =
-      options.globalMcpConfigPath ?? defaultGlobalMcpConfigPath();
-    this.configuredMcpServerNamesOverride = options.mcpServerNames
-      ? [
-          ...new Set(
-            options.mcpServerNames
-              .map((name) => name.trim())
-              .filter((name) => name.length > 0),
-          ),
-        ]
-      : null;
-  }
+	constructor(options: PolicyLoaderOptions = {}) {
+		this.globalConfigPath = options.globalConfigPath ?? defaultGlobalConfigPath();
+		this.agentsDir = options.agentsDir ?? defaultAgentsDir();
+		this.projectGlobalConfigPath = options.projectGlobalConfigPath ?? null;
+		this.projectAgentsDir = options.projectAgentsDir ?? null;
+		this.globalMcpConfigPath = options.globalMcpConfigPath ?? defaultGlobalMcpConfigPath();
+		this.configuredMcpServerNamesOverride = options.mcpServerNames
+			? [...new Set(options.mcpServerNames.map((name) => name.trim()).filter((name) => name.length > 0))]
+			: null;
+	}
 
-  // ── Config issue accumulation ────────────────────────────────────────
+	// ── Config issue accumulation ────────────────────────────────────────
 
-  private accumulateConfigIssues(issues: string[]): void {
-    for (const issue of issues) {
-      if (!this.accumulatedConfigIssues.includes(issue)) {
-        this.accumulatedConfigIssues.push(issue);
-      }
-    }
-  }
+	private accumulateConfigIssues(issues: string[]): void {
+		for (const issue of issues) {
+			if (!this.accumulatedConfigIssues.includes(issue)) {
+				this.accumulatedConfigIssues.push(issue);
+			}
+		}
+	}
 
-  getConfigIssues(): string[] {
-    return [...this.accumulatedConfigIssues];
-  }
+	getConfigIssues(): string[] {
+		return [...this.accumulatedConfigIssues];
+	}
 
-  // ── Scope loaders ────────────────────────────────────────────────────
+	// ── Scope loaders ────────────────────────────────────────────────────
 
-  loadGlobalConfig(): ScopeConfig {
-    const stamp = getFileStamp(this.globalConfigPath);
-    if (this.globalConfigCache?.stamp === stamp) {
-      return this.globalConfigCache.value;
-    }
+	loadGlobalConfig(): ScopeConfig {
+		const stamp = getFileStamp(this.globalConfigPath);
+		if (this.globalConfigCache?.stamp === stamp) {
+			return this.globalConfigCache.value;
+		}
 
-    const { config, issues } = loadUnifiedConfig(this.globalConfigPath);
-    this.accumulateConfigIssues(issues);
+		const { config, issues } = loadUnifiedConfig(this.globalConfigPath);
+		this.accumulateConfigIssues(issues);
 
-    const value: ScopeConfig = {
-      permission: config.permission,
-    };
+		const value: ScopeConfig = {
+			permission: config.permission,
+		};
 
-    this.globalConfigCache = { stamp, value };
-    return value;
-  }
+		this.globalConfigCache = { stamp, value };
+		return value;
+	}
 
-  loadProjectConfig(): ScopeConfig {
-    if (!this.projectGlobalConfigPath) {
-      return {};
-    }
+	loadProjectConfig(): ScopeConfig {
+		if (!this.projectGlobalConfigPath) {
+			return {};
+		}
 
-    const stamp = getFileStamp(this.projectGlobalConfigPath);
-    if (this.projectGlobalConfigCache?.stamp === stamp) {
-      return this.projectGlobalConfigCache.value;
-    }
+		const stamp = getFileStamp(this.projectGlobalConfigPath);
+		if (this.projectGlobalConfigCache?.stamp === stamp) {
+			return this.projectGlobalConfigCache.value;
+		}
 
-    const { config, issues } = loadUnifiedConfig(this.projectGlobalConfigPath);
-    this.accumulateConfigIssues(issues);
+		const { config, issues } = loadUnifiedConfig(this.projectGlobalConfigPath);
+		this.accumulateConfigIssues(issues);
 
-    const value: ScopeConfig = {
-      permission: config.permission,
-    };
+		const value: ScopeConfig = {
+			permission: config.permission,
+		};
 
-    this.projectGlobalConfigCache = { stamp, value };
-    return value;
-  }
+		this.projectGlobalConfigCache = { stamp, value };
+		return value;
+	}
 
-  private loadScopeConfigFrom(
-    dir: string | null,
-    cache: Map<string, FileCacheEntry<ScopeConfig>>,
-    agentName?: string,
-  ): ScopeConfig {
-    if (!dir || !agentName) {
-      return {};
-    }
+	private loadScopeConfigFrom(
+		dir: string | null,
+		cache: Map<string, FileCacheEntry<ScopeConfig>>,
+		agentName?: string,
+	): ScopeConfig {
+		if (!dir || !agentName) {
+			return {};
+		}
 
-    const filePath = join(dir, `${agentName}.md`);
-    const stamp = getFileStamp(filePath);
-    const cached = cache.get(agentName);
-    if (cached?.stamp === stamp) {
-      return cached.value;
-    }
+		const filePath = join(dir, `${agentName}.md`);
+		const stamp = getFileStamp(filePath);
+		const cached = cache.get(agentName);
+		if (cached?.stamp === stamp) {
+			return cached.value;
+		}
 
-    let value: ScopeConfig;
-    try {
-      const markdown = readFileSync(filePath, "utf-8");
-      const frontmatter = extractFrontmatter(markdown);
-      if (!frontmatter) {
-        value = {};
-      } else {
-        const parsed = parseSimpleYamlMap(frontmatter);
-        const { config, issues } = normalizeUnifiedConfig(parsed);
-        this.accumulateConfigIssues(issues);
-        value = { permission: config.permission };
-      }
-    } catch {
-      value = {};
-    }
+		let value: ScopeConfig;
+		try {
+			const markdown = readFileSync(filePath, "utf-8");
+			const frontmatter = extractFrontmatter(markdown);
+			if (!frontmatter) {
+				value = {};
+			} else {
+				const parsed = parseSimpleYamlMap(frontmatter);
+				const { config, issues } = normalizeUnifiedConfig(parsed);
+				this.accumulateConfigIssues(issues);
+				value = { permission: config.permission };
+			}
+		} catch {
+			value = {};
+		}
 
-    cache.set(agentName, { stamp, value });
-    return value;
-  }
+		cache.set(agentName, { stamp, value });
+		return value;
+	}
 
-  loadAgentConfig(agentName?: string): ScopeConfig {
-    return this.loadScopeConfigFrom(
-      this.agentsDir,
-      this.agentConfigCache,
-      agentName,
-    );
-  }
+	loadAgentConfig(agentName?: string): ScopeConfig {
+		return this.loadScopeConfigFrom(this.agentsDir, this.agentConfigCache, agentName);
+	}
 
-  loadProjectAgentConfig(agentName?: string): ScopeConfig {
-    return this.loadScopeConfigFrom(
-      this.projectAgentsDir,
-      this.projectAgentConfigCache,
-      agentName,
-    );
-  }
+	loadProjectAgentConfig(agentName?: string): ScopeConfig {
+		return this.loadScopeConfigFrom(this.projectAgentsDir, this.projectAgentConfigCache, agentName);
+	}
 
-  // ── MCP server names ─────────────────────────────────────────────────
+	// ── MCP server names ─────────────────────────────────────────────────
 
-  getConfiguredMcpServerNames(): readonly string[] {
-    if (this.configuredMcpServerNamesOverride) {
-      return this.configuredMcpServerNamesOverride;
-    }
+	getConfiguredMcpServerNames(): readonly string[] {
+		if (this.configuredMcpServerNamesOverride) {
+			return this.configuredMcpServerNamesOverride;
+		}
 
-    const paths = [this.globalMcpConfigPath];
-    const stamp = paths
-      .map((path) => `${path}:${getFileStamp(path)}`)
-      .join("|");
-    if (this.configuredMcpServerNamesCache?.stamp === stamp) {
-      return this.configuredMcpServerNamesCache.value;
-    }
+		const paths = [this.globalMcpConfigPath];
+		const stamp = paths.map((path) => `${path}:${getFileStamp(path)}`).join("|");
+		if (this.configuredMcpServerNamesCache?.stamp === stamp) {
+			return this.configuredMcpServerNamesCache.value;
+		}
 
-    const value = getConfiguredMcpServerNamesFromPaths(paths);
-    this.configuredMcpServerNamesCache = { stamp, value };
-    return value;
-  }
+		const value = getConfiguredMcpServerNamesFromPaths(paths);
+		this.configuredMcpServerNamesCache = { stamp, value };
+		return value;
+	}
 
-  // ── Cache stamp ───────────────────────────────────────────────────────
+	// ── Cache stamp ───────────────────────────────────────────────────────
 
-  getCacheStamp(agentName?: string): string {
-    const agentStamp = agentName
-      ? getFileStamp(join(this.agentsDir, `${agentName}.md`))
-      : "missing";
-    const projectStamp = this.projectGlobalConfigPath
-      ? getFileStamp(this.projectGlobalConfigPath)
-      : "none";
-    const projectAgentStamp =
-      this.projectAgentsDir && agentName
-        ? getFileStamp(join(this.projectAgentsDir, `${agentName}.md`))
-        : "none";
+	getCacheStamp(agentName?: string): string {
+		const agentStamp = agentName ? getFileStamp(join(this.agentsDir, `${agentName}.md`)) : "missing";
+		const projectStamp = this.projectGlobalConfigPath ? getFileStamp(this.projectGlobalConfigPath) : "none";
+		const projectAgentStamp =
+			this.projectAgentsDir && agentName ? getFileStamp(join(this.projectAgentsDir, `${agentName}.md`)) : "none";
 
-    return `${getFileStamp(this.globalConfigPath)}|${projectStamp}|${agentStamp}|${projectAgentStamp}`;
-  }
+		return `${getFileStamp(this.globalConfigPath)}|${projectStamp}|${agentStamp}|${projectAgentStamp}`;
+	}
 
-  // ── Resolved paths ────────────────────────────────────────────────────
+	// ── Resolved paths ────────────────────────────────────────────────────
 
-  getResolvedPolicyPaths(): ResolvedPolicyPaths {
-    return {
-      globalConfigPath: this.globalConfigPath,
-      globalConfigExists: existsSync(this.globalConfigPath),
-      projectConfigPath: this.projectGlobalConfigPath,
-      projectConfigExists: this.projectGlobalConfigPath
-        ? existsSync(this.projectGlobalConfigPath)
-        : false,
-      agentsDir: this.agentsDir,
-      agentsDirExists: existsSync(this.agentsDir),
-      projectAgentsDir: this.projectAgentsDir,
-      projectAgentsDirExists: this.projectAgentsDir
-        ? existsSync(this.projectAgentsDir)
-        : false,
-    };
-  }
+	getResolvedPolicyPaths(): ResolvedPolicyPaths {
+		return {
+			globalConfigPath: this.globalConfigPath,
+			globalConfigExists: existsSync(this.globalConfigPath),
+			projectConfigPath: this.projectGlobalConfigPath,
+			projectConfigExists: this.projectGlobalConfigPath ? existsSync(this.projectGlobalConfigPath) : false,
+			agentsDir: this.agentsDir,
+			agentsDirExists: existsSync(this.agentsDir),
+			projectAgentsDir: this.projectAgentsDir,
+			projectAgentsDirExists: this.projectAgentsDir ? existsSync(this.projectAgentsDir) : false,
+		};
+	}
 }

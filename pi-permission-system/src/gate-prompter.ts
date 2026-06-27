@@ -7,6 +7,6 @@ import type { PromptPermissionDetails } from "./permission-prompter";
  * is bound by the implementor, not threaded per call.
  */
 export interface GatePrompter {
-  canConfirm(): boolean;
-  prompt(details: PromptPermissionDetails): Promise<PermissionPromptDecision>;
+	canConfirm(): boolean;
+	prompt(details: PromptPermissionDetails): Promise<PermissionPromptDecision>;
 }

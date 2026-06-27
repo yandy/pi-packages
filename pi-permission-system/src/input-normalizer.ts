@@ -19,16 +19,13 @@ import { getNonEmptyString, toRecord } from "./value-guards";
  * value as a pre-qualified target string. Pass the fully-qualified target
  * (e.g. "exa:search" or "exa") directly.
  */
-export function buildInputForSurface(
-  surface: string,
-  value: string | undefined,
-): unknown {
-  const v = value ?? "";
-  if (surface === "bash") return { command: v };
-  if (surface === "skill") return { name: v };
-  if (surface === "external_directory") return { path: v };
-  // MCP and tool surfaces: normalizeInput handles them from the surface alone.
-  return {};
+export function buildInputForSurface(surface: string, value: string | undefined): unknown {
+	const v = value ?? "";
+	if (surface === "bash") return { command: v };
+	if (surface === "skill") return { name: v };
+	if (surface === "external_directory") return { path: v };
+	// MCP and tool surfaces: normalizeInput handles them from the surface alone.
+	return {};
 }
 
 /**
@@ -36,19 +33,19 @@ export function buildInputForSurface(
  * `checkPermission()` to feed a single `evaluateFirst()` call.
  */
 export interface NormalizedInput {
-  /** The permission surface for `evaluate()` (e.g. "bash", "mcp", "skill"). */
-  surface: string;
-  /**
-   * Candidate lookup values in priority order (most-specific first).
-   * Most surfaces produce a single-element array; MCP produces a
-   * multi-candidate list derived from the invocation input.
-   */
-  values: string[];
-  /**
-   * Surface-specific fields forwarded verbatim into `PermissionCheckResult`
-   * (e.g. `{ command }` for bash, `{ target }` for mcp).
-   */
-  resultExtras: Record<string, unknown>;
+	/** The permission surface for `evaluate()` (e.g. "bash", "mcp", "skill"). */
+	surface: string;
+	/**
+	 * Candidate lookup values in priority order (most-specific first).
+	 * Most surfaces produce a single-element array; MCP produces a
+	 * multi-candidate list derived from the invocation input.
+	 */
+	values: string[];
+	/**
+	 * Surface-specific fields forwarded verbatim into `PermissionCheckResult`
+	 * (e.g. `{ command }` for bash, `{ target }` for mcp).
+	 */
+	resultExtras: Record<string, unknown>;
 }
 
 const SPECIAL_PERMISSION_KEYS = new Set(["external_directory", "path"]);
@@ -63,77 +60,74 @@ const SPECIAL_PERMISSION_KEYS = new Set(["external_directory", "path"]);
  *   global MCP config, used to derive server-qualified MCP targets.
  */
 export function normalizeInput(
-  toolName: string,
-  input: unknown,
-  configuredMcpServerNames: readonly string[],
-  cwd?: string,
+	toolName: string,
+	input: unknown,
+	configuredMcpServerNames: readonly string[],
+	cwd?: string,
 ): NormalizedInput {
-  // --- Special surfaces (path, external_directory) ---
-  if (SPECIAL_PERMISSION_KEYS.has(toolName)) {
-    return {
-      surface: toolName,
-      values: normalizePathSurfaceValues(input, cwd),
-      resultExtras: {},
-    };
-  }
+	// --- Special surfaces (path, external_directory) ---
+	if (SPECIAL_PERMISSION_KEYS.has(toolName)) {
+		return {
+			surface: toolName,
+			values: normalizePathSurfaceValues(input, cwd),
+			resultExtras: {},
+		};
+	}
 
-  // --- Skill ---
-  if (toolName === "skill") {
-    const record = toRecord(input);
-    const skillName = record.name;
-    const lookupValue = typeof skillName === "string" ? skillName : "*";
-    return {
-      surface: "skill",
-      values: [lookupValue],
-      resultExtras: {},
-    };
-  }
+	// --- Skill ---
+	if (toolName === "skill") {
+		const record = toRecord(input);
+		const skillName = record.name;
+		const lookupValue = typeof skillName === "string" ? skillName : "*";
+		return {
+			surface: "skill",
+			values: [lookupValue],
+			resultExtras: {},
+		};
+	}
 
-  // --- Bash ---
-  if (toolName === "bash") {
-    const record = toRecord(input);
-    const command = typeof record.command === "string" ? record.command : "";
-    // Strip leading shell comment lines so pattern matching operates on the
-    // actual command, not a `# description` prefix agents often prepend.
-    // Fall back to the raw command when stripping leaves nothing, so an
-    // all-comment command still evaluates against its literal text.
-    const matchValue = stripBashCommentLines(command) || command;
-    return {
-      surface: "bash",
-      values: [matchValue],
-      resultExtras: { command },
-    };
-  }
+	// --- Bash ---
+	if (toolName === "bash") {
+		const record = toRecord(input);
+		const command = typeof record.command === "string" ? record.command : "";
+		// Strip leading shell comment lines so pattern matching operates on the
+		// actual command, not a `# description` prefix agents often prepend.
+		// Fall back to the raw command when stripping leaves nothing, so an
+		// all-comment command still evaluates against its literal text.
+		const matchValue = stripBashCommentLines(command) || command;
+		return {
+			surface: "bash",
+			values: [matchValue],
+			resultExtras: { command },
+		};
+	}
 
-  // --- MCP ---
-  if (toolName === "mcp") {
-    const mcpTargets = [
-      ...createMcpPermissionTargets(input, configuredMcpServerNames),
-      "mcp",
-    ];
-    const fallbackTarget = mcpTargets[0] ?? "mcp";
-    return {
-      surface: "mcp",
-      values: mcpTargets,
-      resultExtras: { target: fallbackTarget },
-    };
-  }
+	// --- MCP ---
+	if (toolName === "mcp") {
+		const mcpTargets = [...createMcpPermissionTargets(input, configuredMcpServerNames), "mcp"];
+		const fallbackTarget = mcpTargets[0] ?? "mcp";
+		return {
+			surface: "mcp",
+			values: mcpTargets,
+			resultExtras: { target: fallbackTarget },
+		};
+	}
 
-  // --- Path-bearing tools (read, write, edit, grep, find, ls) ---
-  if (PATH_BEARING_TOOLS.has(toolName)) {
-    return {
-      surface: toolName,
-      values: normalizePathSurfaceValues(input, cwd),
-      resultExtras: {},
-    };
-  }
+	// --- Path-bearing tools (read, write, edit, grep, find, ls) ---
+	if (PATH_BEARING_TOOLS.has(toolName)) {
+		return {
+			surface: toolName,
+			values: normalizePathSurfaceValues(input, cwd),
+			resultExtras: {},
+		};
+	}
 
-  // --- Extension tools (non-path-bearing) ---
-  return {
-    surface: toolName,
-    values: ["*"],
-    resultExtras: {},
-  };
+	// --- Extension tools (non-path-bearing) ---
+	return {
+		surface: toolName,
+		values: ["*"],
+		resultExtras: {},
+	};
 }
 
 /**
@@ -150,8 +144,8 @@ export function normalizeInput(
  * (potentially attacker-controlled) field on the raw tool input.
  */
 function normalizePathSurfaceValues(input: unknown, cwd?: string): string[] {
-  const path = getNonEmptyString(toRecord(input).path);
-  if (path === null) return ["*"];
-  const values = getPathPolicyValues(path, cwd ? { cwd } : {});
-  return values.length > 0 ? values : ["*"];
+	const path = getNonEmptyString(toRecord(input).path);
+	if (path === null) return ["*"];
+	const values = getPathPolicyValues(path, cwd ? { cwd } : {});
+	return values.length > 0 ? values : ["*"];
 }

@@ -9,29 +9,29 @@ import type { AgentConfig } from "../types";
 const READ_ONLY_TOOLS = ["read", "bash", "grep", "find", "ls"];
 
 export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
-  [
-    "general-purpose",
-    {
-      name: "general-purpose",
-      displayName: "Agent",
-      description: "General-purpose agent for complex, multi-step tasks",
-      // builtinToolNames omitted — means "all available tools" (resolved at lookup time)
-      // inheritContext / runInBackground omitted — strategy fields, callers decide per-call.
-      // Setting them to false would lock callsite intent (see resolveAgentInvocationConfig in invocation-config.ts).
-      systemPrompt: "",
-      promptMode: "append",
-      isDefault: true,
-    },
-  ],
-  [
-    "Explore",
-    {
-      name: "Explore",
-      displayName: "Explore",
-      description: "Fast codebase exploration agent (read-only)",
-      builtinToolNames: READ_ONLY_TOOLS,
-      model: "anthropic/claude-haiku-4-5-20251001",
-      systemPrompt: `# CRITICAL: READ-ONLY MODE - NO FILE MODIFICATIONS
+	[
+		"general-purpose",
+		{
+			name: "general-purpose",
+			displayName: "Agent",
+			description: "General-purpose agent for complex, multi-step tasks",
+			// builtinToolNames omitted — means "all available tools" (resolved at lookup time)
+			// inheritContext / runInBackground omitted — strategy fields, callers decide per-call.
+			// Setting them to false would lock callsite intent (see resolveAgentInvocationConfig in invocation-config.ts).
+			systemPrompt: "",
+			promptMode: "append",
+			isDefault: true,
+		},
+	],
+	[
+		"Explore",
+		{
+			name: "Explore",
+			displayName: "Explore",
+			description: "Fast codebase exploration agent (read-only)",
+			builtinToolNames: READ_ONLY_TOOLS,
+			model: "anthropic/claude-haiku-4-5-20251001",
+			systemPrompt: `# CRITICAL: READ-ONLY MODE - NO FILE MODIFICATIONS
 You are a file search specialist. You excel at thoroughly navigating and exploring codebases.
 Your role is EXCLUSIVELY to search and analyze existing code. You do NOT have access to file editing tools.
 
@@ -59,18 +59,18 @@ Use Bash ONLY for read-only operations: ls, git status, git log, git diff, find,
 - Report findings as regular messages
 - Do not use emojis
 - Be thorough and precise`,
-      promptMode: "replace",
-      isDefault: true,
-    },
-  ],
-  [
-    "Plan",
-    {
-      name: "Plan",
-      displayName: "Plan",
-      description: "Software architect for implementation planning (read-only)",
-      builtinToolNames: READ_ONLY_TOOLS,
-      systemPrompt: `# CRITICAL: READ-ONLY MODE - NO FILE MODIFICATIONS
+			promptMode: "replace",
+			isDefault: true,
+		},
+	],
+	[
+		"Plan",
+		{
+			name: "Plan",
+			displayName: "Plan",
+			description: "Software architect for implementation planning (read-only)",
+			builtinToolNames: READ_ONLY_TOOLS,
+			systemPrompt: `# CRITICAL: READ-ONLY MODE - NO FILE MODIFICATIONS
 You are a software architect and planning specialist.
 Your role is EXCLUSIVELY to explore the codebase and design implementation plans.
 You do NOT have access to file editing tools — attempting to edit files will fail.
@@ -110,8 +110,8 @@ You are STRICTLY PROHIBITED from:
 ### Critical Files for Implementation
 List 3-5 files most critical for implementing this plan:
 - /absolute/path/to/file.ts - [Brief reason]`,
-      promptMode: "replace",
-      isDefault: true,
-    },
-  ],
+			promptMode: "replace",
+			isDefault: true,
+		},
+	],
 ]);

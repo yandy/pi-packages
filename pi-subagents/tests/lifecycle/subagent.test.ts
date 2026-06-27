@@ -6,7 +6,12 @@ import { SubagentState, type SubagentStateInit } from "../../src/lifecycle/subag
 import type { Workspace, WorkspaceProvider } from "../../src/lifecycle/workspace";
 import type { AgentInvocation, CompactionInfo, SubagentType } from "../../src/types";
 import { makeStubExecution } from "../helpers/make-subagent";
-import { createMockSession, createSubagentSessionStub, emitResumeUsageAndCompaction, toSubagentSession } from "../helpers/mock-session";
+import {
+	createMockSession,
+	createSubagentSessionStub,
+	emitResumeUsageAndCompaction,
+	toSubagentSession,
+} from "../helpers/mock-session";
 import { STUB_SNAPSHOT } from "../helpers/stub-ctx";
 
 type SessionFactory = (params: CreateSubagentSessionParams) => Promise<SubagentSession>;
@@ -137,14 +142,26 @@ describe("convenience getters", () => {
 
 		it("turnCount reflects state mutations via incrementTurnCount", () => {
 			const state = new SubagentState();
-			const record = new Subagent({ id: "1", type: "general-purpose", description: "test", execution: makeStubExecution(), state });
+			const record = new Subagent({
+				id: "1",
+				type: "general-purpose",
+				description: "test",
+				execution: makeStubExecution(),
+				state,
+			});
 			state.incrementTurnCount();
 			expect(record.turnCount).toBe(2);
 		});
 
 		it("activeTools reflects state mutations via addActiveTool", () => {
 			const state = new SubagentState();
-			const record = new Subagent({ id: "1", type: "general-purpose", description: "test", execution: makeStubExecution(), state });
+			const record = new Subagent({
+				id: "1",
+				type: "general-purpose",
+				description: "test",
+				execution: makeStubExecution(),
+				state,
+			});
 			state.addActiveTool("Read");
 			expect(record.activeTools.size).toBe(1);
 			expect([...record.activeTools.values()]).toContain("Read");
@@ -152,7 +169,13 @@ describe("convenience getters", () => {
 
 		it("responseText reflects state mutations via appendResponseText", () => {
 			const state = new SubagentState();
-			const record = new Subagent({ id: "1", type: "general-purpose", description: "test", execution: makeStubExecution(), state });
+			const record = new Subagent({
+				id: "1",
+				type: "general-purpose",
+				description: "test",
+				execution: makeStubExecution(),
+				state,
+			});
 			state.appendResponseText("Hello");
 			expect(record.responseText).toBe("Hello");
 		});
@@ -337,8 +360,6 @@ describe("Subagent — abort", () => {
 	});
 });
 
-
-
 /** Create a Subagent for completeRun / failRun tests. */
 function createCompletionAgent(overrides?: { observer?: SubagentLifecycleObserver }) {
 	return {
@@ -385,7 +406,6 @@ describe("Subagent — completeRun", () => {
 		expect(onRunFinished).toHaveBeenCalledOnce();
 		expect(onRunFinished).toHaveBeenCalledWith(record);
 	});
-
 });
 
 describe("Subagent — failRun", () => {
@@ -403,7 +423,6 @@ describe("Subagent — failRun", () => {
 		expect(onRunFinished).toHaveBeenCalledOnce();
 		expect(onRunFinished).toHaveBeenCalledWith(record);
 	});
-
 });
 
 describe("Subagent — disposeSession", () => {
@@ -554,7 +573,10 @@ describe("Subagent.run() — workspace provider", () => {
 		const { factory, stub } = createFactory();
 		stub.runTurnLoop.mockRejectedValue(new Error("turn loop exploded"));
 		const workspace = makeWorkspace("/ws/dir", { resultAddendum: "\nshould be discarded" });
-		const agent = createRunnableAgent({ createSubagentSession: factory, workspaceProvider: makeWorkspaceProvider(workspace) });
+		const agent = createRunnableAgent({
+			createSubagentSession: factory,
+			workspaceProvider: makeWorkspaceProvider(workspace),
+		});
 		await agent.run();
 		expect(agent.status).toBe("error");
 		expect(workspace.dispose).toHaveBeenCalledWith({ status: "error", description: "run test" });
@@ -598,7 +620,10 @@ describe("Subagent.run() — abort signal forwarding", () => {
 describe("Subagent.run() — RunConfig threading", () => {
 	it("passes defaultMaxTurns and graceTurns to runTurnLoop", async () => {
 		const { factory, stub } = createFactory();
-		const agent = createRunnableAgent({ createSubagentSession: factory, getRunConfig: () => ({ defaultMaxTurns: 10, graceTurns: 3 }) });
+		const agent = createRunnableAgent({
+			createSubagentSession: factory,
+			getRunConfig: () => ({ defaultMaxTurns: 10, graceTurns: 3 }),
+		});
 		await agent.run();
 		const turnOpts = stub.runTurnLoop.mock.calls[0][1];
 		expect(turnOpts.defaultMaxTurns).toBe(10);
@@ -731,7 +756,8 @@ describe("Subagent.resume() — observer lifecycle", () => {
 		const session = createMockSession();
 		const seen: Array<{ reason: string; tokensBefore: number }> = [];
 		const observer: SubagentLifecycleObserver = {
-			onCompacted: (_agent: Subagent, info: CompactionInfo) => seen.push({ reason: info.reason, tokensBefore: info.tokensBefore }),
+			onCompacted: (_agent: Subagent, info: CompactionInfo) =>
+				seen.push({ reason: info.reason, tokensBefore: info.tokensBefore }),
 		};
 		const stub = createSubagentSessionStub(session);
 		stub.resumeTurnLoop.mockImplementation(async () => {
