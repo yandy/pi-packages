@@ -5,7 +5,7 @@
 
 ## Goal
 
-一个只包含 skills 的 pi package，将飞书（Lark）开放平台 API skills 通过 npm 分发给其他开发者，无需安装完整的 `pi-feishu-cli`。
+一个只包含 skills 的 pi package，将飞书（Lark）开放平台 API skills 通过 npm 分发给其他开发者。
 
 ## Architecture
 
@@ -89,7 +89,7 @@ skills/
 
 | File | Content |
 |------|---------|
-| `README.md` | Install via `pi install npm:@yandy0725/pi-lark`. Prerequisite: `pi-feishu-cli` for `lark-cli`. Dev: `npm run download-skills`. |
+| `README.md` | Install via `pi install npm:@yandy0725/pi-lark`. Dev: `npm run download-skills`. |
 | `README.zh.md` | 中文版同上 |
 | `RELEASE.md` | Release via `npm version -w pi-lark --no-git-tag-version` → commit → `gh release create pi-lark-vX.Y.Z` |
 
@@ -121,4 +121,3 @@ Release tag `pi-lark-vX.Y.Z` → CI 执行 `npm publish --provenance --workspace
 - Release tag 格式：`pi-lark-vX.Y.Z`
 - Package 名：`@yandy0725/pi-lark`（public access）
 - skills 内容不归本仓库管理，由脚本从飞书平台拉取
-- 安装者需自行安装 `pi-feishu-cli` 以获得 `lark-cli` 命令（README 注明）
