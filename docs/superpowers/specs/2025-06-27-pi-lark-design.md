@@ -61,7 +61,7 @@ pi-lark/
 - `files: ["skills/"]` — 只打包 skills 目录发布
 - `prepublishOnly` → `download-skills` — 发布前自动拉最新 skills
 - `scripts/download-skills` — 也支持手动 `npm run download-skills`
-- `peerDependencies: { "@larksuite/cli": "*" }` — skills 引用 `lark-cli` 命令，安装者需自行安装 `@larksuite/cli`（`npx @larksuite/cli@latest install`）
+- `peerDependencies: { "@larksuite/cli": "*" }` — skills 引用 `lark-cli` 命令，安装者需自行安装（`npm install -g @larksuite/cli`）
 
 ### 2. download-skills.mjs
 
@@ -92,7 +92,7 @@ skills/
 
 | File | Content |
 |------|---------|
-| `README.md` | Install via `pi install npm:@yandy0725/pi-lark`. Prerequisite: install `@larksuite/cli` (`npx @larksuite/cli@latest install`). Dev: `npm run download-skills`. |
+| `README.md` | Install via `pi install npm:@yandy0725/pi-lark`. Prerequisite: `npm install -g @larksuite/cli`. Dev: `npm run download-skills`. |
 | `README.zh.md` | 中文版同上 |
 | `RELEASE.md` | Release via `npm version -w pi-lark --no-git-tag-version` → commit → `gh release create pi-lark-vX.Y.Z` |
 
