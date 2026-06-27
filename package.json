@@ -7,7 +7,8 @@
 		"pi-web-tools",
 		"pi-todo",
 		"pi-vision-tools",
-		"pi-lark"
+		"pi-lark",
+		"pi-dingtalk"
 	],
 	"scripts": {
 		"test": "npm run test --workspaces --if-present",

@@ -41,6 +41,9 @@ jobs:
             pi-lark-v*)
               echo "dir=pi-lark" >> "$GITHUB_OUTPUT"
               ;;
+            pi-dingtalk-v*)
+              echo "dir=pi-dingtalk" >> "$GITHUB_OUTPUT"
+              ;;
           esac
 
       - run: npm ci
