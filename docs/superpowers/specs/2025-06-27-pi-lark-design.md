@@ -44,6 +44,9 @@ pi-lark/
   "type": "module",
   "keywords": ["pi-package", "lark", "feishu", "skills"],
   "files": ["skills/"],
+  "peerDependencies": {
+    "@larksuite/cli": "*"
+  },
   "scripts": {
     "download-skills": "node scripts/download-skills.mjs",
     "prepublishOnly": "npm run download-skills"
@@ -58,7 +61,7 @@ pi-lark/
 - `files: ["skills/"]` — 只打包 skills 目录发布
 - `prepublishOnly` → `download-skills` — 发布前自动拉最新 skills
 - `scripts/download-skills` — 也支持手动 `npm run download-skills`
-- 无 `dependencies`、`peerDependencies`
+- `peerDependencies: { "@larksuite/cli": "*" }` — skills 引用 `lark-cli` 命令，安装者需自行安装 `@larksuite/cli`（`npx @larksuite/cli@latest install`）
 
 ### 2. download-skills.mjs
 
@@ -89,7 +92,7 @@ skills/
 
 | File | Content |
 |------|---------|
-| `README.md` | Install via `pi install npm:@yandy0725/pi-lark`. Dev: `npm run download-skills`. |
+| `README.md` | Install via `pi install npm:@yandy0725/pi-lark`. Prerequisite: install `@larksuite/cli` (`npx @larksuite/cli@latest install`). Dev: `npm run download-skills`. |
 | `README.zh.md` | 中文版同上 |
 | `RELEASE.md` | Release via `npm version -w pi-lark --no-git-tag-version` → commit → `gh release create pi-lark-vX.Y.Z` |
 
@@ -121,3 +124,4 @@ Release tag `pi-lark-vX.Y.Z` → CI 执行 `npm publish --provenance --workspace
 - Release tag 格式：`pi-lark-vX.Y.Z`
 - Package 名：`@yandy0725/pi-lark`（public access）
 - skills 内容不归本仓库管理，由脚本从飞书平台拉取
+- 依赖 `@larksuite/cli`（peerDependency），skills 内的指令需 `lark-cli` 命令
