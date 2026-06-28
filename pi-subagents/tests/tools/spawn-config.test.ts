@@ -117,7 +117,7 @@ describe("resolveSpawnConfig — type resolution", () => {
 });
 
 describe("resolveSpawnConfig — model resolution", () => {
-	it("inherits parent model when no model specified", () => {
+	it("inherits parent model when no model specified and shows its name", () => {
 		const parentModel = { id: "claude-sonnet", name: "Claude Sonnet" };
 		const result = resolveSpawnConfig(
 			{ subagent_type: "general-purpose", prompt: "test", description: "d" },
@@ -127,8 +127,8 @@ describe("resolveSpawnConfig — model resolution", () => {
 		);
 		if ("error" in result) return;
 		expect(result.execution.model).toBe(parentModel);
-		// modelName is undefined when same as parent
-		expect(result.presentation.modelName).toBeUndefined();
+		// modelName is always shown, even when same as parent
+		expect(result.presentation.modelName).toBe("sonnet");
 	});
 
 	it("returns error when user-specified model cannot be resolved", () => {
@@ -189,7 +189,7 @@ describe("resolveSpawnConfig — invocation fields", () => {
 		expect(result.execution.runInBackground).toBe(true);
 	});
 
-	it("builds agentInvocation snapshot", () => {
+	it("builds agentInvocation snapshot with modelName always present", () => {
 		const result = resolveSpawnConfig(
 			{ subagent_type: "general-purpose", prompt: "test", description: "d", thinking: "high" },
 			testRegistry,
@@ -198,7 +198,7 @@ describe("resolveSpawnConfig — invocation fields", () => {
 		);
 		if ("error" in result) return;
 		expect(result.execution.agentInvocation).toEqual({
-			modelName: undefined,
+			modelName: "sonnet",
 			thinking: "high",
 			maxTurns: undefined,
 			inheritContext: false,

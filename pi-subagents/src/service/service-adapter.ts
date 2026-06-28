@@ -9,6 +9,7 @@ import type { ParentSnapshot } from "../lifecycle/parent-snapshot";
 import type { WorkspaceProvider } from "../lifecycle/workspace";
 import type { SpawnOptions, SubagentRecord, SubagentsService } from "../service/service";
 import type { ModelRegistry } from "../session/model-resolver";
+import { resolveModelName } from "../tools/spawn-config";
 import type { SessionContext, Subagent } from "../types";
 
 /** Narrow interface for the SubagentManager — avoids coupling to the concrete class. */
@@ -45,6 +46,7 @@ export class SubagentsServiceAdapter implements SubagentsService {
 		}
 
 		let model: unknown;
+		let modelName: string | undefined;
 		if (options?.model) {
 			const registry = this.runtime.currentCtx.modelRegistry;
 			if (!registry) {
@@ -56,6 +58,11 @@ export class SubagentsServiceAdapter implements SubagentsService {
 			}
 			model = resolved;
 		}
+		// Always compute display model name, even when same as parent
+		modelName = resolveModelName(
+			(model as { id?: string; name?: string } | undefined) ??
+				(this.runtime.currentCtx.model as { id?: string; name?: string } | undefined),
+		);
 
 		const description = options?.description ?? prompt.slice(0, 80);
 		const isBackground = !(options?.foreground ?? false);
@@ -69,6 +76,9 @@ export class SubagentsServiceAdapter implements SubagentsService {
 			inheritContext: options?.inheritContext,
 			bypassQueue: options?.bypassQueue,
 			isBackground,
+			// Service API builds a display-minimal invocation (modelName only);
+			// the tool path additionally carries thinking/maxTurns/inherit tags.
+			invocation: modelName != null ? { modelName } : undefined,
 		});
 	}
 
@@ -126,6 +136,7 @@ export function toSubagentRecord(record: Subagent): SubagentRecord {
 	if (record.result !== undefined) out.result = record.result;
 	if (record.error !== undefined) out.error = record.error;
 	if (record.completedAt !== undefined) out.completedAt = record.completedAt;
+	if (record.modelName !== undefined) out.modelName = record.modelName;
 
 	return out;
 }

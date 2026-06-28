@@ -15,6 +15,14 @@ import { resolveInvocationModel } from "../session/model-resolver";
 import type { AgentInvocation, SubagentType, ThinkingLevel } from "../types";
 import { type AgentDetails, buildInvocationTags, getDisplayName, getPromptModeLabel } from "../ui/display";
 
+/** Derive a short display model name from a model object (or undefined). */
+export function resolveModelName(model: { id?: string; name?: string } | undefined): string | undefined {
+	if (!model) return undefined;
+	const raw = model.name ?? model.id;
+	if (!raw) return undefined;
+	return raw.replace(/^Claude\s+/i, "").toLowerCase();
+}
+
 /** Model info extracted from the parent session context. */
 export interface ModelInfo {
 	parentModel: { id: string; name?: string } | undefined;
@@ -103,13 +111,8 @@ export function resolveSpawnConfig(
 	const inheritContext = resolvedConfig.inheritContext;
 	const runInBackground = resolvedConfig.runInBackground;
 
-	// Compute display model name (only shown when different from parent)
-	const parentModelId = modelInfo.parentModel?.id;
-	const effectiveModelId = model?.id;
-	const modelName =
-		effectiveModelId && effectiveModelId !== parentModelId
-			? (model?.name ?? effectiveModelId).replace(/^Claude\s+/i, "").toLowerCase()
-			: undefined;
+	// Compute display model name — always shown, even when same as parent.
+	const modelName = resolveModelName(model ?? modelInfo.parentModel);
 
 	const effectiveMaxTurns = normalizeMaxTurns(resolvedConfig.maxTurns ?? settings.defaultMaxTurns);
 

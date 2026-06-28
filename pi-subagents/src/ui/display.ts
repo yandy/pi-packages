@@ -28,7 +28,7 @@ export interface AgentDetails {
 	activity?: string;
 	/** Current spinner frame index (for animated running indicator). */
 	spinnerFrame?: number;
-	/** Short model name if different from parent (e.g. "haiku", "sonnet"). */
+	/** Short display model name (always shown; falls back to parent model when unset). */
 	modelName?: string;
 	/** Notable config tags (e.g. ["thinking: high", "inherit context"]). */
 	tags?: string[];

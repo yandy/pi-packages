@@ -73,14 +73,20 @@ describe("recoverEvictedSubagents", () => {
 		expect(result.map((r) => r.id)).toEqual(["new", "old"]);
 	});
 
-	it("skips records without an outputFile (transcript not navigable from disk)", () => {
+	it("skips records without an outputFile when the constructed session file does not exist", () => {
 		const jsonl = parentJsonl([
 			HEADER,
 			recordEntry({ id: "no-file", startedAt: 1000, completedAt: 2000 }), // no outputFile
 			recordEntry({ id: "with-file", startedAt: 1000, completedAt: 2000, outputFile: "/tasks/x.jsonl" }),
 		]);
 
-		const result = recoverEvictedSubagents("/parent.jsonl", () => jsonl);
+		// readFile only succeeds for the parent file; constructed paths fail.
+		const readFile = vi.fn((path: string) => {
+			if (path === "/parent.jsonl") return jsonl;
+			throw new Error("ENOENT");
+		});
+
+		const result = recoverEvictedSubagents("/parent.jsonl", readFile);
 
 		expect(result.map((r) => r.id)).toEqual(["with-file"]);
 	});
@@ -128,5 +134,38 @@ describe("recoverEvictedSubagents", () => {
 
 		expect(entry.modelName).toBeUndefined();
 		expect(entry.toolUses).toBe(0);
+	});
+
+	it("constructs outputFile for old records that lack it, from the agent id and parent session directory", () => {
+		const jsonl = parentJsonl([
+			HEADER,
+			// Old record (pre-fix): no outputFile
+			recordEntry({
+				id: "old-agent",
+				type: "Explore",
+				description: "pre-fix task",
+				status: "completed",
+				startedAt: 1000,
+				completedAt: 4000,
+				toolUses: 3,
+			}),
+		]);
+
+		// readFile should be called for the constructed path to verify it exists.
+		// The subagent session file is at <parent-dir>/<parent-basename>/tasks/<id>.jsonl
+		const readFile = vi.fn((path: string) => {
+			if (path === "/parent.jsonl") return jsonl;
+			// Simulate the child session file existing
+			if (path === "/parent/tasks/old-agent.jsonl") {
+				return JSON.stringify({ type: "session", id: "old-agent", version: 3 }) + "\n";
+			}
+			throw new Error("ENOENT");
+		});
+
+		const result = recoverEvictedSubagents("/parent.jsonl", readFile);
+
+		expect(result).toHaveLength(1);
+		expect(result[0].id).toBe("old-agent");
+		expect(result[0].outputFile).toBe("/parent/tasks/old-agent.jsonl");
 	});
 });

@@ -206,8 +206,13 @@ export class TranscriptOverlay implements Component {
 		this.markdownTheme = markdownTheme;
 		this.modelName = modelName;
 		this.content = this.rebuild();
-		// Start `lastRebuildAt` at 0 so the first live event rebuilds immediately
-		// (the constructor just built `content`); subsequent bursts are then throttled.
+		// Seed `lastRebuildAt` far in the past so the first source-change event
+		// always rebuilds immediately (leading-edge throttle). The constructor
+		// already built `content` from the snapshot at construction time, but
+		// the source may have accumulated events between construction and
+		// subscription — that first rebuild surfaces them without delay.
+		// Subsequent events inside the throttle window are coalesced into a
+		// single trailing rebuild.
 		this.lastRebuildAt = 0;
 		this.unsubscribe = source.subscribe(() => this.scheduleRebuild());
 	}
@@ -223,26 +228,38 @@ export class TranscriptOverlay implements Component {
 		const totalLines = this.getRenderedLines(this.innerWidth()).length;
 		const viewportHeight = this.viewportHeight();
 		const maxScroll = Math.max(0, totalLines - viewportHeight);
+		let scrolled = false;
 
 		if (matchesKey(data, "up") || matchesKey(data, "k")) {
 			this.scrollOffset = Math.max(0, this.scrollOffset - 1);
-			this.autoScroll = this.scrollOffset >= maxScroll;
+			// Streaming may add lines between handleInput and render,
+			// making maxScroll larger; unconditionally disable autoScroll
+			// so render() does not reset scrollOffset back to the bottom.
+			this.autoScroll = false;
+			scrolled = true;
 		} else if (matchesKey(data, "down") || matchesKey(data, "j")) {
 			this.scrollOffset = Math.min(maxScroll, this.scrollOffset + 1);
-			this.autoScroll = this.scrollOffset >= maxScroll;
+			this.autoScroll = false;
+			scrolled = true;
 		} else if (matchesKey(data, "pageUp") || matchesKey(data, "shift+up")) {
 			this.scrollOffset = Math.max(0, this.scrollOffset - viewportHeight);
 			this.autoScroll = false;
+			scrolled = true;
 		} else if (matchesKey(data, "pageDown") || matchesKey(data, "shift+down")) {
 			this.scrollOffset = Math.min(maxScroll, this.scrollOffset + viewportHeight);
-			this.autoScroll = this.scrollOffset >= maxScroll;
+			this.autoScroll = false;
+			scrolled = true;
 		} else if (matchesKey(data, "home")) {
 			this.scrollOffset = 0;
 			this.autoScroll = false;
+			scrolled = true;
 		} else if (matchesKey(data, "end")) {
 			this.scrollOffset = maxScroll;
 			this.autoScroll = true;
+			scrolled = true;
 		}
+
+		if (scrolled) this.tui.requestRender();
 	}
 
 	render(width: number): string[] {
@@ -277,7 +294,7 @@ export class TranscriptOverlay implements Component {
 				? "100%"
 				: `${Math.round(((visibleStart + viewportHeight) / contentLines.length) * 100)}%`;
 		const footerLeft = th.fg("dim", `${contentLines.length} lines · ${scrollPct}`);
-		const footerRight = th.fg("dim", "↑↓ scroll · PgUp/PgDn · q close");
+		const footerRight = th.fg("dim", "↑↓ scroll · PgUp/PgDn · end follow · q close");
 		const footerGap = Math.max(1, innerW - visibleWidth(footerLeft) - visibleWidth(footerRight));
 		lines.push(row(footerLeft + " ".repeat(footerGap) + footerRight));
 		lines.push(hrBot);

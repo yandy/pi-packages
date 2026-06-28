@@ -10,7 +10,7 @@
  * Commands:
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import {
 	createAgentSession,
 	DefaultResourceLoader,
@@ -125,7 +125,7 @@ export default function (pi: ExtensionAPI) {
 		manager,
 		() => notifications.dispose(),
 		unpublishSubagentsService,
-		(parentSessionFile) => recoverEvictedSubagents(parentSessionFile, (path) => readFileSync(path, "utf8")),
+		(parentSessionFile) => recoverEvictedSubagents(parentSessionFile, (path) => readFileSync(path, "utf8"), existsSync),
 	);
 
 	pi.on("session_start", (event, ctx) => lifecycle.handleSessionStart(event, ctx));

@@ -129,7 +129,7 @@ export class Subagent {
 	get maxTurns(): number | undefined {
 		return this.execution.maxTurns;
 	}
-	/** Short model name when the agent runs on a non-parent model, else undefined. */
+	/** Short display model name (always shown; falls back to parent model when unset). */
 	get modelName(): string | undefined {
 		return this.invocation?.modelName;
 	}

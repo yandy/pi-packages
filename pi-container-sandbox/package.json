@@ -33,7 +33,7 @@
 		]
 	},
 	"peerDependencies": {
-		"@earendil-works/pi-coding-agent": ">=0.74.0"
+		"@earendil-works/pi-coding-agent": ">=0.80.2"
 	},
 	"devDependencies": {
 		"@types/dockerode": "^4.0.1"

@@ -33,11 +33,11 @@
 		]
 	},
 	"peerDependencies": {
-		"@earendil-works/pi-coding-agent": ">=0.74.0"
+		"@earendil-works/pi-coding-agent": ">=0.80.2",
+		"@earendil-works/pi-ai": ">=0.80.2"
 	},
 	"dependencies": {
 		"@ast-grep/cli": "^0.41.1",
-		"@earendil-works/pi-ai": "^0.80.2",
 		"vscode-jsonrpc": "^8.2.1"
 	},
 	"devDependencies": {

@@ -38,7 +38,7 @@ export interface NavigableSubagent {
 	readonly activeTools: ReadonlyMap<string, string>;
 	readonly responseText: string;
 	readonly agentMessages: readonly SessionMessage[];
-	/** Short model name when the agent runs on a non-parent model, else undefined. */
+	/** Short display model name (always shown; falls back to parent model when unset). */
 	readonly modelName?: string;
 	isSessionReady(): boolean;
 	subscribeToUpdates(fn: (event: AgentSessionEvent) => void): (() => void) | undefined;
