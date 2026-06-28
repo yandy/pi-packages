@@ -327,6 +327,15 @@ interface AskUserConfig {
 	commentToggleKey?: string;
 }
 
+function filterConfigFields(raw: Record<string, unknown>): Partial<AskUserConfig> {
+	const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
+	return {
+		displayMode: typeof raw.displayMode === "string" ? raw.displayMode : undefined,
+		overlayToggleKey: str(raw.overlayToggleKey),
+		commentToggleKey: str(raw.commentToggleKey),
+	};
+}
+
 function loadAskUserConfig(cwd?: string): Partial<AskUserConfig> {
 	const homeDir = homedir();
 	const userConfigPath = join(homeDir, ".pi", "agent", "ask-user.json");
@@ -335,7 +344,7 @@ function loadAskUserConfig(cwd?: string): Partial<AskUserConfig> {
 	try {
 		if (existsSync(userConfigPath)) {
 			const raw = readFileSync(userConfigPath, "utf-8");
-			config = JSON.parse(raw);
+			config = filterConfigFields(JSON.parse(raw));
 		}
 	} catch {
 		// User config file missing or invalid — silently ignore.
@@ -346,7 +355,7 @@ function loadAskUserConfig(cwd?: string): Partial<AskUserConfig> {
 		try {
 			if (existsSync(projectConfigPath)) {
 				const raw = readFileSync(projectConfigPath, "utf-8");
-				const projectConfig: Partial<AskUserConfig> = JSON.parse(raw);
+				const projectConfig = filterConfigFields(JSON.parse(raw));
 				config = { ...config, ...projectConfig };
 			}
 		} catch {

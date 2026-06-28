@@ -2187,6 +2187,41 @@ describe("ask_user", () => {
 			expect(capturedOptions.overlay).toBe(true);
 		});
 
+		it("silently ignores non-string shortcut values in config (spec: type mismatch fallback)", async () => {
+			setFakeFile("/home/testuser/.pi/agent/ask-user.json", JSON.stringify({ overlayToggleKey: 123, commentToggleKey: true }));
+			const tool = await setupTool();
+			const { handle, calls } = createOverlayHandle();
+			let inputHandler: ((data: string) => any) | undefined;
+
+			await tool.execute(
+				"tool-call-id",
+				{ question: "Q", options: ["A"] },
+				undefined,
+				undefined,
+				{
+					hasUI: true,
+					cwd: "/tmp/project",
+					ui: {
+						custom: async (_factory: any, options: any) => {
+							options.onHandle?.(handle);
+							const result = inputHandler?.("alt+o");
+							// Type mismatch is silently ignored → falls back to default alt+o
+							expect(result).toEqual({ consume: true });
+							return null;
+						},
+						onTerminalInput: (handler: (data: string) => any) => {
+							inputHandler = handler;
+							return () => {};
+						},
+						notify: () => {},
+					},
+				},
+			);
+
+			// Default alt+o should still work
+			expect(calls).toEqual([true]);
+		});
+
 		it("no config file means default behavior unchanged", async () => {
 			const tool = await setupTool();
 			let capturedOptions: any;
