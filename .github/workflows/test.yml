@@ -23,6 +23,8 @@ jobs:
               - "tsconfig.base.json"
               - "vitest.config.ts"
               - "biome.json"
+            pi-ask-user:
+              - "pi-ask-user/**"
             pi-container-sandbox:
               - "pi-container-sandbox/**"
             pi-web-tools:
