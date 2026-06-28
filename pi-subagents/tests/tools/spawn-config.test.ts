@@ -46,9 +46,7 @@ describe("resolveModelName", () => {
 
 	it("returns provider/id for other providers", () => {
 		expect(resolveModelName({ provider: "openai", id: "gpt-4o", name: "GPT-4o" })).toBe("openai/gpt-4o");
-		expect(resolveModelName({ provider: "deepseek", id: "deepseek-v4-flash" })).toBe(
-			"deepseek/deepseek-v4-flash",
-		);
+		expect(resolveModelName({ provider: "deepseek", id: "deepseek-v4-flash" })).toBe("deepseek/deepseek-v4-flash");
 	});
 
 	it("returns undefined when model is undefined", () => {
