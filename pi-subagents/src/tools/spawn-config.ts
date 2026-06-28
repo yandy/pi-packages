@@ -16,16 +16,19 @@ import type { AgentInvocation, SubagentType, ThinkingLevel } from "../types";
 import { type AgentDetails, buildInvocationTags, getDisplayName, getPromptModeLabel } from "../ui/display";
 
 /** Derive a short display model name from a model object (or undefined). */
-export function resolveModelName(model: { id?: string; name?: string } | undefined): string | undefined {
+export function resolveModelName(
+	model: { id?: string; name?: string; provider?: string } | undefined,
+): string | undefined {
 	if (!model) return undefined;
-	const raw = model.name ?? model.id;
-	if (!raw) return undefined;
-	return raw.replace(/^Claude\s+/i, "").toLowerCase();
+	// Primary: provider/id complete format
+	if (model.provider && model.id) return `${model.provider}/${model.id}`;
+	// Fallback: raw name or id, no transformation
+	return model.name ?? model.id ?? undefined;
 }
 
 /** Model info extracted from the parent session context. */
 export interface ModelInfo {
-	parentModel: { id: string; name?: string } | undefined;
+	parentModel: { id: string; name?: string; provider?: string } | undefined;
 	modelRegistry: unknown;
 }
 

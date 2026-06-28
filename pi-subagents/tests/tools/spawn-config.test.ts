@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AgentTypeRegistry } from "../../src/config/agent-types";
-import { resolveSpawnConfig } from "../../src/tools/spawn-config";
+import { resolveModelName, resolveSpawnConfig } from "../../src/tools/spawn-config";
 import type { AgentConfig } from "../../src/types";
 
 function makeAgentConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
@@ -29,13 +29,44 @@ const testRegistry = new AgentTypeRegistry(() => new Map());
 /** Shorthand for building ModelInfo. */
 function makeModelInfo(overrides: Partial<Parameters<typeof resolveSpawnConfig>[2]> = {}) {
 	return {
-		parentModel: { id: "claude-sonnet", name: "Claude Sonnet" } as { id: string; name?: string } | undefined,
+		parentModel: { id: "claude-sonnet", name: "Claude Sonnet", provider: "anthropic" },
 		modelRegistry: { getAll: () => [], getAvailable: () => [] } as unknown,
 		...overrides,
 	};
 }
 
 const defaultSettings = { defaultMaxTurns: undefined as number | undefined };
+
+describe("resolveModelName", () => {
+	it("returns provider/id when provider and id are present", () => {
+		expect(resolveModelName({ provider: "anthropic", id: "claude-sonnet", name: "Claude Sonnet" })).toBe(
+			"anthropic/claude-sonnet",
+		);
+	});
+
+	it("returns provider/id for other providers", () => {
+		expect(resolveModelName({ provider: "openai", id: "gpt-4o", name: "GPT-4o" })).toBe("openai/gpt-4o");
+		expect(resolveModelName({ provider: "deepseek", id: "deepseek-v4-flash" })).toBe(
+			"deepseek/deepseek-v4-flash",
+		);
+	});
+
+	it("returns undefined when model is undefined", () => {
+		expect(resolveModelName(undefined)).toBeUndefined();
+	});
+
+	it("returns name as fallback when provider is missing", () => {
+		expect(resolveModelName({ id: "claude-sonnet", name: "Claude Sonnet" })).toBe("Claude Sonnet");
+	});
+
+	it("returns id as fallback when provider and name are both missing", () => {
+		expect(resolveModelName({ id: "some-model" })).toBe("some-model");
+	});
+
+	it("returns undefined when model has no usable fields", () => {
+		expect(resolveModelName({})).toBeUndefined();
+	});
+});
 
 describe("resolveSpawnConfig — type resolution", () => {
 	it("resolves a known agent type", () => {
@@ -118,7 +149,7 @@ describe("resolveSpawnConfig — type resolution", () => {
 
 describe("resolveSpawnConfig — model resolution", () => {
 	it("inherits parent model when no model specified and shows its name", () => {
-		const parentModel = { id: "claude-sonnet", name: "Claude Sonnet" };
+		const parentModel = { id: "claude-sonnet", name: "Claude Sonnet", provider: "anthropic" };
 		const result = resolveSpawnConfig(
 			{ subagent_type: "general-purpose", prompt: "test", description: "d" },
 			testRegistry,
@@ -128,7 +159,7 @@ describe("resolveSpawnConfig — model resolution", () => {
 		if ("error" in result) return;
 		expect(result.execution.model).toBe(parentModel);
 		// modelName is always shown, even when same as parent
-		expect(result.presentation.modelName).toBe("sonnet");
+		expect(result.presentation.modelName).toBe("anthropic/claude-sonnet");
 	});
 
 	it("returns error when user-specified model cannot be resolved", () => {
@@ -198,7 +229,7 @@ describe("resolveSpawnConfig — invocation fields", () => {
 		);
 		if ("error" in result) return;
 		expect(result.execution.agentInvocation).toEqual({
-			modelName: "sonnet",
+			modelName: "anthropic/claude-sonnet",
 			thinking: "high",
 			maxTurns: undefined,
 			inheritContext: false,

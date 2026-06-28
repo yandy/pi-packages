@@ -245,7 +245,7 @@ describe("SubagentsServiceAdapter — spawn", () => {
 				model: resolvedModel,
 				maxTurns: 5,
 				isBackground: true,
-				invocation: { modelName: "sonnet" },
+				invocation: { modelName: "anthropic/claude-sonnet" },
 			}),
 		);
 	});
