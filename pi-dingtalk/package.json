@@ -3,7 +3,7 @@
 	"publishConfig": {
 		"access": "public"
 	},
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Pi package with DingTalk workspace CLI skills for AI-powered DingTalk development",
 	"license": "MIT",
 	"repository": {

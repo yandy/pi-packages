@@ -3,7 +3,7 @@
 	"publishConfig": {
 		"access": "public"
 	},
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "pi package providing a minimal todo tool with an editor-overhead widget",
 	"license": "MIT",
 	"repository": {

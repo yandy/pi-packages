@@ -3,7 +3,7 @@
 	"publishConfig": {
 		"access": "public"
 	},
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Pi package with Lark (Feishu) API skills for AI-powered Lark app development",
 	"license": "MIT",
 	"repository": {
