@@ -48,6 +48,8 @@ export interface SubagentRecord {
 	completedAt?: number;
 	lifetimeUsage: LifetimeUsage;
 	compactionCount: number;
+	/** Short display model name (always shown; falls back to parent model when unset). */
+	modelName?: string;
 }
 
 /** Options for spawning an agent via the service. */

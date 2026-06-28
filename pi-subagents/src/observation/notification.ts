@@ -15,6 +15,8 @@ export interface NotificationDetails {
 	outputFile?: string;
 	error?: string;
 	resultPreview: string;
+	/** Short display model name (always shown; falls back to parent model when unset). */
+	modelName?: string;
 }
 
 // ---- Pure helpers (exported for unit testing) ----
@@ -87,6 +89,7 @@ export function buildNotificationDetails(record: Subagent, resultMaxLen: number)
 		durationMs: record.completedAt ? record.completedAt - record.startedAt : 0,
 		outputFile: record.outputFile,
 		error: record.error,
+		modelName: record.modelName,
 		resultPreview: record.result
 			? record.result.length > resultMaxLen
 				? record.result.slice(0, resultMaxLen) + "…"

@@ -9,15 +9,18 @@
  * and source them. This module parses those entries back into `EvictedSubagent`
  * descriptors so `/subagents:sessions` can show them again after resume/fork.
  *
- * Pure: takes the parent session file path and a `readFile` seam, returns
- * descriptors. Makes no `fs` calls and stays free of SDK objects beyond the
- * shared `FileEntry`/`CustomEntry` parse result.
+ * Pure: takes the parent session file path, a `readFile` seam, and an optional
+ * `exists` seam (defaults to a readFile-based probe), returns descriptors. The
+ * default keeps the function free of direct `fs` calls; callers may pass
+ * `fs.existsSync` to avoid reading the whole file just to check existence.
  */
 
+import { join } from "node:path";
 import { type CustomEntry, parseSessionEntries } from "@earendil-works/pi-coding-agent";
 import type { EvictedSubagent } from "../lifecycle/subagent-manager";
 import type { SubagentStatus } from "../lifecycle/subagent-state";
 import type { SubagentType } from "../types";
+import { deriveSubagentSessionDir } from "./session-dir";
 
 /** The customType under which completed-subagent records are persisted. */
 export const SUBAGENT_RECORD_CUSTOM_TYPE = "subagents:record";
@@ -48,6 +51,14 @@ interface PersistedSubagentRecord {
 export function recoverEvictedSubagents(
 	parentSessionFile: string | undefined,
 	readFile: (path: string) => string,
+	exists: (path: string) => boolean = (path) => {
+		try {
+			readFile(path);
+			return true;
+		} catch {
+			return false;
+		}
+	},
 ): EvictedSubagent[] {
 	if (!parentSessionFile) return [];
 	let entries: ReturnType<typeof parseSessionEntries>;
@@ -63,9 +74,23 @@ export function recoverEvictedSubagents(
 	);
 
 	const recovered: EvictedSubagent[] = [];
+	// Derive the tasks directory once for fallback outputFile construction.
+	// The empty cwd is harmless: when parentSessionFile is set, session-dir
+	// derives the path from it and ignores cwd entirely.
+	const tasksDir = deriveSubagentSessionDir(parentSessionFile, "");
 	for (const entry of records) {
 		const data = (entry.data ?? {}) as PersistedSubagentRecord;
-		if (!data.outputFile) continue; // not navigable from disk
+		// Try to determine outputFile: prefer the persisted one, else construct
+		// from the agent id and tasks directory (backwards compat for pre-fix records).
+		let outputFile: string | undefined = data.outputFile;
+		if (!outputFile) {
+			const constructed = join(tasksDir, `${data.id}.jsonl`);
+			// Confirm the session file is readable so the file-snapshot source
+			// works later. The `exists` seam defaults to a readFile probe (pure);
+			// callers may pass `fs.existsSync` to avoid reading the whole file.
+			if (!exists(constructed)) continue; // session file doesn't exist — not navigable
+			outputFile = constructed;
+		}
 		recovered.push({
 			id: data.id,
 			type: data.type,
@@ -75,7 +100,7 @@ export function recoverEvictedSubagents(
 			completedAt: data.completedAt,
 			toolUses: data.toolUses ?? 0,
 			modelName: data.modelName,
-			outputFile: data.outputFile,
+			outputFile,
 		});
 	}
 	// Most-recent-first, matching listEvicted()'s ordering.

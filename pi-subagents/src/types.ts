@@ -63,7 +63,7 @@ export interface AgentConfig extends AgentIdentity, AgentPromptConfig {
 }
 
 export interface AgentInvocation {
-	/** Short display name, e.g. "haiku" — only set when different from parent. */
+	/** Short display model name (always shown; falls back to parent model when unset). */
 	modelName?: string;
 	thinking?: ThinkingLevel;
 	maxTurns?: number;

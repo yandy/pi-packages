@@ -42,7 +42,7 @@ export interface WidgetAgent {
 	readonly responseText: string;
 	/** Context-window utilisation (0–100), or null when unavailable. */
 	readonly contextPercent: number | null;
-	/** Short model name when the agent runs on a non-parent model, else undefined. */
+	/** Short display model name (always shown; falls back to parent model when unset). */
 	readonly modelName?: string;
 }
 

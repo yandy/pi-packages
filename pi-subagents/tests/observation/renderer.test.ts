@@ -105,4 +105,11 @@ describe("createNotificationRenderer", () => {
 		expect(text).toContain("7 tool uses");
 		expect(text).toContain("5.0k token");
 	});
+
+	it("shows model name in stats line when set", () => {
+		const renderer = createNotificationRenderer();
+		const result = renderer({ details: makeDetails({ modelName: "haiku" }) }, { expanded: false }, stubTheme());
+		const text = renderText(result);
+		expect(text).toContain("haiku");
+	});
 });

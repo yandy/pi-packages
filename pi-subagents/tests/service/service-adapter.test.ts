@@ -73,6 +73,8 @@ describe("toSubagentRecord", () => {
 		expect(result).not.toHaveProperty("notification");
 		expect(result).not.toHaveProperty("execution");
 		expect(result).not.toHaveProperty("invocation");
+		// modelName from invocation should be surfaced on the record
+		expect(result.modelName).toBe("haiku");
 	});
 
 	it("omits optional fields when undefined on the source", () => {
@@ -229,8 +231,8 @@ describe("SubagentsServiceAdapter — spawn", () => {
 		expect(() => svc.spawn("Explore", "task", { model: "bad-model" })).toThrow(/Model not found/);
 	});
 
-	it("delegates to manager.spawn with resolved model", () => {
-		const resolvedModel = { id: "claude-sonnet", provider: "anthropic" };
+	it("delegates to manager.spawn with resolved model and invocation", () => {
+		const resolvedModel = { id: "claude-sonnet", provider: "anthropic", name: "Claude Sonnet" };
 		const mgr = createManagerStub();
 		const svc = new SubagentsServiceAdapter(mgr, () => resolvedModel, makeRuntimeStub());
 		const id = svc.spawn("Explore", "check TODOs", { model: "sonnet", maxTurns: 5 });
@@ -243,6 +245,7 @@ describe("SubagentsServiceAdapter — spawn", () => {
 				model: resolvedModel,
 				maxTurns: 5,
 				isBackground: true,
+				invocation: { modelName: "sonnet" },
 			}),
 		);
 	});

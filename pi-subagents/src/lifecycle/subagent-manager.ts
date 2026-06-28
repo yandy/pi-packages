@@ -36,7 +36,7 @@ export interface EvictedSubagent {
 	readonly startedAt: number;
 	readonly completedAt: number | undefined;
 	readonly toolUses: number;
-	/** Short model name when the agent ran on a non-parent model, else undefined. */
+	/** Short display model name (always shown; falls back to parent model when unset). */
 	readonly modelName?: string;
 	readonly outputFile: string;
 }

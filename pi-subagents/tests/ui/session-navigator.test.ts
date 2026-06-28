@@ -215,6 +215,27 @@ describe("TranscriptOverlay", () => {
 		expect(out).toContain("q close");
 	});
 
+	it("calls requestRender when a scroll key is pressed", () => {
+		const tui = mockTui();
+		const overlay = makeOverlay({ tui });
+		// Render once to prime the line cache
+		overlay.render(80);
+		vi.mocked(tui.requestRender).mockClear();
+		overlay.handleInput("\x1b[B"); // down arrow
+		expect(tui.requestRender).toHaveBeenCalled();
+	});
+
+	it("does not call requestRender when 'q' is pressed (component closes)", () => {
+		const tui = mockTui();
+		const done = vi.fn();
+		const overlay = makeOverlay({ tui, done });
+		overlay.render(80);
+		vi.mocked(tui.requestRender).mockClear();
+		overlay.handleInput("q");
+		expect(tui.requestRender).not.toHaveBeenCalled();
+		expect(done).toHaveBeenCalled();
+	});
+
 	it("shows the model name in the header when set", () => {
 		const out = makeOverlay({ modelName: "haiku" }).render(80).join("\n");
 		expect(out).toContain("haiku");
