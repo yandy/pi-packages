@@ -44,6 +44,12 @@ jobs:
             pi-dingtalk-v*)
               echo "dir=pi-dingtalk" >> "$GITHUB_OUTPUT"
               ;;
+            pi-permission-system-v*)
+              echo "dir=pi-permission-system" >> "$GITHUB_OUTPUT"
+              ;;
+            pi-subagents-v*)
+              echo "dir=pi-subagents" >> "$GITHUB_OUTPUT"
+              ;;
           esac
 
       - run: npm ci
