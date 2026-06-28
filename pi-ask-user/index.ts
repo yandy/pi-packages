@@ -5,7 +5,10 @@
  * and a custom box border instead of manual ANSI box drawing.
  */
 
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import {
@@ -15,6 +18,7 @@ import {
 	Editor,
 	type EditorTheme,
 	fuzzyFilter,
+	isKeyRelease,
 	Key,
 	type Keybinding,
 	type KeybindingsManager,
@@ -317,12 +321,58 @@ function buildShortcut(spec: string): ResolvedShortcut {
 	};
 }
 
+interface AskUserConfig {
+	displayMode?: string;
+	overlayToggleKey?: string;
+	commentToggleKey?: string;
+}
+
+function filterConfigFields(raw: Record<string, unknown>): Partial<AskUserConfig> {
+	const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
+	return {
+		displayMode: typeof raw.displayMode === "string" ? raw.displayMode : undefined,
+		overlayToggleKey: str(raw.overlayToggleKey),
+		commentToggleKey: str(raw.commentToggleKey),
+	};
+}
+
+function loadAskUserConfig(cwd?: string): Partial<AskUserConfig> {
+	const homeDir = homedir();
+	const userConfigPath = join(homeDir, ".pi", "agent", "ask-user.json");
+
+	let config: Partial<AskUserConfig> = {};
+	try {
+		if (existsSync(userConfigPath)) {
+			const raw = readFileSync(userConfigPath, "utf-8");
+			config = filterConfigFields(JSON.parse(raw));
+		}
+	} catch {
+		// User config file missing or invalid — silently ignore.
+	}
+
+	if (cwd) {
+		const projectConfigPath = join(cwd, ".pi", "ask-user.json");
+		try {
+			if (existsSync(projectConfigPath)) {
+				const raw = readFileSync(projectConfigPath, "utf-8");
+				const projectConfig = filterConfigFields(JSON.parse(raw));
+				config = { ...config, ...projectConfig };
+			}
+		} catch {
+			// Project config file missing or invalid — silently ignore.
+		}
+	}
+
+	return config;
+}
+
 function resolveShortcut(
 	paramValue: string | null | undefined,
 	envValue: string | undefined,
+	configValue: string | null | undefined,
 	defaultSpec: string,
 ): ResolvedShortcut {
-	const candidates: Array<string | null | undefined> = [paramValue, envValue, defaultSpec];
+	const candidates: Array<string | null | undefined> = [paramValue, envValue, configValue, defaultSpec];
 	for (const raw of candidates) {
 		const normalized = normalizeShortcutSpec(raw);
 		if (normalized === undefined) continue; // not provided, fall through
@@ -1565,19 +1615,24 @@ export default function (pi: ExtensionAPI) {
 				commentToggleKey,
 				timeout,
 			} = params as AskParams;
+			const config = loadAskUserConfig(ctx.cwd);
+			const configDisplayMode: AskDisplayMode | undefined =
+				config.displayMode === "overlay" || config.displayMode === "inline" ? config.displayMode : undefined;
 			const envMode = process.env.PI_ASK_USER_DISPLAY_MODE;
 			const envDisplayMode: AskDisplayMode | undefined =
 				envMode === "overlay" || envMode === "inline" ? envMode : undefined;
-			const effectiveDisplayMode: AskDisplayMode = displayMode ?? envDisplayMode ?? "overlay";
+			const effectiveDisplayMode: AskDisplayMode = displayMode ?? envDisplayMode ?? configDisplayMode ?? "overlay";
 			const shortcuts: ResolvedAskShortcuts = {
 				overlayToggle: resolveShortcut(
 					overlayToggleKey,
 					process.env.PI_ASK_USER_OVERLAY_TOGGLE_KEY,
+					config.overlayToggleKey,
 					DEFAULT_OVERLAY_TOGGLE_KEY,
 				),
 				commentToggle: resolveShortcut(
 					commentToggleKey,
 					process.env.PI_ASK_USER_COMMENT_TOGGLE_KEY,
+					config.commentToggleKey,
 					DEFAULT_COMMENT_TOGGLE_KEY,
 				),
 			};
@@ -1669,6 +1724,12 @@ export default function (pi: ExtensionAPI) {
 				if (effectiveDisplayMode === "overlay" && !overlayToggle.disabled && typeof ctx.ui.onTerminalInput === "function") {
 					removeOverlayInputListener = ctx.ui.onTerminalInput((data) => {
 						if (!overlayToggle.matches(data) || !overlayHandle) return undefined;
+						// Ignore Kitty keyboard protocol key release events.
+						// matchesKittySequence ignores event type, so both press (:1u)
+						// and release (:3u) events match the same key binding. Without
+						// this filter, releasing the toggle key chord would immediately
+						// re-show a just-hidden overlay, causing a visible flicker.
+						if (isKeyRelease(data)) return undefined;
 						const nextHidden = !overlayHandle.isHidden();
 						overlayHandle.setHidden(nextHidden);
 						if (nextHidden && !hasAnnouncedHide) {
