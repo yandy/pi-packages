@@ -281,7 +281,7 @@ describe("ToolPreviewFormatter.formatGenericToolInputForLog", () => {
 		const f = makeFormatter({ toolInputLogPreviewMaxLength: 10 });
 		const result = f.formatGenericToolInputForLog({});
 		expect(result).toBeDefined();
-		const preview = result?.slice("input ".length);
+		const preview = result!.slice("input ".length);
 		expect(preview.length).toBe(11); // 10 + "…"
 		expect(preview.endsWith("…")).toBe(true);
 	});

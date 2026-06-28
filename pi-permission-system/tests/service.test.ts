@@ -126,7 +126,7 @@ describe("service adapter delegation", () => {
 		});
 
 		publishPermissionsService(service);
-		getPermissionsService()?.checkPermission("skill", "my-skill", "Explore");
+		getPermissionsService()!.checkPermission("skill", "my-skill", "Explore");
 
 		expect(checkPermission).toHaveBeenCalledWith("skill", { name: "my-skill" }, "Explore", []);
 	});
@@ -143,7 +143,7 @@ describe("service adapter delegation", () => {
 		};
 
 		publishPermissionsService(service);
-		const result = getPermissionsService()?.getToolPermission("bash", "Explore");
+		const result = getPermissionsService()!.getToolPermission("bash", "Explore");
 
 		expect(result).toBe("deny");
 		expect(getToolPermissionFn).toHaveBeenCalledWith("bash", "Explore");
@@ -161,7 +161,7 @@ describe("service adapter delegation", () => {
 		};
 
 		publishPermissionsService(service);
-		const result = getPermissionsService()?.getToolPermission("write");
+		const result = getPermissionsService()!.getToolPermission("write");
 
 		expect(result).toBe("ask");
 		expect(getToolPermissionFn).toHaveBeenCalledWith("write", undefined);
@@ -178,7 +178,7 @@ describe("service adapter delegation", () => {
 		});
 
 		publishPermissionsService(service);
-		getPermissionsService()?.checkPermission("read", "/tmp/file");
+		getPermissionsService()!.checkPermission("read", "/tmp/file");
 
 		expect(checkPermission).toHaveBeenCalledWith("read", {}, undefined, []);
 	});
@@ -205,7 +205,7 @@ describe("registerToolInputFormatter delegation", () => {
 		});
 
 		publishPermissionsService(service);
-		const dispose = getPermissionsService()?.registerToolInputFormatter("my-tool", formatter);
+		const dispose = getPermissionsService()!.registerToolInputFormatter("my-tool", formatter);
 
 		// Registry received the registration
 		expect(registry.get("my-tool")).toBe(formatter);
@@ -226,7 +226,7 @@ describe("registerToolInputFormatter delegation", () => {
 		});
 
 		publishPermissionsService(service);
-		expect(() => getPermissionsService()?.registerToolInputFormatter("my-tool", () => "")).toThrow("my-tool");
+		expect(() => getPermissionsService()!.registerToolInputFormatter("my-tool", () => "")).toThrow("my-tool");
 	});
 });
 
@@ -251,7 +251,7 @@ describe("registerToolAccessExtractor delegation", () => {
 		});
 
 		publishPermissionsService(service);
-		const dispose = getPermissionsService()?.registerToolAccessExtractor("ffgrep", extractor);
+		const dispose = getPermissionsService()!.registerToolAccessExtractor("ffgrep", extractor);
 
 		expect(registry.get("ffgrep")).toBe(extractor);
 
@@ -270,6 +270,6 @@ describe("registerToolAccessExtractor delegation", () => {
 		});
 
 		publishPermissionsService(service);
-		expect(() => getPermissionsService()?.registerToolAccessExtractor("ffgrep", () => "")).toThrow("ffgrep");
+		expect(() => getPermissionsService()!.registerToolAccessExtractor("ffgrep", () => "")).toThrow("ffgrep");
 	});
 });
