@@ -2,6 +2,7 @@
 	"name": "pi-packages",
 	"private": true,
 	"workspaces": [
+		"pi-ask-user",
 		"pi-coding-tools",
 		"pi-container-sandbox",
 		"pi-web-tools",

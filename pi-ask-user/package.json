@@ -1,15 +1,15 @@
 {
-	"name": "@yandy0725/pi-subagents",
+	"name": "@yandy0725/pi-ask-user",
 	"publishConfig": {
 		"access": "public"
 	},
-	"version": "0.2.1",
-	"description": "Focused, in-process sub-agent core for pi — autonomous agents plus a typed API and lifecycle events",
+	"version": "0.1.0",
+	"description": "Interactive ask_user tool for pi-coding-agent with searchable split-pane selection UI, multi-select, and freeform input",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/yandy/pi-packages",
-		"directory": "pi-subagents"
+		"directory": "pi-ask-user"
 	},
 	"type": "module",
 	"keywords": [
@@ -17,7 +17,8 @@
 	],
 	"files": [
 		"index.ts",
-		"src/"
+		"src/",
+		"skills/"
 	],
 	"scripts": {
 		"test": "vitest run",
@@ -30,10 +31,12 @@
 	"pi": {
 		"extensions": [
 			"./index.ts"
+		],
+		"skills": [
+			"./skills"
 		]
 	},
 	"peerDependencies": {
-		"@earendil-works/pi-ai": ">=0.80.2",
 		"@earendil-works/pi-coding-agent": ">=0.80.2",
 		"@earendil-works/pi-tui": ">=0.80.2",
 		"@sinclair/typebox": "*"
