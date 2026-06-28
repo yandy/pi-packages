@@ -5,12 +5,12 @@
  * and a custom box border instead of manual ANSI box drawing.
  */
 
+import { createRequire } from "node:module";
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
-import { Type, type TUnsafe } from "@sinclair/typebox";
 import {
-	Container,
 	type Component,
+	Container,
 	decodeKittyPrintable,
 	Editor,
 	type EditorTheme,
@@ -28,9 +28,9 @@ import {
 	truncateToWidth,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { renderSingleSelectRows, type QuestionOption } from "./src/single-select-layout.js";
+import { type TUnsafe, Type } from "@sinclair/typebox";
+import { type QuestionOption, renderSingleSelectRows } from "./src/single-select-layout.js";
 
-import { createRequire } from "node:module";
 const _require = createRequire(import.meta.url);
 const ASK_USER_VERSION: string = (_require("./package.json") as { version: string }).version;
 
@@ -312,6 +312,7 @@ function buildShortcut(spec: string): ResolvedShortcut {
 	return {
 		disabled: false,
 		spec,
+		// biome-ignore lint/suspicious/noExplicitAny: KeyId type from pi-tui not imported
 		matches: (data: string) => matchesKey(data, spec as any),
 	};
 }
@@ -335,6 +336,7 @@ function resolveShortcut(
 type AskMode = "select" | "freeform" | "comment";
 
 const ASK_OVERLAY_MAX_HEIGHT_RATIO = 0.85;
+// biome-ignore lint/suspicious/noExplicitAny: SizeValue compatibility with pi-tui
 const ASK_OVERLAY_WIDTH: any = "92%";
 const ASK_OVERLAY_MIN_WIDTH = 40;
 const SINGLE_SELECT_SPLIT_PANE_MIN_WIDTH = 84;
@@ -376,8 +378,10 @@ function buildCustomUIOptions(displayMode: AskDisplayMode, onHandle?: (handle: O
 					anchor: "center" as const,
 					width: ASK_OVERLAY_WIDTH,
 					minWidth: ASK_OVERLAY_MIN_WIDTH,
+					// biome-ignore lint/suspicious/noExplicitAny: SizeValue compatibility
 					maxHeight: "85%" as any,
 					margin: 1,
+					// biome-ignore lint/suspicious/noExplicitAny: OverlayOptions compatibility
 				} as any,
 				...(onHandle ? { onHandle } : {}),
 			};
@@ -390,8 +394,10 @@ function buildCustomUIOptions(displayMode: AskDisplayMode, onHandle?: (handle: O
 					anchor: "center" as const,
 					width: ASK_OVERLAY_WIDTH,
 					minWidth: ASK_OVERLAY_MIN_WIDTH,
+					// biome-ignore lint/suspicious/noExplicitAny: SizeValue compatibility
 					maxHeight: "85%" as any,
 					margin: 1,
+					// biome-ignore lint/suspicious/noExplicitAny: OverlayOptions compatibility
 				} as any,
 				...(onHandle ? { onHandle } : {}),
 			};
@@ -1010,6 +1016,7 @@ class AskComponent extends Container {
 	set focused(value: boolean) {
 		this._focused = value;
 		if (this.editor && (this.mode === "freeform" || this.mode === "comment")) {
+			// biome-ignore lint/suspicious/noExplicitAny: Editor.focused setter is internal
 			(this.editor as any).focused = value;
 		}
 	}
@@ -1269,6 +1276,7 @@ class AskComponent extends Container {
 
 	private saveEditorDraft(): void {
 		if (!this.editor) return;
+		// biome-ignore lint/suspicious/noExplicitAny: Editor.getText/setText are internal
 		const getText = (this.editor as any).getText;
 		if (typeof getText !== "function") return;
 
@@ -1282,6 +1290,7 @@ class AskComponent extends Container {
 
 	private setEditorText(text: string): void {
 		const editor = this.ensureEditor();
+		// biome-ignore lint/suspicious/noExplicitAny: Editor.setText is internal
 		const setText = (editor as any).setText;
 		if (typeof setText === "function") {
 			setText.call(editor, text);
@@ -1341,6 +1350,7 @@ class AskComponent extends Container {
 
 		const editor = this.ensureEditor();
 		this.setEditorText(this.freeformDraft);
+		// biome-ignore lint/suspicious/noExplicitAny: Editor.focused setter is internal
 		(editor as any).focused = this._focused;
 
 		this.modeContainer.addChild(new Text(this.theme.fg("accent", this.theme.bold("Custom response")), 1, 0));
@@ -1362,6 +1372,7 @@ class AskComponent extends Container {
 
 		const editor = this.ensureEditor();
 		this.setEditorText(this.commentDraft);
+		// biome-ignore lint/suspicious/noExplicitAny: Editor.focused setter is internal
 		(editor as any).focused = this._focused;
 
 		const selectedLabel = this.pendingSelections.length === 1 ? "Selected option:" : "Selected options:";
@@ -1408,6 +1419,7 @@ class AskComponent extends Container {
  * ctx.ui.custom() returns undefined in RPC mode, so we degrade gracefully.
  */
 async function askViaDialogs(
+	// biome-ignore lint/complexity/noBannedTypes: pi-coding-agent dialog API
 	ui: { select: Function; input: Function },
 	question: string,
 	context: string | undefined,
@@ -1754,6 +1766,7 @@ export default function (pi: ExtensionAPI) {
 				const waitingText =
 					result.content
 						?.filter((part: { type?: string; text?: string }) => part?.type === "text")
+						// biome-ignore lint/suspicious/noExplicitAny: upstream content union type
 						.map((part: any) => (part as { text?: string }).text ?? "")
 						.join("\n")
 						.trim() || "Waiting for user input...";
