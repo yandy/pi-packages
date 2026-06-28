@@ -5,7 +5,10 @@
  * and a custom box border instead of manual ANSI box drawing.
  */
 
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import {
@@ -318,12 +321,49 @@ function buildShortcut(spec: string): ResolvedShortcut {
 	};
 }
 
+interface AskUserConfig {
+	displayMode?: string;
+	overlayToggleKey?: string;
+	commentToggleKey?: string;
+}
+
+function loadAskUserConfig(cwd?: string): Partial<AskUserConfig> {
+	const homeDir = homedir();
+	const userConfigPath = join(homeDir, ".pi", "agent", "ask-user.json");
+
+	let config: Partial<AskUserConfig> = {};
+	try {
+		if (existsSync(userConfigPath)) {
+			const raw = readFileSync(userConfigPath, "utf-8");
+			config = JSON.parse(raw);
+		}
+	} catch {
+		// User config file missing or invalid — silently ignore.
+	}
+
+	if (cwd) {
+		const projectConfigPath = join(cwd, ".pi", "ask-user.json");
+		try {
+			if (existsSync(projectConfigPath)) {
+				const raw = readFileSync(projectConfigPath, "utf-8");
+				const projectConfig: Partial<AskUserConfig> = JSON.parse(raw);
+				config = { ...config, ...projectConfig };
+			}
+		} catch {
+			// Project config file missing or invalid — silently ignore.
+		}
+	}
+
+	return config;
+}
+
 function resolveShortcut(
 	paramValue: string | null | undefined,
 	envValue: string | undefined,
+	configValue: string | null | undefined,
 	defaultSpec: string,
 ): ResolvedShortcut {
-	const candidates: Array<string | null | undefined> = [paramValue, envValue, defaultSpec];
+	const candidates: Array<string | null | undefined> = [paramValue, envValue, configValue, defaultSpec];
 	for (const raw of candidates) {
 		const normalized = normalizeShortcutSpec(raw);
 		if (normalized === undefined) continue; // not provided, fall through
@@ -1566,19 +1606,24 @@ export default function (pi: ExtensionAPI) {
 				commentToggleKey,
 				timeout,
 			} = params as AskParams;
+			const config = loadAskUserConfig(ctx.cwd);
+			const configDisplayMode: AskDisplayMode | undefined =
+				config.displayMode === "overlay" || config.displayMode === "inline" ? config.displayMode : undefined;
 			const envMode = process.env.PI_ASK_USER_DISPLAY_MODE;
 			const envDisplayMode: AskDisplayMode | undefined =
 				envMode === "overlay" || envMode === "inline" ? envMode : undefined;
-			const effectiveDisplayMode: AskDisplayMode = displayMode ?? envDisplayMode ?? "overlay";
+			const effectiveDisplayMode: AskDisplayMode = displayMode ?? envDisplayMode ?? configDisplayMode ?? "overlay";
 			const shortcuts: ResolvedAskShortcuts = {
 				overlayToggle: resolveShortcut(
 					overlayToggleKey,
 					process.env.PI_ASK_USER_OVERLAY_TOGGLE_KEY,
+					config.overlayToggleKey,
 					DEFAULT_OVERLAY_TOGGLE_KEY,
 				),
 				commentToggle: resolveShortcut(
 					commentToggleKey,
 					process.env.PI_ASK_USER_COMMENT_TOGGLE_KEY,
+					config.commentToggleKey,
 					DEFAULT_COMMENT_TOGGLE_KEY,
 				),
 			};
