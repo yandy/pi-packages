@@ -33,10 +33,10 @@
 		]
 	},
 	"peerDependencies": {
-		"@earendil-works/pi-coding-agent": ">=0.74.0"
+		"@earendil-works/pi-coding-agent": ">=0.80.2",
+		"@earendil-works/pi-tui": ">=0.80.2"
 	},
 	"devDependencies": {
-		"@earendil-works/pi-tui": "^0.79.9",
 		"typebox": "^1.1.38"
 	}
 }
