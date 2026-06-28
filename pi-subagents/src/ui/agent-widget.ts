@@ -203,12 +203,12 @@ export class AgentWidget implements SubagentManagerObserver {
 	 */
 	private clearWidget(backgroundAgents: readonly AgentSummary[]): void {
 		if (this.widgetRegistered) {
-			this.uiCtx!.setWidget("agents", undefined);
+			this.uiCtx?.setWidget("agents", undefined);
 			this.widgetRegistered = false;
 			this.tui = undefined;
 		}
 		if (this.lastStatusText !== undefined) {
-			this.uiCtx!.setStatus("subagents", undefined);
+			this.uiCtx?.setStatus("subagents", undefined);
 			this.lastStatusText = undefined;
 		}
 		if (this.widgetInterval) {
@@ -234,7 +234,7 @@ export class AgentWidget implements SubagentManagerObserver {
 			newStatusText = `${statusParts.join(", ")} agent${total === 1 ? "" : "s"}`;
 		}
 		if (newStatusText !== this.lastStatusText) {
-			this.uiCtx!.setStatus("subagents", newStatusText);
+			this.uiCtx?.setStatus("subagents", newStatusText);
 			this.lastStatusText = newStatusText;
 		}
 	}

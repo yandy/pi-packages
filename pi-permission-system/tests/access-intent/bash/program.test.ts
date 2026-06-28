@@ -238,7 +238,7 @@ describe("BashProgram", () => {
 			const symlinkCwd = "/private/tmp";
 			realpathSync.mockImplementation((p: string) => {
 				if (p === "/tmp") return "/private/tmp";
-				if (p.startsWith("/tmp/")) return "/private/tmp" + p.slice(4);
+				if (p.startsWith("/tmp/")) return `/private/tmp${p.slice(4)}`;
 				return p;
 			});
 			const program = await BashProgram.parse("cat /tmp/workspace/file.ts", symlinkCwd);

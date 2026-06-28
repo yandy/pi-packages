@@ -74,7 +74,7 @@ describe("formatMcpInputForPrompt", () => {
 			},
 		});
 		expect(result).toBeDefined();
-		expect(result!.endsWith("…")).toBe(true);
+		expect(result?.endsWith("…")).toBe(true);
 	});
 
 	test("truncates long string argument values", () => {

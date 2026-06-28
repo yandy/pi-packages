@@ -12,8 +12,14 @@
 		"directory": "pi-dingtalk"
 	},
 	"type": "module",
-	"keywords": ["pi-package", "dingtalk", "skills"],
-	"files": ["skills/"],
+	"keywords": [
+		"pi-package",
+		"dingtalk",
+		"skills"
+	],
+	"files": [
+		"skills/"
+	],
 	"peerDependencies": {
 		"dingtalk-workspace-cli": "*"
 	},
@@ -22,6 +28,8 @@
 		"prepublishOnly": "npm run download-skills"
 	},
 	"pi": {
-		"skills": ["./skills"]
+		"skills": [
+			"./skills"
+		]
 	}
 }

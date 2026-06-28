@@ -53,7 +53,7 @@ export function formatTaskNotification(record: Subagent, resultMaxLen: number): 
 
 	const resultPreview = record.result
 		? record.result.length > resultMaxLen
-			? record.result.slice(0, resultMaxLen) + "\n...(truncated, use get_subagent_result for full output)"
+			? `${record.result.slice(0, resultMaxLen)}\n...(truncated, use get_subagent_result for full output)`
 			: record.result
 		: "No output.";
 
@@ -92,7 +92,7 @@ export function buildNotificationDetails(record: Subagent, resultMaxLen: number)
 		modelName: record.modelName,
 		resultPreview: record.result
 			? record.result.length > resultMaxLen
-				? record.result.slice(0, resultMaxLen) + "…"
+				? `${record.result.slice(0, resultMaxLen)}…`
 				: record.result
 			: "No output.",
 	};

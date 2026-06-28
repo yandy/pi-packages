@@ -33,8 +33,8 @@ export function renderAgentResult(
 export function renderRunning(details: AgentDetails, theme: Theme): string {
 	const frame = SPINNER[details.spinnerFrame ?? 0];
 	const s = renderStats(details, theme);
-	let line = theme.fg("accent", frame) + (s ? " " + s : "");
-	line += "\n" + theme.fg("dim", `  ⎿  ${details.activity ?? "thinking\u2026"}`);
+	let line = theme.fg("accent", frame) + (s ? ` ${s}` : "");
+	line += `\n${theme.fg("dim", `  ⎿  ${details.activity ?? "thinking\u2026"}`)}`;
 	return line;
 }
 
@@ -49,22 +49,22 @@ export function renderCompleted(details: AgentDetails, resultText: string, expan
 	const isSteered = details.status === "steered";
 	const icon = isSteered ? theme.fg("warning", "\u2713") : theme.fg("success", "\u2713");
 	const s = renderStats(details, theme);
-	let line = icon + (s ? " " + s : "");
-	line += " " + theme.fg("dim", "\u00B7") + " " + theme.fg("dim", duration);
+	let line = icon + (s ? ` ${s}` : "");
+	line += ` ${theme.fg("dim", "\u00B7")} ${theme.fg("dim", duration)}`;
 
 	if (expanded) {
 		if (resultText) {
 			const lines = resultText.split("\n").slice(0, 50);
 			for (const l of lines) {
-				line += "\n" + theme.fg("dim", `  ${l}`);
+				line += `\n${theme.fg("dim", `  ${l}`)}`;
 			}
 			if (resultText.split("\n").length > 50) {
-				line += "\n" + theme.fg("muted", "  ... (use get_subagent_result with verbose for full output)");
+				line += `\n${theme.fg("muted", "  ... (use get_subagent_result with verbose for full output)")}`;
 			}
 		}
 	} else {
 		const doneText = isSteered ? "Wrapped up (turn limit)" : "Done";
-		line += "\n" + theme.fg("dim", `  \u23BF  ${doneText}`);
+		line += `\n${theme.fg("dim", `  \u23BF  ${doneText}`)}`;
 	}
 	return line;
 }
@@ -72,20 +72,20 @@ export function renderCompleted(details: AgentDetails, resultText: string, expan
 /** Render stopped status: dim stop icon + stats + "Stopped". */
 export function renderStopped(details: AgentDetails, theme: Theme): string {
 	const s = renderStats(details, theme);
-	let line = theme.fg("dim", "\u25A0") + (s ? " " + s : "");
-	line += "\n" + theme.fg("dim", "  \u23BF  Stopped");
+	let line = theme.fg("dim", "\u25A0") + (s ? ` ${s}` : "");
+	line += `\n${theme.fg("dim", "  \u23BF  Stopped")}`;
 	return line;
 }
 
 /** Render error or aborted status: error icon + stats + status message. */
 export function renderFailed(details: AgentDetails, theme: Theme): string {
 	const s = renderStats(details, theme);
-	let line = theme.fg("error", "\u2717") + (s ? " " + s : "");
+	let line = theme.fg("error", "\u2717") + (s ? ` ${s}` : "");
 
 	if (details.status === "error") {
-		line += "\n" + theme.fg("error", `  \u23BF  Error: ${details.error ?? "unknown"}`);
+		line += `\n${theme.fg("error", `  \u23BF  Error: ${details.error ?? "unknown"}`)}`;
 	} else {
-		line += "\n" + theme.fg("warning", "  \u23BF  Aborted (max turns exceeded)");
+		line += `\n${theme.fg("warning", "  \u23BF  Aborted (max turns exceeded)")}`;
 	}
 	return line;
 }
@@ -105,5 +105,5 @@ export function renderStats(details: AgentDetails, theme: Theme): string {
 	}
 	if (details.toolUses > 0) parts.push(`${details.toolUses} tool use${details.toolUses === 1 ? "" : "s"}`);
 	if (details.tokens) parts.push(details.tokens);
-	return parts.map((p) => theme.fg("dim", p)).join(" " + theme.fg("dim", "\u00B7") + " ");
+	return parts.map((p) => theme.fg("dim", p)).join(` ${theme.fg("dim", "\u00B7")} `);
 }

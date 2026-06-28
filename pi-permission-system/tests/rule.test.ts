@@ -513,16 +513,16 @@ describe("evaluateMostRestrictive", () => {
 		const rules: Ruleset = [allowAll, denyEnv];
 		const result = evaluateMostRestrictive("path", [".env", "README.md"], rules);
 		expect(result).not.toBeNull();
-		expect(result!.rule.action).toBe("deny");
-		expect(result!.value).toBe(".env");
+		expect(result?.rule.action).toBe("deny");
+		expect(result?.value).toBe(".env");
 	});
 
 	test("ask accumulates: returns first ask when no deny found", () => {
 		const rules: Ruleset = [allowAll, askSsh];
 		const result = evaluateMostRestrictive("path", ["/home/user/.ssh/id_rsa", "README.md"], rules);
 		expect(result).not.toBeNull();
-		expect(result!.rule.action).toBe("ask");
-		expect(result!.value).toBe("/home/user/.ssh/id_rsa");
+		expect(result?.rule.action).toBe("ask");
+		expect(result?.value).toBe("/home/user/.ssh/id_rsa");
 	});
 
 	test("all allow: returns null", () => {
@@ -541,7 +541,7 @@ describe("evaluateMostRestrictive", () => {
 		const rules: Ruleset = [allowAll, askSsh, denyEnv];
 		const result = evaluateMostRestrictive("path", ["/home/user/.ssh/id_rsa", ".env"], rules);
 		expect(result).not.toBeNull();
-		expect(result!.rule.action).toBe("deny");
-		expect(result!.value).toBe(".env");
+		expect(result?.rule.action).toBe("deny");
+		expect(result?.value).toBe(".env");
 	});
 });

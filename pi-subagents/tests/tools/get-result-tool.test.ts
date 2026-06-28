@@ -73,7 +73,7 @@ describe("GetResultTool", () => {
 		const records = new Map([["agent-1", record]]);
 		const notifications = makeNotifications();
 		await execute(makeManager(records), notifications, { agent_id: "agent-1" });
-		expect(record.notification!.resultConsumed).toBe(true);
+		expect(record.notification?.resultConsumed).toBe(true);
 		expect(notifications.cancelNudge).toHaveBeenCalledWith("agent-1");
 	});
 
@@ -114,7 +114,7 @@ describe("GetResultTool", () => {
 		const record = createTestSubagent({ toolCallId: "tc-1" });
 		const records = new Map([["agent-1", record]]);
 		await execute(makeManager(records), makeNotifications(), { agent_id: "agent-1" });
-		expect(record.notification!.resultConsumed).toBe(true);
+		expect(record.notification?.resultConsumed).toBe(true);
 	});
 
 	it("includes conversation when verbose=true", async () => {

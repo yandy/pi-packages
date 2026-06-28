@@ -134,7 +134,7 @@ export class SubagentManager {
 				this.observer?.onSubagentStarted(agent);
 			},
 			onSessionCreated: options.observer?.onSessionCreated
-				? (agent) => options.observer!.onSessionCreated!(agent)
+				? (agent) => options.observer?.onSessionCreated?.(agent)
 				: undefined,
 			onRunFinished: (agent) => {
 				if (options.isBackground) {

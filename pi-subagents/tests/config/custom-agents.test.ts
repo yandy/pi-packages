@@ -113,7 +113,7 @@ No tools.`,
 		);
 
 		const result = loadCustomAgents(tmpDir);
-		expect(result.get("notool")!.builtinToolNames).toEqual([]);
+		expect(result.get("notool")?.builtinToolNames).toEqual([]);
 	});
 
 	it("passes through unknown tool names (not filtered)", () => {
@@ -128,7 +128,7 @@ Custom tools.`,
 
 		const result = loadCustomAgents(tmpDir);
 		// Unknown tool names are passed through — filtering happens at tool creation time
-		expect(result.get("custom-tools")!.builtinToolNames).toEqual(["read", "my_custom_tool", "grep"]);
+		expect(result.get("custom-tools")?.builtinToolNames).toEqual(["read", "my_custom_tool", "grep"]);
 	});
 
 	it("passes through thinking level as-is (no validation)", () => {
@@ -143,7 +143,7 @@ Any thinking.`,
 
 		const result = loadCustomAgents(tmpDir);
 		// Pi validates at session creation — we just pass through
-		expect(result.get("anythink")!.thinking).toBe("turbo");
+		expect(result.get("anythink")?.thinking).toBe("turbo");
 	});
 
 	it("accepts max_turns: 0 as unlimited", () => {
@@ -157,7 +157,7 @@ Unlimited turns.`,
 		);
 
 		const result = loadCustomAgents(tmpDir);
-		expect(result.get("unlimited")!.maxTurns).toBe(0);
+		expect(result.get("unlimited")?.maxTurns).toBe(0);
 	});
 
 	it("rejects negative max_turns", () => {
@@ -171,7 +171,7 @@ Negative turns.`,
 		);
 
 		const result = loadCustomAgents(tmpDir);
-		expect(result.get("negturns")!.maxTurns).toBeUndefined();
+		expect(result.get("negturns")?.maxTurns).toBeUndefined();
 	});
 
 	it("handles prompt_mode: append", () => {
@@ -185,7 +185,7 @@ Extra instructions.`,
 		);
 
 		const result = loadCustomAgents(tmpDir);
-		expect(result.get("appender")!.promptMode).toBe("append");
+		expect(result.get("appender")?.promptMode).toBe("append");
 	});
 
 	it("defaults unknown prompt_mode to append", () => {
@@ -199,7 +199,7 @@ Unknown mode.`,
 		);
 
 		const result = loadCustomAgents(tmpDir);
-		expect(result.get("badmode")!.promptMode).toBe("append");
+		expect(result.get("badmode")?.promptMode).toBe("append");
 	});
 
 	it("loads multiple agents", () => {
@@ -264,7 +264,7 @@ Should be loaded.`,
 
 		const result = loadCustomAgents(tmpDir);
 		expect(result.has("Explore")).toBe(true);
-		expect(result.get("Explore")!.description).toBe("Custom Explore");
+		expect(result.get("Explore")?.description).toBe("Custom Explore");
 		expect(result.has("custom")).toBe(true);
 	});
 
@@ -279,7 +279,7 @@ tools: read
 		);
 
 		const result = loadCustomAgents(tmpDir);
-		expect(result.get("nobody")!.systemPrompt).toBe("");
+		expect(result.get("nobody")?.systemPrompt).toBe("");
 	});
 
 	it("handles enabled: false frontmatter", () => {
@@ -308,7 +308,7 @@ Agent prompt.`,
 		);
 
 		const result = loadCustomAgents(tmpDir);
-		expect(result.get("myagent")!.displayName).toBe("MyAgent");
+		expect(result.get("myagent")?.displayName).toBe("MyAgent");
 	});
 
 	it("honors PI_CODING_AGENT_DIR for global custom agent discovery", () => {
@@ -324,7 +324,7 @@ Agent prompt.`,
 
 			// Agent is found at $PI_CODING_AGENT_DIR/agents, not at $HOME/.pi/agent/agents
 			expect(result.has("via-env")).toBe(true);
-			expect(result.get("via-env")!.description).toBe("Discovered via env var");
+			expect(result.get("via-env")?.description).toBe("Discovered via env var");
 		} finally {
 			if (originalEnv == null) delete process.env.PI_CODING_AGENT_DIR;
 			else process.env.PI_CODING_AGENT_DIR = originalEnv;
