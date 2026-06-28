@@ -1,5 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
+const RELEASE_SUFFIX = ":release";
+
 // ---------------------------------------------------------------------------
 // Module-level state (var for hoisting so mock factories can close over them)
 // ---------------------------------------------------------------------------
@@ -105,7 +107,13 @@ vi.mock("@earendil-works/pi-tui", () => {
 			shift: (key: string) => `shift+${key}`,
 		},
 		Markdown,
-		matchesKey: (data: string, key: string) => data === key,
+		matchesKey: (data: string, key: string) =>
+			// Simulate real pi-tui: Kitty keyboard protocol release events
+			// (e.g. "alt+o" → [111;3:5u) also match the key binding because
+			// matchesKittySequence ignores the event type. We use ":release"
+			// suffix to distinguish press from release in tests.
+			data === key || data === key + RELEASE_SUFFIX,
+		isKeyRelease: (data: string) => data.endsWith(RELEASE_SUFFIX),
 		Spacer: class {},
 		Text: MockText,
 		truncateToWidth: (text: string) => text,
@@ -573,6 +581,47 @@ describe("ask_user", () => {
 			});
 
 			expect(calls).toEqual([true]);
+		});
+
+		it("ignores Kitty keyboard protocol key release events to prevent overlay flicker", async () => {
+			// When Kitty keyboard protocol is active, a single key chord (e.g. alt+o)
+			// produces two events: a press event and a release event. Both match the
+			// same key binding (matchesKittySequence ignores event type). Without
+			// isKeyRelease filtering, the release event would toggle the overlay back
+			// to visible immediately after hiding, causing a flicker.
+			const tool = await setupTool();
+			const { handle, calls } = createOverlayHandle();
+			let inputHandler: ((data: string) => any) | undefined;
+			const notifications: Array<{ message: string; type?: string }> = [];
+
+			await tool.execute("tool-call-id", { question: "Q", options: ["A"] }, undefined, undefined, {
+				hasUI: true,
+				ui: {
+					custom: async (_factory: any, options: any) => {
+						options.onHandle?.(handle);
+						// Simulate key-down (press) of alt+o → should hide the overlay.
+						const pressResult = inputHandler?.("alt+o");
+						// Simulate key-up (release) of alt+o → should be ignored.
+						const releaseResult = inputHandler?.("alt+o" + RELEASE_SUFFIX);
+						expect(pressResult).toEqual({ consume: true });
+						// Release event should NOT be consumed by the toggle handler.
+						expect(releaseResult).toBeUndefined();
+						return null;
+					},
+					onTerminalInput: (handler: (data: string) => any) => {
+						inputHandler = handler;
+						return () => {};
+					},
+					notify: (message: string, type?: string) => {
+						notifications.push({ message, type });
+					},
+				},
+			});
+
+			// Only one call: setHidden(true) for the press event.
+			// The release event must not toggle the overlay back.
+			expect(calls).toEqual([true]);
+			expect(notifications).toHaveLength(1);
 		});
 
 		it("per-call overlayToggleKey replaces the default alt+o binding", async () => {

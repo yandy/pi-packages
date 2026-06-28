@@ -15,6 +15,7 @@ import {
 	Editor,
 	type EditorTheme,
 	fuzzyFilter,
+	isKeyRelease,
 	Key,
 	type Keybinding,
 	type KeybindingsManager,
@@ -1669,6 +1670,12 @@ export default function (pi: ExtensionAPI) {
 				if (effectiveDisplayMode === "overlay" && !overlayToggle.disabled && typeof ctx.ui.onTerminalInput === "function") {
 					removeOverlayInputListener = ctx.ui.onTerminalInput((data) => {
 						if (!overlayToggle.matches(data) || !overlayHandle) return undefined;
+						// Ignore Kitty keyboard protocol key release events.
+						// matchesKittySequence ignores event type, so both press (:1u)
+						// and release (:3u) events match the same key binding. Without
+						// this filter, releasing the toggle key chord would immediately
+						// re-show a just-hidden overlay, causing a visible flicker.
+						if (isKeyRelease(data)) return undefined;
 						const nextHidden = !overlayHandle.isHidden();
 						overlayHandle.setHidden(nextHidden);
 						if (nextHidden && !hasAnnouncedHide) {
