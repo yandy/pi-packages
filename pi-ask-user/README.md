@@ -97,9 +97,33 @@ Effective order:
 
 1. Per-call `displayMode` parameter (if provided)
 2. `PI_ASK_USER_DISPLAY_MODE` (if set to `"overlay"` or `"inline"`)
-3. Fallback default: `"overlay"`
+3. Project config file `.pi/ask-user.json` `displayMode` field (if exists)
+4. User config file `~/.pi/agent/ask-user.json` `displayMode` field (if exists)
+5. Fallback default: `"overlay"`
 
 Unrecognised values are silently ignored and fall back to `"overlay"`.
+
+## Personal preferences via config files
+
+In addition to environment variables, you can use JSON config files:
+
+**Locations:**
+- User-level (global): `~/.pi/agent/ask-user.json`
+- Project-level: `.pi/ask-user.json`
+
+Fields in the project-level file override same-named fields in the user-level file. Priority: call param > env var > project config > user config > default.
+
+**Example `~/.pi/agent/ask-user.json`:**
+
+```json
+{
+  "displayMode": "inline",
+  "overlayToggleKey": "alt+h",
+  "commentToggleKey": "alt+c"
+}
+```
+
+All fields are optional. Missing files or malformed JSON are silently ignored, equivalent to no configuration.
 
 ### Shortcuts
 
@@ -107,7 +131,9 @@ Effective order for both `overlayToggleKey` and `commentToggleKey`:
 
 1. Per-call parameter (if provided)
 2. Matching env var (`PI_ASK_USER_OVERLAY_TOGGLE_KEY` / `PI_ASK_USER_COMMENT_TOGGLE_KEY`)
-3. Built-in defaults: `alt+o` and `ctrl+g`
+3. Project config file `.pi/ask-user.json` (if exists)
+4. User config file `~/.pi/agent/ask-user.json` (if exists)
+5. Built-in defaults: `alt+o` and `ctrl+g`
 
 Pass `"off"`, `"none"`, or `"disabled"` (at any level) to disable the shortcut entirely. Invalid specs are silently dropped and the next source is used. Specs follow the Pi-TUI [`KeyId`](https://github.com/earendil-works/pi-mono/blob/main/packages/tui/src/keys.ts) format: `[mod+]...key` where modifiers are `ctrl`, `shift`, `alt`, `super`, in any order, joined by `+` (e.g. `ctrl+g`, `alt+shift+x`, `escape`, `tab`).
 

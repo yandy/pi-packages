@@ -80,9 +80,33 @@ export PI_ASK_USER_COMMENT_TOGGLE_KEY=alt+c
 
 1. 每次调用时的 `displayMode` 参数（如提供）
 2. `PI_ASK_USER_DISPLAY_MODE`（如设置为 `"overlay"` 或 `"inline"`）
-3. 回退默认值：`"overlay"`
+3. 项目配置文件 `.pi/ask-user.json`（如存在）中的 `displayMode`
+4. 用户配置文件 `~/.pi/agent/ask-user.json`（如存在）中的 `displayMode`
+5. 回退默认值：`"overlay"`
 
 无法识别的值会被静默忽略并回退到 `"overlay"`。
+
+## 通过配置文件设置个人偏好
+
+除了环境变量，也可以通过 JSON 配置文件设置：
+
+**文件位置：**
+- 用户级（全局）：`~/.pi/agent/ask-user.json`
+- 项目级：`.pi/ask-user.json`
+
+项目级文件中的字段会覆盖用户级文件中同名字段。配置优先级：调用参数 > 环境变量 > 项目配置 > 用户配置 > 默认值。
+
+**示例 `~/.pi/agent/ask-user.json`：**
+
+```json
+{
+  "displayMode": "inline",
+  "overlayToggleKey": "alt+h",
+  "commentToggleKey": "alt+c"
+}
+```
+
+所有字段可选。文件不存在或 JSON 格式错误时静默忽略，等效于未配置。
 
 ### 快捷键
 
@@ -90,7 +114,9 @@ export PI_ASK_USER_COMMENT_TOGGLE_KEY=alt+c
 
 1. 每次调用时的参数（如提供）
 2. 对应的环境变量（`PI_ASK_USER_OVERLAY_TOGGLE_KEY` / `PI_ASK_USER_COMMENT_TOGGLE_KEY`）
-3. 内置默认值：`alt+o` 和 `ctrl+g`
+3. 项目配置文件 `.pi/ask-user.json`（如存在）
+4. 用户配置文件 `~/.pi/agent/ask-user.json`（如存在）
+5. 内置默认值：`alt+o` 和 `ctrl+g`
 
 传入 `"off"`、`"none"` 或 `"disabled"`（任意级别）可以完全禁用快捷键。无效的键位格式会被静默丢弃，使用下一个来源。键位格式遵循 Pi-TUI 的 [`KeyId`](https://github.com/earendil-works/pi-mono/blob/main/packages/tui/src/keys.ts) 格式：`[mod+]...key`，修饰键为 `ctrl`、`shift`、`alt`、`super`，可任意顺序用 `+` 连接（如 `ctrl+g`、`alt+shift+x`、`escape`、`tab`）。
 
