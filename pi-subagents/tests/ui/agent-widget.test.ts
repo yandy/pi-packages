@@ -206,7 +206,7 @@ describe("AgentWidget — projection reads activity off Subagent records", () =>
 		expect(renderFn).toBeDefined();
 		const stubTui = { terminal: { columns: 200 }, requestRender: () => {} };
 		const stubTheme = { fg: (_: string, t: string) => t, bold: (t: string) => t };
-		const lines = renderFn!(stubTui, stubTheme).render();
+		const lines = renderFn?.(stubTui, stubTheme).render();
 		const allText = lines.join("\n");
 		// Turn 3 from the record should appear
 		expect(allText).toContain("⟳3");
@@ -237,7 +237,7 @@ describe("AgentWidget — projection reads activity off Subagent records", () =>
 
 		const stubTui = { terminal: { columns: 200 }, requestRender: () => {} };
 		const stubTheme = { fg: (_: string, t: string) => t, bold: (t: string) => t };
-		const allText = renderFn!(stubTui, stubTheme).render().join("\n");
+		const allText = renderFn?.(stubTui, stubTheme).render().join("\n");
 		expect(allText).toContain("haiku");
 	});
 });
@@ -344,7 +344,7 @@ describe("AgentWidget — background-only filtering", () => {
 		const renderLines = () => {
 			const stubTui = { terminal: { columns: 200 }, requestRender: () => {} };
 			const stubTheme = { fg: (_: string, t: string) => t, bold: (t: string) => t };
-			return renderFn!(stubTui, stubTheme).render();
+			return renderFn?.(stubTui, stubTheme).render();
 		};
 		return { widget, lastContent, renderLines };
 	}

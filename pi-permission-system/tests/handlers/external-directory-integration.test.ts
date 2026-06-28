@@ -454,7 +454,7 @@ describe("external_directory decision event fields", () => {
 		await handler.handleToolCall(event, makeCtx());
 		const extDirDecision = findExtDirDecision(events);
 		expect(extDirDecision).toBeDefined();
-		expect(extDirDecision!.value).toBe(EXTERNAL_PATH);
+		expect(extDirDecision?.value).toBe(EXTERNAL_PATH);
 	});
 
 	it("decision event includes agentName when present", async () => {

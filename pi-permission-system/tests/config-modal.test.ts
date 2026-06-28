@@ -102,17 +102,17 @@ test("permission-system command completions expose top-level config actions", ()
 			controller,
 		);
 
-		expect(definition!.getArgumentCompletions).toBeTypeOf("function");
+		expect(definition?.getArgumentCompletions).toBeTypeOf("function");
 
-		const topLevel = definition!.getArgumentCompletions?.("");
+		const topLevel = definition?.getArgumentCompletions?.("");
 		expect(Array.isArray(topLevel)).toBeTruthy();
 		expect(topLevel?.some((item) => item.value === "show")).toBeTruthy();
 		expect(topLevel?.some((item) => item.value === "reset")).toBeTruthy();
 
-		const filtered = definition!.getArgumentCompletions?.("pa");
+		const filtered = definition?.getArgumentCompletions?.("pa");
 		expect(filtered?.map((item) => item.value)).toEqual(["path"]);
-		expect(definition!.getArgumentCompletions?.("path extra")).toBe(null);
-		expect(definition!.getArgumentCompletions?.("zzz")).toBe(null);
+		expect(definition?.getArgumentCompletions?.("path extra")).toBe(null);
+		expect(definition?.getArgumentCompletions?.("zzz")).toBe(null);
 	} finally {
 		rmSync(baseDir, { recursive: true, force: true });
 	}
@@ -166,36 +166,36 @@ test("permission-system command handlers manage config summary, persistence, and
 		);
 
 		expect(registeredName).toBe("permission-system");
-		expect(definition!.description).toContain("Configure pi-permission-system");
+		expect(definition?.description).toContain("Configure pi-permission-system");
 
 		const infoCtx = createCommandContext(true);
-		await definition!.handler("show", infoCtx.ctx);
+		await definition?.handler("show", infoCtx.ctx);
 		expect(lastNotification(infoCtx.notifications).message).toContain("yoloMode=on");
 		expect(lastNotification(infoCtx.notifications).message).toContain("debugLog=on");
 
-		await definition!.handler("path", infoCtx.ctx);
+		await definition?.handler("path", infoCtx.ctx);
 		expect(lastNotification(infoCtx.notifications).message).toBe(`permission-system config: ${configPath}`);
 
-		await definition!.handler("help", infoCtx.ctx);
+		await definition?.handler("help", infoCtx.ctx);
 		expect(lastNotification(infoCtx.notifications).message).toContain("Usage: /permission-system");
 
-		await definition!.handler("reset", infoCtx.ctx);
+		await definition?.handler("reset", infoCtx.ctx);
 		expect(config).toEqual(DEFAULT_EXTENSION_CONFIG);
 		expect(lastNotification(infoCtx.notifications).message).toBe("Permission system settings reset to defaults.");
 
 		const persisted = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
 		expect(persisted).toEqual(DEFAULT_EXTENSION_CONFIG);
 
-		await definition!.handler("unknown", infoCtx.ctx);
+		await definition?.handler("unknown", infoCtx.ctx);
 		expect(lastNotification(infoCtx.notifications).level).toBe("warning");
 		expect(lastNotification(infoCtx.notifications).message).toContain("Usage: /permission-system");
 
 		const headlessCtx = createCommandContext(false);
-		await definition!.handler("", headlessCtx.ctx);
+		await definition?.handler("", headlessCtx.ctx);
 		expect(lastNotification(headlessCtx.notifications).message).toBe("/permission-system requires interactive TUI mode.");
 
 		const modalCtx = createCommandContext(true);
-		await definition!.handler("", modalCtx.ctx);
+		await definition?.handler("", modalCtx.ctx);
 		expect(modalCtx.getCustomCalls()).toBe(1);
 	} finally {
 		rmSync(baseDir, { recursive: true, force: true });
@@ -241,7 +241,7 @@ test("show output includes rule origins when getComposedRules is provided", asyn
 	);
 
 	const ctx = createCommandContext(true);
-	await definition!.handler("show", ctx.ctx);
+	await definition?.handler("show", ctx.ctx);
 	const msg = lastNotification(ctx.notifications).message;
 
 	expect(msg).toContain("global");
@@ -273,7 +273,7 @@ test("show output omits rule summary when getComposedRules is not provided", asy
 	);
 
 	const ctx = createCommandContext(true);
-	await definition!.handler("show", ctx.ctx);
+	await definition?.handler("show", ctx.ctx);
 	const msg = lastNotification(ctx.notifications).message;
 
 	// Config knobs still present.

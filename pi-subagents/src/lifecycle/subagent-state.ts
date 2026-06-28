@@ -122,7 +122,7 @@ export class SubagentState {
 
 	/** Record a tool starting. Called by record-observer on tool_execution_start. */
 	addActiveTool(toolName: string): void {
-		this._activeTools.set(toolName + "_" + ++this._toolKeySeq, toolName);
+		this._activeTools.set(`${toolName}_${++this._toolKeySeq}`, toolName);
 	}
 
 	/** Remove one active tool by name (first match). Called by record-observer on tool_execution_end. */

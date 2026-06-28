@@ -140,7 +140,7 @@ describe("SubagentEventsObserver", () => {
 			const notifications = makeNotifications();
 			const { observer } = makeObserver({ notifications });
 			const record = createTestSubagent({ status: "completed", toolCallId: "tc-1" });
-			record.notification!.markConsumed();
+			record.notification?.markConsumed();
 
 			observer.onSubagentCompleted(record);
 

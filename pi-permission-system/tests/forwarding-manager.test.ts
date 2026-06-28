@@ -169,7 +169,7 @@ describe("ForwardingManager", () => {
 			expect(mockProcessInbox).toHaveBeenCalledTimes(1);
 
 			// Resolve and a third tick should fire.
-			resolveProcess!();
+			resolveProcess?.();
 			await vi.advanceTimersByTimeAsync(250);
 			expect(mockProcessInbox).toHaveBeenCalledTimes(2);
 		});

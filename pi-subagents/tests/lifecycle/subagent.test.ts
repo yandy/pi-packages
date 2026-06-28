@@ -97,7 +97,7 @@ describe("Subagent — constructor", () => {
 	it("creates NotificationState when execution.parentSession.toolCallId is provided", () => {
 		const record = makeSubagent({ execution: makeStubExecution({ parentSession: { toolCallId: "tc-42" } }) });
 		expect(record.notification).toBeDefined();
-		expect(record.notification!.toolCallId).toBe("tc-42");
+		expect(record.notification?.toolCallId).toBe("tc-42");
 	});
 
 	it("does not create NotificationState when toolCallId is absent", () => {
@@ -507,7 +507,7 @@ describe("Subagent.run() — happy path", () => {
 		const agent = createRunnableAgent();
 		await agent.run();
 		expect(agent.subagentSession).toBeDefined();
-		expect(agent.subagentSession!.session).toBeDefined();
+		expect(agent.subagentSession?.session).toBeDefined();
 	});
 
 	it("flushes pending steers when session is created", async () => {

@@ -231,7 +231,7 @@ describe("NotificationManager", () => {
 		const args = makeArgs();
 		const system = makeManager(args);
 		const record = createTestSubagent({ toolCallId: "tc-1" });
-		record.notification!.markConsumed();
+		record.notification?.markConsumed();
 		system.sendCompletion(record);
 		vi.advanceTimersByTime(300);
 		expect(args.sendMessage).not.toHaveBeenCalled();

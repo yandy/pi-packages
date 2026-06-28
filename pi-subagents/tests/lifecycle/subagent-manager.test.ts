@@ -120,7 +120,7 @@ describe("SubagentManager — Bug 1 race condition (notification.resultConsumed 
 
 		// Simulate the buggy get_subagent_result: await THEN mark consumed
 		await record.promise;
-		record.notification!.markConsumed(); // too late — onComplete already fired
+		record.notification?.markConsumed(); // too late — onComplete already fired
 
 		// onComplete saw resultConsumed as false — would queue a notification (the bug)
 		expect(seeded.getSeenConsumed()).toBeFalsy();
@@ -132,7 +132,7 @@ describe("SubagentManager — Bug 1 race condition (notification.resultConsumed 
 		const { record } = seeded;
 
 		// The fix: pre-mark BEFORE awaiting
-		record.notification!.markConsumed();
+		record.notification?.markConsumed();
 		await record.promise;
 
 		expect(seeded.getSeenConsumed()).toBe(true);
@@ -149,10 +149,10 @@ describe("SubagentManager — Bug 1 race condition (notification.resultConsumed 
 		}));
 
 		const id = spawnBg(manager);
-		await manager.getRecord(id)!.promise;
+		await manager.getRecord(id)?.promise;
 
 		expect(completedRecord).toBeDefined();
-		expect(completedRecord!.notification).toBeUndefined();
+		expect(completedRecord?.notification).toBeUndefined();
 	});
 
 	it("onComplete is not called for foreground agents", async () => {
@@ -188,9 +188,9 @@ describe("SubagentManager — completion callbacks", () => {
 		}));
 
 		const id = spawnBg(manager);
-		await expect(manager.getRecord(id)!.promise).resolves.toBeUndefined();
+		await expect(manager.getRecord(id)?.promise).resolves.toBeUndefined();
 
-		expect(manager.getRecord(id)!.status).toBe("completed");
+		expect(manager.getRecord(id)?.status).toBe("completed");
 	});
 });
 
@@ -219,7 +219,7 @@ describe("SubagentManager — Bug 3 clearCompleted", () => {
 		({ manager } = createManager());
 
 		const id = spawnBg(manager);
-		await manager.getRecord(id)!.promise;
+		await manager.getRecord(id)?.promise;
 
 		expect(manager.listAgents()).toHaveLength(1);
 		manager.clearCompleted();
@@ -234,8 +234,8 @@ describe("SubagentManager — Bug 3 clearCompleted", () => {
 		// Second agent should be queued (limit=1)
 		const id2 = spawnBg(manager, "test2", "queued agent");
 
-		expect(manager.getRecord(id1)!.status).toBe("running");
-		expect(manager.getRecord(id2)!.status).toBe("queued");
+		expect(manager.getRecord(id1)?.status).toBe("running");
+		expect(manager.getRecord(id2)?.status).toBe("queued");
 
 		manager.clearCompleted();
 
@@ -255,7 +255,7 @@ describe("SubagentManager — Bug 3 clearCompleted", () => {
 		({ manager } = createManager({ createSubagentSession: factory }));
 
 		const id = spawnBg(manager);
-		await manager.getRecord(id)!.promise;
+		await manager.getRecord(id)?.promise;
 
 		manager.clearCompleted();
 
@@ -268,8 +268,8 @@ describe("SubagentManager — Bug 3 clearCompleted", () => {
 		({ manager } = createManager({ createSubagentSession: factory }));
 
 		const id = spawnBg(manager);
-		await manager.getRecord(id)!.promise;
-		expect(manager.getRecord(id)!.status).toBe("error");
+		await manager.getRecord(id)?.promise;
+		expect(manager.getRecord(id)?.status).toBe("error");
 
 		manager.clearCompleted();
 		expect(manager.getRecord(id)).toBeUndefined();
@@ -289,8 +289,9 @@ describe("SubagentManager — evicted descriptors", () => {
 		const { factory } = createSessionFactory(createMockSession(), outputFile);
 		({ manager } = createManager({ createSubagentSession: factory }));
 		const id = spawnBg(manager, "test", "investigate the bug");
-		await manager.getRecord(id)!.promise;
-		const completedAt = manager.getRecord(id)!.completedAt!;
+		const record = manager.getRecord(id)!;
+		await record.promise;
+		const completedAt = record.completedAt!;
 		vi.spyOn(Date, "now").mockReturnValue(completedAt + 11 * 60_000);
 		(manager as any).cleanup();
 		return id;
@@ -419,9 +420,9 @@ describe("SubagentManager — lifetime usage + compaction count are eagerly init
 		({ manager } = createManager({ createSubagentSession: factory }));
 
 		const id = spawnBg(manager);
-		await manager.getRecord(id)!.promise;
+		await manager.getRecord(id)?.promise;
 
-		expect(manager.getRecord(id)!.lifetimeUsage).toEqual({
+		expect(manager.getRecord(id)?.lifetimeUsage).toEqual({
 			input: 300,
 			output: 130,
 			cacheWrite: 30,
@@ -451,13 +452,13 @@ describe("SubagentManager — lifetime usage + compaction count are eagerly init
 		}));
 
 		const id = spawnBg(manager);
-		await manager.getRecord(id)!.promise;
+		await manager.getRecord(id)?.promise;
 
 		expect(compactSeen).toEqual([
 			{ count: 1, reason: "threshold" },
 			{ count: 2, reason: "manual" },
 		]);
-		expect(manager.getRecord(id)!.compactionCount).toBe(2);
+		expect(manager.getRecord(id)?.compactionCount).toBe(2);
 	});
 
 	it("resume() also accumulates usage and increments compactions on the same record", async () => {
@@ -473,16 +474,16 @@ describe("SubagentManager — lifetime usage + compaction count are eagerly init
 		({ manager } = createManager({ createSubagentSession: factory }));
 
 		const id = spawnBg(manager);
-		await manager.getRecord(id)!.promise;
+		await manager.getRecord(id)?.promise;
 
 		// Pre-resume: lifetimeUsage from spawn was zero (run did not emit usage events)
-		expect(manager.getRecord(id)!.lifetimeUsage).toEqual({ input: 0, output: 0, cacheWrite: 0 });
-		expect(manager.getRecord(id)!.compactionCount).toBe(0);
+		expect(manager.getRecord(id)?.lifetimeUsage).toEqual({ input: 0, output: 0, cacheWrite: 0 });
+		expect(manager.getRecord(id)?.compactionCount).toBe(0);
 
 		await manager.resume(id, "more");
 
-		expect(manager.getRecord(id)!.lifetimeUsage).toEqual({ input: 70, output: 30, cacheWrite: 5 });
-		expect(manager.getRecord(id)!.compactionCount).toBe(1);
+		expect(manager.getRecord(id)?.lifetimeUsage).toEqual({ input: 70, output: 30, cacheWrite: 5 });
+		expect(manager.getRecord(id)?.compactionCount).toBe(1);
 	});
 });
 
@@ -499,7 +500,7 @@ describe("SubagentManager — getRunConfig threads defaultMaxTurns and graceTurn
 		({ manager } = createManager({ getRunConfig, createSubagentSession: factory }));
 
 		const id = spawnBg(manager);
-		await manager.getRecord(id)!.promise;
+		await manager.getRecord(id)?.promise;
 
 		const turnOpts = stub.runTurnLoop.mock.calls[0][1];
 		expect(turnOpts.defaultMaxTurns).toBe(10);
@@ -511,7 +512,7 @@ describe("SubagentManager — getRunConfig threads defaultMaxTurns and graceTurn
 		({ manager } = createManager({ createSubagentSession: factory }));
 
 		const id = spawnBg(manager);
-		await manager.getRecord(id)!.promise;
+		await manager.getRecord(id)?.promise;
 
 		const turnOpts = stub.runTurnLoop.mock.calls[0][1];
 		expect(turnOpts.defaultMaxTurns).toBeUndefined();
@@ -556,10 +557,10 @@ describe("SubagentManager — dependency injection via options bag", () => {
 		({ manager } = createManager({ createSubagentSession: factory }));
 
 		const id = spawnBg(manager);
-		await manager.getRecord(id)!.promise;
+		await manager.getRecord(id)?.promise;
 
 		expect(factory).toHaveBeenCalledOnce();
-		expect(manager.getRecord(id)!.result).toBe("done");
+		expect(manager.getRecord(id)?.result).toBe("done");
 	});
 
 	it("calls resumeTurnLoop on the SubagentSession when resuming an agent", async () => {
@@ -568,12 +569,12 @@ describe("SubagentManager — dependency injection via options bag", () => {
 		({ manager } = createManager({ createSubagentSession: factory }));
 
 		const id = spawnBg(manager);
-		await manager.getRecord(id)!.promise;
+		await manager.getRecord(id)?.promise;
 
 		await manager.resume(id, "continue");
 
 		expect(stub.resumeTurnLoop).toHaveBeenCalledOnce();
-		expect(manager.getRecord(id)!.result).toBe("second");
+		expect(manager.getRecord(id)?.result).toBe("second");
 	});
 });
 
@@ -608,22 +609,22 @@ describe("SubagentManager — queueing and concurrency with injected stubs", () 
 		const id1 = spawnBg(manager, "test1", "first");
 		const id2 = spawnBg(manager, "test2", "second");
 
-		expect(manager.getRecord(id1)!.status).toBe("running");
-		expect(manager.getRecord(id2)!.status).toBe("queued");
+		expect(manager.getRecord(id1)?.status).toBe("running");
+		expect(manager.getRecord(id2)?.status).toBe("queued");
 
 		// Complete first agent — second should start
 		resolve1();
-		await manager.getRecord(id1)!.promise;
+		await manager.getRecord(id1)?.promise;
 
 		// Wait for the second to start
-		await vi.waitFor(() => expect(manager.getRecord(id2)!.status).toBe("running"));
+		await vi.waitFor(() => expect(manager.getRecord(id2)?.status).toBe("running"));
 
 		resolve2();
-		await manager.getRecord(id2)!.promise;
+		await manager.getRecord(id2)?.promise;
 
 		expect(startOrder).toEqual(["start-1", "start-2"]);
-		expect(manager.getRecord(id1)!.result).toBe("result-1");
-		expect(manager.getRecord(id2)!.result).toBe("result-2");
+		expect(manager.getRecord(id1)?.result).toBe("result-1");
+		expect(manager.getRecord(id2)?.result).toBe("result-2");
 	});
 
 	it("gives a queued agent an awaitable promise at spawn (before its slot opens)", () => {
@@ -633,8 +634,8 @@ describe("SubagentManager — queueing and concurrency with injected stubs", () 
 		// A still-queued agent must already expose a settle-on-completion promise,
 		// so waitForAll can await it without relying on a re-poll. (Regression
 		// guard: #374 made the promise lazy; the limiter handle is captured eagerly.)
-		expect(manager.getRecord(queued)!.status).toBe("queued");
-		expect(manager.getRecord(queued)!.promise).toBeInstanceOf(Promise);
+		expect(manager.getRecord(queued)?.status).toBe("queued");
+		expect(manager.getRecord(queued)?.promise).toBeInstanceOf(Promise);
 
 		manager.abort(running);
 		manager.abort(queued);
@@ -644,11 +645,11 @@ describe("SubagentManager — queueing and concurrency with injected stubs", () 
 		const { manager: mgr, factory, running, queued } = arrangeQueuedPair();
 		manager = mgr;
 
-		expect(manager.getRecord(queued)!.status).toBe("queued");
+		expect(manager.getRecord(queued)?.status).toBe("queued");
 
 		// Abort the queued agent
 		expect(manager.abort(queued)).toBe(true);
-		expect(manager.getRecord(queued)!.status).toBe("stopped");
+		expect(manager.getRecord(queued)?.status).toBe("stopped");
 
 		// factory was called once (for the first agent), never for the aborted one
 		expect(factory).toHaveBeenCalledOnce();
@@ -689,12 +690,12 @@ describe("SubagentManager — queueing and concurrency with injected stubs", () 
 
 		// Complete first — second should start and fire onStart
 		resolve();
-		await manager.getRecord(id1)!.promise;
+		await manager.getRecord(id1)?.promise;
 		await vi.waitFor(() => expect(startedIds).toHaveLength(2));
 
 		expect(startedIds).toEqual([id1, id2]);
 
-		await manager.getRecord(id2)!.promise;
+		await manager.getRecord(id2)?.promise;
 	});
 });
 
@@ -711,12 +712,12 @@ describe("SubagentManager — subagent session state", () => {
 		({ manager } = createManager({ createSubagentSession: factory }));
 
 		const id = spawnBg(manager);
-		await manager.getRecord(id)!.promise;
+		await manager.getRecord(id)?.promise;
 
 		const record = manager.getRecord(id)!;
 		expect(record.subagentSession).toBeDefined();
-		expect(record.subagentSession!.session).toBe(session);
-		expect(record.subagentSession!.outputFile).toBe("/tmp/session.jsonl");
+		expect(record.subagentSession?.session).toBe(session);
+		expect(record.subagentSession?.outputFile).toBe("/tmp/session.jsonl");
 	});
 
 	it("record.subagentSession is undefined before the session is created", () => {
@@ -779,7 +780,7 @@ describe("SubagentManager — onSubagentCreated observer", () => {
 			description: "bg agent",
 			isBackground: true,
 		});
-		await manager.getRecord(id)!.promise;
+		await manager.getRecord(id)?.promise;
 
 		expect(callOrder).toEqual(["created", "started"]);
 	});
@@ -807,10 +808,10 @@ describe("SubagentManager — lifecycle observer forwarding", () => {
 				},
 			},
 		});
-		await manager.getRecord(id)!.promise;
+		await manager.getRecord(id)?.promise;
 
 		expect(received.agent).toBe(manager.getRecord(id));
-		expect(received.agent!.id).toBe(id);
+		expect(received.agent?.id).toBe(id);
 	});
 
 	it("forwards onSessionCreated for foreground agents", async () => {
@@ -829,7 +830,7 @@ describe("SubagentManager — lifecycle observer forwarding", () => {
 		});
 
 		expect(received.agent).toBeDefined();
-		expect(received.agent!.type).toBe("general-purpose");
+		expect(received.agent?.type).toBe("general-purpose");
 	});
 });
 
@@ -847,8 +848,8 @@ describe("SubagentManager — toolCallId notification wiring", () => {
 		const record = manager.getRecord(id)!;
 
 		expect(record.notification).toBeInstanceOf(NotificationState);
-		expect(record.notification!.toolCallId).toBe("tc-42");
-		expect(record.notification!.resultConsumed).toBe(false);
+		expect(record.notification?.toolCallId).toBe("tc-42");
+		expect(record.notification?.resultConsumed).toBe(false);
 		manager.abort(id);
 	});
 

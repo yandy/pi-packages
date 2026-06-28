@@ -159,14 +159,14 @@ function buildSections(
 ): WidgetSections {
 	const finishedLines: string[] = [];
 	for (const a of categories.finished) {
-		finishedLines.push(truncate(theme.fg("dim", "\u251C\u2500") + " " + renderFinishedLine(a, registry, theme)));
+		finishedLines.push(truncate(`${theme.fg("dim", "\u251C\u2500")} ${renderFinishedLine(a, registry, theme)}`));
 	}
 
 	const runningLines: [string, string][] = [];
 	for (const a of categories.running) {
 		const [header, act] = renderRunningLines(a, registry, spinnerFrame, theme);
 		runningLines.push([
-			truncate(theme.fg("dim", "\u251C\u2500") + ` ${header}`),
+			truncate(`${theme.fg("dim", "\u251C\u2500")} ${header}`),
 			truncate(theme.fg("dim", "\u2502  ") + act),
 		]);
 	}
@@ -252,7 +252,7 @@ function assembleOverflow(
 	const overflowText = overflowParts.join(", ");
 	lines.push(
 		truncate(
-			theme.fg("dim", "\u2514\u2500") + ` ${theme.fg("dim", `+${hiddenRunning + hiddenFinished} more (${overflowText})`)}`,
+			`${theme.fg("dim", "\u2514\u2500")} ${theme.fg("dim", `+${hiddenRunning + hiddenFinished} more (${overflowText})`)}`,
 		),
 	);
 	return lines;
@@ -291,7 +291,7 @@ export function renderWidgetLines(params: {
 	// Assemble with overflow cap (heading takes 1 line).
 	const maxBody = MAX_WIDGET_LINES - 1;
 	const totalBody = finishedLines.length + runningLines.length * 2 + (queuedLine ? 1 : 0);
-	const heading = truncate(theme.fg(headingColor, headingIcon) + " " + theme.fg(headingColor, "Agents"));
+	const heading = truncate(`${theme.fg(headingColor, headingIcon)} ${theme.fg(headingColor, "Agents")}`);
 
 	if (totalBody <= maxBody) {
 		return assembleWithinBudget(heading, { finishedLines, runningLines, queuedLine });

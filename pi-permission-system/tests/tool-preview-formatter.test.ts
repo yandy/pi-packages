@@ -281,7 +281,7 @@ describe("ToolPreviewFormatter.formatGenericToolInputForLog", () => {
 		const f = makeFormatter({ toolInputLogPreviewMaxLength: 10 });
 		const result = f.formatGenericToolInputForLog({});
 		expect(result).toBeDefined();
-		const preview = result!.slice("input ".length);
+		const preview = result?.slice("input ".length);
 		expect(preview.length).toBe(11); // 10 + "…"
 		expect(preview.endsWith("…")).toBe(true);
 	});
@@ -319,7 +319,7 @@ describe("ToolPreviewFormatter.getToolInputPreviewForLog", () => {
 		const longPath = `/src/${"a".repeat(50)}.ts`;
 		const preview = f.getToolInputPreviewForLog(makeResult("read"), { path: longPath }, pathBearingTools);
 		expect(preview).toBeDefined();
-		expect(preview!.length).toBeLessThanOrEqual(16); // 15 + "…"
+		expect(preview?.length).toBeLessThanOrEqual(16); // 15 + "…"
 	});
 
 	test("returns generic JSON preview for non-path-bearing tools", () => {
@@ -363,7 +363,7 @@ describe("ToolPreviewFormatter.getPermissionLogContext", () => {
 		const longPath = `/src/${"a".repeat(50)}.ts`;
 		const ctx = f.getPermissionLogContext(makeResult("read"), { path: longPath }, pathBearingTools);
 		expect(ctx.toolInputPreview).toBeDefined();
-		expect(ctx.toolInputPreview!.length).toBeLessThanOrEqual(16);
+		expect(ctx.toolInputPreview?.length).toBeLessThanOrEqual(16);
 	});
 });
 

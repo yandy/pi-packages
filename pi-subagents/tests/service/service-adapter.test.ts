@@ -182,7 +182,7 @@ describe("SubagentsServiceAdapter — getRecord and listAgents", () => {
 		const svc = createService([recordA, recordB]);
 		const result = svc.getRecord("a-1");
 		expect(result).toBeDefined();
-		expect(result!.id).toBe("a-1");
+		expect(result?.id).toBe("a-1");
 		expect(result).not.toHaveProperty("session");
 		expect(result).not.toHaveProperty("abortController");
 	});

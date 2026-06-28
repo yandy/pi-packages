@@ -46,7 +46,6 @@ export class SubagentsServiceAdapter implements SubagentsService {
 		}
 
 		let model: unknown;
-		let modelName: string | undefined;
 		if (options?.model) {
 			const registry = this.runtime.currentCtx.modelRegistry;
 			if (!registry) {
@@ -59,7 +58,7 @@ export class SubagentsServiceAdapter implements SubagentsService {
 			model = resolved;
 		}
 		// Always compute display model name, even when same as parent
-		modelName = resolveModelName(
+		const modelName = resolveModelName(
 			(model as { id?: string; name?: string; provider?: string } | undefined) ??
 				(this.runtime.currentCtx.model as { id?: string; name?: string; provider?: string } | undefined),
 		);

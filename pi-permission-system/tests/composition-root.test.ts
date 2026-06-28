@@ -282,7 +282,7 @@ describe("service and gate share one formatter registry", () => {
 		await fireSessionStart(pi, ctx);
 
 		const previewMarker = "PREVIEW::shared-registry-proof";
-		getPermissionsService()!.registerToolInputFormatter("demo", () => previewMarker);
+		getPermissionsService()?.registerToolInputFormatter("demo", () => previewMarker);
 		const result = (await pi.fire(
 			"tool_call",
 			{ toolName: "demo", toolCallId: "demo-ask", input: { foo: "bar" } },
@@ -316,7 +316,7 @@ describe("service and gate share one access extractor registry", () => {
 
 		// ffgrep carries its path under a non-standard key; without the extractor
 		// the default input.path convention would miss it.
-		getPermissionsService()!.registerToolAccessExtractor("ffgrep", (input) =>
+		getPermissionsService()?.registerToolAccessExtractor("ffgrep", (input) =>
 			typeof input.target === "string" ? input.target : undefined,
 		);
 
@@ -427,7 +427,7 @@ describe("single source of truth for session state", () => {
 		expect(reply.data?.result).toBe("allow");
 
 		// Service accessor must also see the session approval.
-		const serviceResult = getPermissionsService()!.checkPermission("demo");
+		const serviceResult = getPermissionsService()?.checkPermission("demo");
 		expect(serviceResult.state).toBe("allow");
 
 		rmSync(cwd, { recursive: true, force: true });
@@ -526,7 +526,7 @@ describe("session approvals do not leak across same-cwd session switches", () =>
 		// The gate prompts and the mock selects options[1], recording a
 		// session-scoped approval the service can read back.
 		await firstPi.fire("tool_call", { toolName: "demo", toolCallId: "demo-approve", input: { foo: "bar" } }, firstCtx);
-		expect(getPermissionsService()!.checkPermission("demo").state).toBe("allow");
+		expect(getPermissionsService()?.checkPermission("demo").state).toBe("allow");
 
 		// The switch tears down the old session before the new one starts.
 		await firstPi.fire("session_shutdown");
@@ -539,7 +539,7 @@ describe("session approvals do not leak across same-cwd session switches", () =>
 
 		// The previous session's approval must not be visible: `demo` is back to
 		// its configured `ask`, not the carried-over `allow`.
-		expect(getPermissionsService()!.checkPermission("demo").state).toBe("ask");
+		expect(getPermissionsService()?.checkPermission("demo").state).toBe("ask");
 
 		rmSync(cwd, { recursive: true, force: true });
 	});

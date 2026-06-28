@@ -192,7 +192,7 @@ Guidelines:
 				const displayName = args.subagent_type ? getDisplayName(args.subagent_type as string, registry) : "Subagent";
 				const desc = (args.description as string | undefined) ?? "";
 				return new Text(
-					"▸ " + theme.fg("toolTitle", theme.bold(displayName)) + (desc ? "  " + theme.fg("muted", desc) : ""),
+					`▸ ${theme.fg("toolTitle", theme.bold(displayName))}${desc ? `  ${theme.fg("muted", desc)}` : ""}`,
 					0,
 					0,
 				);

@@ -16,7 +16,7 @@ export function canonicalizePath(absolutePath: string): string {
 
 	const parts = absolutePath.split("/").filter(Boolean);
 	for (let i = parts.length; i >= 0; i--) {
-		const candidate = "/" + parts.slice(0, i).join("/");
+		const candidate = `/${parts.slice(0, i).join("/")}`;
 		try {
 			const real = realpathSync(candidate);
 			const tail = parts.slice(i);

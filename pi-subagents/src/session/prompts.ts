@@ -66,14 +66,14 @@ You are operating as a sub-agent invoked to handle a specific task.
 		// placed verbatim (no wrapper tag) so it forms an identical byte prefix
 		// with the parent session, maximising KV cache hits. The <active_agent>
 		// tag and env block vary per call and are placed after the cached prefix.
-		return identity + "\n\n" + bridge + "\n\n" + activeAgentTag + envBlock + customSection;
+		return `${identity}\n\n${bridge}\n\n${activeAgentTag}${envBlock}${customSection}`;
 	}
 
 	// "replace" mode — parent/genericBase prefix first for KV cache reuse, then
 	// the active_agent tag, env block, and the config's full system prompt.
 	// Unlike append mode, no <sub_agent_context> bridge or <agent_instructions>
 	// wrapper is injected — the custom prompt retains full control.
-	return identity + "\n\n" + activeAgentTag + envBlock + "\n\n" + config.systemPrompt;
+	return `${identity}\n\n${activeAgentTag}${envBlock}\n\n${config.systemPrompt}`;
 }
 
 /** Fallback base prompt when parent system prompt is unavailable (both modes). */

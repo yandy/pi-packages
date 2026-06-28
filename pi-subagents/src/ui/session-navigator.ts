@@ -270,7 +270,7 @@ export class TranscriptOverlay implements Component {
 
 		const pad = (s: string, len: number): string => s + " ".repeat(Math.max(0, len - visibleWidth(s)));
 		const row = (content: string): string =>
-			th.fg("border", "│") + " " + truncateToWidth(pad(content, innerW), innerW) + " " + th.fg("border", "│");
+			`${th.fg("border", "│")} ${truncateToWidth(pad(content, innerW), innerW)} ${th.fg("border", "│")}`;
 		const hrTop = th.fg("border", `╭${"─".repeat(width - 2)}╮`);
 		const hrBot = th.fg("border", `╰${"─".repeat(width - 2)}╯`);
 		const hrMid = row(th.fg("dim", "─".repeat(innerW)));

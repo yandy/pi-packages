@@ -42,21 +42,21 @@ export function createNotificationRenderer() {
 		if (d.totalTokens > 0) parts.push(formatTokens(d.totalTokens));
 		if (d.durationMs > 0) parts.push(formatMs(d.durationMs));
 		if (parts.length) {
-			line += "\n  " + parts.map((p) => theme.fg("dim", p)).join(" " + theme.fg("dim", "·") + " ");
+			line += `\n  ${parts.map((p) => theme.fg("dim", p)).join(` ${theme.fg("dim", "·")} `)}`;
 		}
 
 		// Line 3: result preview (collapsed) or full (expanded)
 		if (expanded) {
 			const lines = d.resultPreview.split("\n").slice(0, 30);
-			for (const l of lines) line += "\n" + theme.fg("dim", `  ${l}`);
+			for (const l of lines) line += `\n${theme.fg("dim", `  ${l}`)}`;
 		} else {
 			const preview = d.resultPreview.split("\n")[0]?.slice(0, 80) ?? "";
-			line += "\n  " + theme.fg("dim", `⎿  ${preview}`);
+			line += `\n  ${theme.fg("dim", `⎿  ${preview}`)}`;
 		}
 
 		// Line 4: output file link (if present)
 		if (d.outputFile) {
-			line += "\n  " + theme.fg("muted", `transcript: ${d.outputFile}`);
+			line += `\n  ${theme.fg("muted", `transcript: ${d.outputFile}`)}`;
 		}
 
 		return new Text(line, 0, 0);

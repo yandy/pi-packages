@@ -157,7 +157,7 @@ describe("recoverEvictedSubagents", () => {
 			if (path === "/parent.jsonl") return jsonl;
 			// Simulate the child session file existing
 			if (path === "/parent/tasks/old-agent.jsonl") {
-				return JSON.stringify({ type: "session", id: "old-agent", version: 3 }) + "\n";
+				return `${JSON.stringify({ type: "session", id: "old-agent", version: 3 })}\n`;
 			}
 			throw new Error("ENOENT");
 		});
