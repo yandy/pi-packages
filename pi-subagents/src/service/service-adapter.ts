@@ -60,8 +60,8 @@ export class SubagentsServiceAdapter implements SubagentsService {
 		}
 		// Always compute display model name, even when same as parent
 		modelName = resolveModelName(
-			(model as { id?: string; name?: string } | undefined) ??
-				(this.runtime.currentCtx.model as { id?: string; name?: string } | undefined),
+			(model as { id?: string; name?: string; provider?: string } | undefined) ??
+				(this.runtime.currentCtx.model as { id?: string; name?: string; provider?: string } | undefined),
 		);
 
 		const description = options?.description ?? prompt.slice(0, 80);
