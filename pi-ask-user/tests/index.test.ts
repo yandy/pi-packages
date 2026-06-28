@@ -141,6 +141,18 @@ vi.mock("@sinclair/typebox", () => ({
 	},
 }));
 
+vi.mock("node:os", () => ({
+	homedir: () => "/home/testuser",
+}));
+
+// In-memory filesystem for config file tests
+let fakeFiles: Record<string, string> = {};
+
+vi.mock("node:fs", () => ({
+	existsSync: (path: string) => path in fakeFiles,
+	readFileSync: (path: string, _encoding: string) => fakeFiles[path] ?? "",
+}));
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -154,6 +166,14 @@ function stubEnv(key: string, value: string): void {
 	});
 }
 
+function setFakeFile(path: string, content: string): void {
+	fakeFiles[path] = content;
+}
+
+function clearFakeFiles(): void {
+	fakeFiles = {};
+}
+
 beforeAll(() => {
 	// Theme-not-initialised (#17) scenario is covered by the vi.mock above
 	// which returns a brokenMarkdownTheme whose proxy throws on property access.
@@ -161,6 +181,7 @@ beforeAll(() => {
 
 afterEach(() => {
 	for (const restore of envStubs.splice(0)) restore();
+	clearFakeFiles();
 });
 
 function createKeybindings(overrides: Partial<Record<string, string[]>> = {}) {
@@ -218,6 +239,29 @@ function createTheme() {
 	return {
 		fg: (_color: string, text: string) => text,
 		bold: (text: string) => text,
+	};
+}
+
+function createOverlayHandle() {
+	let hidden = false;
+	const calls: boolean[] = [];
+	return {
+		handle: {
+			hide() {},
+			setHidden(value: boolean) {
+				hidden = value;
+				calls.push(value);
+			},
+			isHidden() {
+				return hidden;
+			},
+			focus() {},
+			unfocus() {},
+			isFocused() {
+				return false;
+			},
+		},
+		calls,
 	};
 }
 
@@ -424,29 +468,6 @@ describe("ask_user", () => {
 	});
 
 	describe("overlay hide/show toggle (alt+o)", () => {
-		function createOverlayHandle() {
-			let hidden = false;
-			const calls: boolean[] = [];
-			return {
-				handle: {
-					hide() {},
-					setHidden(value: boolean) {
-						hidden = value;
-						calls.push(value);
-					},
-					isHidden() {
-						return hidden;
-					},
-					focus() {},
-					unfocus() {},
-					isFocused() {
-						return false;
-					},
-				},
-				calls,
-			};
-		}
-
 		it("registers an onTerminalInput listener and passes onHandle in overlay mode", async () => {
 			const tool = await setupTool();
 			let capturedOptions: any;
@@ -2017,6 +2038,177 @@ describe("ask_user", () => {
 			);
 
 			expect(capturedOpts).toEqual({ timeout: 5000 });
+		});
+	});
+
+	describe("config file", () => {
+		it("reads displayMode from user config file", async () => {
+			setFakeFile("/home/testuser/.pi/agent/ask-user.json", JSON.stringify({ displayMode: "inline" }));
+			const tool = await setupTool();
+			let capturedOptions: any;
+
+			await tool.execute(
+				"tool-call-id",
+				{ question: "Q", options: ["A"] },
+				undefined,
+				undefined,
+				{
+					hasUI: true,
+					cwd: "/tmp/project",
+					ui: {
+						custom: async (_factory: any, options: any) => {
+							capturedOptions = options;
+							return null;
+						},
+					},
+				},
+			);
+
+			// Inline mode produces undefined custom options (non-overlay)
+			expect(capturedOptions).toBeUndefined();
+		});
+
+		it("project config overrides user config for displayMode", async () => {
+			setFakeFile("/home/testuser/.pi/agent/ask-user.json", JSON.stringify({ displayMode: "inline" }));
+			setFakeFile("/tmp/project/.pi/ask-user.json", JSON.stringify({ displayMode: "overlay" }));
+			const tool = await setupTool();
+			let capturedOptions: any;
+
+			await tool.execute(
+				"tool-call-id",
+				{ question: "Q", options: ["A"] },
+				undefined,
+				undefined,
+				{
+					hasUI: true,
+					cwd: "/tmp/project",
+					ui: {
+						custom: async (_factory: any, options: any) => {
+							capturedOptions = options;
+							return null;
+						},
+					},
+				},
+			);
+
+			// Project says overlay → overlay mode
+			expect(capturedOptions.overlay).toBe(true);
+		});
+
+		it("env var overrides config file for displayMode", async () => {
+			stubEnv("PI_ASK_USER_DISPLAY_MODE", "inline");
+			setFakeFile("/home/testuser/.pi/agent/ask-user.json", JSON.stringify({ displayMode: "overlay" }));
+			const tool = await setupTool();
+			let capturedOptions: any;
+
+			await tool.execute(
+				"tool-call-id",
+				{ question: "Q", options: ["A"] },
+				undefined,
+				undefined,
+				{
+					hasUI: true,
+					cwd: "/tmp/project",
+					ui: {
+						custom: async (_factory: any, options: any) => {
+							capturedOptions = options;
+							return null;
+						},
+					},
+				},
+			);
+
+			// Env says inline → inline mode, ignoring config
+			expect(capturedOptions).toBeUndefined();
+		});
+
+		it("reads shortcut keys from config file", async () => {
+			setFakeFile("/home/testuser/.pi/agent/ask-user.json", JSON.stringify({
+				overlayToggleKey: "alt+h",
+				commentToggleKey: "alt+c",
+			}));
+			const tool = await setupTool();
+			const { handle, calls } = createOverlayHandle();
+			let inputHandler: ((data: string) => any) | undefined;
+
+			await tool.execute(
+				"tool-call-id",
+				{ question: "Q", options: ["A"] },
+				undefined,
+				undefined,
+				{
+					hasUI: true,
+					cwd: "/tmp/project",
+					ui: {
+						custom: async (_factory: any, options: any) => {
+							options.onHandle?.(handle);
+							const consumed = inputHandler?.("alt+h");
+							const ignored = inputHandler?.("alt+o");
+							expect(consumed).toEqual({ consume: true });
+							expect(ignored).toBeUndefined();
+							return null;
+						},
+						onTerminalInput: (handler: (data: string) => any) => {
+							inputHandler = handler;
+							return () => {};
+						},
+						notify: () => {},
+					},
+				},
+			);
+
+			// Config alt+h should work; alt+o should not
+			expect(calls).toEqual([true]);
+		});
+
+		it("silently ignores malformed config JSON", async () => {
+			setFakeFile("/home/testuser/.pi/agent/ask-user.json", "not-json{{{");
+			const tool = await setupTool();
+			let capturedOptions: any;
+
+			await tool.execute(
+				"tool-call-id",
+				{ question: "Q", options: ["A"] },
+				undefined,
+				undefined,
+				{
+					hasUI: true,
+					cwd: "/tmp/project",
+					ui: {
+						custom: async (_factory: any, options: any) => {
+							capturedOptions = options;
+							return null;
+						},
+					},
+				},
+			);
+
+			// Falls back to default overlay mode
+			expect(capturedOptions.overlay).toBe(true);
+		});
+
+		it("no config file means default behavior unchanged", async () => {
+			const tool = await setupTool();
+			let capturedOptions: any;
+
+			await tool.execute(
+				"tool-call-id",
+				{ question: "Q", options: ["A"] },
+				undefined,
+				undefined,
+				{
+					hasUI: true,
+					cwd: "/tmp/project",
+					ui: {
+						custom: async (_factory: any, options: any) => {
+							capturedOptions = options;
+							return null;
+						},
+					},
+				},
+			);
+
+			expect(capturedOptions.overlay).toBe(true);
 		});
 	});
 });
