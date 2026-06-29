@@ -24,8 +24,7 @@
 		"test:watch": "vitest",
 		"typecheck": "tsc --noEmit",
 		"lint": "biome lint .",
-		"format": "biome format --write .",
-		"check": "biome check ."
+		"format": "biome format --write ."
 	},
 	"pi": {
 		"extensions": [

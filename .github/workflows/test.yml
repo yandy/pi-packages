@@ -10,7 +10,8 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
-      packages: ${{ steps.filter.outputs.changes }}
+      packages: ${{ steps.filter-packages.outputs.packages }}
+      has_root: ${{ steps.filter.outputs.root }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -39,10 +40,25 @@ jobs:
               - "pi-todo/**"
             pi-vision-tools:
               - "pi-vision-tools/**"
+      - id: filter-packages
+        run: echo "packages=$(echo '${{ steps.filter.outputs.changes }}' | jq -c 'map(select(. != "root"))')" >> "$GITHUB_OUTPUT"
 
-  test:
+  test-full:
     needs: changes
-    if: needs.changes.outputs.packages != '[]' && needs.changes.outputs.packages != ''
+    if: needs.changes.outputs.has_root == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck && npm run lint && npm test
+
+  test-packages:
+    needs: changes
+    if: needs.changes.outputs.has_root != 'true' && needs.changes.outputs.packages != '[]' && needs.changes.outputs.packages != ''
     strategy:
       matrix:
         package: ${{ fromJson(needs.changes.outputs.packages) }}
@@ -54,9 +70,7 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
-      - if: matrix.package != 'root'
-        run: npm run typecheck -w ${{ matrix.package }} --if-present
-      - if: matrix.package != 'root'
-        run: npm run lint -w ${{ matrix.package }} --if-present
-      - if: matrix.package != 'root'
-        run: npm test -w ${{ matrix.package }} --if-present
+      - run: |
+          npm run typecheck -w "${{ matrix.package }}" --if-present
+          npm run lint -w "${{ matrix.package }}" --if-present
+          npm test -w "${{ matrix.package }}" --if-present
