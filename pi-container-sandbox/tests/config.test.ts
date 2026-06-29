@@ -115,14 +115,14 @@ describe("new runtime fields", () => {
 		const configDir = resolvePath(testDir, TEST_CONFIG_DIR);
 		mkdirSync(configDir, { recursive: true });
 		writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify({
-			runtime: { memory: "8g", cpus: "4", swap: "0", pidsLimit: 1024, mounts: ["/extra/tools"] },
+			runtime: { memory: "8g", cpus: "4", swap: "0", pidsLimit: 1024, mounts: [{ source: "/host/projects", target: "/projects" }] },
 		}));
 		const cfg = loadSbxConfig(testDir);
 		expect(cfg.runtime.memory).toBe("8g");
 		expect(cfg.runtime.cpus).toBe("4");
 		expect(cfg.runtime.swap).toBe("0");
 		expect(cfg.runtime.pidsLimit).toBe(1024);
-		expect(cfg.runtime.mounts).toEqual(["/extra/tools"]);
+		expect(cfg.runtime.mounts).toEqual([{ source: "/host/projects", target: "/projects" }]);
 	});
 
 	it("new fields default to null/empty when not configured", () => {
