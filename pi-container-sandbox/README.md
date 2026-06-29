@@ -96,42 +96,34 @@ Configuration is read from two locations. Project config overrides global config
     "memory": null, "cpus": null, "swap": null, "pidsLimit": null,
     "cache": null, "mounts": []
   },
-  "build": { "dockerfile": null, "context": null, "args": {} },
   "host": { "commands": [] }
 }
 ```
 
 #### image group
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `name` | string | `"pi-container-sandbox"` | Image name |
-| `tag` | string | `"latest"` | Image tag |
+| Field | Type | Default | Example | Description |
+|-------|------|---------|---------|-------------|
+| `name` | string | `"pi-container-sandbox"` | `"pi-sandbox"` | Image name |
+| `tag` | string | `"latest"` | `"v1.0"` | Image tag |
 
 #### runtime group
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `name` | string \| null | `null` | Container reuse name |
-| `tier` | `"small"` \| `"medium"` \| `"large"` | `"medium"` | Resource tier |
-| `network` | boolean | `true` | Container networking |
-| `persist` | boolean | `false` | Keep container after exit |
-| `memory` | string \| null | `null` | Memory override |
-| `cpus` | string \| null | `null` | CPU override |
-| `swap` | string \| null | `null` | Swap override |
-| `pidsLimit` | number \| null | `null` | PID limit |
-| `cache` | string \| null | `null` | Cache volume name |
-| `mounts` | string[] | `[]` | Extra mount paths |
-
-#### build group
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `dockerfile` | string \| null | `null` | Dockerfile path |
-| `context` | string \| null | `null` | Build context |
-| `args` | Record<string, string> | `{}` | Build arguments |
+| Field | Type | Default | Example | Description |
+|-------|------|---------|---------|-------------|
+| `name` | string \| null | `null` | `"my-dev-box"` | Container reuse name |
+| `tier` | `"small"` \| `"medium"` \| `"large"` | `"medium"` | `"large"` | Resource tier |
+| `network` | boolean | `true` | `false` | Container networking |
+| `persist` | boolean | `false` | `true` | Keep container after exit |
+| `memory` | string \| null | `null` | `"8g"` | Memory override |
+| `cpus` | string \| null | `null` | `"4"` | CPU override |
+| `swap` | string \| null | `null` | `"0"` | Swap override |
+| `pidsLimit` | number \| null | `null` | `1024` | PID limit |
+| `cache` | string \| null | `null` | `"sbx-cache"` | Cache volume name |
+| `mounts` | string[] | `[]` | `["/extra/tools"]` | Extra mount paths |
 
 #### host group
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `commands` | string[] | `[]` | Host command allowlist |
+| Field | Type | Default | Example | Description |
+|-------|------|---------|---------|-------------|
+| `commands` | string[] | `[]` | `["git", "npm", "docker"]` | Host command allowlist |
 
 ### Resource Tiers
 

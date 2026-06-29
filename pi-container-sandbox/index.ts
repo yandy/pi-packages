@@ -205,9 +205,6 @@ export default function (pi: ExtensionAPI) {
 				resources,
 				extraMounts: skillMounts.length ? skillMounts : undefined,
 				cacheVolume,
-				dockerfile: cfg.build.dockerfile ?? undefined,
-				buildContext: cfg.build.context ?? undefined,
-				buildArgs: Object.keys(cfg.build.args).length ? cfg.build.args : undefined,
 				onProgress: (msg: string) => ctx.ui.setStatus("sandbox", `[build] ${msg}`),
 			});
 
@@ -252,7 +249,6 @@ export default function (pi: ExtensionAPI) {
 					await runtime.buildImage({
 						dockerfile,
 						buildContext: buildCtx,
-						buildArgs: cfg.build.args,
 						onProgress: (msg: string) => ctx.ui.setStatus("sandbox", `[build] ${msg}`),
 					});
 				} catch (e) {
