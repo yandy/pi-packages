@@ -4,7 +4,7 @@ import { resolve as resolvePath } from "node:path";
 import {
 	discoverDockerfiles,
 	getSbxConfigPath,
-	imageRefForTag,
+	imageRef,
 	loadSbxConfig,
 	PACKAGE_DOCKER_DIR,
 	saveSbxConfig,
@@ -32,7 +32,7 @@ export function createSandboxCommandHandlers(
 			if (!sbx) {
 				const cfg = loadSbxConfig(localCwd);
 				ctx.ui.notify(
-					`Sandbox is not active. Start pi with --container.\nconfigured image: ${imageRefForTag(cfg.image, cfg.tag)}`,
+					`Sandbox is not active. Start pi with --container.\nconfigured image: ${imageRef(cfg.image)}`,
 					"info",
 				);
 				return;
@@ -165,7 +165,7 @@ export function createSandboxCommandHandlers(
 			}
 			const name = args.trim() || sbx.name;
 			const cfg = loadSbxConfig(sbx.hostCwd);
-			cfg.containerName = name;
+			cfg.runtime.name = name;
 			saveSbxConfig(sbx.hostCwd, cfg);
 			ctx.ui.notify(`Sandbox container "${name}" saved to sandbox.json. It will be reused next session.`, "info");
 		},
@@ -223,15 +223,15 @@ export function createSandboxCommandHandlers(
 			const sbx = getSbx();
 			const hostCwd = sbx?.hostCwd ?? localCwd;
 			const cfg = loadSbxConfig(hostCwd);
-			const imageRef = imageRefForTag(cfg.image, cfg.tag);
+			const ref = imageRef(cfg.image);
 			const configPath = getSbxConfigPath(hostCwd);
 			const lines: string[] = [
 				"Sandbox project config (.pi/agent/sandbox.json):",
-				`  Image:   ${imageRef}`,
-				`  Tier:    ${cfg.tier}`,
-				`  Name:    ${cfg.containerName ?? "(auto)"}`,
-				`  Persist: ${cfg.persist ? "yes" : "no"}`,
-				`  Cache:   ${cfg.cacheVolume ?? "(none)"}`,
+				`  Image:   ${ref}`,
+				`  Tier:    ${cfg.runtime.tier}`,
+				`  Name:    ${cfg.runtime.name ?? "(auto)"}`,
+				`  Persist: ${cfg.runtime.persist ? "yes" : "no"}`,
+				`  Cache:   ${cfg.runtime.cache ?? "(none)"}`,
 				"",
 				`Config file: ${existsSync(configPath) ? configPath : "(not yet created)"}`,
 			];
@@ -307,7 +307,7 @@ export function createSandboxCommandHandlers(
 				const sbx = getSbx();
 				const hostCwd = sbx?.hostCwd ?? localCwd;
 				const cfg = loadSbxConfig(hostCwd);
-				cfg.tier = tier;
+				cfg.runtime.tier = tier;
 				saveSbxConfig(hostCwd, cfg);
 				ctx.ui.notify(
 					`Tier set to ${tier} (mem=${TIER_SPECS[tier].memory}, cpu=${TIER_SPECS[tier].cpus}). Restart pi to apply.`,
