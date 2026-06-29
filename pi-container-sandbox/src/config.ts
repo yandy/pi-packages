@@ -4,6 +4,12 @@ import { fileURLToPath } from "node:url";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { SizeTier } from "./tiers";
 
+export interface MountConfig {
+	source: string;
+	target: string;
+	mode?: 'ro' | 'rw';
+}
+
 export interface ImageConfig {
 	name: string;
 	tag: string;
@@ -19,7 +25,7 @@ export interface RuntimeConfig {
 	swap: string | null;
 	pidsLimit: number | null;
 	cache: string | null;
-	mounts: string[];
+	mounts: MountConfig[];
 }
 
 export interface HostConfig {
