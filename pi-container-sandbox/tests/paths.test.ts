@@ -15,6 +15,8 @@ import {
 	shq,
 	toContainerPath,
 } from "../src/paths";
+import { expandPath } from "../src/paths";
+import { homedir } from "node:os";
 import type { MountSpec } from "../src/runtime";
 
 const testDir = resolvePath(tmpdir(), `pi-paths-test-${Date.now()}`);
@@ -273,5 +275,33 @@ describe("PathApprovalStore merge-on-conflict", () => {
 		expect(found?.path).toBe("/bar");
 
 		rmSync(dir, { recursive: true, force: true });
+	});
+});
+
+describe("expandPath", () => {
+	it("expands ~ to homedir", () => {
+		expect(expandPath("~")).toBe(homedir());
+	});
+
+	it("expands ~/path to homedir + /path", () => {
+		expect(expandPath("~/data/projects")).toBe(homedir() + "/data/projects");
+	});
+
+	it("expands ${userHome} placeholder", () => {
+		expect(expandPath("${userHome}/data")).toBe(homedir() + "/data");
+	});
+
+	it("does not expand ~otheruser", () => {
+		expect(expandPath("~otheruser/stuff")).toBe("~otheruser/stuff");
+	});
+
+	it("leaves absolute paths unchanged", () => {
+		expect(expandPath("/absolute/path")).toBe("/absolute/path");
+	});
+
+	it("handles multiple ${userHome} occurrences", () => {
+		expect(expandPath("${userHome}/a/${userHome}/b")).toBe(
+			homedir() + "/a/" + homedir() + "/b",
+		);
 	});
 });
