@@ -75,7 +75,7 @@ Fetch content from a URL and return as text, markdown, or raw HTML.
 # From repo root:
 npm ci                    # Install all dependencies
 npm run typecheck         # Type-check all packages
-npm run check             # Lint + format check
+npm run lint              # Biome lint
 npm test                  # Run all tests
 
 # Package-specific:

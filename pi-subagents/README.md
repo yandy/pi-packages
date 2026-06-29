@@ -142,7 +142,7 @@ When `@yandy0725/pi-permission-system` is installed, the package integrates auto
 
 ```bash
 npm run typecheck        # tsc --noEmit
-npm run check            # biome check
+npm run lint             # biome lint
 npm test                 # vitest run
 ```
 

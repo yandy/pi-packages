@@ -142,7 +142,7 @@ max_turns: 30
 
 ```bash
 npm run typecheck        # tsc --noEmit
-npm run check            # biome check
+npm run lint             # biome lint
 npm test                 # vitest run
 ```
 
