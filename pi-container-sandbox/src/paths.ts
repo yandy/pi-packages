@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { resolve as resolvePath } from "node:path";
 import type { MountSpec } from "./runtime";
 
@@ -291,6 +292,16 @@ ${absPath}`,
 	sessionPrefixes.push(absPath);
 	ui.notify(`Approved read access (${days} days): ${absPath}`, "info");
 	return true;
+}
+
+export function expandPath(raw: string): string {
+	const home = homedir();
+	let result = raw;
+	if (result === '~' || result.startsWith('~/')) {
+		result = home + result.slice(1);
+	}
+	result = result.replace(/\$\{userHome\}/g, () => home);
+	return result;
 }
 
 export async function ensureExternalReadApproved(

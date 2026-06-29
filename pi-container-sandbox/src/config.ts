@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFile
 import { basename, dirname, extname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { expandPath } from "./paths";
 import type { SizeTier } from "./tiers";
 
 export interface MountConfig {
@@ -77,7 +78,7 @@ export function loadSbxConfig(hostCwd: string): SbxConfig {
 	const globalRaw = readJsonFile(resolvePath(agentDir, "sandbox.json")) || {};
 	const projectRaw = readJsonFile(getSbxConfigPath(hostCwd)) || {};
 
-	return {
+	const config: SbxConfig = {
 		image: mergeGroup(
 			mergeGroup(DEFAULT_SBX_CONFIG.image, extractGroup(globalRaw, "image") as Partial<ImageConfig>),
 			extractGroup(projectRaw, "image") as Partial<ImageConfig>,
@@ -91,6 +92,17 @@ export function loadSbxConfig(hostCwd: string): SbxConfig {
 			extractGroup(projectRaw, "host") as Partial<HostConfig>,
 		),
 	};
+
+	// Expand ~ and ${userHome} in mount source and cache paths
+	config.runtime.mounts = config.runtime.mounts.map((m) => ({
+		...m,
+		source: expandPath(m.source),
+	}));
+	if (config.runtime.cache) {
+		config.runtime.cache = expandPath(config.runtime.cache);
+	}
+
+	return config;
 }
 
 export function getSbxConfigPath(hostCwd: string): string {
