@@ -1,4 +1,3 @@
-import { homedir } from "node:os";
 import { resolve as resolvePath } from "node:path";
 import {
 	createBashTool,
@@ -9,7 +8,7 @@ import {
 	type ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
 import { createSandboxCommandHandlers } from "./src/commands/sandbox";
-import { discoverDockerfiles, imageRefForTag, loadSbxConfig, PACKAGE_DOCKER_DIR } from "./src/config";
+import { discoverDockerfiles, imageRef, loadSbxConfig, PACKAGE_DOCKER_DIR } from "./src/config";
 import {
 	createEditOps,
 	createHostBashOps,
@@ -29,7 +28,7 @@ import {
 import { DockerRuntime, deriveContainerName } from "./src/runtime";
 import { clearSbx, getSbx, type SbxSession, setSbx } from "./src/session";
 import { discoverSkillMounts } from "./src/skills";
-import { parseSizeTier, TIER_SPECS } from "./src/tiers";
+import { TIER_SPECS } from "./src/tiers";
 
 export default function (pi: ExtensionAPI) {
 	pi.registerFlag("container", {
@@ -47,80 +46,7 @@ export default function (pi: ExtensionAPI) {
 		type: "boolean",
 		default: false,
 	});
-	pi.registerFlag("container-size", {
-		description: "Sandbox size tier: small, medium, large (default: medium)",
-		type: "string",
-		default: "medium",
-	});
-	pi.registerFlag("sandbox-name", {
-		description: "Re-usable sandbox name. If container exists, reattaches; otherwise creates new.",
-		type: "string",
-	});
-	pi.registerFlag("sandbox-persist", {
-		description: `[deprecated: use --container-keep] Keep sandbox container alive after session exit`,
-		type: "boolean",
-		default: false,
-	});
-	pi.registerFlag("sandbox-cache", {
-		description: "Docker volume name for persistent cache at /cache",
-		type: "string",
-	});
-	pi.registerFlag("container-image", {
-		description: "Image to use for the sandbox (default: pi-container-sandbox:latest)",
-		type: "string",
-	});
-	pi.registerFlag("dockerfile", {
-		description: "Path to a custom Dockerfile for the sandbox image (default: extension's built-in Dockerfile)",
-		type: "string",
-	});
-	pi.registerFlag("dockerfile-context", {
-		description: "Build context directory for the custom Dockerfile (default: extension's docker/ dir)",
-		type: "string",
-	});
-	pi.registerFlag("container-net", {
-		description: "Allow outbound network from the sandbox (default: on)",
-		type: "boolean",
-		default: true,
-	});
-	pi.registerFlag("no-container-net", {
-		description: "Disable container networking",
-		type: "boolean",
-		default: false,
-	});
-	pi.registerFlag("container-keep", {
-		description: "Don't stop the sandbox container when pi exits",
-		type: "boolean",
-		default: false,
-	});
-	pi.registerFlag("container-mount-skills", {
-		description: "Mount agent skill directories read-only into the container at /skills (default: on)",
-		type: "boolean",
-		default: true,
-	});
-	pi.registerFlag("container-mount-paths", {
-		description: "Comma-separated list of additional host directories to mount read-only",
-		type: "string",
-	});
-	pi.registerFlag("container-allow-paths", {
-		description: "Comma-separated list of host path prefixes to allow for read access from outside the sandbox",
-		type: "string",
-	});
-	pi.registerFlag("container-memory", {
-		description: "Memory limit for the container (e.g., 2g, 512m)",
-		type: "string",
-	});
-	pi.registerFlag("container-cpus", {
-		description: "CPU limit for the container (e.g., 2, 0.5)",
-		type: "string",
-	});
-	pi.registerFlag("container-swap", {
-		description: "Swap limit for the container (e.g., 1g, 0 to disable)",
-		type: "string",
-	});
-	pi.registerFlag("container-pids-limit", {
-		description: "Maximum number of PIDs the container can create. Default: 512",
-		type: "string",
-	});
+
 
 	const localCwd = process.cwd();
 	const localRead = createReadTool(localCwd);
@@ -187,7 +113,7 @@ export default function (pi: ExtensionAPI) {
 			const sbx = getSbx();
 			if (!sbx) return localBash.execute(id, params, signal, onUpdate);
 
-			const hostCommands = sbx.config.hostCommands ?? [];
+			const hostCommands = sbx.config.host.commands ?? [];
 			const cmdName = extractCommandName(params.command);
 			if (cmdName && hostCommands.includes(cmdName)) {
 				if (!hostBashTool) {
@@ -217,7 +143,7 @@ export default function (pi: ExtensionAPI) {
 			? `Agent skills are mounted read-only at /skills/ (e.g. ${sbx.mounts.map((m) => m.target).join(", ")}). Read skill files via /skills/<name>/SKILL.md. Writing to /skills/ is forbidden.`
 			: "No skill directories are mounted.";
 
-		const hostCommands = sbx.config.hostCommands ?? [];
+		const hostCommands = sbx.config.host.commands ?? [];
 		const hostCmdHint = hostCommands.length
 			? [
 					"",
@@ -250,77 +176,40 @@ export default function (pi: ExtensionAPI) {
 
 		try {
 			const cfg = loadSbxConfig(localCwd);
-
-			const sizeFlag = pi.getFlag("container-size") as string | undefined;
-			const sizeTier = parseSizeTier(sizeFlag || cfg.tier) || "medium";
+			const rt = cfg.runtime;
+			const sizeTier = rt.tier;
 			const tierSpec = TIER_SPECS[sizeTier];
+			const image = imageRef(cfg.image);
+			const allowNetwork = rt.network;
+			const keep = rt.persist;
 
-			const flagImage = pi.getFlag("container-image") as string | undefined;
-			const configImageRef = imageRefForTag(cfg.image, cfg.tag);
-			const image = flagImage || configImageRef || "pi-container-sandbox:latest";
+			const extraPaths = rt.mounts.length ? rt.mounts : undefined;
+			const sandboxName = rt.name ?? deriveContainerName(localCwd);
+			const isReusable = !!(rt.name);
 
-			const allowNetwork = (pi.getFlag("container-net") as boolean) && !(pi.getFlag("no-container-net") as boolean);
-			const keep = pi.getFlag("container-keep") as boolean;
-			const persist = (pi.getFlag("sandbox-persist") as boolean) || cfg.persist;
-			const mountSkills = pi.getFlag("container-mount-skills") as boolean;
-			const extraPathsRaw = pi.getFlag("container-mount-paths") as string | undefined;
-			const extraPaths = extraPathsRaw
-				? extraPathsRaw
-						.split(",")
-						.map((p: string) => p.trim())
-						.filter(Boolean)
-				: undefined;
-			const dockerfileFlag = pi.getFlag("dockerfile") as string | undefined;
-			const dockerfileContextFlag = pi.getFlag("dockerfile-context") as string | undefined;
+			const cacheVolume = rt.cache ?? undefined;
 
-			const nameFlag = pi.getFlag("sandbox-name") as string | undefined;
-			const sandboxName = nameFlag ?? cfg.containerName ?? deriveContainerName(localCwd);
-			const isReusable = !!(nameFlag || cfg.containerName);
+			const skillMounts = discoverSkillMounts(extraPaths);
 
-			const cacheFlag = pi.getFlag("sandbox-cache") as string | undefined;
-			const cacheVolume = cacheFlag ?? cfg.cacheVolume ?? undefined;
-
-			const skillMounts = mountSkills ? discoverSkillMounts(extraPaths) : [];
-
-			const allowPathsRaw = pi.getFlag("container-allow-paths") as string | undefined;
-			const allowedExternalPrefixes = allowPathsRaw
-				? allowPathsRaw
-						.split(",")
-						.map((p: string) => p.trim())
-						.filter(Boolean)
-						.map((p: string) => (p.startsWith("~") ? resolvePath(homedir(), p.slice(1)) : resolvePath(p)))
-				: [];
+			const allowedExternalPrefixes: string[] = [];
 
 			const resources: { memory: string; cpus: string; swap: string; pidsLimit?: number } = {
-				memory: tierSpec.memory,
-				cpus: tierSpec.cpus,
-				swap: tierSpec.swap,
+				memory: tierSpec.memory, cpus: tierSpec.cpus, swap: tierSpec.swap,
 			};
-
-			const memFlag = pi.getFlag("container-memory") as string | undefined;
-			const cpusFlag = pi.getFlag("container-cpus") as string | undefined;
-			const pidsFlagRaw = pi.getFlag("container-pids-limit") as string | undefined;
-			const pidsFlag = pidsFlagRaw ? parseInt(pidsFlagRaw, 10) : undefined;
-			const swapFlag = pi.getFlag("container-swap") as string | undefined;
-			if (memFlag) resources.memory = memFlag;
-			if (cpusFlag) resources.cpus = cpusFlag;
-			if (pidsFlag !== undefined) resources.pidsLimit = pidsFlag;
-			if (swapFlag !== undefined) resources.swap = swapFlag;
+			if (rt.memory) resources.memory = rt.memory;
+			if (rt.cpus) resources.cpus = rt.cpus;
+			if (rt.pidsLimit !== null) resources.pidsLimit = rt.pidsLimit;
+			if (rt.swap !== null) resources.swap = rt.swap;
 
 			const runtime = new DockerRuntime({
-				image,
-				hostCwd: localCwd,
-				name: sandboxName,
-				allowNetwork,
+				image, hostCwd: localCwd, name: sandboxName, allowNetwork,
 				resources,
 				extraMounts: skillMounts.length ? skillMounts : undefined,
 				cacheVolume,
-				dockerfile: cfg.dockerfile ?? dockerfileFlag,
-				buildContext: cfg.buildContext ?? dockerfileContextFlag,
-				buildArgs: cfg.buildArgs,
-				onProgress: (msg: string) => {
-					ctx.ui.setStatus("sandbox", `[build] ${msg}`);
-				},
+				dockerfile: cfg.build.dockerfile ?? undefined,
+				buildContext: cfg.build.context ?? undefined,
+				buildArgs: Object.keys(cfg.build.args).length ? cfg.build.args : undefined,
+				onProgress: (msg: string) => ctx.ui.setStatus("sandbox", `[build] ${msg}`),
 			});
 
 			await runtime.init();
@@ -364,7 +253,7 @@ export default function (pi: ExtensionAPI) {
 					await runtime.buildImage({
 						dockerfile,
 						buildContext: buildCtx,
-						buildArgs: cfg.buildArgs,
+						buildArgs: cfg.build.args,
 						onProgress: (msg: string) => ctx.ui.setStatus("sandbox", `[build] ${msg}`),
 					});
 				} catch (e) {
@@ -378,17 +267,10 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			setSbx({
-				runtime,
-				name: sandboxName,
-				hostCwd: localCwd,
-				keep: keep || persist,
-				mounts: skillMounts,
-				allowedExternalPrefixes,
-				resources,
-				imageRef: image,
-				config: cfg,
-				isReusable,
-				isReattached: false,
+				runtime, name: sandboxName, hostCwd: localCwd,
+				keep, mounts: skillMounts, allowedExternalPrefixes,
+				resources, imageRef: image, config: cfg,
+				isReusable, isReattached: false,
 			});
 
 			let cleaned = false;

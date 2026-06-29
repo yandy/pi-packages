@@ -60,10 +60,11 @@ function readJsonFile(path: string): Record<string, unknown> | null {
 	} catch { return null; }
 }
 
-function mergeGroup<G extends Record<string, unknown>>(a: G, b: Partial<G>): G {
-	const result = { ...a };
-	for (const key of Object.keys(b) as (keyof G)[]) {
-		if (b[key] !== undefined) result[key] = b[key] as G[keyof G];
+function mergeGroup<G>(a: G, b: Partial<G>): G {
+	const result = { ...a } as G;
+	for (const key of Object.keys(b as object)) {
+		const k = key as keyof G;
+		if (b[k] !== undefined) result[k] = b[k] as G[keyof G];
 	}
 	return result;
 }
