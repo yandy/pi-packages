@@ -214,6 +214,7 @@ docker exec -it <container-name> bash
 ```bash
 npm install              # 安装依赖
 npm run typecheck        # tsc --noEmit
+npm run lint             # biome lint
 npm test                 # vitest 运行
 npm run build-image      # 构建 sandbox 镜像
 pi -e ./index.ts         # 本地运行扩展

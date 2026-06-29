@@ -235,6 +235,7 @@ Find the container name from `/sandbox status` or `docker ps --filter name=pi-sb
 # From repo root:
 npm ci                    # Install all dependencies
 npm run typecheck         # Type-check all packages
+npm run lint              # Biome lint
 npm test                  # Run all tests
 
 # Package-specific:

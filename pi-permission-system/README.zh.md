@@ -86,7 +86,7 @@ pi install npm:@yandy0725/pi-permission-system
 
 ```bash
 npm run typecheck        # tsc --noEmit
-npm run check            # biome check
+npm run lint             # biome lint
 npm test                 # vitest run
 ```
 

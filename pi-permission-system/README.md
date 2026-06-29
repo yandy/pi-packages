@@ -86,7 +86,7 @@ The `external_directory` surface decides whether reaching outside the working tr
 
 ```bash
 npm run typecheck        # tsc --noEmit
-npm run check            # biome check
+npm run lint             # biome lint
 npm test                 # vitest run
 ```
 

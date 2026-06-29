@@ -22,7 +22,7 @@ Monorepo for @yandy pi packages. Uses npm workspaces.
 ```bash
 npm ci                    # Install all dependencies (root + all workspaces)
 npm run typecheck         # Type-check all packages
-npm run check             # Lint + format check all packages
+npm run lint              # Biome lint
 npm run format            # Format all packages
 npm test                  # Run all tests
 ```
