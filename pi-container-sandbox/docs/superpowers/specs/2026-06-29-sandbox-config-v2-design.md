@@ -33,7 +33,6 @@
     "tier": "medium",
     "network": true,
     "persist": false,
-    "mountSkills": true,
     "memory": null,
     "cpus": null,
     "swap": null,
@@ -62,7 +61,6 @@
 | `tier` | `runtime.tier` | `"small" \| "medium" \| "large"` | 资源规格 |
 | — | `runtime.network` | `boolean` | **新增**：容器网络开关 |
 | `persist` | `runtime.persist` | `boolean` | 退出后保留容器 |
-| — | `runtime.mountSkills` | `boolean` | **新增**：挂载 agent skill 目录 |
 | — | `runtime.memory` | `string \| null` | **新增**：内存覆盖 |
 | — | `runtime.cpus` | `string \| null` | **新增**：CPU 覆盖 |
 | — | `runtime.swap` | `string \| null` | **新增**：swap 覆盖 |
@@ -123,7 +121,6 @@ export interface RuntimeConfig {
   tier: SizeTier;
   network: boolean;
   persist: boolean;
-  mountSkills: boolean;
   memory: string | null;
   cpus: string | null;
   swap: string | null;
@@ -146,7 +143,6 @@ export const DEFAULT_SBX_CONFIG: SbxConfig = {
   image: { name: "pi-container-sandbox", tag: "latest" },
   runtime: {
     name: null, tier: "medium", network: true, persist: false,
-    mountSkills: true,
     memory: null, cpus: null, swap: null, pidsLimit: null,
     cache: null, mounts: [],
   },
@@ -197,6 +193,7 @@ export const DEFAULT_SBX_CONFIG: SbxConfig = {
 - `src/tiers.ts`（`SizeTier` 定义不变）
 - `src/ops.ts`、`src/paths.ts`、`src/session.ts`（仅类型引用更新）
 - `/sandbox allow` 命令和 `path-approvals.json` 路径授权机制（不受此次变更影响）
+- `mountSkills`（始终为 `true`，skill 目录总是挂载）
 
 ---
 
