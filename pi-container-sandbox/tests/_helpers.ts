@@ -3,12 +3,14 @@ import type { ExecOpts, ExecResult, Runtime } from "../src/runtime";
 import { type SbxSession, setSbx } from "../src/session";
 
 const DEFAULT_CONFIG: SbxConfig = {
-	image: "pi-sandbox",
-	tag: "latest",
-	containerName: null,
-	tier: "medium",
-	persist: false,
-	cacheVolume: null,
+	image: { name: "pi-sandbox", tag: "latest" },
+	runtime: {
+		name: null, tier: "medium", network: true, persist: false,
+		memory: null, cpus: null, swap: null, pidsLimit: null,
+		cache: null, mounts: [],
+	},
+	build: { dockerfile: null, context: null, args: {} },
+	host: { commands: [] },
 };
 
 export function mockRuntime(overrides?: Partial<Runtime>): Runtime {
