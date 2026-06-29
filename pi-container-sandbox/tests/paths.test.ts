@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { resolve as resolvePath } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+	expandPath,
 	getExternalPath,
 	hostToRemote,
 	isAllowedExternalResource,
@@ -15,7 +16,6 @@ import {
 	shq,
 	toContainerPath,
 } from "../src/paths";
-import { expandPath } from "../src/paths";
 import { homedir } from "node:os";
 import type { MountSpec } from "../src/runtime";
 
@@ -303,5 +303,13 @@ describe("expandPath", () => {
 		expect(expandPath("${userHome}/a/${userHome}/b")).toBe(
 			homedir() + "/a/" + homedir() + "/b",
 		);
+	});
+
+	it("does not expand ${userhome} (case-sensitive)", () => {
+		expect(expandPath("${userhome}/data")).toBe("${userhome}/data");
+	});
+
+	it("does not expand ${USER_HOME} (case-sensitive)", () => {
+		expect(expandPath("${USER_HOME}/data")).toBe("${USER_HOME}/data");
 	});
 });

@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { resolve as resolvePath } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -132,6 +132,32 @@ describe("new runtime fields", () => {
 		expect(cfg.runtime.swap).toBeNull();
 		expect(cfg.runtime.pidsLimit).toBeNull();
 		expect(cfg.runtime.mounts).toEqual([]);
+	});
+
+	it("expands ~ and ${userHome} in mount source and cache fields", () => {
+		const configDir = resolvePath(testDir, TEST_CONFIG_DIR);
+		mkdirSync(configDir, { recursive: true });
+		writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify({
+			runtime: {
+				mounts: [
+					{ source: "~/projects", target: "/projects" },
+					{ source: "${userHome}/tools", target: "/tools" },
+					{ source: "/foo", target: "~/keep" },
+				],
+				cache: "~/sandbox-cache",
+			},
+		}));
+		const cfg = loadSbxConfig(testDir);
+
+		const home = homedir();
+		expect(cfg.runtime.mounts).toEqual([
+			{ source: home + "/projects", target: "/projects" },
+			{ source: home + "/tools", target: "/tools" },
+		]);
+		expect(cfg.runtime.cache).toBe(home + "/sandbox-cache");
+
+		expect(cfg.runtime.mounts[2].source).toBe("/foo");
+		expect(cfg.runtime.mounts[2].target).toBe("~/keep");
 	});
 });
 

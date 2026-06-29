@@ -300,7 +300,7 @@ export function expandPath(raw: string): string {
 	if (result === '~' || result.startsWith('~/')) {
 		result = home + result.slice(1);
 	}
-	result = result.replace(/\$\{userHome\}/g, home);
+	result = result.replace(/\$\{userHome\}/g, () => home);
 	return result;
 }
 
