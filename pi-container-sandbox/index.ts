@@ -195,6 +195,16 @@ export default function (pi: ExtensionAPI) {
 				mode: m.mode ?? ('ro' as const),
 			}));
 
+			// validate mount entries
+			for (const m of rt.mounts) {
+				if (typeof m.source !== 'string' || !m.source || typeof m.target !== 'string' || !m.target) {
+					throw new Error(
+						`sandbox: invalid mount entry "${JSON.stringify(m)}" — expected { source: "<host-path>", target: "<container-path>", mode?: "ro" | "rw" }. ` +
+						`The old string[] format for runtime.mounts is no longer supported.`
+					);
+				}
+			}
+
 			// Auto-discover skill mounts under home directory
 			const skillMounts = discoverSkillMounts();
 
