@@ -118,7 +118,7 @@ Configuration is read from two locations. Project config overrides global config
 | `swap` | string \| null | `null` | `"0"` | Swap override |
 | `pidsLimit` | number \| null | `null` | `1024` | PID limit |
 | `cache` | string \| null | `null` | `"sbx-cache"` | Cache volume name |
-| `mounts` | string[] | `[]` | `["/extra/tools"]` | Extra mount paths |
+| `mounts` | MountConfig[] | `[]` | `[{ "source": "/data/projects", "target": "/projects" }]` | Host→container path mappings with optional ro/rw mode |
 
 #### host group
 | Field | Type | Default | Example | Description |

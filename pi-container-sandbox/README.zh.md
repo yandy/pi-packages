@@ -113,7 +113,7 @@ agent skill 目录以 **只读** 方式挂载到 `/skills/`。
 | `swap` | string \| null | `null` | `"0"` | swap 覆盖 |
 | `pidsLimit` | number \| null | `null` | `1024` | PID 限制 |
 | `cache` | string \| null | `null` | `"sbx-cache"` | 缓存卷名 |
-| `mounts` | string[] | `[]` | `["/extra/tools"]` | 额外挂载路径 |
+| `mounts` | MountConfig[] | `[]` | `[{ "source": "/data/projects", "target": "/projects" }]` | 宿主机→容器路径映射，可选 ro/rw 模式 |
 
 #### host 组
 | 字段 | 类型 | 默认值 | 示例 | 说明 |
