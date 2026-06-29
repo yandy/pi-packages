@@ -153,9 +153,11 @@ describe("new runtime fields", () => {
 		expect(cfg.runtime.mounts).toEqual([
 			{ source: home + "/projects", target: "/projects" },
 			{ source: home + "/tools", target: "/tools" },
+			{ source: "/foo", target: "~/keep" },
 		]);
 		expect(cfg.runtime.cache).toBe(home + "/sandbox-cache");
 
+		// Verify target containing ~ is NOT expanded
 		expect(cfg.runtime.mounts[2].source).toBe("/foo");
 		expect(cfg.runtime.mounts[2].target).toBe("~/keep");
 	});
