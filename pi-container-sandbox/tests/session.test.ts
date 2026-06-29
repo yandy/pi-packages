@@ -9,7 +9,16 @@ const mockSession: SbxSession = {
 	mounts: [],
 	allowedExternalPrefixes: [],
 	imageRef: "pi-sandbox:latest",
-	config: { image: "pi-sandbox", tag: "latest", containerName: null, tier: "medium", persist: false, cacheVolume: null },
+	config: {
+		image: { name: "pi-sandbox", tag: "latest" },
+		runtime: {
+			name: null, tier: "medium", network: true, persist: false,
+			memory: null, cpus: null, swap: null, pidsLimit: null,
+			cache: null, mounts: [],
+		},
+		build: { dockerfile: null, context: null, args: {} },
+		host: { commands: [] },
+	},
 	isReusable: false,
 	isReattached: false,
 };

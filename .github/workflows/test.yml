@@ -43,6 +43,9 @@ jobs:
   test:
     needs: changes
     if: needs.changes.outputs.packages != '[]' && needs.changes.outputs.packages != ''
+    strategy:
+      matrix:
+        package: ${{ fromJson(needs.changes.outputs.packages) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -51,6 +54,9 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
-      - run: npm run typecheck --workspaces --if-present
-      - run: npm run check --workspaces --if-present
-      - run: npm test --workspaces --if-present
+      - if: matrix.package != 'root'
+        run: npm run typecheck -w ${{ matrix.package }} --if-present
+      - if: matrix.package != 'root'
+        run: npm run lint -w ${{ matrix.package }} --if-present
+      - if: matrix.package != 'root'
+        run: npm test -w ${{ matrix.package }} --if-present

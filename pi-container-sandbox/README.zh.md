@@ -77,7 +77,7 @@ agent skill 目录以 **只读** 方式挂载到 `/skills/`。
 
 ```json
 {
-  "tier": "medium"
+  "runtime": { "tier": "medium" }
 }
 ```
 
@@ -85,17 +85,48 @@ agent skill 目录以 **只读** 方式挂载到 `/skills/`。
 
 ```json
 {
-  "image": "pi-container-sandbox",
-  "tag": "latest",
-  "containerName": null,
-  "tier": "medium",
-  "persist": false,
-  "cacheVolume": null,
-  "hostCommands": ["git", "docker"]
+  "image": { "name": "pi-container-sandbox", "tag": "latest" },
+  "runtime": {
+    "name": null, "tier": "medium", "network": true, "persist": false,
+    "memory": null, "cpus": null, "swap": null, "pidsLimit": null,
+    "cache": null, "mounts": []
+  },
+  "build": { "dockerfile": null, "context": null, "args": {} },
+  "host": { "commands": [] }
 }
 ```
 
-`hostCommands`（可选字符串数组）：该列表中的命令直接在宿主机而非容器内执行。按命令名（bash 命令的第一个词）匹配。例如，配置 `"git"` 后 `git status`、`git diff` 等均会在宿主机执行。
+#### image 组
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `name` | string | `"pi-container-sandbox"` | 镜像名 |
+| `tag` | string | `"latest"` | 镜像标签 |
+
+#### runtime 组
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `name` | string \| null | `null` | 容器复用名 |
+| `tier` | `"small"` \| `"medium"` \| `"large"` | `"medium"` | 资源规格 |
+| `network` | boolean | `true` | 容器网络 |
+| `persist` | boolean | `false` | 退出后保留容器 |
+| `memory` | string \| null | `null` | 内存覆盖 |
+| `cpus` | string \| null | `null` | CPU 覆盖 |
+| `swap` | string \| null | `null` | swap 覆盖 |
+| `pidsLimit` | number \| null | `null` | PID 限制 |
+| `cache` | string \| null | `null` | 缓存卷名 |
+| `mounts` | string[] | `[]` | 额外挂载路径 |
+
+#### build 组
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `dockerfile` | string \| null | `null` | Dockerfile 路径 |
+| `context` | string \| null | `null` | 构建上下文 |
+| `args` | Record<string, string> | `{}` | 构建参数 |
+
+#### host 组
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `commands` | string[] | `[]` | 宿主机命令白名单 |
 
 ### 资源规格
 
@@ -113,21 +144,8 @@ agent skill 目录以 **只读** 方式挂载到 `/skills/`。
 |------|--------|------|
 | `--container` | `true` | 启用 sandbox |
 | `--no-container` / `--noc` | `false` | 禁用 sandbox |
-| `--container-size` | `medium` | 资源规格：`small`、`medium`、`large` |
-| `--sandbox-name` | — | 命名容器以便复用 |
-| `--sandbox-persist` | `false` | pi 退出后保留容器 |
-| `--sandbox-cache` | — | 挂载到 `/cache` 的 Docker 卷 |
-| `--container-image` | — | 覆盖镜像引用 |
-| `--container-net` | `true` | 允许容器出站网络 |
-| `--no-container-net` | `false` | 禁用容器网络 |
-| `--container-keep` | `false` | 退出时不停止容器 |
-| `--container-mount-skills` | `true` | 将 agent skill 目录挂载到 `/skills` |
-| `--container-mount-paths` | — | 额外挂载路径（逗号分隔） |
-| `--container-allow-paths` | — | 外部路径读权限白名单 |
-| `--container-memory` | — | 覆盖内存限制 |
-| `--container-cpus` | — | 覆盖 CPU 限制 |
-| `--container-swap` | — | 覆盖 swap 限制 |
-| `--container-pids-limit` | — | 覆盖 PID 数量限制 |
+
+其他所有配置项均通过 `sandbox.json` 配置。
 
 ## 外部文件读取
 

@@ -8,10 +8,9 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 	CONFIG_DIR_NAME: ".test-cfg",
 }));
 
-import { DEFAULT_SBX_CONFIG, getSbxConfigPath, imageRefForTag, loadSbxConfig, saveSbxConfig } from "../src/config";
+import { DEFAULT_SBX_CONFIG, getSbxConfigPath, imageRef, loadSbxConfig, saveSbxConfig } from "../src/config";
 
 const TEST_CONFIG_DIR = ".test-cfg";
-
 const testDir = resolvePath(tmpdir(), `pi-sandbox-test-${Date.now()}`);
 
 beforeEach(() => {
@@ -30,10 +29,10 @@ describe("getSbxConfigPath", () => {
 	});
 });
 
-describe("imageRefForTag", () => {
-	it("combines image and tag with optional slash prefix", () => {
-		expect(imageRefForTag("pi-sandbox", "latest")).toBe("pi-sandbox:latest");
-		expect(imageRefForTag("org/pi-sandbox", "v1.0")).toBe("org/pi-sandbox:v1.0");
+describe("imageRef", () => {
+	it("combines image name and tag", () => {
+		expect(imageRef({ name: "pi-sandbox", tag: "latest" })).toBe("pi-sandbox:latest");
+		expect(imageRef({ name: "org/pi-sandbox", tag: "v1.0" })).toBe("org/pi-sandbox:v1.0");
 	});
 });
 
@@ -43,101 +42,134 @@ describe("loadSbxConfig", () => {
 		expect(cfg).toEqual(DEFAULT_SBX_CONFIG);
 	});
 
-	it("loads values from existing config file", () => {
+	it("loads values from project config with per-group merge", () => {
 		const configDir = resolvePath(testDir, TEST_CONFIG_DIR);
 		mkdirSync(configDir, { recursive: true });
-		writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify({ image: "my-img", tag: "v2", tier: "large" }));
+		writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify({
+			image: { name: "my-img", tag: "v2" },
+			runtime: { tier: "large", network: false },
+			host: { commands: ["git"] },
+		}));
 
 		const cfg = loadSbxConfig(testDir);
-		expect(cfg.image).toBe("my-img");
-		expect(cfg.tag).toBe("v2");
-		expect(cfg.tier).toBe("large");
-		expect(cfg.containerName).toBe(DEFAULT_SBX_CONFIG.containerName);
-		expect(cfg.persist).toBe(DEFAULT_SBX_CONFIG.persist);
+		expect(cfg.image.name).toBe("my-img");
+		expect(cfg.image.tag).toBe("v2");
+		expect(cfg.runtime.tier).toBe("large");
+		expect(cfg.runtime.network).toBe(false);
+		expect(cfg.runtime.name).toBe(DEFAULT_SBX_CONFIG.runtime.name);
+		expect(cfg.runtime.persist).toBe(DEFAULT_SBX_CONFIG.runtime.persist);
+		expect(cfg.host.commands).toEqual(["git"]);
 	});
 
 	it("falls back to defaults on corrupt JSON", () => {
 		const configDir = resolvePath(testDir, TEST_CONFIG_DIR);
 		mkdirSync(configDir, { recursive: true });
 		writeFileSync(resolvePath(configDir, "sandbox.json"), "not json {{{");
-
 		const cfg = loadSbxConfig(testDir);
 		expect(cfg).toEqual(DEFAULT_SBX_CONFIG);
+	});
+
+	it("partial group overrides do not reset other group fields", () => {
+		const configDir = resolvePath(testDir, TEST_CONFIG_DIR);
+		mkdirSync(configDir, { recursive: true });
+		writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify({
+			runtime: { tier: "small" },
+		}));
+		const cfg = loadSbxConfig(testDir);
+		expect(cfg.runtime.tier).toBe("small");
+		expect(cfg.runtime.network).toBe(DEFAULT_SBX_CONFIG.runtime.network);
+		expect(cfg.runtime.persist).toBe(DEFAULT_SBX_CONFIG.runtime.persist);
+		expect(cfg.image).toEqual(DEFAULT_SBX_CONFIG.image);
 	});
 });
 
 describe("saveSbxConfig", () => {
 	it("writes config to disk", () => {
-		saveSbxConfig(testDir, { image: "x", tag: "y", containerName: "z", tier: "small", persist: true, cacheVolume: "v" });
-		const cfg = loadSbxConfig(testDir);
-		expect(cfg.image).toBe("x");
-		expect(cfg.tag).toBe("y");
-		expect(cfg.containerName).toBe("z");
-		expect(cfg.tier).toBe("small");
-		expect(cfg.persist).toBe(true);
-		expect(cfg.cacheVolume).toBe("v");
+		const cfg = {
+			...DEFAULT_SBX_CONFIG,
+			image: { name: "x", tag: "y" },
+			runtime: { ...DEFAULT_SBX_CONFIG.runtime, name: "z", tier: "small" as const, persist: true, cache: "v" },
+		};
+		saveSbxConfig(testDir, cfg);
+		const loaded = loadSbxConfig(testDir);
+		expect(loaded.image).toEqual({ name: "x", tag: "y" });
+		expect(loaded.runtime.name).toBe("z");
+		expect(loaded.runtime.tier).toBe("small");
+		expect(loaded.runtime.persist).toBe(true);
+		expect(loaded.runtime.cache).toBe("v");
 	});
 
 	it("round-trips: save then load returns same values", () => {
-		const input = { ...DEFAULT_SBX_CONFIG, tier: "large" as const, containerName: "my-container" };
+		const input = {
+			...DEFAULT_SBX_CONFIG,
+			runtime: { ...DEFAULT_SBX_CONFIG.runtime, tier: "large" as const, name: "my-container" },
+		};
 		saveSbxConfig(testDir, input);
 		const output = loadSbxConfig(testDir);
 		expect(output).toEqual(input);
 	});
 });
 
-describe("loadSbxConfig new fields", () => {
-	it("parses dockerfile, buildContext, buildArgs from config", () => {
+describe("new runtime fields", () => {
+	it("parses memory, cpus, swap, pidsLimit, mounts from runtime group", () => {
 		const configDir = resolvePath(testDir, TEST_CONFIG_DIR);
 		mkdirSync(configDir, { recursive: true });
-		writeFileSync(
-			resolvePath(configDir, "sandbox.json"),
-			JSON.stringify({
-				image: "my-img",
-				tag: "v2",
-				dockerfile: "./Dockerfile.custom",
-				buildContext: ".",
-				buildArgs: { FOO: "bar", BAZ: "1" },
-			}),
-		);
-
+		writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify({
+			runtime: { memory: "8g", cpus: "4", swap: "0", pidsLimit: 1024, mounts: ["/extra/tools"] },
+		}));
 		const cfg = loadSbxConfig(testDir);
-		expect(cfg.dockerfile).toBe("./Dockerfile.custom");
-		expect(cfg.buildContext).toBe(".");
-		expect(cfg.buildArgs).toEqual({ FOO: "bar", BAZ: "1" });
+		expect(cfg.runtime.memory).toBe("8g");
+		expect(cfg.runtime.cpus).toBe("4");
+		expect(cfg.runtime.swap).toBe("0");
+		expect(cfg.runtime.pidsLimit).toBe(1024);
+		expect(cfg.runtime.mounts).toEqual(["/extra/tools"]);
 	});
 
-	it("omits optional fields when not present in config", () => {
-		const configDir = resolvePath(testDir, TEST_CONFIG_DIR);
-		mkdirSync(configDir, { recursive: true });
-		writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify({ image: "img" }));
-
+	it("new fields default to null/empty when not configured", () => {
 		const cfg = loadSbxConfig(testDir);
-		expect(cfg.dockerfile).toBeUndefined();
-		expect(cfg.buildContext).toBeUndefined();
-		expect(cfg.buildArgs).toBeUndefined();
+		expect(cfg.runtime.memory).toBeNull();
+		expect(cfg.runtime.cpus).toBeNull();
+		expect(cfg.runtime.swap).toBeNull();
+		expect(cfg.runtime.pidsLimit).toBeNull();
+		expect(cfg.runtime.mounts).toEqual([]);
 	});
 });
 
-describe("loadSbxConfig hostCommands", () => {
-	it("reads hostCommands from config file", () => {
+describe("build group", () => {
+	it("parses dockerfile, context, args from build group", () => {
 		const configDir = resolvePath(testDir, TEST_CONFIG_DIR);
 		mkdirSync(configDir, { recursive: true });
-		writeFileSync(
-			resolvePath(configDir, "sandbox.json"),
-			JSON.stringify({
-				image: "my-img",
-				hostCommands: ["git", "docker", "npm"],
-			}),
-		);
-
+		writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify({
+			build: { dockerfile: "./Dockerfile.custom", context: ".", args: { FOO: "bar", BAZ: "1" } },
+		}));
 		const cfg = loadSbxConfig(testDir);
-		expect(cfg.hostCommands).toEqual(["git", "docker", "npm"]);
+		expect(cfg.build.dockerfile).toBe("./Dockerfile.custom");
+		expect(cfg.build.context).toBe(".");
+		expect(cfg.build.args).toEqual({ FOO: "bar", BAZ: "1" });
 	});
 
-	it("returns undefined hostCommands when not in config", () => {
+	it("build group defaults to null/empty when not configured", () => {
 		const cfg = loadSbxConfig(testDir);
-		expect(cfg.hostCommands).toBeUndefined();
+		expect(cfg.build.dockerfile).toBeNull();
+		expect(cfg.build.context).toBeNull();
+		expect(cfg.build.args).toEqual({});
+	});
+});
+
+describe("host group", () => {
+	it("parses commands from host group", () => {
+		const configDir = resolvePath(testDir, TEST_CONFIG_DIR);
+		mkdirSync(configDir, { recursive: true });
+		writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify({
+			host: { commands: ["git", "docker", "npm"] },
+		}));
+		const cfg = loadSbxConfig(testDir);
+		expect(cfg.host.commands).toEqual(["git", "docker", "npm"]);
+	});
+
+	it("host commands default to empty array", () => {
+		const cfg = loadSbxConfig(testDir);
+		expect(cfg.host.commands).toEqual([]);
 	});
 });
 
@@ -148,23 +180,5 @@ describe("discoverDockerfiles", () => {
 		const files = discoverDockerfiles();
 		expect(files).toContain("cn");
 		expect(files).toContain("gh");
-	});
-});
-
-describe("loadSbxConfig preserves unknown fields", () => {
-	it("round-trips user-added fields through save/load", () => {
-		const configDir = resolvePath(testDir, TEST_CONFIG_DIR);
-		mkdirSync(configDir, { recursive: true });
-		const original = { image: "pi-sandbox", custom_user_field: "hello", nested: { foo: 1 } };
-		writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify(original));
-
-		const cfg = loadSbxConfig(testDir);
-		expect((cfg as any).custom_user_field).toBe("hello");
-		expect((cfg as any).nested).toEqual({ foo: 1 });
-
-		saveSbxConfig(testDir, cfg);
-		const cfg2 = loadSbxConfig(testDir);
-		expect((cfg2 as any).custom_user_field).toBe("hello");
-		expect((cfg2 as any).nested).toEqual({ foo: 1 });
 	});
 });

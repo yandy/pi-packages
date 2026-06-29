@@ -82,7 +82,7 @@ Configuration is read from two locations. Project config overrides global config
 
 ```json
 {
-  "tier": "medium"
+  "runtime": { "tier": "medium" }
 }
 ```
 
@@ -90,20 +90,48 @@ Configuration is read from two locations. Project config overrides global config
 
 ```json
 {
-  "image": "pi-container-sandbox",
-  "tag": "latest",
-  "containerName": null,
-  "tier": "medium",
-  "persist": false,
-  "cacheVolume": null,
-  "hostCommands": ["git", "docker"]
+  "image": { "name": "pi-container-sandbox", "tag": "latest" },
+  "runtime": {
+    "name": null, "tier": "medium", "network": true, "persist": false,
+    "memory": null, "cpus": null, "swap": null, "pidsLimit": null,
+    "cache": null, "mounts": []
+  },
+  "build": { "dockerfile": null, "context": null, "args": {} },
+  "host": { "commands": [] }
 }
 ```
 
-`hostCommands` (optional string array): Commands in this list run directly
-on the host instead of inside the container. Matches by command name
-(the first word of the bash command). For example, listing `"git"` means
-`git status`, `git diff`, etc. all execute on the host.
+#### image group
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | string | `"pi-container-sandbox"` | Image name |
+| `tag` | string | `"latest"` | Image tag |
+
+#### runtime group
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | string \| null | `null` | Container reuse name |
+| `tier` | `"small"` \| `"medium"` \| `"large"` | `"medium"` | Resource tier |
+| `network` | boolean | `true` | Container networking |
+| `persist` | boolean | `false` | Keep container after exit |
+| `memory` | string \| null | `null` | Memory override |
+| `cpus` | string \| null | `null` | CPU override |
+| `swap` | string \| null | `null` | Swap override |
+| `pidsLimit` | number \| null | `null` | PID limit |
+| `cache` | string \| null | `null` | Cache volume name |
+| `mounts` | string[] | `[]` | Extra mount paths |
+
+#### build group
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `dockerfile` | string \| null | `null` | Dockerfile path |
+| `context` | string \| null | `null` | Build context |
+| `args` | Record<string, string> | `{}` | Build arguments |
+
+#### host group
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `commands` | string[] | `[]` | Host command allowlist |
 
 ### Resource Tiers
 
@@ -121,21 +149,8 @@ Use `--container-size` flag or `/sandbox tiers set` to switch.
 |------|---------|-------------|
 | `--container` | `true` | Enable sandbox |
 | `--no-container` / `--noc` | `false` | Disable sandbox |
-| `--container-size` | `medium` | Resource tier: `small`, `medium`, `large` |
-| `--sandbox-name` | — | Named container for reuse |
-| `--sandbox-persist` | `false` | Keep container after pi exits |
-| `--sandbox-cache` | — | Docker volume mounted at `/cache` |
-| `--container-image` | — | Override image ref |
-| `--container-net` | `true` | Allow outbound network |
-| `--no-container-net` | `false` | Disable network |
-| `--container-keep` | `false` | Don't stop container on exit |
-| `--container-mount-skills` | `true` | Mount agent skill directories at `/skills` |
-| `--container-mount-paths` | — | Extra mount paths (comma-separated) |
-| `--container-allow-paths` | — | External path read allowlist |
-| `--container-memory` | — | Override memory limit |
-| `--container-cpus` | — | Override CPU limit |
-| `--container-swap` | — | Override swap limit |
-| `--container-pids-limit` | — | Override PIDs limit |
+
+All other configuration is managed through `sandbox.json`.
 
 ## External File Read
 

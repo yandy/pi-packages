@@ -4,26 +4,50 @@ import { fileURLToPath } from "node:url";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { SizeTier } from "./tiers";
 
-export interface SbxConfig {
-	image: string;
+export interface ImageConfig {
+	name: string;
 	tag: string;
-	containerName: string | null;
+}
+
+export interface RuntimeConfig {
+	name: string | null;
 	tier: SizeTier;
+	network: boolean;
 	persist: boolean;
-	cacheVolume: string | null;
-	dockerfile?: string;
-	buildContext?: string;
-	buildArgs?: Record<string, string>;
-	hostCommands?: string[];
+	memory: string | null;
+	cpus: string | null;
+	swap: string | null;
+	pidsLimit: number | null;
+	cache: string | null;
+	mounts: string[];
+}
+
+export interface BuildConfig {
+	dockerfile: string | null;
+	context: string | null;
+	args: Record<string, string>;
+}
+
+export interface HostConfig {
+	commands: string[];
+}
+
+export interface SbxConfig {
+	image: ImageConfig;
+	runtime: RuntimeConfig;
+	build: BuildConfig;
+	host: HostConfig;
 }
 
 export const DEFAULT_SBX_CONFIG: SbxConfig = {
-	image: "pi-container-sandbox",
-	tag: "latest",
-	containerName: null,
-	tier: "medium",
-	persist: false,
-	cacheVolume: null,
+	image: { name: "pi-container-sandbox", tag: "latest" },
+	runtime: {
+		name: null, tier: "medium", network: true, persist: false,
+		memory: null, cpus: null, swap: null, pidsLimit: null,
+		cache: null, mounts: [],
+	},
+	build: { dockerfile: null, context: null, args: {} },
+	host: { commands: [] },
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -33,39 +57,63 @@ function readJsonFile(path: string): Record<string, unknown> | null {
 	try {
 		const raw = readFileSync(path, "utf-8");
 		return JSON.parse(raw) as Record<string, unknown>;
-	} catch {
-		return null;
+	} catch { return null; }
+}
+
+function mergeGroup<G>(a: G, b: Partial<G>): G {
+	const result = { ...a } as G;
+	for (const key of Object.keys(b as object)) {
+		const k = key as keyof G;
+		if (b[k] !== undefined) result[k] = b[k] as G[keyof G];
 	}
+	return result;
+}
+
+function extractGroup(raw: Record<string, unknown>, group: string): Record<string, unknown> {
+	const g = raw[group];
+	return (g && typeof g === "object" && !Array.isArray(g) ? g : {}) as Record<string, unknown>;
+}
+
+export function loadSbxConfig(hostCwd: string): SbxConfig {
+	const agentDir = getAgentDir();
+	const globalRaw = readJsonFile(resolvePath(agentDir, "sandbox.json")) || {};
+	const projectRaw = readJsonFile(getSbxConfigPath(hostCwd)) || {};
+
+	return {
+		image: mergeGroup(
+			mergeGroup(DEFAULT_SBX_CONFIG.image, extractGroup(globalRaw, "image") as Partial<ImageConfig>),
+			extractGroup(projectRaw, "image") as Partial<ImageConfig>,
+		),
+		runtime: mergeGroup(
+			mergeGroup(DEFAULT_SBX_CONFIG.runtime, extractGroup(globalRaw, "runtime") as Partial<RuntimeConfig>),
+			extractGroup(projectRaw, "runtime") as Partial<RuntimeConfig>,
+		),
+		build: mergeGroup(
+			mergeGroup(DEFAULT_SBX_CONFIG.build, extractGroup(globalRaw, "build") as Partial<BuildConfig>),
+			extractGroup(projectRaw, "build") as Partial<BuildConfig>,
+		),
+		host: mergeGroup(
+			mergeGroup(DEFAULT_SBX_CONFIG.host, extractGroup(globalRaw, "host") as Partial<HostConfig>),
+			extractGroup(projectRaw, "host") as Partial<HostConfig>,
+		),
+	};
 }
 
 export function getSbxConfigPath(hostCwd: string): string {
 	return resolvePath(hostCwd, CONFIG_DIR_NAME, "sandbox.json");
 }
 
-export function loadSbxConfig(hostCwd: string): SbxConfig {
-	const agentDir = getAgentDir();
-	const globalConfig = readJsonFile(resolvePath(agentDir, "sandbox.json")) || {};
-	const projectConfig = readJsonFile(getSbxConfigPath(hostCwd)) || {};
-	return {
-		...DEFAULT_SBX_CONFIG,
-		...globalConfig,
-		...projectConfig,
-	} as SbxConfig;
-}
-
 export function saveSbxConfig(hostCwd: string, config: SbxConfig): void {
 	const configPath = getSbxConfigPath(hostCwd);
 	const dir = resolvePath(configPath, "..");
-	if (!existsSync(dir)) {
-		mkdirSync(dir, { recursive: true });
-	}
+	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 	const tmpPath = `${configPath}.tmp`;
 	writeFileSync(tmpPath, JSON.stringify(config, null, 2));
 	renameSync(tmpPath, configPath);
 }
 
-export function imageRefForTag(image: string, tag: string): string {
-	return `${image}:${tag}`;
+export function imageRef(im: ImageConfig): string {
+	return `${im.name}:${im.tag}`;
 }
 
 export function discoverDockerfiles(): string[] {
