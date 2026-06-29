@@ -23,7 +23,6 @@
 		"typecheck": "tsc --noEmit",
 		"lint": "biome lint .",
 		"format": "biome format --write .",
-		"check": "biome check .",
 		"build-image": "node --experimental-strip-types scripts/build-image.ts",
 		"clean": "rm -rf dist"
 	},
