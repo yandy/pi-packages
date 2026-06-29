@@ -22,12 +22,6 @@ export interface RuntimeConfig {
 	mounts: string[];
 }
 
-export interface BuildConfig {
-	dockerfile: string | null;
-	context: string | null;
-	args: Record<string, string>;
-}
-
 export interface HostConfig {
 	commands: string[];
 }
@@ -35,7 +29,6 @@ export interface HostConfig {
 export interface SbxConfig {
 	image: ImageConfig;
 	runtime: RuntimeConfig;
-	build: BuildConfig;
 	host: HostConfig;
 }
 
@@ -46,7 +39,6 @@ export const DEFAULT_SBX_CONFIG: SbxConfig = {
 		memory: null, cpus: null, swap: null, pidsLimit: null,
 		cache: null, mounts: [],
 	},
-	build: { dockerfile: null, context: null, args: {} },
 	host: { commands: [] },
 };
 
@@ -87,10 +79,6 @@ export function loadSbxConfig(hostCwd: string): SbxConfig {
 		runtime: mergeGroup(
 			mergeGroup(DEFAULT_SBX_CONFIG.runtime, extractGroup(globalRaw, "runtime") as Partial<RuntimeConfig>),
 			extractGroup(projectRaw, "runtime") as Partial<RuntimeConfig>,
-		),
-		build: mergeGroup(
-			mergeGroup(DEFAULT_SBX_CONFIG.build, extractGroup(globalRaw, "build") as Partial<BuildConfig>),
-			extractGroup(projectRaw, "build") as Partial<BuildConfig>,
 		),
 		host: mergeGroup(
 			mergeGroup(DEFAULT_SBX_CONFIG.host, extractGroup(globalRaw, "host") as Partial<HostConfig>),

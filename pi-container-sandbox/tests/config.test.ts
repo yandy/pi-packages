@@ -135,27 +135,6 @@ describe("new runtime fields", () => {
 	});
 });
 
-describe("build group", () => {
-	it("parses dockerfile, context, args from build group", () => {
-		const configDir = resolvePath(testDir, TEST_CONFIG_DIR);
-		mkdirSync(configDir, { recursive: true });
-		writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify({
-			build: { dockerfile: "./Dockerfile.custom", context: ".", args: { FOO: "bar", BAZ: "1" } },
-		}));
-		const cfg = loadSbxConfig(testDir);
-		expect(cfg.build.dockerfile).toBe("./Dockerfile.custom");
-		expect(cfg.build.context).toBe(".");
-		expect(cfg.build.args).toEqual({ FOO: "bar", BAZ: "1" });
-	});
-
-	it("build group defaults to null/empty when not configured", () => {
-		const cfg = loadSbxConfig(testDir);
-		expect(cfg.build.dockerfile).toBeNull();
-		expect(cfg.build.context).toBeNull();
-		expect(cfg.build.args).toEqual({});
-	});
-});
-
 describe("host group", () => {
 	it("parses commands from host group", () => {
 		const configDir = resolvePath(testDir, TEST_CONFIG_DIR);

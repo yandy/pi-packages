@@ -91,42 +91,34 @@ agent skill 目录以 **只读** 方式挂载到 `/skills/`。
     "memory": null, "cpus": null, "swap": null, "pidsLimit": null,
     "cache": null, "mounts": []
   },
-  "build": { "dockerfile": null, "context": null, "args": {} },
   "host": { "commands": [] }
 }
 ```
 
 #### image 组
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `name` | string | `"pi-container-sandbox"` | 镜像名 |
-| `tag` | string | `"latest"` | 镜像标签 |
+| 字段 | 类型 | 默认值 | 示例 | 说明 |
+|------|------|--------|------|------|
+| `name` | string | `"pi-container-sandbox"` | `"pi-sandbox"` | 镜像名 |
+| `tag` | string | `"latest"` | `"v1.0"` | 镜像标签 |
 
 #### runtime 组
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `name` | string \| null | `null` | 容器复用名 |
-| `tier` | `"small"` \| `"medium"` \| `"large"` | `"medium"` | 资源规格 |
-| `network` | boolean | `true` | 容器网络 |
-| `persist` | boolean | `false` | 退出后保留容器 |
-| `memory` | string \| null | `null` | 内存覆盖 |
-| `cpus` | string \| null | `null` | CPU 覆盖 |
-| `swap` | string \| null | `null` | swap 覆盖 |
-| `pidsLimit` | number \| null | `null` | PID 限制 |
-| `cache` | string \| null | `null` | 缓存卷名 |
-| `mounts` | string[] | `[]` | 额外挂载路径 |
-
-#### build 组
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `dockerfile` | string \| null | `null` | Dockerfile 路径 |
-| `context` | string \| null | `null` | 构建上下文 |
-| `args` | Record<string, string> | `{}` | 构建参数 |
+| 字段 | 类型 | 默认值 | 示例 | 说明 |
+|------|------|--------|------|------|
+| `name` | string \| null | `null` | `"my-dev-box"` | 容器复用名 |
+| `tier` | `"small"` \| `"medium"` \| `"large"` | `"medium"` | `"large"` | 资源规格 |
+| `network` | boolean | `true` | `false` | 容器网络 |
+| `persist` | boolean | `false` | `true` | 退出后保留容器 |
+| `memory` | string \| null | `null` | `"8g"` | 内存覆盖 |
+| `cpus` | string \| null | `null` | `"4"` | CPU 覆盖 |
+| `swap` | string \| null | `null` | `"0"` | swap 覆盖 |
+| `pidsLimit` | number \| null | `null` | `1024` | PID 限制 |
+| `cache` | string \| null | `null` | `"sbx-cache"` | 缓存卷名 |
+| `mounts` | string[] | `[]` | `["/extra/tools"]` | 额外挂载路径 |
 
 #### host 组
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `commands` | string[] | `[]` | 宿主机命令白名单 |
+| 字段 | 类型 | 默认值 | 示例 | 说明 |
+|------|------|--------|------|------|
+| `commands` | string[] | `[]` | `["git", "npm", "docker"]` | 宿主机命令白名单 |
 
 ### 资源规格
 

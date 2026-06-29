@@ -9,7 +9,6 @@ const DEFAULT_CONFIG: SbxConfig = {
 		memory: null, cpus: null, swap: null, pidsLimit: null,
 		cache: null, mounts: [],
 	},
-	build: { dockerfile: null, context: null, args: {} },
 	host: { commands: [] },
 };
 

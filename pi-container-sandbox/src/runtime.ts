@@ -36,9 +36,6 @@ export interface SandboxOptions {
 	};
 	extraMounts?: MountSpec[];
 	cacheVolume?: string;
-	dockerfile?: string;
-	buildContext?: string;
-	buildArgs?: Record<string, string>;
 	onProgress?: (msg: string) => void;
 }
 
@@ -137,7 +134,7 @@ export class DockerRuntime implements Runtime {
 		const image = this.opts.image;
 		const buildContext = opts.buildContext ?? PACKAGE_DOCKER_DIR;
 		const dockerfile = opts.dockerfile;
-		const buildArgs = opts.buildArgs ?? this.opts.buildArgs;
+		const buildArgs = opts.buildArgs;
 		const onProgress = opts.onProgress ?? this.opts.onProgress;
 
 		const report = (msg: string) => onProgress?.(msg);
