@@ -79,6 +79,21 @@ describe("isReadOnlyMount", () => {
 	});
 });
 
+describe("isReadOnlyMount with mode", () => {
+	it("returns true for ro mount", () => {
+		const mounts: MountSpec[] = [{ source: "/host/data", target: "/data", mode: "ro" }];
+		expect(isReadOnlyMount("/data/file.txt", mounts)).toBe(true);
+	});
+	it("returns false for rw mount", () => {
+		const mounts: MountSpec[] = [{ source: "/host/data", target: "/data", mode: "rw" }];
+		expect(isReadOnlyMount("/data/file.txt", mounts)).toBe(false);
+	});
+	it("returns true when mode is not specified (default ro)", () => {
+		const mounts: MountSpec[] = [{ source: "/host/data", target: "/data" }];
+		expect(isReadOnlyMount("/data/file.txt", mounts)).toBe(true);
+	});
+});
+
 describe("resolveExtraMountPath", () => {
 	const mounts = [{ source: "/h/a", target: "/mnt/a" }];
 	it("returns path if it matches a mount target", () => {

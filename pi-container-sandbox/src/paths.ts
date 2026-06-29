@@ -83,7 +83,7 @@ export function remoteToHost(containerPath: string, hostCwd: string, mounts: Mou
 export function isReadOnlyMount(containerPath: string, mounts: MountSpec[]): boolean {
 	for (const m of mounts) {
 		if (containerPath === m.target || containerPath.startsWith(`${m.target}/`)) {
-			return true;
+			return m.mode !== "rw";
 		}
 	}
 	return false;
