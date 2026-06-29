@@ -1,4 +1,3 @@
-import { resolve as resolvePath } from "node:path";
 import {
 	createBashTool,
 	createEditTool,
