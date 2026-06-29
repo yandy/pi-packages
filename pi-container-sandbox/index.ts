@@ -24,7 +24,7 @@ import {
 	PathApprovalStore,
 	REMOTE_ROOT,
 } from "./src/paths";
-import { DockerRuntime, deriveContainerName } from "./src/runtime";
+import { DockerRuntime, deriveContainerName, type MountSpec } from "./src/runtime";
 import { clearSbx, getSbx, type SbxSession, setSbx } from "./src/session";
 import { discoverSkillMounts } from "./src/skills";
 import { TIER_SPECS } from "./src/tiers";
@@ -138,9 +138,15 @@ export default function (pi: ExtensionAPI) {
 		const sbx = getSbx();
 		if (!sbx) return;
 
-		const skillInfo = sbx.mounts.length
-			? `Agent skills are mounted read-only at /skills/ (e.g. ${sbx.mounts.map((m) => m.target).join(", ")}). Read skill files via /skills/<name>/SKILL.md. Writing to /skills/ is forbidden.`
-			: "No skill directories are mounted.";
+		const skillTargets = sbx.mounts.filter((m) => m.target.startsWith('/skills/')).map((m) => m.target);
+		const otherMounts = sbx.mounts.filter((m) => !m.target.startsWith('/skills/'));
+		const skillsPart = skillTargets.length
+			? `Agent skills are mounted read-only at /skills/ (e.g. ${skillTargets.join(", ")}). Read skill files via /skills/<name>/SKILL.md. Writing to /skills/ is forbidden.`
+			: "No agent skill directories are mounted.";
+		const mountsPart = otherMounts.length
+			? `Additional mounts: ${otherMounts.map((m) => `${m.source} → ${m.target}${m.mode === 'rw' ? ' (rw)' : ' (ro)'}`).join(", ")}.`
+			: "";
+		const skillInfo = [skillsPart, mountsPart].filter(Boolean).join("\n");
 
 		const hostCommands = sbx.config.host.commands ?? [];
 		const hostCmdHint = hostCommands.length
@@ -182,13 +188,32 @@ export default function (pi: ExtensionAPI) {
 			const allowNetwork = rt.network;
 			const keep = rt.persist;
 
-			const extraPaths = rt.mounts.length ? rt.mounts : undefined;
+			// Convert sandbox.json MountConfig[] to MountSpec[]
+			const userMounts: MountSpec[] = rt.mounts.map((m) => ({
+				source: m.source,
+				target: m.target,
+				mode: m.mode ?? ('ro' as const),
+			}));
+
+			// Auto-discover skill mounts under home directory
+			const skillMounts = discoverSkillMounts();
+
+			// Merge: detect target conflicts
+			for (const um of userMounts) {
+				const conflict = skillMounts.find((sm) => sm.target === um.target);
+				if (conflict) {
+					throw new Error(
+						`sandbox: mount target conflict: "${um.target}" is already used by auto-discovered skill at "${conflict.source}". ` +
+						`Choose a different target for your custom mount at "${um.source}".`
+					);
+				}
+			}
+			const allMounts = [...skillMounts, ...userMounts];
+
 			const sandboxName = rt.name ?? deriveContainerName(localCwd);
 			const isReusable = !!(rt.name);
 
 			const cacheVolume = rt.cache ?? undefined;
-
-			const skillMounts = discoverSkillMounts(extraPaths);
 
 			const allowedExternalPrefixes: string[] = [];
 
@@ -203,7 +228,7 @@ export default function (pi: ExtensionAPI) {
 			const runtime = new DockerRuntime({
 				image, hostCwd: localCwd, name: sandboxName, allowNetwork,
 				resources,
-				extraMounts: skillMounts.length ? skillMounts : undefined,
+				extraMounts: allMounts.length ? allMounts : undefined,
 				cacheVolume,
 				onProgress: (msg: string) => ctx.ui.setStatus("sandbox", `[build] ${msg}`),
 			});
@@ -263,7 +288,7 @@ export default function (pi: ExtensionAPI) {
 
 			setSbx({
 				runtime, name: sandboxName, hostCwd: localCwd,
-				keep, mounts: skillMounts, allowedExternalPrefixes,
+				keep, mounts: allMounts, allowedExternalPrefixes,
 				resources, imageRef: image, config: cfg,
 				isReusable, isReattached: false,
 			});
@@ -309,13 +334,14 @@ export default function (pi: ExtensionAPI) {
 			const statusPrefix = "Sandbox up";
 			ctx.ui.setStatus(
 				"sandbox",
-				ctx.ui.theme.fg("accent", `${statusPrefix}: ${actualName} (net=${allowNetwork ? "on" : "off"})${resStr}`),
+				ctx.ui.theme.fg("accent", `${statusPrefix}: ${actualName} (net=${allowNetwork ? "on" : "off"})${resStr}${allMounts.length ? `, mounts=${allMounts.length}` : ""}`),
 			);
 			ctx.ui.notify(
 				[
 					`${statusPrefix}: docker ${actualName}${resStr}${isReusable ? " [re-usable]" : ""}`,
 					ok,
 					skillMounts.length ? `Skills mounted: ${skillMounts.map((m) => m.target).join(", ")}` : "",
+					userMounts.length ? `Extra mounts: ${userMounts.map((m) => `${m.source} → ${m.target} (${m.mode ?? 'ro'})`).join(", ")}` : "",
 					cacheVolume ? `Cache volume: ${cacheVolume} at /cache` : "",
 				]
 					.filter(Boolean)
