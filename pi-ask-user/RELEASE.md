@@ -8,7 +8,7 @@
 # 在仓库根目录执行：
 
 # 1. 确保全部通过
-npm run typecheck && npm run check && npm test
+npm run typecheck && npm run lint && npm test
 
 # 2. 升级版本号并提交
 npm version <新版本号> --workspace=pi-ask-user --no-git-tag-version
