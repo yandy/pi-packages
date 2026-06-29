@@ -14,6 +14,7 @@ const MAX_EXEC_BUFFER = 16 * 1024 * 1024; // 16MB
 export interface MountSpec {
 	source: string;
 	target: string;
+	mode?: 'ro' | 'rw';
 }
 
 export interface BuildImageOpts {
@@ -211,7 +212,10 @@ export class DockerRuntime implements Runtime {
 
 		const binds: string[] = [`${hostCwd}:${this.workRoot}`];
 		if (extraMounts) {
-			for (const m of extraMounts) binds.push(`${m.source}:${m.target}:ro`);
+			for (const m of extraMounts) {
+				const mode = m.mode === 'rw' ? 'rw' : 'ro';
+				binds.push(`${m.source}:${m.target}:${mode}`);
+			}
 		}
 		if (cacheVolume) binds.push(`${cacheVolume}:/cache`);
 
