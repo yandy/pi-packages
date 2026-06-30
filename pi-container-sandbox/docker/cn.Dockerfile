@@ -64,7 +64,8 @@ USER pi
 WORKDIR /workspace
 
 ENV NPM_CONFIG_PREFIX="/home/pi/.local" \
-    UV_TOOL_BIN_DIR="/home/pi/.local/bin"
+    UV_TOOL_BIN_DIR="/home/pi/.local/bin" \
+    PATH="/home/pi/.local/bin:${PATH}"
 
 # tini reaps zombies so long-running agent shells stay tidy
 ENTRYPOINT ["/usr/bin/tini", "--"]
