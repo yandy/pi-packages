@@ -46,7 +46,6 @@ export default function (pi: ExtensionAPI) {
 		default: false,
 	});
 
-
 	const localCwd = process.cwd();
 	const localRead = createReadTool(localCwd);
 	const localWrite = createWriteTool(localCwd);
@@ -138,13 +137,13 @@ export default function (pi: ExtensionAPI) {
 		const sbx = getSbx();
 		if (!sbx) return;
 
-		const skillTargets = sbx.mounts.filter((m) => m.target.startsWith('/skills/')).map((m) => m.target);
-		const otherMounts = sbx.mounts.filter((m) => !m.target.startsWith('/skills/'));
+		const skillTargets = sbx.mounts.filter((m) => m.target.startsWith("/skills/")).map((m) => m.target);
+		const otherMounts = sbx.mounts.filter((m) => !m.target.startsWith("/skills/"));
 		const skillsPart = skillTargets.length
 			? `Agent skills are mounted read-only at /skills/ (e.g. ${skillTargets.join(", ")}). Read skill files via /skills/<name>/SKILL.md. Writing to /skills/ is forbidden.`
 			: "No agent skill directories are mounted.";
 		const mountsPart = otherMounts.length
-			? `Additional mounts: ${otherMounts.map((m) => `${m.source} → ${m.target}${m.mode === 'rw' ? ' (rw)' : ' (ro)'}`).join(", ")}.`
+			? `Additional mounts: ${otherMounts.map((m) => `${m.source} → ${m.target}${m.mode === "rw" ? " (rw)" : " (ro)"}`).join(", ")}.`
 			: "";
 		const skillInfo = [skillsPart, mountsPart].filter(Boolean).join("\n");
 
@@ -191,15 +190,15 @@ export default function (pi: ExtensionAPI) {
 			const userMounts: MountSpec[] = rt.mounts.map((m) => ({
 				source: m.source,
 				target: m.target,
-				mode: m.mode ?? ('ro' as const),
+				mode: m.mode ?? ("ro" as const),
 			}));
 
 			// validate mount entries
 			for (const m of rt.mounts) {
-				if (typeof m.source !== 'string' || !m.source || typeof m.target !== 'string' || !m.target) {
+				if (typeof m.source !== "string" || !m.source || typeof m.target !== "string" || !m.target) {
 					throw new Error(
 						`sandbox: invalid mount entry "${JSON.stringify(m)}" — expected { source: "<host-path>", target: "<container-path>", mode?: "ro" | "rw" }. ` +
-						`The old string[] format for runtime.mounts is no longer supported.`
+							`The old string[] format for runtime.mounts is no longer supported.`,
 					);
 				}
 			}
@@ -213,21 +212,23 @@ export default function (pi: ExtensionAPI) {
 				if (conflict) {
 					throw new Error(
 						`sandbox: mount target conflict: "${um.target}" is already used by auto-discovered skill at "${conflict.source}". ` +
-						`Choose a different target for your custom mount at "${um.source}".`
+							`Choose a different target for your custom mount at "${um.source}".`,
 					);
 				}
 			}
 			const allMounts = [...skillMounts, ...userMounts];
 
 			const sandboxName = rt.name ?? deriveContainerName(localCwd);
-			const isReusable = !!(rt.name);
+			const isReusable = !!rt.name;
 
 			const cacheVolume = rt.cache ?? undefined;
 
 			const allowedExternalPrefixes: string[] = [];
 
 			const resources: { memory: string; cpus: string; swap: string; pidsLimit?: number } = {
-				memory: tierSpec.memory, cpus: tierSpec.cpus, swap: tierSpec.swap,
+				memory: tierSpec.memory,
+				cpus: tierSpec.cpus,
+				swap: tierSpec.swap,
 			};
 			if (rt.memory) resources.memory = rt.memory;
 			if (rt.cpus) resources.cpus = rt.cpus;
@@ -235,11 +236,14 @@ export default function (pi: ExtensionAPI) {
 			if (rt.swap !== null) resources.swap = rt.swap;
 
 			const runtime = new DockerRuntime({
-				image, hostCwd: localCwd, name: sandboxName, allowNetwork,
+				image,
+				hostCwd: localCwd,
+				name: sandboxName,
+				allowNetwork,
 				resources,
 				extraMounts: allMounts.length ? allMounts : undefined,
 				cacheVolume,
-			env: cfg.runtime.env,
+				env: cfg.runtime.env,
 				onProgress: (msg: string) => ctx.ui.setStatus("sandbox", `[build] ${msg}`),
 			});
 
@@ -297,10 +301,17 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			setSbx({
-				runtime, name: sandboxName, hostCwd: localCwd,
-				keep, mounts: allMounts, allowedExternalPrefixes,
-				resources, imageRef: image, config: cfg,
-				isReusable, isReattached: false,
+				runtime,
+				name: sandboxName,
+				hostCwd: localCwd,
+				keep,
+				mounts: allMounts,
+				allowedExternalPrefixes,
+				resources,
+				imageRef: image,
+				config: cfg,
+				isReusable,
+				isReattached: false,
 			});
 
 			let cleaned = false;
@@ -344,14 +355,19 @@ export default function (pi: ExtensionAPI) {
 			const statusPrefix = "Sandbox up";
 			ctx.ui.setStatus(
 				"sandbox",
-				ctx.ui.theme.fg("accent", `${statusPrefix}: ${actualName} (net=${allowNetwork ? "on" : "off"})${resStr}${allMounts.length ? `, mounts=${allMounts.length}` : ""}`),
+				ctx.ui.theme.fg(
+					"accent",
+					`${statusPrefix}: ${actualName} (net=${allowNetwork ? "on" : "off"})${resStr}${allMounts.length ? `, mounts=${allMounts.length}` : ""}`,
+				),
 			);
 			ctx.ui.notify(
 				[
 					`${statusPrefix}: docker ${actualName}${resStr}${isReusable ? " [re-usable]" : ""}`,
 					ok,
 					skillMounts.length ? `Skills mounted: ${skillMounts.map((m) => m.target).join(", ")}` : "",
-					userMounts.length ? `Extra mounts: ${userMounts.map((m) => `${m.source} → ${m.target} (${m.mode ?? 'ro'})`).join(", ")}` : "",
+					userMounts.length
+						? `Extra mounts: ${userMounts.map((m) => `${m.source} → ${m.target} (${m.mode ?? "ro"})`).join(", ")}`
+						: "",
 					cacheVolume ? `Cache volume: ${cacheVolume} at /cache` : "",
 				]
 					.filter(Boolean)

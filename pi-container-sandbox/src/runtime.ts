@@ -15,7 +15,7 @@ const MAX_EXEC_BUFFER = 16 * 1024 * 1024; // 16MB
 export interface MountSpec {
 	source: string;
 	target: string;
-	mode?: 'ro' | 'rw';
+	mode?: "ro" | "rw";
 }
 
 export interface BuildImageOpts {
@@ -79,6 +79,26 @@ export function deriveContainerName(hostCwd: string): string {
 	const maxBasename = 128 - `pi-sbx--${hash}`.length;
 	const truncated = basename.length > maxBasename ? basename.slice(0, maxBasename) : basename;
 	return `pi-sbx-${truncated}-${hash}`;
+}
+
+export function expandEnvEntry(entry: string, hostCwd: string): string {
+	const eqIdx = entry.indexOf("=");
+	if (eqIdx === -1) return entry;
+	const key = entry.slice(0, eqIdx);
+	const value = entry.slice(eqIdx + 1);
+	try {
+		const expanded = execSync(`bash -c 'echo -n "${value.replace(/'/g, "'\"'\"'")}"'`, {
+			encoding: "utf-8",
+			timeout: 5000,
+			cwd: hostCwd,
+		});
+		return `${key}=${expanded}`;
+	} catch (err) {
+		console.warn(
+			`sandbox: failed to expand env entry "${key}", fallback to raw value: ${err instanceof Error ? err.message : String(err)}`,
+		);
+		return entry;
+	}
 }
 
 type State =
@@ -189,21 +209,7 @@ export class DockerRuntime implements Runtime {
 	}
 
 	private _expandEnv(entries: string[]): string[] {
-		return entries.map((entry) => {
-			const eqIdx = entry.indexOf("=");
-			if (eqIdx === -1) return entry; // 无 = 的非法格式，原样保留
-			const key = entry.slice(0, eqIdx);
-			const value = entry.slice(eqIdx + 1);
-			try {
-				const expanded = execSync(
-					`bash -c 'echo -n "${value.replace(/'/g, "'\"'\"'")}"'`,
-					{ encoding: "utf-8", timeout: 5000, cwd: this.opts.hostCwd },
-				);
-				return `${key}=${expanded}`;
-			} catch {
-				return entry; // 展开失败降级为原始值
-			}
-		});
+		return entries.map((entry) => expandEnvEntry(entry, this.opts.hostCwd));
 	}
 
 	async startContainer(): Promise<void> {
@@ -233,7 +239,7 @@ export class DockerRuntime implements Runtime {
 		const binds: string[] = [`${hostCwd}:${this.workRoot}`];
 		if (extraMounts) {
 			for (const m of extraMounts) {
-				const mode = m.mode === 'rw' ? 'rw' : 'ro';
+				const mode = m.mode === "rw" ? "rw" : "ro";
 				binds.push(`${m.source}:${m.target}:${mode}`);
 			}
 		}
@@ -264,10 +270,7 @@ export class DockerRuntime implements Runtime {
 			Cmd: ["sleep", "infinity"],
 			User: "1000:1000",
 			WorkingDir: this.workRoot,
-			Env: [
-				"DEBIAN_FRONTEND=noninteractive",
-				...this._expandEnv(this.opts.env ?? []),
-			],
+			Env: ["DEBIAN_FRONTEND=noninteractive", ...this._expandEnv(this.opts.env ?? [])],
 			HostConfig,
 			name,
 		});
