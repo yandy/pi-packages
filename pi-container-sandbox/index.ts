@@ -239,6 +239,7 @@ export default function (pi: ExtensionAPI) {
 				resources,
 				extraMounts: allMounts.length ? allMounts : undefined,
 				cacheVolume,
+			env: cfg.runtime.env,
 				onProgress: (msg: string) => ctx.ui.setStatus("sandbox", `[build] ${msg}`),
 			});
 
