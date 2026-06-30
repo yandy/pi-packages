@@ -63,12 +63,16 @@ export class ToolCallGatePipeline {
 		const formatter = new ToolPreviewFormatter(this.inputs.getToolPreviewLimits(), this.customFormatters);
 
 		const infraDirs = this.inputs.getInfrastructureReadDirs();
+		const skillDirs = this.inputs
+			.getActiveSkillEntries()
+			.map((e) => e.normalizedBaseDir)
+			.filter(Boolean);
 
 		const gateProducers: Array<() => GateResult | Promise<GateResult>> = [
 			() => describeSkillReadGate(tcc, () => this.inputs.getActiveSkillEntries()),
 			() => describePathGate(tcc, this.resolver, this.customExtractors),
 			() => describeExternalDirectoryGate(tcc, infraDirs, this.resolver, this.customExtractors),
-			() => describeBashExternalDirectoryGate(tcc, bashProgram, this.resolver),
+			() => describeBashExternalDirectoryGate(tcc, bashProgram, this.resolver, skillDirs),
 			() => describeBashPathGate(tcc, bashProgram, this.resolver),
 			() => {
 				// Bash commands may chain several sub-commands (`a && b`, `a | b`, …);

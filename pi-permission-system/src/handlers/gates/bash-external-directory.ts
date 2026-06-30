@@ -2,6 +2,7 @@ import type { BashProgram } from "../../access-intent/bash/program";
 import type { ScopedPermissionResolver } from "../../permission-resolver";
 import { SessionApproval } from "../../session-approval";
 import { deriveApprovalPattern } from "../../session-rules";
+import { isPathWithinDirectory } from "../../path-utils";
 import { getNonEmptyString, toRecord } from "../../value-guards";
 import type { GateResult } from "./descriptor";
 import { formatBashExternalDirectoryAskPrompt } from "./external-directory-messages";
@@ -21,6 +22,7 @@ export function describeBashExternalDirectoryGate(
 	tcc: ToolCallContext,
 	bashProgram: BashProgram | null,
 	resolver: ScopedPermissionResolver,
+	skillDirs?: readonly string[],
 ): GateResult {
 	if (tcc.toolName !== "bash") return null;
 
@@ -32,12 +34,24 @@ export function describeBashExternalDirectoryGate(
 	const externalPaths = bashProgram.externalPaths();
 	if (externalPaths.length === 0) return null;
 
+	// Filter out paths within skill bundle directories — they are trusted by
+	// virtue of the skill having been loaded.
+	const nonSkillPaths = skillDirs?.length
+		? externalPaths.filter((p) => {
+				const boundary = p.boundaryValue();
+				return !boundary || !skillDirs.some((dir) => isPathWithinDirectory(boundary, dir));
+			})
+		: externalPaths;
+
+	// All external paths are within skill directories — allow silently.
+	if (nonSkillPaths.length === 0) return null;
+
 	// Resolve every external path on the external_directory surface and keep the
 	// ones not already allowed (config-level allows suppress the prompt just as
 	// session-level allows do); the shared helper single-sources the #418 alias
 	// matching and the worst-uncovered selection.
 	const { uncovered: uncoveredEntries, worstCheck } = selectUncoveredExternalPaths(
-		externalPaths,
+		nonSkillPaths,
 		resolver,
 		tcc.agentName ?? undefined,
 	);
