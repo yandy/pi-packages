@@ -96,7 +96,7 @@ describe("saveSbxConfig", () => {
 		expect(loaded.runtime.name).toBe("z");
 		expect(loaded.runtime.tier).toBe("small");
 		expect(loaded.runtime.persist).toBe(true);
-		expect(loaded.runtime.cache).toBe("v");
+		expect(loaded.runtime.cache).toBe(resolvePath(testDir, "v"));
 	});
 
 	it("round-trips: save then load returns same values", () => {
@@ -134,14 +134,15 @@ describe("new runtime fields", () => {
 		expect(cfg.runtime.mounts).toEqual([]);
 	});
 
-	it("expands ~ and ${userHome} in mount source and cache fields", () => {
+	it("expands ~ and resolves relative paths in mount source and cache fields", () => {
 		const configDir = resolvePath(testDir, TEST_CONFIG_DIR);
 		mkdirSync(configDir, { recursive: true });
 		writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify({
 			runtime: {
 				mounts: [
 					{ source: "~/projects", target: "/projects" },
-					{ source: "${userHome}/tools", target: "/tools" },
+					{ source: "./relative-dir", target: "/rel" },
+					{ source: "../parent-dir", target: "/par" },
 					{ source: "/foo", target: "~/keep" },
 				],
 				cache: "~/sandbox-cache",
@@ -152,14 +153,29 @@ describe("new runtime fields", () => {
 		const home = homedir();
 		expect(cfg.runtime.mounts).toEqual([
 			{ source: home + "/projects", target: "/projects" },
-			{ source: home + "/tools", target: "/tools" },
+			{ source: resolvePath(testDir, "./relative-dir"), target: "/rel" },
+			{ source: resolvePath(testDir, "../parent-dir"), target: "/par" },
 			{ source: "/foo", target: "~/keep" },
 		]);
 		expect(cfg.runtime.cache).toBe(home + "/sandbox-cache");
 
 		// Verify target containing ~ is NOT expanded
-		expect(cfg.runtime.mounts[2].source).toBe("/foo");
-		expect(cfg.runtime.mounts[2].target).toBe("~/keep");
+		expect(cfg.runtime.mounts[3].source).toBe("/foo");
+		expect(cfg.runtime.mounts[3].target).toBe("~/keep");
+	});
+
+	it("${userHome} is no longer special — treated as relative path", () => {
+		const configDir = resolvePath(testDir, TEST_CONFIG_DIR);
+		mkdirSync(configDir, { recursive: true });
+		writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify({
+			runtime: {
+				mounts: [{ source: "${userHome}/tools", target: "/tools" }],
+				cache: "${userHome}/cache",
+			},
+		}));
+		const cfg = loadSbxConfig(testDir);
+		expect(cfg.runtime.mounts[0].source).toBe(resolvePath(testDir, "${userHome}/tools"));
+		expect(cfg.runtime.cache).toBe(resolvePath(testDir, "${userHome}/cache"));
 	});
 
 	it("parses env array from runtime group", () => {
