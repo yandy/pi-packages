@@ -289,6 +289,11 @@ describe("expandPath", () => {
 		expect(expandPath("~/data/projects")).toBe(homedir() + "/data/projects");
 	});
 
+	it("~ takes precedence over cwd — cwd is ignored for ~ paths", () => {
+		expect(expandPath("~/data", "/other/cwd")).toBe(homedir() + "/data");
+		expect(expandPath("~", "/other/cwd")).toBe(homedir());
+	});
+
 	it("does not expand ~otheruser", () => {
 		expect(expandPath("~otheruser/stuff")).toBe("~otheruser/stuff");
 	});
