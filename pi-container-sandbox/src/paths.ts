@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { resolve as resolvePath } from "node:path";
 import type { MountSpec } from "./runtime";
 
-export const REMOTE_ROOT = "/workspace";
+export const CONTAINER_ROOT = "/workspace";
 export const SKILLS_ROOT = "/skills";
 
 export function toContainerPath(
@@ -11,7 +11,7 @@ export function toContainerPath(
 	hostCwd: string,
 	mounts: MountSpec[],
 ): { ok: true; path: string } | { ok: false; reason: string } {
-	if (hostPath.startsWith(`${REMOTE_ROOT}/`) || hostPath === REMOTE_ROOT) {
+	if (hostPath.startsWith(`${CONTAINER_ROOT}/`) || hostPath === CONTAINER_ROOT) {
 		return { ok: true, path: hostPath };
 	}
 	if (hostPath.startsWith(`${SKILLS_ROOT}/`) || hostPath === SKILLS_ROOT) {
@@ -22,7 +22,7 @@ export function toContainerPath(
 
 	if (abs === hostCwd || abs.startsWith(`${hostCwd}/`)) {
 		const rel = abs === hostCwd ? "" : abs.slice(hostCwd.length + 1);
-		return { ok: true, path: rel ? `${REMOTE_ROOT}/${rel}` : REMOTE_ROOT };
+		return { ok: true, path: rel ? `${CONTAINER_ROOT}/${rel}` : CONTAINER_ROOT };
 	}
 
 	for (const m of mounts) {
@@ -48,8 +48,8 @@ export function resolveExtraMountPath(containerPath: string, mounts: MountSpec[]
 	return null;
 }
 
-export function hostToRemote(hostPath: string, hostCwd: string, mounts?: MountSpec[]): string {
-	if (hostPath === REMOTE_ROOT || hostPath.startsWith(`${REMOTE_ROOT}/`)) {
+export function hostToContainer(hostPath: string, hostCwd: string, mounts?: MountSpec[]): string {
+	if (hostPath === CONTAINER_ROOT || hostPath.startsWith(`${CONTAINER_ROOT}/`)) {
 		return hostPath;
 	}
 	if (mounts) {
@@ -61,16 +61,16 @@ export function hostToRemote(hostPath: string, hostCwd: string, mounts?: MountSp
 		throw new Error(`sandbox: refusing to access ${abs}: outside of project cwd ${hostCwd}`);
 	}
 	const rel = abs === hostCwd ? "" : abs.slice(hostCwd.length + 1);
-	return rel ? `${REMOTE_ROOT}/${rel}` : REMOTE_ROOT;
+	return rel ? `${CONTAINER_ROOT}/${rel}` : CONTAINER_ROOT;
 }
 
-export function remoteToHost(containerPath: string, hostCwd: string, mounts: MountSpec[]): string {
-	if (!containerPath.startsWith(REMOTE_ROOT) && !containerPath.startsWith(SKILLS_ROOT)) {
+export function containerToHost(containerPath: string, hostCwd: string, mounts: MountSpec[]): string {
+	if (!containerPath.startsWith(CONTAINER_ROOT) && !containerPath.startsWith(SKILLS_ROOT)) {
 		return containerPath;
 	}
-	if (containerPath === REMOTE_ROOT) return hostCwd;
-	if (containerPath.startsWith(`${REMOTE_ROOT}/`)) {
-		return resolvePath(hostCwd, containerPath.slice(REMOTE_ROOT.length + 1));
+	if (containerPath === CONTAINER_ROOT) return hostCwd;
+	if (containerPath.startsWith(`${CONTAINER_ROOT}/`)) {
+		return resolvePath(hostCwd, containerPath.slice(CONTAINER_ROOT.length + 1));
 	}
 	for (const m of mounts) {
 		if (containerPath === m.target) return m.source;
@@ -101,7 +101,7 @@ export function isAllowedExternalResource(hostPath: string, allowedPrefixes: str
 }
 
 export function isInsideCwd(hostPath: string, hostCwd: string): boolean {
-	if (hostPath === REMOTE_ROOT || hostPath.startsWith(`${REMOTE_ROOT}/`)) return true;
+	if (hostPath === CONTAINER_ROOT || hostPath.startsWith(`${CONTAINER_ROOT}/`)) return true;
 	const abs = resolvePath(hostCwd, hostPath);
 	return abs === hostCwd || abs.startsWith(`${hostCwd}/`);
 }

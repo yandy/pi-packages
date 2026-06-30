@@ -12,7 +12,7 @@ import {
 	createEditOps,
 	createHostBashOps,
 	createReadOps,
-	createRemoteBashOps,
+	createContainerBashOps,
 	createWriteOps,
 	execCapture,
 	extractCommandName,
@@ -22,7 +22,7 @@ import {
 	getExternalPath,
 	isAllowedExternalResource,
 	PathApprovalStore,
-	REMOTE_ROOT,
+	CONTAINER_ROOT,
 } from "./src/paths";
 import { DockerRuntime, deriveContainerName, type MountSpec } from "./src/runtime";
 import { clearSbx, getSbx, type SbxSession, setSbx } from "./src/session";
@@ -123,7 +123,7 @@ export default function (pi: ExtensionAPI) {
 				return hostBashTool.execute(id, params, signal, onUpdate);
 			}
 
-			const tool = createBashTool(localCwd, { operations: createRemoteBashOps(sbx) });
+			const tool = createBashTool(localCwd, { operations: createContainerBashOps(sbx) });
 			return tool.execute(id, params, signal, onUpdate);
 		},
 	});
@@ -131,7 +131,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("user_bash", () => {
 		const sbx = getSbx();
 		if (!sbx) return;
-		return { operations: createRemoteBashOps(sbx) };
+		return { operations: createContainerBashOps(sbx) };
 	});
 
 	pi.on("before_agent_start", async (event) => {
@@ -156,8 +156,7 @@ export default function (pi: ExtensionAPI) {
 					`  ${hostCommands.join(", ")}`,
 					"",
 					`When using these commands, prefer relative paths (e.g. \`src/foo.ts\`)`,
-					`rather than absolute /workspace paths, because they execute outside the`,
-					`container where /workspace does not exist.`,
+					`rather than absolute ${CONTAINER_ROOT} paths, because they execute outside the container where ${CONTAINER_ROOT} does not exist.`,
 				].join("\n")
 			: "";
 
@@ -165,7 +164,7 @@ export default function (pi: ExtensionAPI) {
 			systemPrompt: event.systemPrompt.replace(
 				/Current working directory:\s*\S+/,
 				[
-					`Current working directory: ${REMOTE_ROOT} (sandboxed in docker container ${sbx.name}, host cwd ${localCwd} mounted read-write)`,
+					`Current working directory: ${CONTAINER_ROOT} (sandboxed in docker container ${sbx.name}, host cwd ${localCwd} mounted read-write)`,
 					skillInfo,
 					hostCmdHint,
 				]
