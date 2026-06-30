@@ -1,4 +1,12 @@
-# runtime.mounts 路径展开（~ / ${userHome}）
+# runtime.mounts 路径展开（~ / 相对路径）
+
+> **⚠ 2026-06-30 更新：** 此设计文档记录原始设计。当前实际行为已变更：
+> - ✅ `~` 展开仍保留
+> - ❌ `${userHome}` 支持已移除（不再展开，作为普通相对路径处理）
+> - ✅ **新增**：`source` 和 `cache` 支持相对路径（基于 `hostCwd` 解析）
+> - `expandPath(raw)` → `expandPath(raw, cwd?)`，`cwd` 为可选参数
+>
+> 详见 commit `82f2664`。
 
 ## 背景
 
