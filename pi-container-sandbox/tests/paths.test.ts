@@ -279,6 +279,8 @@ describe("PathApprovalStore merge-on-conflict", () => {
 });
 
 describe("expandPath", () => {
+	const cwd = "/home/user/project";
+
 	it("expands ~ to homedir", () => {
 		expect(expandPath("~")).toBe(homedir());
 	});
@@ -287,8 +289,9 @@ describe("expandPath", () => {
 		expect(expandPath("~/data/projects")).toBe(homedir() + "/data/projects");
 	});
 
-	it("expands ${userHome} placeholder", () => {
-		expect(expandPath("${userHome}/data")).toBe(homedir() + "/data");
+	it("~ takes precedence over cwd — cwd is ignored for ~ paths", () => {
+		expect(expandPath("~/data", "/other/cwd")).toBe(homedir() + "/data");
+		expect(expandPath("~", "/other/cwd")).toBe(homedir());
 	});
 
 	it("does not expand ~otheruser", () => {
@@ -299,10 +302,29 @@ describe("expandPath", () => {
 		expect(expandPath("/absolute/path")).toBe("/absolute/path");
 	});
 
-	it("handles multiple ${userHome} occurrences", () => {
-		expect(expandPath("${userHome}/a/${userHome}/b")).toBe(
-			homedir() + "/a/" + homedir() + "/b",
-		);
+	it("resolves relative path against cwd", () => {
+		expect(expandPath("./relative/dir", cwd)).toBe("/home/user/project/relative/dir");
+	});
+
+	it("resolves ../parent against cwd", () => {
+		expect(expandPath("../sibling", cwd)).toBe("/home/user/sibling");
+	});
+
+	it("resolves plain relative path (no ./) against cwd", () => {
+		expect(expandPath("foo/bar", cwd)).toBe("/home/user/project/foo/bar");
+	});
+
+	it("returns relative path as-is when cwd is not provided", () => {
+		expect(expandPath("./cache")).toBe("./cache");
+		expect(expandPath("../cache")).toBe("../cache");
+	});
+
+	it("does NOT expand ${userHome} — treat as literal", () => {
+		expect(expandPath("${userHome}/data")).toBe("${userHome}/data");
+	});
+
+	it("${userHome} with cwd resolves as relative path", () => {
+		expect(expandPath("${userHome}/data", cwd)).toBe("/home/user/project/${userHome}/data");
 	});
 
 	it("does not expand ${userhome} (case-sensitive)", () => {

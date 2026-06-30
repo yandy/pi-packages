@@ -294,13 +294,15 @@ ${absPath}`,
 	return true;
 }
 
-export function expandPath(raw: string): string {
+export function expandPath(raw: string, cwd?: string): string {
 	const home = homedir();
 	let result = raw;
 	if (result === '~' || result.startsWith('~/')) {
 		result = home + result.slice(1);
 	}
-	result = result.replace(/\$\{userHome\}/g, () => home);
+	if (cwd && !result.startsWith('/')) {
+		result = resolvePath(cwd, result);
+	}
 	return result;
 }
 

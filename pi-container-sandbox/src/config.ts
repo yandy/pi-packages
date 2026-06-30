@@ -94,13 +94,13 @@ export function loadSbxConfig(hostCwd: string): SbxConfig {
 		),
 	};
 
-	// Expand ~ and ${userHome} in mount source and cache paths
+	// Expand ~ and resolve relative paths in mount source and cache
 	config.runtime.mounts = config.runtime.mounts.map((m) => ({
 		...m,
-		source: expandPath(m.source),
+		source: expandPath(m.source, hostCwd),
 	}));
 	if (config.runtime.cache) {
-		config.runtime.cache = expandPath(config.runtime.cache);
+		config.runtime.cache = expandPath(config.runtime.cache, hostCwd);
 	}
 
 	return config;
