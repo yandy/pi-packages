@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { execSync } from "node:child_process";
 import Dockerode from "dockerode";
 import { PACKAGE_DOCKER_DIR } from "./config";
 
@@ -38,6 +39,7 @@ export interface SandboxOptions {
 	extraMounts?: MountSpec[];
 	cacheVolume?: string;
 	onProgress?: (msg: string) => void;
+	env?: string[];
 }
 
 export interface ExecOpts {
@@ -186,6 +188,24 @@ export class DockerRuntime implements Runtime {
 		return this.opts.image;
 	}
 
+	private _expandEnv(entries: string[]): string[] {
+		return entries.map((entry) => {
+			const eqIdx = entry.indexOf("=");
+			if (eqIdx === -1) return entry; // 无 = 的非法格式，原样保留
+			const key = entry.slice(0, eqIdx);
+			const value = entry.slice(eqIdx + 1);
+			try {
+				const expanded = execSync(
+					`bash -c 'echo -n "${value.replace(/'/g, "'\"'\"'")}"'`,
+					{ encoding: "utf-8", timeout: 5000, cwd: this.opts.hostCwd },
+				);
+				return `${key}=${expanded}`;
+			} catch {
+				return entry; // 展开失败降级为原始值
+			}
+		});
+	}
+
 	async startContainer(): Promise<void> {
 		const docker = this._requireDocker();
 		const { hostCwd, name, allowNetwork, extraMounts, resources, cacheVolume, image } = this.opts;
@@ -244,7 +264,10 @@ export class DockerRuntime implements Runtime {
 			Cmd: ["sleep", "infinity"],
 			User: "1000:1000",
 			WorkingDir: this.workRoot,
-			Env: ["DEBIAN_FRONTEND=noninteractive"],
+			Env: [
+				"DEBIAN_FRONTEND=noninteractive",
+				...this._expandEnv(this.opts.env ?? []),
+			],
 			HostConfig,
 			name,
 		});
