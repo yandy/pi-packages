@@ -119,6 +119,7 @@ Configuration is read from two locations. Project config overrides global config
 | `pidsLimit` | number \| null | `null` | `1024` | PID limit |
 | `cache` | string \| null | `null` | `"sbx-cache"` | Cache volume name |
 | `mounts` | MountConfig[] | `[]` | `[{ "source": "/data/projects", "target": "/projects" }]` | Host→container path mappings with optional ro/rw mode |
+| `env` | `string[]` | `[]` | `["TOKEN=$(cat /path/to/file)"]` | Environment variables injected into the container in `"KEY=VALUE"` format. Values support shell command substitution (e.g. `"TOKEN=$(cat /path/to/file)"`), expanded on the host before passing to Docker. Falls back to literal value on expansion failure |
 
 #### host group
 | Field | Type | Default | Example | Description |

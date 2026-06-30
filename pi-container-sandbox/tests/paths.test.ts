@@ -5,12 +5,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	expandPath,
 	getExternalPath,
-	hostToRemote,
+	hostToContainer,
 	isAllowedExternalResource,
 	isInsideCwd,
 	isReadOnlyMount,
 	PathApprovalStore,
-	remoteToHost,
+	containerToHost,
 	requestPathApproval,
 	resolveExtraMountPath,
 	shq,
@@ -37,22 +37,22 @@ describe("shq", () => {
 	});
 });
 
-describe("toRemote", () => {
+describe("hostToContainer", () => {
 	it("converts relative path inside cwd to /workspace path", () => {
-		expect(hostToRemote("src/index.ts", testDir)).toBe("/workspace/src/index.ts");
+		expect(hostToContainer("src/index.ts", testDir)).toBe("/workspace/src/index.ts");
 	});
 	it("returns /workspace for cwd itself", () => {
-		expect(hostToRemote(".", testDir)).toBe("/workspace");
+		expect(hostToContainer(".", testDir)).toBe("/workspace");
 	});
 	it("passes through paths already under /workspace", () => {
-		expect(hostToRemote("/workspace/src/file.ts", testDir)).toBe("/workspace/src/file.ts");
+		expect(hostToContainer("/workspace/src/file.ts", testDir)).toBe("/workspace/src/file.ts");
 	});
 	it("throws for paths outside cwd", () => {
-		expect(() => hostToRemote("/etc/passwd", testDir)).toThrow("outside of project cwd");
+		expect(() => hostToContainer("/etc/passwd", testDir)).toThrow("outside of project cwd");
 	});
 	it("passes through paths under a mount target", () => {
 		const mounts = [{ source: "/host/skills", target: "/skills/my-skill" }];
-		expect(hostToRemote("/skills/my-skill/SKILL.md", testDir, mounts)).toBe("/skills/my-skill/SKILL.md");
+		expect(hostToContainer("/skills/my-skill/SKILL.md", testDir, mounts)).toBe("/skills/my-skill/SKILL.md");
 	});
 });
 
@@ -204,37 +204,37 @@ describe("toContainerPath", () => {
 	});
 });
 
-describe("remoteToHost", () => {
+describe("containerToHost", () => {
 	const testHostCwd = "/home/user/project";
 
 	it("maps /workspace to hostCwd", () => {
-		expect(remoteToHost("/workspace", testHostCwd, [])).toBe("/home/user/project");
+		expect(containerToHost("/workspace", testHostCwd, [])).toBe("/home/user/project");
 	});
 
 	it("maps /workspace/src/foo to hostCwd/src/foo", () => {
-		expect(remoteToHost("/workspace/src/foo.ts", testHostCwd, [])).toBe("/home/user/project/src/foo.ts");
+		expect(containerToHost("/workspace/src/foo.ts", testHostCwd, [])).toBe("/home/user/project/src/foo.ts");
 	});
 
 	it("passes through non-container absolute paths unchanged", () => {
-		expect(remoteToHost("/home/user/project/src/foo.ts", testHostCwd, [])).toBe("/home/user/project/src/foo.ts");
+		expect(containerToHost("/home/user/project/src/foo.ts", testHostCwd, [])).toBe("/home/user/project/src/foo.ts");
 	});
 
 	it("passes through relative paths unchanged", () => {
-		expect(remoteToHost("src/foo.ts", testHostCwd, [])).toBe("src/foo.ts");
+		expect(containerToHost("src/foo.ts", testHostCwd, [])).toBe("src/foo.ts");
 	});
 
 	it("maps /skills/<name>/... to mount source", () => {
 		const mounts = [{ source: "/opt/skills/my-skill", target: "/skills/my-skill" }];
-		expect(remoteToHost("/skills/my-skill/SKILL.md", testHostCwd, mounts)).toBe("/opt/skills/my-skill/SKILL.md");
+		expect(containerToHost("/skills/my-skill/SKILL.md", testHostCwd, mounts)).toBe("/opt/skills/my-skill/SKILL.md");
 	});
 
 	it("maps /skills/<name> to mount source root", () => {
 		const mounts = [{ source: "/opt/skills/my-skill", target: "/skills/my-skill" }];
-		expect(remoteToHost("/skills/my-skill", testHostCwd, mounts)).toBe("/opt/skills/my-skill");
+		expect(containerToHost("/skills/my-skill", testHostCwd, mounts)).toBe("/opt/skills/my-skill");
 	});
 
 	it("throws for unmapped /skills path", () => {
-		expect(() => remoteToHost("/skills/unknown/file", "/home/user", [])).toThrow("Cannot map container path");
+		expect(() => containerToHost("/skills/unknown/file", "/home/user", [])).toThrow("Cannot map container path");
 	});
 });
 

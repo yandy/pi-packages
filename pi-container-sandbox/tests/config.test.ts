@@ -161,6 +161,21 @@ describe("new runtime fields", () => {
 		expect(cfg.runtime.mounts[2].source).toBe("/foo");
 		expect(cfg.runtime.mounts[2].target).toBe("~/keep");
 	});
+
+	it("parses env array from runtime group", () => {
+		const configDir = resolvePath(testDir, TEST_CONFIG_DIR);
+		mkdirSync(configDir, { recursive: true });
+		writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify({
+			runtime: { env: ["NODE_ENV=production", "DEBUG=app:*"] },
+		}));
+		const cfg = loadSbxConfig(testDir);
+		expect(cfg.runtime.env).toEqual(["NODE_ENV=production", "DEBUG=app:*"]);
+	});
+
+	it("env defaults to empty array when not configured", () => {
+		const cfg = loadSbxConfig(testDir);
+		expect(cfg.runtime.env).toEqual([]);
+	});
 });
 
 describe("host group", () => {

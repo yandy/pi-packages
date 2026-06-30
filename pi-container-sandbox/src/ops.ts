@@ -2,7 +2,7 @@ import { readFileSync, statSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import type { BashOperations, EditOperations, ReadOperations, WriteOperations } from "@earendil-works/pi-coding-agent";
 import { createLocalBashOperations } from "@earendil-works/pi-coding-agent";
-import { hostToRemote, isAllowedExternalResource, isInsideCwd, isReadOnlyMount, remoteToHost, shq } from "./paths";
+import { hostToContainer, isAllowedExternalResource, isInsideCwd, isReadOnlyMount, containerToHost, shq } from "./paths";
 import type { MountSpec, Runtime } from "./runtime";
 
 export interface SbxHandle {
@@ -50,7 +50,7 @@ export function createReadOps(sbx: SbxHandle): ReadOperations {
 		readFile: (p) => {
 			const ext = tryExternal(p);
 			if (ext.external) return Promise.resolve(readFileSync(ext.abs));
-			return execCapture(sbx, `cat ${shq(hostToRemote(p, sbx.hostCwd, sbx.mounts))}`);
+			return execCapture(sbx, `cat ${shq(hostToContainer(p, sbx.hostCwd, sbx.mounts))}`);
 		},
 		access: (p) => {
 			const ext = tryExternal(p);
@@ -62,7 +62,7 @@ export function createReadOps(sbx: SbxHandle): ReadOperations {
 					return Promise.reject(e);
 				}
 			}
-			return execCapture(sbx, `test -r ${shq(hostToRemote(p, sbx.hostCwd, sbx.mounts))}`).then(() => {});
+			return execCapture(sbx, `test -r ${shq(hostToContainer(p, sbx.hostCwd, sbx.mounts))}`).then(() => {});
 		},
 		detectImageMimeType: async (p) => {
 			const ext = tryExternal(p);
@@ -78,7 +78,7 @@ export function createReadOps(sbx: SbxHandle): ReadOperations {
 				return map[ext2lower] || null;
 			}
 			try {
-				const r = await execCapture(sbx, `file --mime-type -b ${shq(hostToRemote(p, sbx.hostCwd, sbx.mounts))}`);
+				const r = await execCapture(sbx, `file --mime-type -b ${shq(hostToContainer(p, sbx.hostCwd, sbx.mounts))}`);
 				const m = r.toString().trim();
 				return ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(m) ? m : null;
 			} catch {
@@ -91,22 +91,22 @@ export function createReadOps(sbx: SbxHandle): ReadOperations {
 export function createWriteOps(sbx: SbxHandle): WriteOperations {
 	return {
 		writeFile: async (p, content) => {
-			const remote = hostToRemote(p, sbx.hostCwd, sbx.mounts);
-			if (isReadOnlyMount(remote, sbx.mounts)) {
-				throw new Error(`sandbox: refusing to write to ${remote}: read-only skill mount`);
+			const containerPath = hostToContainer(p, sbx.hostCwd, sbx.mounts);
+			if (isReadOnlyMount(containerPath, sbx.mounts)) {
+				throw new Error(`sandbox: refusing to write to ${containerPath}: read-only skill mount`);
 			}
-			const parentDir = remote.split("/").slice(0, -1).join("/") || "/";
+			const parentDir = containerPath.split("/").slice(0, -1).join("/") || "/";
 			await execCapture(sbx, `mkdir -p ${shq(parentDir)}`);
 			const buf = typeof content === "string" ? Buffer.from(content) : Buffer.from(content);
 			const b64 = buf.toString("base64");
-			await execCapture(sbx, `printf %s ${shq(b64)} | base64 -d > ${shq(remote)}`);
+			await execCapture(sbx, `printf %s ${shq(b64)} | base64 -d > ${shq(containerPath)}`);
 		},
 		mkdir: async (dir) => {
-			const remote = hostToRemote(dir, sbx.hostCwd, sbx.mounts);
-			if (isReadOnlyMount(remote, sbx.mounts)) {
-				throw new Error(`sandbox: refusing to mkdir in ${remote}: read-only skill mount`);
+			const containerPath = hostToContainer(dir, sbx.hostCwd, sbx.mounts);
+			if (isReadOnlyMount(containerPath, sbx.mounts)) {
+				throw new Error(`sandbox: refusing to mkdir in ${containerPath}: read-only skill mount`);
 			}
-			await execCapture(sbx, `mkdir -p ${shq(remote)}`);
+			await execCapture(sbx, `mkdir -p ${shq(containerPath)}`);
 		},
 	};
 }
@@ -143,22 +143,22 @@ export function extractCommandName(command: string): string | null {
 }
 
 export function createHostBashOps(hostCwd: string, mounts: MountSpec[]): BashOperations {
-	const local = createLocalBashOperations();
+	const hostBash = createLocalBashOperations();
 	return {
 		exec: (command, cwd, opts) => {
-			const mappedCwd = remoteToHost(cwd, hostCwd, mounts);
-			return local.exec(command, mappedCwd, opts);
+			const mappedCwd = containerToHost(cwd, hostCwd, mounts);
+			return hostBash.exec(command, mappedCwd, opts);
 		},
 	};
 }
 
-export function createRemoteBashOps(sbx: SbxHandle): BashOperations {
+export function createContainerBashOps(sbx: SbxHandle): BashOperations {
 	return {
 		exec: (command, cwd, opts) => {
-			const remoteCwd = hostToRemote(cwd, sbx.hostCwd, sbx.mounts);
+			const containerCwd = hostToContainer(cwd, sbx.hostCwd, sbx.mounts);
 			return execStream(
 				sbx,
-				`cd ${shq(remoteCwd)} && ${command}`,
+				`cd ${shq(containerCwd)} && ${command}`,
 				opts as { onData: (b: Buffer) => void; signal?: AbortSignal; timeout?: number },
 			);
 		},

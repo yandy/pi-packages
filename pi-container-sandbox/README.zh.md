@@ -114,6 +114,7 @@ agent skill 目录以 **只读** 方式挂载到 `/skills/`。
 | `pidsLimit` | number \| null | `null` | `1024` | PID 限制 |
 | `cache` | string \| null | `null` | `"sbx-cache"` | 缓存卷名 |
 | `mounts` | MountConfig[] | `[]` | `[{ "source": "/data/projects", "target": "/projects" }]` | 宿主机→容器路径映射，可选 ro/rw 模式 |
+| `env` | `string[]` | `[]` | `["TOKEN=$(cat /path/to/file)"]` | 注入容器的环境变量，格式 `"KEY=VALUE"`。值支持 shell 命令替换（如 `"TOKEN=$(cat /path/to/file)"`），在宿主机上展开后传入容器。展开失败时降级为原始字面值 |
 
 #### host 组
 | 字段 | 类型 | 默认值 | 示例 | 说明 |
