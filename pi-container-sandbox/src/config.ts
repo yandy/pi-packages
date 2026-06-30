@@ -27,6 +27,7 @@ export interface RuntimeConfig {
 	pidsLimit: number | null;
 	cache: string | null;
 	mounts: MountConfig[];
+	env?: string[];
 }
 
 export interface HostConfig {
@@ -44,7 +45,7 @@ export const DEFAULT_SBX_CONFIG: SbxConfig = {
 	runtime: {
 		name: null, tier: "medium", network: true, persist: false,
 		memory: null, cpus: null, swap: null, pidsLimit: null,
-		cache: null, mounts: [],
+		cache: null, mounts: [], env: [],
 	},
 	host: { commands: [] },
 };
