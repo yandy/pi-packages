@@ -48,10 +48,14 @@ function intentValues(intent: AccessIntent): readonly string[] {
  * shared `BashProgram` and inject it, exactly as `permission-gate-handler.ts`
  * does, so the gate is exercised through the production wiring.
  */
-async function describeGate(tcc: ToolCallContext, resolver: ScopedPermissionResolver): Promise<GateResult> {
+async function describeGate(
+	tcc: ToolCallContext,
+	resolver: ScopedPermissionResolver,
+	skillDirs?: readonly string[],
+): Promise<GateResult> {
 	const command = getNonEmptyString(toRecord(tcc.input).command);
 	const bashProgram = tcc.toolName === "bash" && command ? await BashProgram.parse(command, tcc.cwd) : null;
-	return describeBashExternalDirectoryGate(tcc, bashProgram, resolver);
+	return describeBashExternalDirectoryGate(tcc, bashProgram, resolver, skillDirs);
 }
 
 // ── tests ──────────────────────────────────────────────────────────────────
@@ -220,5 +224,41 @@ describe("describeBashExternalDirectoryGate", () => {
 		expect(desc.sessionApproval).toBeDefined();
 		if (!desc.sessionApproval) return;
 		expect(desc.sessionApproval.patterns.length).toBe(1);
+	});
+
+	it("returns null when all external paths are within skill directories", async () => {
+		const skillDirs = ["/home/.pi/agent-code/git/github.com/yandy/superpowers/skills/sdd"];
+		const result = await describeGate(
+			makeTcc({
+				input: { command: "bash /home/.pi/agent-code/git/github.com/yandy/superpowers/skills/sdd/scripts/review-package abc123 HEAD" },
+			}),
+			makeResolver(makeCheckResult("ask")),
+			skillDirs,
+		);
+		expect(result).toBeNull();
+	});
+
+	it("filters skill paths, returns descriptor for remaining external paths", async () => {
+		const skillDirs = ["/home/.pi/agent-code/git/github.com/yandy/superpowers/skills/sdd"];
+		const result = await describeGate(
+			makeTcc({
+				input: { command: "diff /home/.pi/agent-code/git/github.com/yandy/superpowers/skills/sdd/scripts/task-brief /etc/hosts" },
+			}),
+			makeResolver(makeCheckResult("ask")),
+			skillDirs,
+		);
+		expect(isGateDescriptor(result)).toBe(true);
+		const desc = result as GateDescriptor;
+		expect(desc.denialContext).toMatchObject({
+			kind: "bash_external_directory",
+		});
+	});
+
+	it("behaves identically when skillDirs is not passed (backward compat)", async () => {
+		const result = await describeGate(
+			makeTcc({ input: { command: "cat /outside/file.ts" } }),
+			makeResolver(makeCheckResult("ask")),
+		);
+		expect(isGateDescriptor(result)).toBe(true);
 	});
 });

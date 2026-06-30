@@ -2,6 +2,7 @@ import type { BashProgram } from "../../access-intent/bash/program";
 import type { ScopedPermissionResolver } from "../../permission-resolver";
 import { SessionApproval } from "../../session-approval";
 import { deriveApprovalPattern } from "../../session-rules";
+import { isPathWithinDirectory } from "../../path-utils";
 import { getNonEmptyString, toRecord } from "../../value-guards";
 import type { GateResult } from "./descriptor";
 import { formatBashExternalDirectoryAskPrompt } from "./external-directory-messages";
@@ -21,6 +22,7 @@ export function describeBashExternalDirectoryGate(
 	tcc: ToolCallContext,
 	bashProgram: BashProgram | null,
 	resolver: ScopedPermissionResolver,
+	skillDirs?: readonly string[],
 ): GateResult {
 	if (tcc.toolName !== "bash") return null;
 
