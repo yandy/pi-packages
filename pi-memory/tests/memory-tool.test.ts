@@ -82,4 +82,18 @@ describe("doRemove", () => {
 		expect(mem).not.toContain("[B]");
 		expect(mem).toContain("[A]");
 	});
+	it("removes topic file and index line when content removal empties the file", async () => {
+		// Set up a topic file with plain content (no frontmatter) so that
+		// removing the only content leaves the file fully empty.
+		await writeFile(join(dir, "single.md"), "only note here", "utf8");
+		await writeFile(join(dir, "MEMORY.md"), "- [Single](single.md) \u2014 single desc\n", "utf8");
+		const res = await doRemove(dir, { old_text: "only note here", topic: "single.md" });
+		expect(res.ok).toBe(true);
+		// topic file should no longer exist
+		await expect(readFile(join(dir, "single.md"), "utf8")).rejects.toThrow();
+		// MEMORY.md should no longer reference single.md
+		const mem = await readFile(join(dir, "MEMORY.md"), "utf8");
+		expect(mem).not.toContain("single.md");
+		expect(mem).not.toContain("[Single]");
+	});
 });

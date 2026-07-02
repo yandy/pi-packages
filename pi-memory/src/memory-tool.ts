@@ -1,5 +1,4 @@
 import { readFile, writeFile, mkdir, readdir, unlink } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { parseIndex, serializeIndex, upsertEntry, checkCapacity, type IndexEntry } from "./index-file";
@@ -77,6 +76,9 @@ async function findMatches(memoryDir: string, old_text: string, topic?: string):
 }
 
 export async function doReplace(memoryDir: string, p: ReplaceParams): Promise<ActionResult> {
+	if (p.topic) {
+		try { safeTopicPath(memoryDir, p.topic); } catch { return { ok: false, error: "Unsafe topic path" }; }
+	}
 	const sites = await findMatches(memoryDir, p.old_text, p.topic);
 	if (sites.length === 0) return { ok: false, error: `No match for old_text` };
 	if (sites.length > 1) return { ok: false, error: `Multiple matches (${sites.length}); specify topic. Sites: ${sites.map((s) => s.file).join(", ")}` };
@@ -96,6 +98,7 @@ export async function doRemove(memoryDir: string, p: RemoveParams): Promise<Acti
 	// that topic file plus the index.
 	let sites: MatchSite[];
 	if (p.topic) {
+		try { safeTopicPath(memoryDir, p.topic); } catch { return { ok: false, error: "Unsafe topic path" }; }
 		sites = await findMatches(memoryDir, p.old_text, p.topic);
 	} else {
 		const idxRaw = await readFile(join(memoryDir, MEMORY_MD), "utf8").catch(() => "");
@@ -131,7 +134,7 @@ export async function doRemove(memoryDir: string, p: RemoveParams): Promise<Acti
 
 // search memory scope — implemented fully in Task 9
 export async function searchMemory(memoryDir: string, query: string): Promise<string> {
-	const files = (await readdir(memoryDir).catch(() => [])).filter((f) => f.endsWith(".md"));
+	const files = (await readdir(memoryDir).catch(() => [])).filter((f) => f.endsWith(".md") && f !== MEMORY_MD);
 	const q = query.toLowerCase();
 	const hits: string[] = [];
 	for (const f of files) {
