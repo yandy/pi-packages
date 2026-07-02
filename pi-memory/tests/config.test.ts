@@ -1,5 +1,5 @@
 import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { DEFAULT_CONFIG, loadConfig } from "../src/config";
@@ -37,6 +37,13 @@ describe("loadConfig", () => {
 		expect(cfg.memIndexMaxLines).toBe(100);
 		expect(cfg.memIndexMaxBytes).toBe(25600); // unchanged default
 	});
+	it("nested deep-merge preserves sibling fields when one nested field is overridden", async () => {
+		await writeFile(join(globalDir, "pi-memory.json"), JSON.stringify({ dream: { model: "deepseek/deepseek-v4-flash" } }));
+		const cfg = await loadConfig({ cwd: projectDir, isProjectTrusted: () => true, _globalDir: globalDir, _configDirName: ".pi" });
+		expect(cfg.dream.model).toBe("deepseek/deepseek-v4-flash");
+		expect(cfg.dream.nudgeAfterSessions).toBe(5);
+		expect(cfg.dream.nudgeAfterHours).toBe(24);
+	});
 	it("project overrides global", async () => {
 		await writeFile(join(globalDir, "pi-memory.json"), JSON.stringify({ memIndexMaxLines: 100 }));
 		await mkdir(join(projectDir, ".pi"), { recursive: true });
@@ -54,5 +61,16 @@ describe("loadConfig", () => {
 		await writeFile(join(globalDir, "pi-memory.json"), JSON.stringify({ memoryDir: "~/mymem" }));
 		const cfg = await loadConfig({ cwd: projectDir, isProjectTrusted: () => true, _globalDir: globalDir, _configDirName: ".pi" });
 		expect(cfg.memoryDir).not.toContain("~");
+	});
+	it("handles malformed JSON gracefully", async () => {
+		await writeFile(join(globalDir, "pi-memory.json"), "this is not json");
+		const cfg = await loadConfig({ cwd: projectDir, isProjectTrusted: () => true, _globalDir: globalDir, _configDirName: ".pi" });
+		expect(cfg.enabled).toBe(true);
+		expect(cfg.memIndexMaxLines).toBe(200);
+	});
+	it("expands bare ~ to homedir", async () => {
+		await writeFile(join(globalDir, "pi-memory.json"), JSON.stringify({ memoryDir: "~" }));
+		const cfg = await loadConfig({ cwd: projectDir, isProjectTrusted: () => true, _globalDir: globalDir, _configDirName: ".pi" });
+		expect(cfg.memoryDir).toBe(homedir());
 	});
 });
