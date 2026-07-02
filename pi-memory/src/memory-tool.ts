@@ -1,6 +1,9 @@
 import { readFile, writeFile, mkdir, readdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+import { StringEnum } from "@earendil-works/pi-ai";
+import { Text } from "@earendil-works/pi-tui";
 import { parseIndex, serializeIndex, upsertEntry, checkCapacity, type IndexEntry } from "./index-file";
 import { buildFrontmatter, appendContent, isEmptyAfterRemove } from "./topic-file";
 import { safeTopicPath } from "./paths";
@@ -147,4 +150,92 @@ export async function searchMemory(memoryDir: string, query: string): Promise<st
 		}
 	}
 	return hits.length ? hits.join("\n\n") : "No matches in memory.";
+}
+
+export interface MemoryToolDeps {
+	getMemoryDir: () => string | null;
+	getConfig: () => { memIndexMaxLines: number; memIndexMaxBytes: number; sessionSearch: { maxSessions: number; maxMatches: number } };
+	searchSessions: (cwd: string, query: string, cfg: { maxSessions: number; maxMatches: number }) => Promise<string>;
+	cwd: () => string;
+}
+
+export function createMemoryTool(deps: MemoryToolDeps) {
+	return {
+		name: "memory",
+		label: "Memory",
+		description:
+			"Read/write project memory across sessions. action 'add' stores content under a topic file (auto-created) and upserts the MEMORY.md index; 'replace'/'remove' locate by substring (old_text); 'search' queries memory files or history sessions (scope: memory|sessions).",
+		promptSnippet: "Read/write project memory across sessions (add/replace/remove/search).",
+		promptGuidelines: [
+			"Use memory to persist project facts, user preferences, and lessons learned across sessions.",
+			"Use memory action 'add' with an explicit topic filename when you discover something worth remembering long-term.",
+			"Use memory action 'search' with scope='sessions' to find past work in history sessions.",
+		],
+		parameters: Type.Object({
+			action: StringEnum(["add", "replace", "remove", "search"] as const),
+			content: Type.Optional(Type.String({ description: "Knowledge text to store (add) or replacement text (replace)" })),
+			topic: Type.Optional(Type.String({ description: "Target topic filename, e.g. 'debugging.md'. Auto-created if new (add)." })),
+			title: Type.Optional(Type.String({ description: "Short title for the MEMORY.md index line (add). Defaults to topic stem." })),
+			description: Type.Optional(Type.String({ description: "One-line description for the MEMORY.md index line (add). Defaults to first line of content truncated ~80 chars." })),
+			old_text: Type.Optional(Type.String({ description: "Substring to locate (replace/remove). Matched against topic files and MEMORY.md index lines." })),
+			query: Type.Optional(Type.String()),
+			scope: Type.Optional(StringEnum(["memory", "sessions"] as const)),
+		}),
+		renderCall(args: any, theme: any) {
+			let t = theme.fg("toolTitle", theme.bold("memory ")) + theme.fg("muted", args.action);
+			if (args.topic) t += ` ${theme.fg("accent", args.topic)}`;
+			if (args.query) t += ` ${theme.fg("dim", `"${args.query}"`)}`;
+			return new Text(t, 0, 0);
+		},
+		renderResult(result: any, { expanded }: any, theme: any) {
+			const txt = result.content?.[0];
+			const text = txt?.type === "text" ? txt.text : "";
+			if (result.details?.error) return new Text(theme.fg("error", `Error: ${result.details.error}`), 0, 0);
+			return new Text(theme.fg("success", "✓ ") + theme.fg("muted", text.split("\n")[0]), 0, 0);
+		},
+		async execute(_id: string, params: any, _signal: AbortSignal | undefined, _onUpdate: any, _ctx: any) {
+			const dir = deps.getMemoryDir();
+			const cfg = deps.getConfig();
+			if (!dir) throw new Error("Memory not initialized (no session_start yet)");
+			let text: string;
+			let details: any = {};
+			switch (params.action) {
+				case "add": {
+					if (!params.content) throw new Error("content is required for add");
+					if (!params.topic) throw new Error("topic is required for add");
+					const r = await doAdd(dir, { content: params.content, topic: params.topic, title: params.title, description: params.description, maxLines: cfg.memIndexMaxLines, maxBytes: cfg.memIndexMaxBytes });
+					if (!r.ok) throw new Error(r.error);
+					text = `Added to ${params.topic}. Index now has ${r.entries?.length ?? 0} entries.`;
+					details = { entries: r.entries?.length };
+					break;
+				}
+				case "replace": {
+					if (!params.old_text || !params.content) throw new Error("old_text and content are required for replace");
+					const r = await doReplace(dir, { old_text: params.old_text, content: params.content, topic: params.topic });
+					if (!r.ok) throw new Error(r.error);
+					text = "Replaced.";
+					break;
+				}
+				case "remove": {
+					if (!params.old_text) throw new Error("old_text is required for remove");
+					const r = await doRemove(dir, { old_text: params.old_text, topic: params.topic });
+					if (!r.ok) throw new Error(r.error);
+					text = "Removed.";
+					break;
+				}
+				case "search": {
+					if (!params.query) throw new Error("query is required for search");
+					if (params.scope === "sessions") {
+						text = await deps.searchSessions(deps.cwd(), params.query, cfg.sessionSearch);
+					} else {
+						text = await searchMemory(dir, params.query);
+					}
+					break;
+				}
+				default:
+					throw new Error(`Unknown action: ${params.action}`);
+			}
+			return { content: [{ type: "text", text }], details };
+		},
+	};
 }
