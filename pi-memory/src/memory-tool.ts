@@ -1,5 +1,5 @@
 import { readFile, writeFile, mkdir, readdir, unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -39,8 +39,8 @@ export async function doAdd(memoryDir: string, p: AddParams): Promise<ActionResu
 	} catch (e: any) {
 		return { ok: false, error: e.message };
 	}
-	return withFileMutationQueue(topicPath, async () => {
-		await mkdir(memoryDir, { recursive: true });
+	return withFileMutationQueue(join(memoryDir, MEMORY_MD), async () => {
+		await mkdir(dirname(topicPath), { recursive: true });
 		const entries = await readIndex(memoryDir);
 		const title = p.title ?? p.topic.replace(/\.md$/i, "");
 		const description = p.description ?? p.content.split("\n")[0].slice(0, 80);
@@ -111,7 +111,7 @@ export async function doRemove(memoryDir: string, p: RemoveParams): Promise<Acti
 	if (sites.length > 1) return { ok: false, error: `Multiple matches (${sites.length}); specify topic. Sites: ${sites.map((s) => s.file).join(", ")}` };
 	const site = sites[0];
 	const filePath = join(memoryDir, site.file);
-	return withFileMutationQueue(filePath, async () => {
+	return withFileMutationQueue(join(memoryDir, MEMORY_MD), async () => {
 		if (site.type === "index") {
 			const raw = await readFile(filePath, "utf8");
 			const lines = raw.split("\n").filter((l) => !l.includes(p.old_text));
@@ -155,6 +155,7 @@ export async function searchMemory(memoryDir: string, query: string): Promise<st
 export interface MemoryToolDeps {
 	getMemoryDir: () => string | null;
 	getConfig: () => { memIndexMaxLines: number; memIndexMaxBytes: number; sessionSearch: { maxSessions: number; maxMatches: number } };
+	getEnabled: () => boolean;
 	searchSessions: (cwd: string, query: string, cfg: { maxSessions: number; maxMatches: number }) => Promise<string>;
 	cwd: () => string;
 }
@@ -194,6 +195,7 @@ export function createMemoryTool(deps: MemoryToolDeps) {
 			return new Text(theme.fg("success", "✓ ") + theme.fg("muted", text.split("\n")[0]), 0, 0);
 		},
 		async execute(_id: string, params: any, _signal: AbortSignal | undefined, _onUpdate: any, _ctx: any) {
+			if (!deps.getEnabled()) throw new Error("Memory is disabled (run /memory on)");
 			const dir = deps.getMemoryDir();
 			const cfg = deps.getConfig();
 			if (!dir) throw new Error("Memory not initialized (no session_start yet)");

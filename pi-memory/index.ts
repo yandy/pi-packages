@@ -28,6 +28,7 @@ export default function (pi: ExtensionAPI) {
 				createMemoryTool({
 					getMemoryDir: () => memoryDir,
 					getConfig: () => config!,
+					getEnabled: () => config?.enabled ?? false,
 					searchSessions,
 					cwd: () => ctx.cwd,
 				}) as any,

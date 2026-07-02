@@ -40,6 +40,19 @@ describe("doAdd", () => {
 		expect(res.ok).toBe(false);
 		expect(res.error).toMatch(/unsafe|traversal|escape/i);
 	});
+	it("serializes parallel adds to different topics (no lost update on MEMORY.md)", async () => {
+		const results = await Promise.all([
+			doAdd(dir, { content: "staging port 2222", topic: "ssh.md", title: "SSH Staging", description: "staging ssh config", maxLines: 200, maxBytes: 25600 }),
+			doAdd(dir, { content: "prod port 443", topic: "firewall.md", title: "Firewall", description: "prod firewall rules", maxLines: 200, maxBytes: 25600 }),
+		]);
+		expect(results[0].ok).toBe(true);
+		expect(results[1].ok).toBe(true);
+		const mem = await readFile(join(dir, "MEMORY.md"), "utf8");
+		expect(mem).toContain("[SSH Staging](ssh.md)");
+		expect(mem).toContain("[Firewall](firewall.md)");
+		expect(await readFile(join(dir, "ssh.md"), "utf8")).toContain("staging port 2222");
+		expect(await readFile(join(dir, "firewall.md"), "utf8")).toContain("prod port 443");
+	});
 });
 
 describe("doReplace", () => {
