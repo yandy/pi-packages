@@ -7,7 +7,7 @@ import {
 	getExternalPath,
 	hostToContainer,
 	isAllowedExternalResource,
-	isInsideCwd,
+	isInsideContainer,
 	isReadOnlyMount,
 	PathApprovalStore,
 	containerToHost,
@@ -56,15 +56,21 @@ describe("hostToContainer", () => {
 	});
 });
 
-describe("isInsideCwd", () => {
+describe("isInsideContainer", () => {
 	it("returns true for relative path inside cwd", () => {
-		expect(isInsideCwd("src/file.ts", testDir)).toBe(true);
+		expect(isInsideContainer("src/file.ts", testDir)).toBe(true);
 	});
 	it("returns true for /workspace paths", () => {
-		expect(isInsideCwd("/workspace/src/file.ts", testDir)).toBe(true);
+		expect(isInsideContainer("/workspace/src/file.ts", testDir)).toBe(true);
 	});
 	it("returns false for paths outside cwd", () => {
-		expect(isInsideCwd("/etc/passwd", testDir)).toBe(false);
+		expect(isInsideContainer("/etc/passwd", testDir)).toBe(false);
+	});
+	it("returns true for /skills root path", () => {
+		expect(isInsideContainer("/skills", testDir)).toBe(true);
+	});
+	it("returns true for /skills sub-paths", () => {
+		expect(isInsideContainer("/skills/find-docs/SKILL.md", testDir)).toBe(true);
 	});
 });
 
@@ -116,6 +122,17 @@ describe("getExternalPath", () => {
 	});
 	it("returns null for /workspace paths", () => {
 		expect(getExternalPath("/workspace/src/file.ts", testDir, [])).toBeNull();
+	});
+	it("returns null for /skills root", () => {
+		expect(getExternalPath("/skills", testDir, [])).toBeNull();
+	});
+	it("returns null for /skills sub-paths without mounts", () => {
+		expect(getExternalPath("/skills/my-skill/SKILL.md", testDir, [])).toBeNull();
+	});
+	it("returns null for /skills sub-paths with mounts present", () => {
+		const mounts: MountSpec[] = [{ source: "/host/skills", target: "/skills/my-skill" }];
+		expect(getExternalPath("/skills/my-skill/SKILL.md", testDir, mounts)).toBeNull();
+		expect(getExternalPath("/skills/my-skill", testDir, mounts)).toBeNull();
 	});
 });
 
