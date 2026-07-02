@@ -2,7 +2,7 @@ import { readFileSync, statSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import type { BashOperations, EditOperations, ReadOperations, WriteOperations } from "@earendil-works/pi-coding-agent";
 import { createLocalBashOperations } from "@earendil-works/pi-coding-agent";
-import { hostToContainer, isAllowedExternalResource, isInsideCwd, isReadOnlyMount, containerToHost, shq } from "./paths";
+import { hostToContainer, isAllowedExternalResource, isInsideContainer, isReadOnlyMount, containerToHost, shq } from "./paths";
 import type { MountSpec, Runtime } from "./runtime";
 
 export interface SbxHandle {
@@ -41,7 +41,7 @@ export async function execStream(
 export function createReadOps(sbx: SbxHandle): ReadOperations {
 	const resolveAbs = (p: string) => resolvePath(sbx.hostCwd, p);
 	const tryExternal = (p: string): { external: true; abs: string } | { external: false } => {
-		if (isInsideCwd(p, sbx.hostCwd)) return { external: false };
+		if (isInsideContainer(p, sbx.hostCwd)) return { external: false };
 		const abs = resolveAbs(p);
 		return isAllowedExternalResource(abs, sbx.allowedExternalPrefixes) ? { external: true, abs } : { external: false };
 	};

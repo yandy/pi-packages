@@ -100,14 +100,15 @@ export function isAllowedExternalResource(hostPath: string, allowedPrefixes: str
 	return false;
 }
 
-export function isInsideCwd(hostPath: string, hostCwd: string): boolean {
+export function isInsideContainer(hostPath: string, hostCwd: string): boolean {
 	if (hostPath === CONTAINER_ROOT || hostPath.startsWith(`${CONTAINER_ROOT}/`)) return true;
+	if (hostPath === SKILLS_ROOT || hostPath.startsWith(`${SKILLS_ROOT}/`)) return true;
 	const abs = resolvePath(hostCwd, hostPath);
 	return abs === hostCwd || abs.startsWith(`${hostCwd}/`);
 }
 
 export function getExternalPath(hostPath: string, hostCwd: string, mounts: MountSpec[]): string | null {
-	if (isInsideCwd(hostPath, hostCwd)) return null;
+	if (isInsideContainer(hostPath, hostCwd)) return null;
 	const abs = resolvePath(hostCwd, hostPath);
 	const containerPath = hostPath.startsWith("/") ? hostPath : abs;
 	if (resolveExtraMountPath(containerPath, mounts)) return null;
