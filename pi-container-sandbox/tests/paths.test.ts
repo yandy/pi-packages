@@ -4,17 +4,17 @@ import { resolve as resolvePath } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	expandPath,
+	findMount,
 	getExternalPath,
 	hostToContainer,
 	isAllowedExternalResource,
+	isContainerPath,
 	isInsideContainer,
 	isReadOnlyMount,
 	PathApprovalStore,
 	containerToHost,
-	requestPathApproval,
-	resolveExtraMountPath,
+	ensureExternalReadApproved,
 	shq,
-	toContainerPath,
 } from "../src/paths";
 import { homedir } from "node:os";
 import type { MountSpec } from "../src/runtime";
@@ -74,6 +74,25 @@ describe("isInsideContainer", () => {
 	});
 });
 
+describe("isContainerPath", () => {
+	it("returns true for exact /workspace", () => {
+		expect(isContainerPath("/workspace")).toBe(true);
+	});
+	it("returns true for /workspace sub-paths", () => {
+		expect(isContainerPath("/workspace/src/file.ts")).toBe(true);
+	});
+	it("returns true for exact /skills", () => {
+		expect(isContainerPath("/skills")).toBe(true);
+	});
+	it("returns true for /skills sub-paths", () => {
+		expect(isContainerPath("/skills/my-skill/SKILL.md")).toBe(true);
+	});
+	it("returns false for other paths", () => {
+		expect(isContainerPath("/etc/passwd")).toBe(false);
+		expect(isContainerPath("/home/user/file.txt")).toBe(false);
+	});
+});
+
 describe("isReadOnlyMount", () => {
 	const mounts = [{ source: "/host/skills", target: "/skills/my-skill" }];
 	it("returns true for exact mount target match", () => {
@@ -102,14 +121,29 @@ describe("isReadOnlyMount with mode", () => {
 	});
 });
 
-describe("resolveExtraMountPath", () => {
-	const mounts = [{ source: "/h/a", target: "/mnt/a" }];
-	it("returns path if it matches a mount target", () => {
-		expect(resolveExtraMountPath("/mnt/a", mounts)).toBe("/mnt/a");
-		expect(resolveExtraMountPath("/mnt/a/file.txt", mounts)).toBe("/mnt/a/file.txt");
+describe("findMount", () => {
+	const mounts: MountSpec[] = [
+		{ source: "/host/skills", target: "/skills/my-skill", mode: "ro" },
+		{ source: "/host/data", target: "/data", mode: "rw" },
+	];
+	it("returns mount for exact target match", () => {
+		const result = findMount("/skills/my-skill", mounts);
+		expect(result).toBeDefined();
+		expect(result?.target).toBe("/skills/my-skill");
+		expect(result?.mode).toBe("ro");
 	});
-	it("returns null for unrelated path", () => {
-		expect(resolveExtraMountPath("/other/path", mounts)).toBeNull();
+	it("returns mount for sub-path under target", () => {
+		const result = findMount("/skills/my-skill/SKILL.md", mounts);
+		expect(result).toBeDefined();
+		expect(result?.target).toBe("/skills/my-skill");
+	});
+	it("returns undefined for unrelated path", () => {
+		expect(findMount("/other/path", mounts)).toBeUndefined();
+	});
+	it("returns rw mount when applicable", () => {
+		const result = findMount("/data/file.txt", mounts);
+		expect(result).toBeDefined();
+		expect(result?.mode).toBe("rw");
 	});
 });
 
@@ -193,34 +227,6 @@ describe("PathApprovalStore", () => {
 	});
 });
 
-describe("toContainerPath", () => {
-	const hostCwd = "/home/user/project";
-	const mounts: MountSpec[] = [{ source: "/home/user/.agents/skills/my-skill", target: "/skills/my-skill" }];
-
-	it("maps host cwd path to /workspace", () => {
-		const result = toContainerPath("src/file.ts", hostCwd, []);
-		expect(result.ok).toBe(true);
-		if (result.ok) expect(result.path).toBe("/workspace/src/file.ts");
-	});
-
-	it("maps a skill mount path", () => {
-		const result = toContainerPath("/home/user/.agents/skills/my-skill/SKILL.md", hostCwd, mounts);
-		expect(result.ok).toBe(true);
-		if (result.ok) expect(result.path).toBe("/skills/my-skill/SKILL.md");
-	});
-
-	it("rejects path outside cwd and mounts", () => {
-		const result = toContainerPath("/etc/passwd", hostCwd, mounts);
-		expect(result.ok).toBe(false);
-		if (!result.ok) expect(result.reason).toContain("escapes sandbox");
-	});
-
-	it("passes through paths already in /workspace or /skills", () => {
-		expect(toContainerPath("/workspace/foo", hostCwd, []).ok).toBe(true);
-		expect(toContainerPath("/skills/x", hostCwd, []).ok).toBe(true);
-	});
-});
-
 describe("containerToHost", () => {
 	const testHostCwd = "/home/user/project";
 
@@ -255,7 +261,19 @@ describe("containerToHost", () => {
 	});
 });
 
-describe("requestPathApproval", () => {
+describe("ensureExternalReadApproved", () => {
+	it("throws when user denies access", async () => {
+		const testPath = "/home/user/sensitive-file.txt";
+
+		const mockUi = {
+			select: async (_title: string, _options: string[]) => "Deny",
+			notify: () => {},
+		};
+
+		const store = new PathApprovalStore(testDir);
+		await expect(ensureExternalReadApproved(testPath, [], store, mockUi)).rejects.toThrow("sandbox: access denied");
+	});
+
 	it("select dialog title includes the path being approved", async () => {
 		const testPath = "/home/user/sensitive-file.txt";
 		let capturedTitle = "";
@@ -269,8 +287,7 @@ describe("requestPathApproval", () => {
 		};
 
 		const store = new PathApprovalStore(testDir);
-		await requestPathApproval(testPath, [], store, mockUi);
-
+		await expect(ensureExternalReadApproved(testPath, [], store, mockUi)).rejects.toThrow();
 		expect(capturedTitle).toContain(testPath);
 	});
 });

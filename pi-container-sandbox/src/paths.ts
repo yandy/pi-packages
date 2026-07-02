@@ -6,55 +6,31 @@ import type { MountSpec } from "./runtime";
 export const CONTAINER_ROOT = "/workspace";
 export const SKILLS_ROOT = "/skills";
 
-export function toContainerPath(
-	hostPath: string,
-	hostCwd: string,
-	mounts: MountSpec[],
-): { ok: true; path: string } | { ok: false; reason: string } {
-	if (hostPath.startsWith(`${CONTAINER_ROOT}/`) || hostPath === CONTAINER_ROOT) {
-		return { ok: true, path: hostPath };
-	}
-	if (hostPath.startsWith(`${SKILLS_ROOT}/`) || hostPath === SKILLS_ROOT) {
-		return { ok: true, path: hostPath };
-	}
-
-	const abs = resolvePath(hostCwd, hostPath);
-
-	if (abs === hostCwd || abs.startsWith(`${hostCwd}/`)) {
-		const rel = abs === hostCwd ? "" : abs.slice(hostCwd.length + 1);
-		return { ok: true, path: rel ? `${CONTAINER_ROOT}/${rel}` : CONTAINER_ROOT };
-	}
-
-	for (const m of mounts) {
-		if (abs === m.source || abs.startsWith(`${m.source}/`)) {
-			const rel = abs === m.source ? "" : abs.slice(m.source.length + 1);
-			return { ok: true, path: rel ? `${m.target}/${rel}` : m.target };
-		}
-	}
-
-	return { ok: false, reason: `Path escapes sandbox: ${hostPath}` };
-}
-
 export function shq(s: string): string {
 	return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-export function resolveExtraMountPath(containerPath: string, mounts: MountSpec[]): string | null {
+export function findMount(containerPath: string, mounts: MountSpec[]): MountSpec | undefined {
 	for (const m of mounts) {
 		if (containerPath === m.target || containerPath.startsWith(`${m.target}/`)) {
-			return containerPath;
+			return m;
 		}
 	}
-	return null;
+	return undefined;
+}
+
+export function isContainerPath(path: string): boolean {
+	return path === CONTAINER_ROOT || path.startsWith(`${CONTAINER_ROOT}/`) ||
+		path === SKILLS_ROOT || path.startsWith(`${SKILLS_ROOT}/`);
 }
 
 export function hostToContainer(hostPath: string, hostCwd: string, mounts?: MountSpec[]): string {
-	if (hostPath === CONTAINER_ROOT || hostPath.startsWith(`${CONTAINER_ROOT}/`)) {
+	if (isContainerPath(hostPath)) {
 		return hostPath;
 	}
 	if (mounts) {
-		const resolved = resolveExtraMountPath(hostPath, mounts);
-		if (resolved) return resolved;
+		const mount = findMount(hostPath, mounts);
+		if (mount) return hostPath;
 	}
 	const abs = resolvePath(hostCwd, hostPath);
 	if (abs !== hostCwd && !abs.startsWith(`${hostCwd}/`)) {
@@ -65,29 +41,24 @@ export function hostToContainer(hostPath: string, hostCwd: string, mounts?: Moun
 }
 
 export function containerToHost(containerPath: string, hostCwd: string, mounts: MountSpec[]): string {
-	if (!containerPath.startsWith(CONTAINER_ROOT) && !containerPath.startsWith(SKILLS_ROOT)) {
+	if (!isContainerPath(containerPath)) {
 		return containerPath;
 	}
 	if (containerPath === CONTAINER_ROOT) return hostCwd;
 	if (containerPath.startsWith(`${CONTAINER_ROOT}/`)) {
 		return resolvePath(hostCwd, containerPath.slice(CONTAINER_ROOT.length + 1));
 	}
-	for (const m of mounts) {
-		if (containerPath === m.target) return m.source;
-		if (containerPath.startsWith(`${m.target}/`)) {
-			return resolvePath(m.source, containerPath.slice(m.target.length + 1));
-		}
+	const mount = findMount(containerPath, mounts);
+	if (mount) {
+		return resolvePath(mount.source, containerPath.slice(mount.target.length + 1));
 	}
 	throw new Error(`Cannot map container path to host: ${containerPath}`);
 }
 
 export function isReadOnlyMount(containerPath: string, mounts: MountSpec[]): boolean {
-	for (const m of mounts) {
-		if (containerPath === m.target || containerPath.startsWith(`${m.target}/`)) {
-			return m.mode !== "rw";
-		}
-	}
-	return false;
+	const mount = findMount(containerPath, mounts);
+	if (!mount) return false;
+	return mount.mode !== "rw";
 }
 
 export function isAllowedExternalResource(hostPath: string, allowedPrefixes: string[]): boolean {
@@ -101,8 +72,7 @@ export function isAllowedExternalResource(hostPath: string, allowedPrefixes: str
 }
 
 export function isInsideContainer(hostPath: string, hostCwd: string): boolean {
-	if (hostPath === CONTAINER_ROOT || hostPath.startsWith(`${CONTAINER_ROOT}/`)) return true;
-	if (hostPath === SKILLS_ROOT || hostPath.startsWith(`${SKILLS_ROOT}/`)) return true;
+	if (isContainerPath(hostPath)) return true;
 	const abs = resolvePath(hostCwd, hostPath);
 	return abs === hostCwd || abs.startsWith(`${hostCwd}/`);
 }
@@ -111,7 +81,7 @@ export function getExternalPath(hostPath: string, hostCwd: string, mounts: Mount
 	if (isInsideContainer(hostPath, hostCwd)) return null;
 	const abs = resolvePath(hostCwd, hostPath);
 	const containerPath = hostPath.startsWith("/") ? hostPath : abs;
-	if (resolveExtraMountPath(containerPath, mounts)) return null;
+	if (findMount(containerPath, mounts)) return null;
 	return abs;
 }
 
@@ -242,7 +212,7 @@ export class PathApprovalStore {
 	}
 }
 
-export async function requestPathApproval(
+export async function ensureExternalReadApproved(
 	absPath: string,
 	sessionPrefixes: string[],
 	store: PathApprovalStore,
@@ -250,16 +220,16 @@ export async function requestPathApproval(
 		select: (title: string, options: string[]) => Promise<string | undefined>;
 		notify: (msg: string, level?: "info" | "warning" | "error") => void;
 	},
-): Promise<boolean> {
+): Promise<void> {
 	for (const prefix of sessionPrefixes) {
-		if (absPath === prefix || absPath.startsWith(`${prefix}/`)) return true;
+		if (absPath === prefix || absPath.startsWith(`${prefix}/`)) return;
 	}
 
 	const existing = store.find(absPath);
-	if (existing) return true;
+	if (existing) return;
 
 	const basename = absPath.split("/").pop() || "";
-	if (basename.startsWith("pi-clipboard-")) return true;
+	if (basename.startsWith("pi-clipboard-")) return;
 
 	const options = ["Approve once", "Approve always", "Approve for 7 days", "Approve for 30 days", "Deny"];
 
@@ -271,28 +241,29 @@ ${absPath}`,
 			options,
 		);
 	} catch {
-		return false;
+		throw new Error(`sandbox: access denied to ${absPath}`);
 	}
 
-	if (!choice || choice.includes("Deny")) return false;
+	if (!choice || choice.includes("Deny")) {
+		throw new Error(`sandbox: access denied to ${absPath}`);
+	}
 
 	if (choice.includes("once")) {
 		sessionPrefixes.push(absPath);
-		return true;
+		return;
 	}
 
 	if (choice.includes("always")) {
 		store.add(absPath, Infinity);
 		sessionPrefixes.push(absPath);
 		ui.notify(`Approved read access (always): ${absPath}`, "info");
-		return true;
+		return;
 	}
 
 	const days = choice.includes("30") ? 30 : 7;
 	store.add(absPath, days);
 	sessionPrefixes.push(absPath);
 	ui.notify(`Approved read access (${days} days): ${absPath}`, "info");
-	return true;
 }
 
 export function expandPath(raw: string, cwd?: string): string {
@@ -305,19 +276,4 @@ export function expandPath(raw: string, cwd?: string): string {
 		result = resolvePath(cwd, result);
 	}
 	return result;
-}
-
-export async function ensureExternalReadApproved(
-	absPath: string,
-	sessionPrefixes: string[],
-	store: PathApprovalStore,
-	ui: {
-		select: (title: string, options: string[]) => Promise<string | undefined>;
-		notify: (msg: string, level?: "info" | "warning" | "error") => void;
-	},
-): Promise<void> {
-	const approved = await requestPathApproval(absPath, sessionPrefixes, store, ui);
-	if (!approved) {
-		throw new Error(`sandbox: access denied to ${absPath}`);
-	}
 }

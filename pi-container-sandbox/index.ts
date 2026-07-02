@@ -281,7 +281,7 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 
-				const dockerfile = `${labelMap.get(selected!)}.Dockerfile`;
+				const dockerfile = `${labelMap.get(selected)}.Dockerfile`;
 				const buildCtx = PACKAGE_DOCKER_DIR;
 
 				try {
@@ -340,7 +340,9 @@ export default function (pi: ExtensionAPI) {
 				process.exit(143);
 			});
 
-			const ok = (await execCapture(getSbx()!, "id -un && pwd", 10000)).toString().trim();
+			const sbx = getSbx();
+			if (!sbx) throw new Error("sandbox not initialized");
+			const ok = (await execCapture(sbx, "id -un && pwd", 10000)).toString().trim();
 
 			const resParts: string[] = [
 				`size=${sizeTier}`,
