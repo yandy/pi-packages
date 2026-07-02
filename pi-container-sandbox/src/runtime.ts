@@ -355,9 +355,10 @@ export class DockerRuntime implements Runtime {
 				stdin: opts.stdin !== undefined,
 				abortSignal: controller.signal,
 			})) as NodeJS.ReadWriteStream;
-		} catch {
+		} catch (err) {
 			if (timer) clearTimeout(timer);
-			return { exitCode: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+			const msg = err instanceof Error ? err.message : String(err);
+			throw new Error(`sandbox: failed to start container exec: ${msg}`);
 		}
 
 		const stdoutChunks: Buffer[] = [];
@@ -383,6 +384,7 @@ export class DockerRuntime implements Runtime {
 					opts.onData?.(payload);
 				} else if (streamType === 2) {
 					stderrChunks.push(payload);
+					opts.onData?.(payload);
 				}
 			}
 		});
@@ -428,6 +430,9 @@ export class DockerRuntime implements Runtime {
 				}
 			};
 			stream.on("end", finish);
+			stream.on("error", (err) => {
+				console.warn(`sandbox exec stream error: ${err instanceof Error ? err.message : String(err)}`);
+			});
 			stream.on("error", finish);
 			stream.on("close", finish);
 			if (opts.stdin !== undefined && !controller.signal.aborted) {
