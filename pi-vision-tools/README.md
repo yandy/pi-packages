@@ -21,6 +21,12 @@ calling model  →  describe_image  →  vision model  →  text back to calling
 2. The tool decodes the image, optionally compresses it with sharp, then calls the configured vision model
 3. The vision model's text answer is returned as the tool result
 
+## Prefix cache
+
+Model switching already invalidates the prefix cache (different provider or model name is part of the request). The `setActiveTools` add/remove of `describe_image` is simply part of the new model's system prompt — there is zero additional cache churn.
+
+The tool list is deterministic per model (vision models never include `describe_image`, non-vision models always do). Switching to another model and back therefore produces the same prefix as before, and the original cache hit is preserved.
+
 ## Install
 
 ```bash
