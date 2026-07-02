@@ -66,6 +66,12 @@ describe("isInsideCwd", () => {
 	it("returns false for paths outside cwd", () => {
 		expect(isInsideCwd("/etc/passwd", testDir)).toBe(false);
 	});
+	it("returns true for /skills root path", () => {
+		expect(isInsideCwd("/skills", testDir)).toBe(true);
+	});
+	it("returns true for /skills sub-paths", () => {
+		expect(isInsideCwd("/skills/find-docs/SKILL.md", testDir)).toBe(true);
+	});
 });
 
 describe("isReadOnlyMount", () => {
@@ -116,6 +122,17 @@ describe("getExternalPath", () => {
 	});
 	it("returns null for /workspace paths", () => {
 		expect(getExternalPath("/workspace/src/file.ts", testDir, [])).toBeNull();
+	});
+	it("returns null for /skills root", () => {
+		expect(getExternalPath("/skills", testDir, [])).toBeNull();
+	});
+	it("returns null for /skills sub-paths without mounts", () => {
+		expect(getExternalPath("/skills/my-skill/SKILL.md", testDir, [])).toBeNull();
+	});
+	it("returns null for /skills sub-paths with mounts present", () => {
+		const mounts: MountSpec[] = [{ source: "/host/skills", target: "/skills/my-skill" }];
+		expect(getExternalPath("/skills/my-skill/SKILL.md", testDir, mounts)).toBeNull();
+		expect(getExternalPath("/skills/my-skill", testDir, mounts)).toBeNull();
 	});
 });
 
