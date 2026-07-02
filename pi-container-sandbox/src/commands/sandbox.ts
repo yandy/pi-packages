@@ -1,6 +1,5 @@
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { resolve as resolvePath } from "node:path";
+import { expandPath } from "../paths";
 import {
 	discoverDockerfiles,
 	getSbxConfigPath,
@@ -251,7 +250,7 @@ export function createSandboxCommandHandlers(
 				);
 				return;
 			}
-			const abs = raw.startsWith("~") ? resolvePath(homedir(), raw.slice(1)) : resolvePath(raw);
+			const abs = expandPath(raw);
 			if (sbx.allowedExternalPrefixes.includes(abs)) {
 				ctx.ui.notify(`Path ${abs} is already allowed.`, "info");
 				return;
@@ -268,7 +267,7 @@ export function createSandboxCommandHandlers(
 			const parts = args.trim().split(/\s+/);
 			if (parts[0] === "revoke" && parts[1]) {
 				const target = parts.slice(1).join(" ");
-				const abs = target.startsWith("~") ? resolvePath(homedir(), target.slice(1)) : resolvePath(target);
+				const abs = expandPath(target);
 				if (pathApprovals.revoke(abs)) {
 					ctx.ui.notify(`Revoked path approval: ${abs}`, "info");
 				} else {

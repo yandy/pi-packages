@@ -13,7 +13,3 @@ export const TIER_SPECS: Record<SizeTier, TierSpec> = {
 	large: { memory: "8g", swap: "4g", cpus: "4" },
 };
 
-export function parseSizeTier(tier: string): SizeTier | null {
-	if (tier in TIER_SPECS) return tier as SizeTier;
-	return null;
-}

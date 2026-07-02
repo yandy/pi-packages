@@ -1,19 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSizeTier, TIER_SPECS } from "../src/tiers";
-
-describe("parseSizeTier", () => {
-	it("returns the tier for valid tier names", () => {
-		expect(parseSizeTier("small")).toBe("small");
-		expect(parseSizeTier("medium")).toBe("medium");
-		expect(parseSizeTier("large")).toBe("large");
-	});
-
-	it("returns null for unknown tier names", () => {
-		expect(parseSizeTier("xlarge")).toBeNull();
-		expect(parseSizeTier("")).toBeNull();
-		expect(parseSizeTier("SMALL")).toBeNull();
-	});
-});
+import { TIER_SPECS } from "../src/tiers";
 
 describe("TIER_SPECS", () => {
 	it("has small, medium, large entries", () => {
