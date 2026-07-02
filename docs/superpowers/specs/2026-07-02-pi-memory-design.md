@@ -346,7 +346,8 @@ Last dream: 2026-07-01 14:30 (2 sessions ago)
 ```ts
 import { createAgentSession, SessionManager, DefaultResourceLoader, AuthStorage } from "@earendil-works/pi-coding-agent";
 
-async function runDream(opts: { model; memoryDir; cwd; signal }): Promise<string> {
+async function runDream(opts: { model; memoryDir; cwd; signal; createSession? }): Promise<string> {
+  const createSession = opts.createSession ?? createAgentSession;  // DI：测试可注入假实现
   // 1. 隔离的 ResourceLoader：空 settings + 空 agentDir 发现 → 不加载任何扩展/skill（避免递归加载 pi-memory 自身）
   const loader = new DefaultResourceLoader({
     cwd: opts.memoryDir,
@@ -358,7 +359,7 @@ async function runDream(opts: { model; memoryDir; cwd; signal }): Promise<string
 
   // 2. in-memory session，工具限制为 read/edit/write（cwd=memoryDir，只能动记忆文件）
   const authStorage = AuthStorage.create();
-  const { session } = await createAgentSession({
+  const { session } = await createSession({
     model: opts.model,
     authStorage,
     modelRegistry: ModelRegistry.create(authStorage),
@@ -560,9 +561,9 @@ tag 格式 `pi-memory-v*`，流程同 pi-todo（`npm version --workspace=pi-memo
 
 ### dream 测试
 
-- mock `createAgentSession`（注入假 session，验证传入的 model/tools/cwd/loader 配置正确）。
-- 验证 dream task prompt 含文件列表 + 整理指令。
-- 验证取消路径（signal abort）。
+- **纯函数直接测**（无 mock）：`buildDreamTask(memoryDir)`（prompt 含文件列表+整理指令）、`resolveDreamModel(config, ctx)`（auto→ctx.model / explicit→registry.find）、`extractSummary(messages)`（取最后一条 assistant 文本）。
+- **`runDream` 编排用依赖注入**：`runDream({ ..., createSession })` 接受可选 `createSession`（默认真实 `createAgentSession`），测试注入假 `createSession` 返回可控假 session，验证：传入的 model/tools/cwd/loader 配置正确、摘要提取、`dispose` 被调用、`signal` abort 触发取消路径。**避免脆弱的模块 mock（vi.mock）**。
+- **LLM 实际整理质量不可单元测试** → 仅手动 smoke test（真实便宜模型跑一次 `/dream` 验证端到端）。真实 dream 不进 `npm test`（需 API key、花钱、非确定、慢；RELEASE.md 要求每次发布跑 `npm test`）。
 
 ### 注入测试
 
