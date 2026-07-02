@@ -21,6 +21,12 @@
 2. 工具解码图像，可选使用 sharp 压缩，然后调用配置好的视觉模型
 3. 视觉模型的文本回答作为工具结果返回
 
+## 前缀缓存
+
+切换模型时自身的 prefix cache 已因 model 变化而失效，`setActiveTools` 增删 `describe_image` 只是新 model 系统提示的正常组成部分，不会额外造成 cache 抖动。
+
+对同一个 model，tool 列表是确定的（无视觉一定带 `describe_image`，有视觉一定不带），所以中间切换到其他 model 再切回来时，前缀内容与先前一致，仍然能命中原有缓存。
+
 ## 安装
 
 ```bash
