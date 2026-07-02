@@ -38,7 +38,7 @@ export function truncateForInjection(content: string, maxLines: number, maxBytes
 	let out = content;
 	let truncated = false;
 	if (lines.length > maxLines) {
-		out = lines.slice(0, maxLines - 1).join("\n");
+		out = lines.slice(0, maxLines).join("\n");
 		truncated = true;
 	}
 	if (Buffer.byteLength(out, "utf8") > maxBytes) {
@@ -48,7 +48,7 @@ export function truncateForInjection(content: string, maxLines: number, maxBytes
 		out = cut;
 		truncated = true;
 	}
-	if (truncated) out += `\n[truncated]: memory index exceeds injection limit`;
+	if (truncated) out += `\n[truncated: memory index exceeds injection limit]`;
 	return { ok: !truncated, content: out, truncated };
 }
 

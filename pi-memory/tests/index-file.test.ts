@@ -51,9 +51,19 @@ describe("truncateForInjection", () => {
 		const many = Array.from({ length: 10 }, (_, i) => `- [T${i}](t${i}.md) — d${i}`).join("\n");
 		const r = truncateForInjection(many, 3, 25600);
 		expect(r.truncated).toBe(true);
-		expect(r.content.split("\n").length).toBeLessThanOrEqual(3);
-		expect(r.content).toContain("[truncated]");
+		expect(r.content.split("\n").length).toBe(4);
+		expect(r.content).toContain("[truncated:");
 	});
+});
+
+it("truncates by byte count when under line limit", () => {
+	const longLine = `- [A very long title that exceeds the byte limit](example.md) — some description here`;
+	const r = truncateForInjection(longLine, 100, 50);
+	expect(r.truncated).toBe(true);
+	// content before the truncated marker should be ≤ maxBytes
+	const beforeMarker = r.content.split("\n")[0];
+	expect(Buffer.byteLength(beforeMarker, "utf8")).toBeLessThanOrEqual(50);
+	expect(r.content).toContain("[truncated:");
 });
 
 describe("checkCapacity", () => {
