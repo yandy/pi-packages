@@ -1,0 +1,43 @@
+{
+	"name": "@yandy0725/pi-memory",
+	"publishConfig": {
+		"access": "public"
+	},
+	"version": "0.1.0",
+	"description": "File-system driven persistent memory layer for pi coding agent",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/yandy/pi-packages",
+		"directory": "pi-memory"
+	},
+	"type": "module",
+	"keywords": [
+		"pi-package"
+	],
+	"files": [
+		"index.ts",
+		"src/"
+	],
+	"scripts": {
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"typecheck": "tsc --noEmit",
+		"lint": "biome lint .",
+		"format": "biome format --write ."
+	},
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-ai": ">=0.80.2",
+		"@earendil-works/pi-coding-agent": ">=0.80.2",
+		"@earendil-works/pi-tui": ">=0.80.2",
+		"typebox": "*"
+	},
+	"devDependencies": {
+		"typebox": "^1.1.38"
+	}
+}
