@@ -31,7 +31,7 @@ pi install npm:@yandy0725/pi-memory
 
 ## 配置
 
-在代理目录（`~/.pi/pi-memory.json`）或项目的 `.pi/` 目录（需受信任）中创建 `pi-memory.json`：
+在代理目录（`~/.pi/agent/pi-memory.json`）或项目的 `.pi/` 目录（需受信任）中创建 `pi-memory.json`：
 
 ```json
 {

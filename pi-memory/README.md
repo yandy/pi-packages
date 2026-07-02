@@ -31,7 +31,7 @@ Or add to `~/.pi/agent/settings.json`:
 
 ## Configuration
 
-Create `pi-memory.json` in the agent directory (`~/.pi/pi-memory.json`) or the project `.pi/` directory (if trusted):
+Create `pi-memory.json` in the agent directory (`~/.pi/agent/pi-memory.json`) or the project `.pi/` directory (if trusted):
 
 ```json
 {
