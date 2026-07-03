@@ -6,7 +6,7 @@ export interface DecodedImage {
 	mimeType: string;
 }
 
-export interface ImageReadOptions {
+interface ImageReadOptions {
 	readFile?: (path: string) => Promise<Buffer>;
 }
 

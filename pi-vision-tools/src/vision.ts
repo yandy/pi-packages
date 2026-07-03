@@ -3,13 +3,13 @@ import type { VisionConfig } from "./config.js";
 import type { DecodedImage } from "./image.js";
 import type { ReasoningOptions } from "./reasoning.js";
 
-export type CompleteFn = (
+type CompleteFn = (
 	model: Model<any>,
 	context: Context,
 	options?: Record<string, unknown>,
 ) => Promise<AssistantMessage>;
 
-export interface VisionCallInput {
+interface VisionCallInput {
 	model: Model<any>;
 	auth: { apiKey?: string; headers?: Record<string, string> };
 	prompt: string;
@@ -18,14 +18,14 @@ export interface VisionCallInput {
 	signal?: AbortSignal;
 }
 
-export interface VisionCallResult {
+interface VisionCallResult {
 	text: string;
 	usage?: { input?: number; output?: number };
 	errorMessage?: string;
 	stopReason?: string;
 }
 
-export type ResolveResult = { ok: true; model: Model<any> } | { ok: false; error: string };
+type ResolveResult = { ok: true; model: Model<any> } | { ok: false; error: string };
 
 interface ModelLookup {
 	find(provider: string, id: string): Model<any> | undefined;
