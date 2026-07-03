@@ -6,17 +6,17 @@
 
 | 包 | 描述 | npm |
 |---|---|---|
-| [pi-ask-user](./pi-ask-user) | 交互式 ask_user 工具，支持可搜索分栏 UI、多选和自由文本 | `@yandy0725/pi-ask-user` |
-| [pi-coding-tools](./pi-coding-tools) | AST/LSP 代码智能工具（ast_grep_search/lsp_symbols/lsp_hover/lsp_navigate）+ ls/find/grep | `@yandy0725/pi-coding-tools` |
-| [pi-container-sandbox](./pi-container-sandbox) | Docker 沙箱扩展 | `@yandy0725/pi-container-sandbox` |
-| [pi-dingtalk](./pi-dingtalk) | 钉钉集成（AI 表格、日历、审批、文档等） | `@yandy0725/pi-dingtalk` |
-| [pi-lark](./pi-lark) | Lark/飞书集成 | `@yandy0725/pi-lark` |
-| [pi-memory](./pi-memory) | 基于文件系统的持久化记忆层，为 pi 编程代理提供跨会话记忆 | `@yandy0725/pi-memory` |
-| [pi-permission-system](./pi-permission-system) | 工具访问控制的权限系统 | `@yandy0725/pi-permission-system` |
-| [pi-subagents](./pi-subagents) | 进程内子代理核心，支持后台执行和类型化 API | `@yandy0725/pi-subagents` |
-| [pi-todo](./pi-todo) | 极简 todo 工具，带编辑器嵌入式小组件 | `@yandy0725/pi-todo` |
-| [pi-vision-tools](./pi-vision-tools) | `describe_image` 工具——将图像分析委托给视觉模型 | `@yandy0725/pi-vision-tools` |
-| [pi-web-tools](./pi-web-tools) | websearch + webfetch 工具 | `@yandy0725/pi-web-tools` |
+| [pi-ask-user](./pi-ask-user/README.zh.md) | 交互式 ask_user 工具，支持可搜索分栏 UI、多选和自由文本 | `@yandy0725/pi-ask-user` |
+| [pi-coding-tools](./pi-coding-tools/README.zh.md) | AST/LSP 代码智能工具（ast_grep_search/lsp_symbols/lsp_hover/lsp_navigate）+ ls/find/grep | `@yandy0725/pi-coding-tools` |
+| [pi-container-sandbox](./pi-container-sandbox/README.zh.md) | Docker 沙箱扩展 | `@yandy0725/pi-container-sandbox` |
+| [pi-dingtalk](./pi-dingtalk/README.zh.md) | 钉钉集成（AI 表格、日历、审批、文档等） | `@yandy0725/pi-dingtalk` |
+| [pi-lark](./pi-lark/README.zh.md) | Lark/飞书集成 | `@yandy0725/pi-lark` |
+| [pi-memory](./pi-memory/README.zh.md) | 基于文件系统的持久化记忆层，为 pi 编程代理提供跨会话记忆 | `@yandy0725/pi-memory` |
+| [pi-permission-system](./pi-permission-system/README.zh.md) | 工具访问控制的权限系统 | `@yandy0725/pi-permission-system` |
+| [pi-subagents](./pi-subagents/README.zh.md) | 进程内子代理核心，支持后台执行和类型化 API | `@yandy0725/pi-subagents` |
+| [pi-todo](./pi-todo/README.zh.md) | 极简 todo 工具，带编辑器嵌入式小组件 | `@yandy0725/pi-todo` |
+| [pi-vision-tools](./pi-vision-tools/README.zh.md) | `describe_image` 工具——将图像分析委托给视觉模型 | `@yandy0725/pi-vision-tools` |
+| [pi-web-tools](./pi-web-tools/README.zh.md) | websearch + webfetch 工具 | `@yandy0725/pi-web-tools` |
 
 ## 开发
 

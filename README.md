@@ -1,5 +1,7 @@
 # pi-packages
 
+English | [中文](./README.zh.md)
+
 Monorepo for @yandy pi packages. Uses npm workspaces.
 
 ## Packages
