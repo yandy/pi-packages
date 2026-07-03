@@ -26,7 +26,7 @@ import {
 } from "./src/paths";
 import { DockerRuntime, deriveContainerName, type MountSpec } from "./src/runtime";
 import { clearSbx, getSbx, type SbxSession, setSbx } from "./src/session";
-import { discoverSkillMounts } from "./src/skills";
+import { parseAvailableSkills, skillsToMountSpecs } from "./src/skills";
 import { TIER_SPECS } from "./src/tiers";
 
 export default function (pi: ExtensionAPI) {
@@ -203,16 +203,19 @@ export default function (pi: ExtensionAPI) {
 				}
 			}
 
-			// Auto-discover skill mounts under home directory
-			const skillMounts = discoverSkillMounts();
+			// Dynamic skill discovery: parse <available_skills> XML from system prompt.
+			// Catches ALL pi-loaded skills — npm packages, project .agents/skills/,
+			// settings config, etc. — not just ~/.agents/skills/.
+			const skillParsed = parseAvailableSkills(ctx.getSystemPrompt());
+			const skillMounts = skillsToMountSpecs(skillParsed);
 
-			// Merge: detect target conflicts
+			// Detect target conflicts between user mounts and skill mounts
 			for (const um of userMounts) {
 				const conflict = skillMounts.find((sm) => sm.target === um.target);
 				if (conflict) {
 					throw new Error(
-						`sandbox: mount target conflict: "${um.target}" is already used by auto-discovered skill at "${conflict.source}". ` +
-							`Choose a different target for your custom mount at "${um.source}".`,
+						`sandbox: mount target "${um.target}" is reserved for skill "${conflict.source}". ` +
+							`Use a different target in sandbox.json.`,
 					);
 				}
 			}
@@ -305,7 +308,9 @@ export default function (pi: ExtensionAPI) {
 				name: sandboxName,
 				hostCwd: localCwd,
 				keep,
-				mounts: allMounts,
+				skillMounts,
+				userMounts,
+				skillFileMapping: skillParsed,
 				allowedExternalPrefixes,
 				resources,
 				imageRef: image,
