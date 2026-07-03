@@ -77,37 +77,41 @@ mkdir -p /tmp/mem-test && cd /tmp/mem-test && git init
 
 ---
 
-## 阶段 3:replace / remove
+## 阶段 3:remove（按 entry 精确删除）
 
-### replace(子串替换)
+### remove 基础
 
-```
-把记忆里 "端口 2222" 改成 "端口 2223"
-```
-
-**预期**:agent 调 `memory replace`,定位 `old_text` 替换。验证文件内容更新。
-
-### 测歧义处理
-
-先 add 两条含相同关键词的记忆到不同 topic,然后:
+先 add 两条记忆（同一 topic 或不同 topic），然后：
 
 ```
-把所有含 "test" 的记忆条目里的 test 改成 tests
+删掉关于 SSH Gotcha 的那条记忆
 ```
 
-**预期**:多处匹配时工具返回错误 + 匹配位置列表,agent 应要求指定 topic 或用更精确的 `old_text`。
+**预期**：agent 调 `memory remove entry="SSH Gotcha"`，索引行被删 + topic 文件中对应的 `## SSH Gotcha` 区块被删。
 
-### remove
+### 测多 entry topic 删一条后文件保留
 
-```
-删掉关于用户偏好回复风格的那条记忆
-```
+对同一 topic add 两条 entry，然后删除其中一条：
 
-**预期**:索引行被删。若该 topic 文件变空,文件应被删除 + 索引行清除(测空文件清理)。验证:
+**预期**：topic 文件仍存在，剩余 entry 保留，updated 日期刷新。
 
-```bash
-ls ~/.pi/memory/<hash>/   # 空 topic 文件应消失
-```
+### 测最后一个 entry 删除后文件清理
+
+对只有一个 entry 的 topic 执行 remove：
+
+**预期**：topic 文件被删除，MEMORY.md 中不再引用该 topic。
+
+### 测多匹配报错
+
+在不同 topic 中 add 同 title 的 entry（如两个 `title="Config"`），然后 remove `entry="Config"`：
+
+**预期**：工具报错 "multiple matches" + 列出涉及的 topic 文件列表。
+
+### 测 entry 不存在报错
+
+remove 一个不存在的 entry title：
+
+**预期**：工具报错 "not found"。
 
 ---
 
@@ -119,7 +123,7 @@ ls ~/.pi/memory/<hash>/   # 空 topic 文件应消失
 搜一下记忆里关于 docker 的内容
 ```
 
-**预期**:返回匹配的 topic 文件 + 上下文行。
+**预期**：返回匹配的**完整 entry block**（整个 `##` 区域），而非仅上下文行。
 
 ### scope=sessions(pi 独有能力,需有历史会话)
 
@@ -134,7 +138,29 @@ ls ~/.pi/memory/<hash>/   # 空 topic 文件应消失
 
 ---
 
-## 阶段 5:/memory 命令
+## 阶段 5:read（加载 topic 或 entry）
+
+### read topic
+
+```
+加载 debugging 这个 topic 的全部内容
+```
+
+**预期**：agent 调 `memory action="read" topic="debugging"`（支持有无 `.md` 后缀），返回该 topic 文件完整内容。
+
+### read entry
+
+先 add 几条记忆，然后：
+
+```
+加载 SSH Gotcha 这个 entry 的内容
+```
+
+**预期**：agent 调 `memory action="read" entry="SSH Gotcha"`，扫描所有 topic 文件，返回匹配的 `## SSH Gotcha` block。
+
+---
+
+## 阶段 6:/memory 命令
 
 - `/memory` — 显示状态面板(enabled / Dir / 索引行数 / topic files / last dream)
 - `/memory off` — 关闭。验证:后续 `before_agent_start` 不再注入(prompt 里无 Memory Index),且调 `memory add` 工具会抛 `Memory is disabled`。
@@ -142,7 +168,7 @@ ls ~/.pi/memory/<hash>/   # 空 topic 文件应消失
 
 ---
 
-## 阶段 6:/dream(需真实模型 + API key)
+## 阶段 7:/dream(需真实模型 + API key)
 
 **前置**:确保有可用模型 API key。可配置便宜模型加速:
 
@@ -173,7 +199,7 @@ ls ~/.pi/memory/<hash>/   # 空 topic 文件应消失
 
 ---
 
-## 阶段 7:启动 nudge
+## 阶段 8:启动 nudge
 
 nudge 条件:距上次 dream ≥ 24h 且 ≥ 5 个 session,或无 dream 记录且 ≥ 5 个 session。
 
@@ -189,7 +215,7 @@ rm ~/.pi/memory/<hash>/.dream-meta.json
 
 ---
 
-## 阶段 8:配置与边界
+## 阶段 9:配置与边界
 
 - **项目级配置**:在 `/tmp/mem-test/.pi/pi-memory.json` 放 `{ "memIndexMaxLines": 3 }`,信任项目后验证 `/memory` 显示 3 上限、add 第 4 条触发容量错误(返回现有条目列表,agent 应 consolidate 重试)。
 - **路径穿越**:让 agent `memory add topic="../escape.md"` —— 应被拒绝(safeTopicPath 抛错)。
@@ -215,16 +241,19 @@ rm -rf ~/.pi/memory/<hash>          # 删测试项目记忆
 | 1 | add 写入 + 索引 | | |
 | 2 | 跨会话 snapshot 注入 | | |
 | 2 | snapshot 冻结语义 | | |
-| 3 | replace 子串替换 | | |
-| 3 | replace 歧义处理 | | |
-| 3 | remove + 空文件清理 | | |
-| 4 | search scope=memory | | |
-| 4 | search scope=sessions | | |
-| 5 | /memory 状态 / on / off | | |
-| 6 | /dream 整理 + meta | | |
-| 6 | /dream 取消 | | |
-| 6 | /dream 无模型 | | |
-| 7 | 启动 nudge | | |
-| 8 | 容量超限 | | |
-| 8 | 路径穿越拒绝 | | |
-| 8 | 非 git 项目 | | |
+| 3 | remove 按 entry 删除 | | |
+| 3 | 多 entry topic 删一条文件保留 | | |
+| 3 | 最后一个 entry 删除文件清理 | | |
+| 3 | 多匹配报错 | | |
+| 3 | entry 不存在报错 | | |
+| 4 | search scope=memory（完整 entry block） | | |
+| 5 | read topic | | |
+| 5 | read entry | | |
+| 6 | /memory 状态 / on / off | | |
+| 7 | /dream 整理 + meta | | |
+| 7 | /dream 取消 | | |
+| 7 | /dream 无模型 | | |
+| 8 | 启动 nudge | | |
+| 9 | 容量超限 | | |
+| 9 | 路径穿越拒绝 | | |
+| 9 | 非 git 项目 | | |
