@@ -4,7 +4,6 @@ import { docker, dockerSpawn } from "./docker-cli";
 import { PACKAGE_DOCKER_DIR } from "./config";
 
 const BUILD_TIMEOUT_MS = parseInt(process.env.SBX_BUILD_TIMEOUT || "600000", 10);
-const MAX_EXEC_BUFFER = 16 * 1024 * 1024; // 16MB
 
 export interface MountSpec {
 	source: string;
@@ -241,7 +240,7 @@ export class DockerRuntime implements Runtime {
 			"--memory", memory,
 			"--cpus", cpus,
 			"--pids-limit", String(pidsLimit),
-			"--network", allowNetwork ? "default" : "none",
+			"--network", allowNetwork ? "bridge" : "none",
 			"--cap-drop", "ALL",
 			"--security-opt", "no-new-privileges",
 		];
