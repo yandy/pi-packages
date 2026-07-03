@@ -42,9 +42,13 @@ setSbx({ skillMounts, userMounts })    return { systemPrompt }
 ```typescript
 // SbxSession — 拆分明确意图
 interface SbxSession {
-  skillMounts: MountSpec[];  // 新增：自动发现的 skill，始终 /skills/<name>, ro
-  userMounts: MountSpec[];   // 新增：用户 sandbox.json 配置
-  // mounts: MountSpec[];    // 移除
+  skillMounts: MountSpec[];     // 新增：自动发现的 skill，始终 /skills/<name>, ro
+  userMounts: MountSpec[];      // 新增：用户 sandbox.json 配置
+  skillFileMapping: Array<{     // 新增：parseAvailableSkills 的原始结果，供 before_agent_start 替换 <location>
+    name: string;
+    filePath: string;           // SKILL.md 绝对路径
+  }>;
+  // mounts: MountSpec[];       // 移除
 }
 ```
 
@@ -87,30 +91,29 @@ interface SbxSession {
 ### `session_start` handler
 
 ```
-1. userMounts = sandbox.json runtime.mounts → MountSpec[]
-2. skillMounts = skillsToMountSpecs(parseAvailableSkills(ctx.getSystemPrompt()))
-3. 冲突检测：userMounts 的 target 不能与 skillMounts 的 target 重合
-4. allMounts = [...skillMounts, ...userMounts] 给 DockerRuntime
-5. setSbx({ skillMounts, userMounts, ... })
+1. skillParsed = parseAvailableSkills(ctx.getSystemPrompt())
+2. skillMounts = skillsToMountSpecs(skillParsed)
+3. userMounts = sandbox.json runtime.mounts → MountSpec[]
+4. 冲突检测：userMounts 的 target 不能与 skillMounts 的 target 重合
+5. allMounts = [...skillMounts, ...userMounts] 给 DockerRuntime
+6. setSbx({ skillMounts, userMounts, skillFileMapping: skillParsed, ... })
 ```
 
 ### `before_agent_start` handler
 
 ```
-1. 重新解析 event.systemPrompt 中 <available_skills> XML，构建 filePath → name 映射
-   （event.systemPrompt 是原始 prompt，扩展 handler 被顺序调用，各自接收原始值）
+1. 遍历 sbx.skillFileMapping，对每个 { name, filePath }：
+   - 在 event.systemPrompt 中将 <location>filePath</location>
+     替换为 <location>/skills/{name}/SKILL.md</location>
 
-2. 用映射表替换 <location> 为容器内路径:
-   <location>/skills/ask-user/SKILL.md</location>
+2. 构建 skill info（直接读 sbx.skillMounts，不再按 /skills/ 前缀过滤）
 
-3. 构建 skill info（直接读 sbx.skillMounts，不再按 /skills/ 前缀过滤）
+3. 构建 user mount info（直接读 sbx.userMounts）
 
-4. 构建 user mount info（直接读 sbx.userMounts）
-
-5. 替换 CWD 行，追加 skill/user info
+4. 替换 CWD 行，追加 skill/user info
 ```
 
-注：不在 `SbxSession` 中额外存储映射表——`before_agent_start` 收到完整原始 system prompt，重新解析即可。
+注：skillFileMapping 在 session_start 时由 parseAvailableSkills() 产出并存入 SbxSession，before_agent_start 直接使用，不重复解析 XML。
 
 ## 移除的代码
 
