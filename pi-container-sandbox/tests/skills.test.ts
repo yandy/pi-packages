@@ -1,7 +1,37 @@
 import { readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { describe, expect, it } from "vitest";
+import { formatSkillsForPrompt, type Skill } from "@earendil-works/pi-coding-agent";
 import { fixSkillLocations, parseAvailableSkills, skillsToMountSpecs } from "../src/skills";
+
+// Realistic Skill[] fixtures — if pi changes the Skill interface fields used
+// by formatSkillsForPrompt, update these fixtures to match.
+const realSkills: Skill[] = [
+	{
+		name: "ask-user",
+		description: "Ask the user questions interactively",
+		filePath: "/home/user/.pi/agent-code/npm/node_modules/@yandy0725/pi-ask-user/skills/ask-user/SKILL.md",
+		baseDir: "/home/user/.pi/agent-code/npm/node_modules/@yandy0725/pi-ask-user/skills/ask-user",
+		sourceInfo: { source: "npm", path: "/home/user/.pi/agent-code/npm/node_modules/@yandy0725/pi-ask-user" },
+		disableModelInvocation: false,
+	},
+	{
+		name: "find-docs",
+		description: "Search for documentation and examples",
+		filePath: "/home/user/.pi/agent-code/skills/find-docs/SKILL.md",
+		baseDir: "/home/user/.pi/agent-code/skills/find-docs",
+		sourceInfo: { source: "global-skills", path: "/home/user/.pi/agent-code/skills" },
+		disableModelInvocation: false,
+	},
+	{
+		name: "brainstorming",
+		description: "Explore ideas before building",
+		filePath: "/home/user/workspace/project/.agents/skills/brainstorming/SKILL.md",
+		baseDir: "/home/user/workspace/project/.agents/skills/brainstorming",
+		sourceInfo: { source: "project", path: "/home/user/workspace/project/.agents/skills" },
+		disableModelInvocation: false,
+	},
+];
 
 describe("parseAvailableSkills", () => {
 	it("parses a single skill from <available_skills> XML", () => {
@@ -83,6 +113,38 @@ describe("parseAvailableSkills", () => {
 		const result = parseAvailableSkills(prompt);
 		expect(result).toHaveLength(1);
 		expect(result[0].name).toBe("valid");
+	});
+
+	it("golden: round-trips pi's real formatSkillsForPrompt output", () => {
+		// This is the format-change alert: if pi changes how it serializes
+		// skills into XML, formatSkillsForPrompt will produce different output
+		// and this test will fail — warning us to update parseAvailableSkills.
+		const realXml = formatSkillsForPrompt(realSkills);
+
+		const result = parseAvailableSkills(realXml);
+		expect(result).toHaveLength(3);
+		expect(result[0].name).toBe("ask-user");
+		expect(result[0].hostFilePath).toBe(realSkills[0].filePath);
+		expect(result[1].name).toBe("find-docs");
+		expect(result[1].hostFilePath).toBe(realSkills[1].filePath);
+		expect(result[2].name).toBe("brainstorming");
+		expect(result[2].hostFilePath).toBe(realSkills[2].filePath);
+
+		// Verify the full pipeline: parse → mount specs → fix locations
+		const mounts = skillsToMountSpecs(result);
+		expect(mounts).toHaveLength(3);
+		expect(mounts[0].target).toBe("/skills/ask-user");
+		expect(mounts[1].target).toBe("/skills/find-docs");
+		expect(mounts[2].target).toBe("/skills/brainstorming");
+
+		const fixed = fixSkillLocations(realXml, result);
+		expect(fixed).toContain("<location>/skills/ask-user/SKILL.md</location>");
+		expect(fixed).toContain("<location>/skills/find-docs/SKILL.md</location>");
+		expect(fixed).toContain("<location>/skills/brainstorming/SKILL.md</location>");
+		// Verify host paths are gone
+		expect(fixed).not.toContain(realSkills[0].filePath);
+		expect(fixed).not.toContain(realSkills[1].filePath);
+		expect(fixed).not.toContain(realSkills[2].filePath);
 	});
 
 	it("golden: parses real pi <available_skills> fixture (format change alert)", () => {
@@ -194,7 +256,7 @@ describe("fixSkillLocations", () => {
 		expect(result).toBe(prompt);
 	});
 
-	it("returns prompt unchanged for empty mapping", () => {
+	it("returns empty array for empty input", () => {
 		const prompt = "some prompt";
 		expect(fixSkillLocations(prompt, [])).toBe(prompt);
 	});
