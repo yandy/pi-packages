@@ -6,7 +6,9 @@ const mockSession: SbxSession = {
 	name: "test-container",
 	hostCwd: "/tmp/test",
 	keep: false,
-	mounts: [],
+	skillMounts: [],
+	userMounts: [],
+	skillFileMapping: [],
 	allowedExternalPrefixes: [],
 	imageRef: "pi-sandbox:latest",
 	config: {
