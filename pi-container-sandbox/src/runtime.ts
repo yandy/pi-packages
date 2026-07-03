@@ -1,13 +1,7 @@
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
-import Dockerode from "dockerode";
+import { docker, dockerSpawn } from "./docker-cli";
 import { PACKAGE_DOCKER_DIR } from "./config";
-
-function getDockerSocket(): string {
-	const host = process.env.DOCKER_HOST;
-	if (host?.startsWith("unix://")) return host.slice(7);
-	return process.env.DOCKER_SOCKET || "/var/run/docker.sock";
-}
 
 const BUILD_TIMEOUT_MS = parseInt(process.env.SBX_BUILD_TIMEOUT || "600000", 10);
 const MAX_EXEC_BUFFER = 16 * 1024 * 1024; // 16MB
@@ -102,13 +96,13 @@ export function expandEnvEntry(entry: string, hostCwd: string): string {
 }
 
 type State =
-	| { kind: "uninit"; docker: Dockerode | null }
+	| { kind: "uninit"; initialized: boolean }
 	| { kind: "disabled"; reason: string }
 	| { kind: "broken"; reason: string }
-	| { kind: "ready"; container: Dockerode.Container; id: string };
+	| { kind: "ready"; id: string };
 
 export class DockerRuntime implements Runtime {
-	private state: State = { kind: "uninit", docker: null };
+	private state: State = { kind: "uninit", initialized: false };
 	private workRoot = "/workspace";
 	private _initPromise: Promise<void> | null = null;
 	private opts: SandboxOptions;
@@ -119,9 +113,8 @@ export class DockerRuntime implements Runtime {
 
 	async init(): Promise<void> {
 		try {
-			const docker = new Dockerode({ socketPath: getDockerSocket() });
-			await docker.ping();
-			this.state = { kind: "uninit", docker };
+			docker(["info"]);
+			this.state = { kind: "uninit", initialized: true };
 		} catch (err) {
 			this.state = {
 				kind: "disabled",
@@ -144,63 +137,63 @@ export class DockerRuntime implements Runtime {
 
 	async imageExists(): Promise<boolean> {
 		try {
-			await this._requireDocker().getImage(this.opts.image).inspect();
+			docker(["image", "inspect", this.opts.image]);
 			return true;
-		} catch (err: any) {
-			if (err?.statusCode === 404) return false;
-			throw err;
+		} catch {
+			return false;
 		}
 	}
 
 	async buildImage(opts: BuildImageOpts): Promise<void> {
-		const docker = this._requireDocker();
 		const image = this.opts.image;
 		const buildContext = opts.buildContext ?? PACKAGE_DOCKER_DIR;
 		const dockerfile = opts.dockerfile;
-		const buildArgs = opts.buildArgs;
 		const onProgress = opts.onProgress ?? this.opts.onProgress;
 
 		const report = (msg: string) => onProgress?.(msg);
 		report(`Building image ${image}...`);
 
-		const buildStream = await docker.buildImage(
-			{ context: buildContext, src: ["."] },
-			{ t: image, dockerfile, buildargs: buildArgs, version: "2" },
-		);
+		const args = [
+			"build",
+			"-t", image,
+			"-f", dockerfile,
+			"--progress=plain",
+		];
 
-		const buildPromise = new Promise<void>((resolve, reject) => {
-			let settled = false;
-			docker.modem.followProgress(
-				buildStream,
-				(err: any) => {
-					if (settled) return;
-					settled = true;
-					if (err) reject(err instanceof Error ? err : new Error(String(err)));
-					else resolve();
-				},
-				(event: any) => {
-					if (event.stream) report(event.stream.trim());
-					else if (event.errorDetail) {
-						if (!settled) {
-							settled = true;
-							reject(new Error(event.errorDetail.message || event.error || "Build failed"));
-						}
-					} else if (event.error) {
-						report(`ERROR: ${event.error}`);
-						if (!settled) {
-							settled = true;
-							reject(new Error(event.error));
-						}
-					} else if (event.status) report(event.status);
-				},
-			);
+		if (opts.buildArgs) {
+			for (const [k, v] of Object.entries(opts.buildArgs)) {
+				args.push("--build-arg", `${k}=${v}`);
+			}
+		}
+
+		args.push(buildContext);
+
+		let pending = "";
+		const result = await dockerSpawn(args, {
+			timeoutMs: BUILD_TIMEOUT_MS,
+			onStdout: (chunk: Buffer) => {
+				const text = chunk.toString("utf-8");
+				pending += text;
+				const lines = pending.split("\n");
+				pending = lines.pop() ?? "";
+				for (const line of lines) {
+					const trimmed = line.trim();
+					if (trimmed) report(trimmed);
+				}
+			},
+			onStderr: (chunk: Buffer) => {
+				const text = chunk.toString("utf-8").trim();
+				if (text) report(`[stderr] ${text}`);
+			},
 		});
 
-		const timeoutPromise = new Promise<void>((_, reject) =>
-			setTimeout(() => reject(new Error(`sandbox: image build timed out after ${BUILD_TIMEOUT_MS}ms`)), BUILD_TIMEOUT_MS),
-		);
+		if (pending.trim()) report(pending.trim());
 
-		await Promise.race([buildPromise, timeoutPromise]);
+		if (result.exitCode !== 0) {
+			const errMsg = result.stderr.toString("utf-8").trim() || "Build failed";
+			throw new Error(`sandbox: image build failed (exit ${result.exitCode}): ${errMsg}`);
+		}
+
 		report(`Image ${image} built successfully.`);
 	}
 
@@ -213,80 +206,90 @@ export class DockerRuntime implements Runtime {
 	}
 
 	async startContainer(): Promise<void> {
-		const docker = this._requireDocker();
-		const { hostCwd, name, allowNetwork, extraMounts, resources, cacheVolume, image } = this.opts;
+		const { hostCwd, name, allowNetwork, extraMounts, resources, cacheVolume, image, env } = this.opts;
 
-		const existing = docker.getContainer(name);
+		// 1. Check for existing container
+		let existingId: string | null = null;
 		try {
-			const info = await existing.inspect();
-			if (info.State.Running) {
-				this.state = { kind: "ready", container: existing, id: info.Id };
-				return;
+			const info = JSON.parse(docker(["container", "inspect", name]));
+			if (info?.[0]) {
+				const state = info[0].State;
+				if (state?.Running) {
+					this.state = { kind: "ready", id: info[0].Id };
+					return;
+				}
+				existingId = info[0].Id;
 			}
-			try {
-				await existing.remove({ force: true });
-			} catch (err: any) {
-				if (err?.statusCode !== 404 && err?.statusCode !== 409) throw err;
-			}
-		} catch (err: any) {
-			if (err?.statusCode !== 404) throw err;
+		} catch {}
+
+		// 2. Clean up existing container if present but not running
+		if (existingId) {
+			try { docker(["rm", "-f", name]); } catch {}
 		}
 
+		// 3. Build docker run args
 		const memory = resources?.memory ?? "4g";
 		const cpus = resources?.cpus ?? "2";
 		const pidsLimit = resources?.pidsLimit ?? 512;
 
-		const binds: string[] = [`${hostCwd}:${this.workRoot}`];
+		const args: string[] = [
+			"run", "-d",
+			"--name", name,
+			"--user", "1000:1000",
+			"-w", this.workRoot,
+			"-v", `${hostCwd}:${this.workRoot}`,
+			"--memory", memory,
+			"--cpus", cpus,
+			"--pids-limit", String(pidsLimit),
+			"--network", allowNetwork ? "default" : "none",
+			"--cap-drop", "ALL",
+			"--security-opt", "no-new-privileges",
+		];
+
+		// Extra mounts
 		if (extraMounts) {
 			for (const m of extraMounts) {
 				const mode = m.mode === "rw" ? "rw" : "ro";
-				binds.push(`${m.source}:${m.target}:${mode}`);
+				args.push("-v", `${m.source}:${m.target}:${mode}`);
 			}
 		}
-		if (cacheVolume) binds.push(`${cacheVolume}:/cache`);
+		if (cacheVolume) {
+			args.push("-v", `${cacheVolume}:/cache`);
+		}
 
-		const HostConfig: any = {
-			Binds: binds,
-			Memory: this._parseBytes(memory),
-			NanoCpus: Math.round(parseFloat(cpus) * 1e9),
-			PidsLimit: pidsLimit,
-			AutoRemove: false,
-			NetworkMode: allowNetwork ? "default" : "none",
-			CapDrop: ["ALL"],
-			SecurityOpt: ["no-new-privileges"],
-		};
-
+		// Swap
 		if (resources?.swap !== undefined) {
 			const swapVal = resources.swap;
 			if (swapVal === "0") {
-				HostConfig.MemorySwap = this._parseBytes(memory);
+				args.push("--memory-swap", memory);
 			} else {
-				HostConfig.MemorySwap = this._parseBytes(memory) + this._parseBytes(swapVal);
+				const memBytes = this._parseBytes(memory);
+				const swapBytes = memBytes + this._parseBytes(swapVal);
+				args.push("--memory-swap", String(swapBytes));
 			}
 		}
 
-		const container = await docker.createContainer({
-			Image: image,
-			Cmd: ["sleep", "infinity"],
-			User: "1000:1000",
-			WorkingDir: this.workRoot,
-			Env: ["DEBIAN_FRONTEND=noninteractive", ...this._expandEnv(this.opts.env ?? [])],
-			HostConfig,
-			name,
-		});
-		await container.start();
-		const inspect = await container.inspect();
-		this.state = { kind: "ready", container, id: inspect.Id };
+		// Environment variables
+		const dockerEnv = ["DEBIAN_FRONTEND=noninteractive", ...this._expandEnv(env ?? [])];
+		for (const e of dockerEnv) {
+			args.push("-e", e);
+		}
+
+		args.push(image, "sleep", "infinity");
+
+		// 4. Start container
+		docker(args, { timeout: 60_000 });
+		const inspectInfo = JSON.parse(docker(["container", "inspect", name]));
+		this.state = { kind: "ready", id: inspectInfo[0].Id };
 	}
 
 	async withReady(): Promise<void> {
 		if (this.state.kind === "ready") {
 			try {
-				await this.state.container.inspect();
+				docker(["container", "inspect", this.opts.name]);
 				return;
 			} catch {
-				const docker = this.state.kind === "ready" ? await this._getDocker() : null;
-				this.state = { kind: "uninit", docker };
+				this.state = { kind: "uninit", initialized: true };
 			}
 		}
 		if (this.state.kind === "disabled" || this.state.kind === "broken") return;
@@ -301,151 +304,47 @@ export class DockerRuntime implements Runtime {
 
 	async shutdown(): Promise<void> {
 		if (this.state.kind !== "ready") return;
-		try {
-			await this.state.container.stop({ t: 5 });
-		} catch {}
-		try {
-			await this.state.container.remove({ force: true });
-		} catch {}
-		this.state = { kind: "uninit", docker: null };
+		const name = this.opts.name;
+		try { docker(["stop", "-t", "5", name]); } catch {}
+		try { docker(["rm", "-f", name]); } catch {}
+		this.state = { kind: "uninit", initialized: false };
 	}
 
 	async exec(opts: ExecOpts): Promise<ExecResult> {
 		if (this.state.kind === "broken") throw new Error(this.state.reason);
 		if (this.state.kind !== "ready") throw new Error("Sandbox not ready");
-		const container = this.state.container;
 
-		const exec = await container.exec({
-			Cmd: opts.cmd,
-			AttachStdout: true,
-			AttachStderr: true,
-			AttachStdin: opts.stdin !== undefined,
-			WorkingDir: opts.workDir ?? this.workRoot,
-			Env: opts.env,
-		});
+		const args = ["exec", "-i"];
+		if (opts.workDir) args.push("-w", opts.workDir);
+		if (opts.env) {
+			for (const e of opts.env) args.push("-e", e);
+		}
+		args.push(this.opts.name, ...opts.cmd);
 
 		const controller = new AbortController();
-		let timedOut = false;
-		let timer: NodeJS.Timeout | null = null;
-		if (opts.timeoutMs && opts.timeoutMs > 0) {
-			timer = setTimeout(() => {
-				timedOut = true;
-				controller.abort(new Error("timeout"));
-			}, opts.timeoutMs);
-		}
 		if (opts.signal) {
-			const externalSignal = opts.signal;
-			if (externalSignal.aborted) {
-				controller.abort(externalSignal.reason);
-			} else {
-				externalSignal.addEventListener("abort", () => controller.abort(externalSignal.reason), { once: true });
+			if (opts.signal.aborted) {
+				return { exitCode: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
 			}
-		}
-		if (controller.signal.aborted) {
-			if (timer) clearTimeout(timer);
-			return { exitCode: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+			opts.signal.addEventListener("abort", () => controller.abort(opts.signal!.reason), { once: true });
 		}
 
-		let stream: NodeJS.ReadWriteStream;
-		try {
-			stream = (await exec.start({
-				Detach: false,
-				Tty: false,
-				hijack: true,
-				stdin: opts.stdin !== undefined,
-				abortSignal: controller.signal,
-			})) as NodeJS.ReadWriteStream;
-		} catch (err) {
-			if (timer) clearTimeout(timer);
-			const msg = err instanceof Error ? err.message : String(err);
-			throw new Error(`sandbox: failed to start container exec: ${msg}`);
-		}
-
-		const stdoutChunks: Buffer[] = [];
-		const stderrChunks: Buffer[] = [];
-
-		let pending = Buffer.alloc(0);
-		stream.on("data", (chunk: Buffer) => {
-			pending = Buffer.concat([pending, chunk]);
-			if (pending.length > MAX_EXEC_BUFFER) {
-				try {
-					(stream as any).destroy(new Error("exec stream buffer exceeded 16MB limit"));
-				} catch {}
-				return;
-			}
-			while (pending.length >= 8) {
-				const streamType = pending[0];
-				const size = pending.readUInt32BE(4);
-				if (pending.length < 8 + size) break;
-				const payload = pending.subarray(8, 8 + size);
-				pending = pending.subarray(8 + size);
-				if (streamType === 1) {
-					stdoutChunks.push(payload);
-					opts.onData?.(payload);
-				} else if (streamType === 2) {
-					stderrChunks.push(payload);
-					opts.onData?.(payload);
-				}
-			}
+		const result = await dockerSpawn(args, {
+			timeoutMs: opts.timeoutMs,
+			signal: controller.signal,
+			stdin: opts.stdin,
+			onStdout: opts.onData,
+			onStderr: opts.onData,
 		});
 
-		controller.signal.addEventListener("abort", async () => {
-			try {
-				(stream as any).destroy();
-			} catch {}
-			try {
-				const info = await exec.inspect();
-				if (info.Pid) {
-					const killExec = await container.exec({
-						Cmd: ["sh", "-c", `kill -9 ${info.Pid} 2>/dev/null; exit 0`],
-						AttachStdout: false,
-						AttachStderr: false,
-					});
-					await killExec.start({ Detach: true }).catch(() => {});
-				}
-			} catch {
-				/* best effort */
-			}
-		});
-
-		return new Promise<ExecResult>((resolve) => {
-			let settled = false;
-			const finish = async () => {
-				if (settled) return;
-				settled = true;
-				if (timer) clearTimeout(timer);
-				try {
-					const inspect = await exec.inspect();
-					resolve({
-						exitCode: timedOut ? null : (inspect.ExitCode ?? null),
-						stdout: Buffer.concat(stdoutChunks),
-						stderr: Buffer.concat(stderrChunks),
-					});
-				} catch {
-					resolve({
-						exitCode: null,
-						stdout: Buffer.concat(stdoutChunks),
-						stderr: Buffer.concat(stderrChunks),
-					});
-				}
-			};
-			stream.on("end", finish);
-			stream.on("error", (err) => {
-				console.warn(`sandbox exec stream error: ${err instanceof Error ? err.message : String(err)}`);
-			});
-			stream.on("error", finish);
-			stream.on("close", finish);
-			if (opts.stdin !== undefined && !controller.signal.aborted) {
-				const buf = typeof opts.stdin === "string" ? Buffer.from(opts.stdin) : opts.stdin;
-				(stream as any).write(buf);
-			}
-			(stream as any).end();
-		});
+		return result;
 	}
 
 	private async _doInit(): Promise<void> {
-		const docker = await this._getDocker();
-		if (!docker) return;
+		if (this.state.kind === "uninit" && !this.state.initialized) {
+			await this.init();
+		}
+		if (this.state.kind !== "uninit" || !this.state.initialized) return;
 		try {
 			await this.startContainer();
 		} catch (err) {
@@ -454,22 +353,6 @@ export class DockerRuntime implements Runtime {
 				reason: `Container start failed: ${err instanceof Error ? err.message : String(err)}`,
 			};
 		}
-	}
-
-	private _requireDocker(): Dockerode {
-		if (this.state.kind === "uninit" && this.state.docker) return this.state.docker;
-		if (this.state.kind === "ready") {
-			return new Dockerode({ socketPath: getDockerSocket() });
-		}
-		throw new Error("Docker not initialized");
-	}
-
-	private async _getDocker(): Promise<Dockerode | null> {
-		if (this.state.kind === "uninit") {
-			if (!this.state.docker) await this.init();
-			if (this.state.kind === "uninit") return this.state.docker;
-		}
-		return null;
 	}
 
 	private _parseBytes(s: string): number {
