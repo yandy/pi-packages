@@ -321,22 +321,29 @@ export class DockerRuntime implements Runtime {
 		args.push(this.opts.name, ...opts.cmd);
 
 		const controller = new AbortController();
+		let abortHandler: (() => void) | undefined;
 		if (opts.signal) {
 			if (opts.signal.aborted) {
 				return { exitCode: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
 			}
-			opts.signal.addEventListener("abort", () => controller.abort(opts.signal!.reason), { once: true });
+			abortHandler = () => controller.abort(opts.signal?.reason);
+			opts.signal.addEventListener("abort", abortHandler, { once: true });
 		}
 
-		const result = await dockerSpawn(args, {
-			timeoutMs: opts.timeoutMs,
-			signal: controller.signal,
-			stdin: opts.stdin,
-			onStdout: opts.onData,
-			onStderr: opts.onData,
-		});
-
-		return result;
+		try {
+			const { exitCode, stdout, stderr } = await dockerSpawn(args, {
+				timeoutMs: opts.timeoutMs,
+				signal: controller.signal,
+				stdin: opts.stdin,
+				onStdout: opts.onData,
+				onStderr: opts.onData,
+			});
+			return { exitCode, stdout, stderr };
+		} finally {
+			if (opts.signal && abortHandler) {
+				opts.signal.removeEventListener("abort", abortHandler);
+			}
+		}
 	}
 
 	private async _doInit(): Promise<void> {

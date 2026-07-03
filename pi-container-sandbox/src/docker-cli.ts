@@ -1,11 +1,5 @@
 import { execFileSync, spawn, type SpawnOptions } from "node:child_process";
 
-export function getDockerSocket(): string {
-	const host = process.env.DOCKER_HOST;
-	if (host?.startsWith("unix://")) return host.slice(7);
-	return process.env.DOCKER_SOCKET || "/var/run/docker.sock";
-}
-
 /**
  * 同步执行 docker 命令。适用于 inspect、stop、rm 等快速操作。
  * 失败时抛出 Error。
@@ -58,11 +52,11 @@ export function dockerSpawn(
 			});
 		};
 
-		child.stdout!.on("data", (chunk: Buffer) => {
+		child.stdout?.on("data", (chunk: Buffer) => {
 			stdoutChunks.push(chunk);
 			opts.onStdout?.(chunk);
 		});
-		child.stderr!.on("data", (chunk: Buffer) => {
+		child.stderr?.on("data", (chunk: Buffer) => {
 			stderrChunks.push(chunk);
 			opts.onStderr?.(chunk);
 		});
@@ -99,9 +93,9 @@ export function dockerSpawn(
 		// stdin
 		if (opts.stdin !== undefined) {
 			const buf = typeof opts.stdin === "string" ? Buffer.from(opts.stdin) : opts.stdin;
-			child.stdin!.end(buf);
+			child.stdin?.end(buf);
 		} else {
-			child.stdin!.end();
+			child.stdin?.end();
 		}
 	});
 }
