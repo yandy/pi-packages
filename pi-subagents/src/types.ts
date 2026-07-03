@@ -30,7 +30,7 @@ export interface SubscribableSession {
 export type SubagentType = string;
 
 /** UI display and agent listing — name, display name, description, prompt mode. */
-export interface AgentIdentity {
+interface AgentIdentity {
 	name: string;
 	displayName?: string;
 	description: string;

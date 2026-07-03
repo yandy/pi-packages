@@ -50,7 +50,7 @@ export interface SubagentManagerObserver {
 	onSubagentCreated(record: Subagent): void;
 }
 
-export interface SubagentManagerOptions {
+interface SubagentManagerOptions {
 	/** Assembly factory that produces a born-complete SubagentSession per spawn. */
 	createSubagentSession: (params: CreateSubagentSessionParams) => Promise<SubagentSession>;
 	/** Concurrency limiter — schedules background run thunks FIFO against the limit. */

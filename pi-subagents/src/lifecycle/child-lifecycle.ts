@@ -59,7 +59,7 @@ export interface ChildDisposedEvent {
 }
 
 /** Narrow emit seam — injected, never imports the Pi SDK. */
-export type LifecycleEmit = (channel: string, data: unknown) => void;
+type LifecycleEmit = (channel: string, data: unknown) => void;
 
 /** Publishes the child-execution lifecycle on the event bus. */
 export interface ChildLifecyclePublisher {

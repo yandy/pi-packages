@@ -38,19 +38,19 @@ function applyRecursionGuard(session: AgentSession): void {
 // ── IO boundary ───────────────────────────────────────────────────────────────
 
 /** Minimal resource-loader contract used by the factory. */
-export interface ResourceLoaderLike {
+interface ResourceLoaderLike {
 	reload(): Promise<void>;
 }
 
 /** Minimal session-manager contract used by the factory. */
-export interface SessionManagerLike {
+interface SessionManagerLike {
 	newSession(opts: { parentSession?: string }): void;
 	getSessionFile(): string | undefined;
 	getSessionId(): string;
 }
 
 /** Options passed to EnvironmentIO/SessionFactoryIO methods. */
-export interface ResourceLoaderOptions {
+interface ResourceLoaderOptions {
 	cwd: string;
 	agentDir: string;
 	noPromptTemplates?: boolean;
@@ -62,7 +62,7 @@ export interface ResourceLoaderOptions {
 }
 
 /** Options passed to SessionFactoryIO.createSession. */
-export interface CreateSessionOptions {
+interface CreateSessionOptions {
 	cwd: string;
 	agentDir: string;
 	sessionManager: SessionManagerLike;
@@ -80,7 +80,7 @@ export interface CreateSessionOptions {
  * Decouples the factory from direct process/SDK reads so each can be stubbed
  * independently in tests.
  */
-export interface EnvironmentIO {
+interface EnvironmentIO {
 	detectEnv: (exec: ShellExec, cwd: string) => Promise<EnvInfo>;
 	getAgentDir: () => string;
 	deriveSessionDir: (parentSessionFile: string | undefined, effectiveCwd: string) => string;
@@ -92,7 +92,7 @@ export interface EnvironmentIO {
  * Decouples the factory from direct Pi SDK imports and sibling-module IO,
  * making it testable via plain stub objects without vi.mock().
  */
-export interface SessionFactoryIO {
+interface SessionFactoryIO {
 	createResourceLoader: (opts: ResourceLoaderOptions) => ResourceLoaderLike;
 	createSessionManager: (cwd: string, sessionDir: string) => SessionManagerLike;
 	createSettingsManager: (cwd: string, agentDir: string) => SettingsManager;
