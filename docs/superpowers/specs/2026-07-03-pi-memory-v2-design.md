@@ -83,7 +83,7 @@ staging uses port 2222
 connection timeout after 30s on staging
 ```
 
-- `name` 取 topic 文件名去掉 `.md` 扩展名（如 `debugging.md` → `debugging`）
+- `name` 为可读标题，由 LLM 在 `add` 时根据 topic 语义提供（如 `Debugging Tips`、`Go Build Commands`），不与文件名强绑定。若 LLM 未提供，默认取 topic 文件名去掉 `.md` 扩展名
 
 ---
 
@@ -182,7 +182,7 @@ update outdated info), and rebuild the MEMORY.md index. Rules:
 - Each topic file contains entries as `## Entry Title` blocks.
 - Deduplicate entries: if two entries in the same topic contain the same info, merge them.
 - If entries across different topics overlap, move the content to the more appropriate topic.
-- Keep MEMORY.md index in sync: - [Entry Title](topic.md) per entry.
+- Rebuild MEMORY.md index: list entries you deem valuable (not necessarily every entry). Each line: - [Entry Title](topic.md). Accuracy matters more than completeness.
 - When done, output a summary: merged N, removed N, moved N, updated N.
 ```
 
@@ -196,7 +196,7 @@ update outdated info), and rebuild the MEMORY.md index. Rules:
 
 ### 索引重建
 
-dream 结束后，MEMORY.md 索引应准确反映每个 topic 文件中当前的所有 `##` entry。
+dream 结束后，MEMORY.md 索引应准确反映 dream 整理后的结果。不要求 MEMORY.md 覆盖 topic 文件中的所有 `##` entry——dream 可选择性列出有价值的 entry，索引只需对其列出的条目保持准确即可。
 
 ---
 
