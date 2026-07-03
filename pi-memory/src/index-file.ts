@@ -4,7 +4,7 @@ export interface IndexEntry {
 	description: string;
 	raw: string;
 }
-export interface IndexFile {
+interface IndexFile {
 	entries: IndexEntry[];
 	raw: string;
 }
