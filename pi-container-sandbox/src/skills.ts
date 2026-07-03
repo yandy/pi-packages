@@ -32,6 +32,7 @@ export function parseAvailableSkills(systemPrompt: string): Array<{
 	const regex = /<skill>\s*<name>([\s\S]*?)<\/name>[\s\S]*?<location>([\s\S]*?)<\/location>/g;
 
 	let match: RegExpExecArray | null;
+	// biome-ignore lint/suspicious/noAssignInExpressions: standard RegExp exec loop idiom
 	while ((match = regex.exec(systemPrompt)) !== null) {
 		const rawName = match[1].trim();
 		const rawLocation = match[2].trim();
