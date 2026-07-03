@@ -5,12 +5,14 @@ import type { MemoryConfig } from "../src/config";
 const cfg: Pick<MemoryConfig, "dream"> = { dream: { nudgeAfterSessions: 5, nudgeAfterHours: 24, model: "auto" } };
 
 describe("buildDreamTask", () => {
-	it("includes memory dir + consolidation instructions + line limit", () => {
-		const task = buildDreamTask("/mem/abc123", 200);
-		expect(task).toContain("/mem/abc123");
-		expect(task).toMatch(/deduplicat|consolidat/i);
-		expect(task).toContain("200");
-	});
+  it("includes memory dir + entry-level consolidation instructions + line limit", () => {
+    const task = buildDreamTask("/mem/abc123", 200);
+    expect(task).toContain("/mem/abc123");
+    expect(task).toMatch(/deduplicat|consolidat/i);
+    expect(task).toContain("200");
+    expect(task).toContain("## Entry Title");
+    expect(task).toContain("not necessarily every entry");
+  });
 });
 
 describe("resolveDreamModel", () => {
