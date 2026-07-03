@@ -68,11 +68,10 @@ Type.Object({
 
 ### Topic 文件
 
-简化 frontmatter（仅 `name` + `updated`），无 `#` 一级标题，frontmatter 后直接 `## entryTitle`：
+简化 frontmatter（仅 `updated`），无 `#` 一级标题，frontmatter 后直接 `## entryTitle`。文件名本身即标识：
 
 ```markdown
 ---
-name: debugging
 updated: 2026-07-03
 ---
 
@@ -82,8 +81,6 @@ staging uses port 2222
 ## MySQL Timeout
 connection timeout after 30s on staging
 ```
-
-- `name` 为可读标题，由 LLM 在 `add` 时根据 topic 语义提供（如 `Debugging Tips`、`Go Build Commands`），不与文件名强绑定。若 LLM 未提供，默认取 topic 文件名去掉 `.md` 扩展名
 
 ---
 
@@ -95,7 +92,7 @@ connection timeout after 30s on staging
 
 1. 解析 topic 文件路径（`safeTopicPath` 防穿越）
 2. 读取已有 topic 文件（如存在）
-3. 若文件不存在 → 写 `buildFrontmatter({ name: topicTitle, updated: today() })` + `\n## title\n\ncontent`
+3. 若文件不存在 → 写 `buildFrontmatter({ updated: today() })` + `\n## title\n\ncontent`
 4. 若文件存在 → 追加 `\n\n## title\n\ncontent`，刷 frontmatter `updated`
 5. MEMORY.md **追加**新索引行（不 upsert，允许多行同 topic）
 6. 容量校验：超限回滚 + 返回错误
@@ -121,7 +118,6 @@ connection timeout after 30s on staging
 
 ```markdown
 ---
-name: debugging
 updated: 2026-07-03
 ---
 
@@ -136,7 +132,6 @@ connection timeout after 30s
 
 ```markdown
 ---
-name: debugging
 updated: 2026-07-03
 ---
 
@@ -204,8 +199,8 @@ dream 结束后，MEMORY.md 索引应准确反映 dream 整理后的结果。不
 
 | 函数 | 变更 |
 |------|------|
-| `TopicMeta` | 仅 `name: string` + `updated: string` |
-| `buildFrontmatter(meta)` | 仅输出 `name` + `updated` |
+| `TopicMeta` | 仅 `updated: string` |
+| `buildFrontmatter(meta)` | 仅输出 `updated` |
 | `appendContent(existing, entryTitle, content)` | 新文件（existing=null）：`## entryTitle\n\ncontent`；已有文件：追加 `\n\n## entryTitle\n\ncontent`。不负责 frontmatter（由 `doAdd` 处理） |
 | `updateFrontmatterDate(raw, date)` | **新增**，更新 frontmatter 中 `updated` 字段 |
 | `removeEntrySection(raw, title)` | **新增**，移除 `## title` 对应 block |
@@ -277,7 +272,7 @@ dream 结束后，MEMORY.md 索引应准确反映 dream 整理后的结果。不
 
 ### `topic-file.test.ts`
 
-- 更新 `buildFrontmatter`：仅验证 `name` + `updated`，无 `description` / `type`
+- 更新 `buildFrontmatter`：仅验证 `updated`，无 `name` / `description` / `type`
 - 更新 `appendContent`：新文件不包含 `# ` 一级标题
 - 新增 `updateFrontmatterDate` 测试
 - 新增 `removeEntrySection` 测试（单 entry / 多 entry / 首 entry / 尾 entry）
@@ -297,7 +292,7 @@ dream 结束后，MEMORY.md 索引应准确反映 dream 整理后的结果。不
 
 - 更新 `doAdd`：
   - 同一 topic 有多行（不 upsert）
-  - 新 topic 文件无一级标题、有 frontmatter（仅 name+updated）
+  - 新 topic 文件无一级标题、有 frontmatter（仅 updated）
   - 追加已有 topic 刷新 `updated`
   - 无 description
 - 移除 `doReplace` 测试
