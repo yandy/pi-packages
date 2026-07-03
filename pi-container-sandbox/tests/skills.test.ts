@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseAvailableSkills, skillsToMountSpecs } from "../src/skills";
+import { fixSkillLocations, parseAvailableSkills, skillsToMountSpecs } from "../src/skills";
 
 describe("parseAvailableSkills", () => {
 	it("parses a single skill from <available_skills> XML", () => {
@@ -107,5 +107,69 @@ describe("skillsToMountSpecs", () => {
 
 	it("returns empty array for empty input", () => {
 		expect(skillsToMountSpecs([])).toEqual([]);
+	});
+});
+
+describe("fixSkillLocations", () => {
+	const mapping = [
+		{ name: "ask-user", hostFilePath: "/home/.pi/skills/ask-user/SKILL.md" },
+		{ name: "find-docs", hostFilePath: "/home/.pi/skills/find-docs/SKILL.md" },
+	];
+
+	it("replaces host <location> paths with container paths", () => {
+		const prompt = `<available_skills>
+  <skill>
+    <name>ask-user</name>
+    <location>/home/.pi/skills/ask-user/SKILL.md</location>
+  </skill>
+</available_skills>`;
+
+		const result = fixSkillLocations(prompt, [mapping[0]]);
+		expect(result).toContain("<location>/skills/ask-user/SKILL.md</location>");
+		expect(result).not.toContain("/home/.pi/skills/ask-user/SKILL.md");
+	});
+
+	it("replaces multiple skill locations", () => {
+		const prompt = `<available_skills>
+  <skill>
+    <name>ask-user</name>
+    <location>/home/.pi/skills/ask-user/SKILL.md</location>
+  </skill>
+  <skill>
+    <name>find-docs</name>
+    <location>/home/.pi/skills/find-docs/SKILL.md</location>
+  </skill>
+</available_skills>`;
+
+		const result = fixSkillLocations(prompt, mapping);
+		expect(result).toContain("<location>/skills/ask-user/SKILL.md</location>");
+		expect(result).toContain("<location>/skills/find-docs/SKILL.md</location>");
+		expect(result).not.toContain("/home/.pi/skills/");
+	});
+
+	it("handles whitespace inside <location> tags", () => {
+		const prompt = `<available_skills>
+  <skill>
+    <name>ask-user</name>
+    <location>
+      /home/.pi/skills/ask-user/SKILL.md
+    </location>
+  </skill>
+</available_skills>`;
+
+		const result = fixSkillLocations(prompt, [mapping[0]]);
+		expect(result).toContain("<location>/skills/ask-user/SKILL.md</location>");
+		expect(result).not.toContain("/home/.pi/skills/");
+	});
+
+	it("returns prompt unchanged when no mapping entries match", () => {
+		const prompt = "no skills here";
+		const result = fixSkillLocations(prompt, mapping);
+		expect(result).toBe(prompt);
+	});
+
+	it("returns prompt unchanged for empty mapping", () => {
+		const prompt = "some prompt";
+		expect(fixSkillLocations(prompt, [])).toBe(prompt);
 	});
 });

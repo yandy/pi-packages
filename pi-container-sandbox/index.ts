@@ -26,7 +26,7 @@ import {
 } from "./src/paths";
 import { DockerRuntime, deriveContainerName, type MountSpec } from "./src/runtime";
 import { clearSbx, getSbx, type SbxSession, setSbx } from "./src/session";
-import { parseAvailableSkills, skillsToMountSpecs } from "./src/skills";
+import { fixSkillLocations, parseAvailableSkills, skillsToMountSpecs } from "./src/skills";
 import { TIER_SPECS } from "./src/tiers";
 
 export default function (pi: ExtensionAPI) {
@@ -139,13 +139,7 @@ export default function (pi: ExtensionAPI) {
 
 		// 1. Fix <location> paths to point inside the container.
 		//    Uses skillFileMapping (from session_start) — no XML re-parsing.
-		let fixedPrompt = event.systemPrompt;
-		for (const { name, hostFilePath } of sbx.skillFileMapping) {
-			fixedPrompt = fixedPrompt.replace(
-				`<location>${hostFilePath}</location>`,
-				`<location>/skills/${name}/SKILL.md</location>`,
-			);
-		}
+		const fixedPrompt = fixSkillLocations(event.systemPrompt, sbx.skillFileMapping);
 
 		// 2. Build skill mount info from sbx.skillMounts (no /skills/ prefix filtering)
 		const skillInfo = sbx.skillMounts.length

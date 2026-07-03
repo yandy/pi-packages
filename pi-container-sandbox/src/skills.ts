@@ -66,3 +66,27 @@ export function skillsToMountSpecs(
 		mode: "ro" as const,
 	}));
 }
+
+/**
+ * Fix <location> tags in a system prompt to point inside the container.
+ *
+ * For each skill in the mapping, replaces its host file path in
+ * <location> tags with the container path /skills/<name>/SKILL.md.
+ * Uses whitespace-tolerant regex replacement to match regardless of
+ * whitespace inside <location> tags.
+ */
+export function fixSkillLocations(
+	prompt: string,
+	mapping: Array<{ name: string; hostFilePath: string }>,
+): string {
+	let result = prompt;
+	for (const { name, hostFilePath } of mapping) {
+		const escaped = hostFilePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		const regex = new RegExp(
+			`<location>\\s*${escaped}\\s*<\\/location>`,
+			"g",
+		);
+		result = result.replace(regex, `<location>/skills/${name}/SKILL.md</location>`);
+	}
+	return result;
+}
