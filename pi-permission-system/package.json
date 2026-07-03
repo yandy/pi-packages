@@ -39,7 +39,7 @@
 	},
 	"dependencies": {
 		"tree-sitter-bash": "^0.25.1",
-		"web-tree-sitter": "^0.26.9"
+		"web-tree-sitter": "^0.26.10"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.0",
