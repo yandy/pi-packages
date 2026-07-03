@@ -5,7 +5,7 @@ import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { parseIndex, serializeIndex, upsertEntry, checkCapacity, type IndexEntry } from "./index-file";
-import { buildFrontmatter, appendContent, isEmptyAfterRemove } from "./topic-file";
+import { buildFrontmatter, appendContent, hasEntries } from "./topic-file";
 import { safeTopicPath } from "./paths";
 
 export interface AddParams { content: string; topic: string; title?: string; description?: string; maxLines: number; maxBytes: number; }
@@ -24,10 +24,6 @@ async function readIndex(memoryDir: string): Promise<IndexEntry[]> {
 	}
 }
 
-function slug(s: string): string {
-	return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "memory";
-}
-
 function today(): string {
 	return new Date().toISOString().slice(0, 10);
 }
@@ -44,7 +40,7 @@ export async function doAdd(memoryDir: string, p: AddParams): Promise<ActionResu
 		const entries = await readIndex(memoryDir);
 		const title = p.title ?? p.topic.replace(/\.md$/i, "");
 		const description = p.description ?? p.content.split("\n")[0].slice(0, 80);
-		const next = upsertEntry(entries, { title, topic: p.topic, description, raw: "" });
+		const next = upsertEntry(entries, { title, topic: p.topic, description: description, raw: "" });
 		if (!checkCapacity(next, p.maxLines, p.maxBytes)) {
 			return { ok: false, error: `MEMORY.md capacity exceeded (max ${p.maxLines} lines / ${p.maxBytes} bytes). Current entries: ${serializeIndex(entries)}` };
 		}
@@ -53,7 +49,7 @@ export async function doAdd(memoryDir: string, p: AddParams): Promise<ActionResu
 		try { existing = await readFile(topicPath, "utf8"); } catch { existing = null; }
 		const isNew = !existing;
 		const out = isNew
-			? `${buildFrontmatter({ name: slug(title), description, type: "project", updated: today() })}${appendContent(null, title, p.content)}`
+			? `${buildFrontmatter({ updated: today() })}${appendContent(null, title, p.content)}`
 			: appendContent(existing, title, p.content);
 		await writeFile(topicPath, out, "utf8");
 		// write index
@@ -119,7 +115,7 @@ export async function doRemove(memoryDir: string, p: RemoveParams): Promise<Acti
 		} else {
 			const raw = await readFile(filePath, "utf8");
 			const next = raw.replace(p.old_text, "");
-			if (isEmptyAfterRemove(next)) {
+			if (!hasEntries(next)) {
 				await unlink(filePath).catch(() => {});
 				// also drop its index line
 				const idxRaw = await readFile(join(memoryDir, MEMORY_MD), "utf8").catch(() => "");
