@@ -137,16 +137,26 @@ export default function (pi: ExtensionAPI) {
 		const sbx = getSbx();
 		if (!sbx) return;
 
-		const skillTargets = sbx.mounts.filter((m) => m.target.startsWith("/skills/")).map((m) => m.target);
-		const otherMounts = sbx.mounts.filter((m) => !m.target.startsWith("/skills/"));
-		const skillsPart = skillTargets.length
-			? `Agent skills are mounted read-only at /skills/ (e.g. ${skillTargets.join(", ")}). Read skill files via /skills/<name>/SKILL.md. Writing to /skills/ is forbidden.`
-			: "No agent skill directories are mounted.";
-		const mountsPart = otherMounts.length
-			? `Additional mounts: ${otherMounts.map((m) => `${m.source} → ${m.target}${m.mode === "rw" ? " (rw)" : " (ro)"}`).join(", ")}.`
-			: "";
-		const skillInfo = [skillsPart, mountsPart].filter(Boolean).join("\n");
+		// 1. Fix <location> paths to point inside the container.
+		//    Uses skillFileMapping (from session_start) — no XML re-parsing.
+		let fixedPrompt = event.systemPrompt;
+		for (const { name, hostFilePath } of sbx.skillFileMapping) {
+			fixedPrompt = fixedPrompt.replace(
+				`<location>${hostFilePath}</location>`,
+				`<location>/skills/${name}/SKILL.md</location>`,
+			);
+		}
 
+		// 2. Build skill mount info from sbx.skillMounts (no /skills/ prefix filtering)
+		const skillInfo = sbx.skillMounts.length
+			? `Skills mounted at: ${sbx.skillMounts.map((m) => m.target).join(", ")}.`
+			: "";
+
+		const userInfo = sbx.userMounts.length
+			? `User mounts: ${sbx.userMounts.map((m) => `${m.source} → ${m.target}${m.mode === "rw" ? " (rw)" : ""}`).join(", ")}.`
+			: "";
+
+		// 3. Build host command hint
 		const hostCommands = sbx.config.host.commands ?? [];
 		const hostCmdHint = hostCommands.length
 			? [
@@ -159,12 +169,13 @@ export default function (pi: ExtensionAPI) {
 				].join("\n")
 			: "";
 
+		// 4. Replace CWD line with sandbox-aware version
 		return {
-			systemPrompt: event.systemPrompt.replace(
+			systemPrompt: fixedPrompt.replace(
 				/Current working directory:\s*\S+/,
 				[
 					`Current working directory: ${CONTAINER_ROOT} (sandboxed in docker container ${sbx.name}, host cwd ${localCwd} mounted read-write)`,
-					skillInfo,
+					[skillInfo, userInfo].filter(Boolean).join("\n"),
 					hostCmdHint,
 				]
 					.filter(Boolean)
