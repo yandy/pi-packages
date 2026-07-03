@@ -46,10 +46,3 @@ export function loadConfig(cwd: string): WebToolsConfig {
 	return cachedConfig;
 }
 
-export function resolveSetting(
-	value: string | undefined,
-	configValue: string | undefined,
-	defaultValue: string,
-): string {
-	return value || configValue || defaultValue;
-}

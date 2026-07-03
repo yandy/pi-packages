@@ -49,7 +49,7 @@ export type Hover = {
 } | null;
 
 // SymbolKind 常用枚举值（LSP 规范）
-export const SYMBOL_KIND: Record<string, number> = {
+const SYMBOL_KIND: Record<string, number> = {
 	File: 1,
 	Module: 2,
 	Namespace: 3,

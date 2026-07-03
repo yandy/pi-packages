@@ -30,20 +30,6 @@ function resolveExtensionRoot(moduleUrl = import.meta.url): string {
 
 export const EXTENSION_ROOT = resolveExtensionRoot();
 
-const PERMISSION_POLICY_KEYS: ReadonlySet<string> = new Set([
-	"defaultPolicy",
-	"tools",
-	"bash",
-	"mcp",
-	"skills",
-	"special",
-	"external_directory",
-]);
-
-export function detectMisplacedPermissionKeys(raw: Record<string, unknown>): string[] {
-	return Object.keys(raw).filter((key) => PERMISSION_POLICY_KEYS.has(key));
-}
-
 export function normalizePermissionSystemConfig(raw: UnifiedPermissionConfig): PermissionSystemExtensionConfig {
 	const result: PermissionSystemExtensionConfig = {
 		debugLog: raw.debugLog === true,
