@@ -4,7 +4,7 @@ File-system driven persistent memory layer for pi coding agent. Stores project k
 
 ## Features
 
-- **One `memory` tool**, four actions: `add` (store knowledge), `replace` (edit existing), `remove` (delete), `search` (query memory or session history)
+- **One `memory` tool**, four actions: `add` (append entry), `remove` (delete entry by title), `read` (load topic or entry), `search` (query memory or session history)
 - **Topic-based file organization**: each `memory add` writes to a named `.md` file under the project's memory directory
 - **`MEMORY.md` index** — auto-generated table of contents with line/byte capacity limits
 - **Snapshot injection**: on every new session, the memory index is appended to the system prompt, keeping the agent aware of past work
@@ -68,38 +68,35 @@ Project-level config (`.pi/pi-memory.json`) is only loaded when the project is t
 ## Tool reference
 
 ```
-memory(action: "add" | "replace" | "remove" | "search",
-        content?, topic?, title?, description?,
-        old_text?, query?, scope?)
+memory(action: "add" | "remove" | "search" | "read",
+        content?, topic?, title?,
+        entry?, query?, scope?)
 ```
 
 ### `add`
 
-Stores content under a topic file and upserts the MEMORY.md index.
+Appends an entry to a topic file and adds a new line to the MEMORY.md index (no upsert — multiple entries per topic).
 
 - **`content`** (required) — knowledge text to persist
 - **`topic`** (required) — target filename, e.g. `"debugging.md"`. Auto-created if new
-- **`title`** (optional) — short title for the index line (defaults to topic stem)
-- **`description`** (optional) — one-line description (defaults to first ~80 chars of content)
-
-### `replace`
-
-Locates `old_text` as a substring and replaces it with `content`.
-
-- **`old_text`** (required) — substring to find
-- **`content`** (required) — replacement text
-- **`topic`** (optional) — narrow search to a specific file; required when text appears in multiple locations
+- **`title`** (required) — short title for the index line and entry heading
 
 ### `remove`
 
-Locates `old_text` and deletes it. When the last content in a topic file is removed, the file and its index entry are cleaned up.
+Deletes an entry by exact title match on the MEMORY.md index. Removes both the index line and the corresponding `##` block from the topic file. When the last entry in a topic is removed, the topic file is deleted.
 
-- **`old_text`** (required) — substring to delete
-- **`topic`** (optional) — narrow search to a specific file
+- **`entry`** (required) — exact entry title to remove
+
+### `read`
+
+Loads memory content. Either an entire topic file or a single entry block.
+
+- **`topic`** (optional) — topic name, e.g. `"debugging"` or `"debugging.md"`. Loads the entire topic file
+- **`entry`** (optional) — entry title. Returns the specific `## Entry Title` block
 
 ### `search`
 
-Queries either memory files or session history.
+Queries either memory files or session history. Memory search returns the full entry block (entire `##` section) for each match.
 
 - **`query`** (required) — search keyword
 - **`scope`** (optional) — `"memory"` (default, scans topic files) or `"sessions"` (scans session history)
