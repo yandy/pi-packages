@@ -61,7 +61,7 @@ export default function (pi: ExtensionAPI) {
 		sbx: SbxSession,
 		ctx: { ui: ExtensionUIContext; hasUI: boolean },
 	): Promise<void> {
-		const external = getExternalPath(paramsPath, sbx.hostCwd, sbx.mounts);
+		const external = getExternalPath(paramsPath, sbx.hostCwd, [...sbx.skillMounts, ...sbx.userMounts]);
 		if (!external) return;
 		if (isAllowedExternalResource(external, sbx.allowedExternalPrefixes)) return;
 		if (!ctx.hasUI) {
@@ -79,7 +79,7 @@ export default function (pi: ExtensionAPI) {
 			const sbx = getSbx();
 			if (!sbx) return localRead.execute(id, params, signal, onUpdate);
 			await guardExternalRead(params.path, sbx, _ctx);
-			const tool = createReadTool(localCwd, { operations: createReadOps(sbx) });
+			const tool = createReadTool(localCwd, { operations: createReadOps({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }) });
 			return tool.execute(id, params, signal, onUpdate);
 		},
 	});
@@ -89,7 +89,7 @@ export default function (pi: ExtensionAPI) {
 		async execute(id, params, signal, onUpdate, _ctx) {
 			const sbx = getSbx();
 			if (!sbx) return localWrite.execute(id, params, signal, onUpdate);
-			const tool = createWriteTool(localCwd, { operations: createWriteOps(sbx) });
+			const tool = createWriteTool(localCwd, { operations: createWriteOps({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }) });
 			return tool.execute(id, params, signal, onUpdate);
 		},
 	});
@@ -99,7 +99,7 @@ export default function (pi: ExtensionAPI) {
 		async execute(id, params, signal, onUpdate, _ctx) {
 			const sbx = getSbx();
 			if (!sbx) return localEdit.execute(id, params, signal, onUpdate);
-			const tool = createEditTool(localCwd, { operations: createEditOps(sbx) });
+			const tool = createEditTool(localCwd, { operations: createEditOps({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }) });
 			return tool.execute(id, params, signal, onUpdate);
 		},
 	});
@@ -116,13 +116,13 @@ export default function (pi: ExtensionAPI) {
 			if (cmdName && hostCommands.includes(cmdName)) {
 				if (!hostBashTool) {
 					hostBashTool = createBashTool(localCwd, {
-						operations: createHostBashOps(sbx.hostCwd, sbx.mounts),
+						operations: createHostBashOps(sbx.hostCwd, [...sbx.skillMounts, ...sbx.userMounts]),
 					});
 				}
 				return hostBashTool.execute(id, params, signal, onUpdate);
 			}
 
-			const tool = createBashTool(localCwd, { operations: createContainerBashOps(sbx) });
+			const tool = createBashTool(localCwd, { operations: createContainerBashOps({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }) });
 			return tool.execute(id, params, signal, onUpdate);
 		},
 	});
@@ -130,7 +130,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("user_bash", () => {
 		const sbx = getSbx();
 		if (!sbx) return;
-		return { operations: createContainerBashOps(sbx) };
+		return { operations: createContainerBashOps({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }) };
 	});
 
 	pi.on("before_agent_start", async (event) => {
@@ -358,7 +358,7 @@ export default function (pi: ExtensionAPI) {
 
 			const sbx = getSbx();
 			if (!sbx) throw new Error("sandbox not initialized");
-			const ok = (await execCapture(sbx, "id -un && pwd", 10000)).toString().trim();
+			const ok = (await execCapture({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }, "id -un && pwd", 10000)).toString().trim();
 
 			const resParts: string[] = [
 				`size=${sizeTier}`,

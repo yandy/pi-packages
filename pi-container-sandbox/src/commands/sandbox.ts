@@ -36,7 +36,7 @@ export function createSandboxCommandHandlers(
 				);
 				return;
 			}
-			const info = (await execCapture(sbx, "id; uname -a; df -h /workspace | tail -1")).toString();
+			const info = (await execCapture({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }, "id; uname -a; df -h /workspace | tail -1")).toString();
 			const resParts: string[] = [];
 			if (sbx.resources?.memory) resParts.push(`memory: ${sbx.resources.memory}`);
 			if (sbx.resources?.cpus) resParts.push(`cpus: ${sbx.resources.cpus}`);
@@ -180,7 +180,7 @@ export function createSandboxCommandHandlers(
 				return;
 			}
 			try {
-				const stdout = (await execCapture(sbx, args.trim(), 30000)).toString();
+				const stdout = (await execCapture({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }, args.trim(), 30000)).toString();
 				ctx.ui.notify(`$ ${args.trim()}\n${stdout}`, "info");
 			} catch (e) {
 				ctx.ui.notify(`exec failed: ${e instanceof Error ? e.message : String(e)}`, "error");
@@ -211,7 +211,7 @@ export function createSandboxCommandHandlers(
 				"echo",
 				'ldd $(command -v node) | sed "s/^/node ldd: /"',
 			].join("\n");
-			const out = (await execCapture(sbx, script, 20000)).toString();
+			const out = (await execCapture({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }, script, 20000)).toString();
 			ctx.ui.notify(`Sandbox doctor:\n${out}`, "info");
 		},
 
