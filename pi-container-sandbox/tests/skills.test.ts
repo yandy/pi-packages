@@ -1,19 +1,111 @@
 import { describe, expect, it } from "vitest";
-import { discoverSkillMounts } from "../src/skills";
+import { parseAvailableSkills, skillsToMountSpecs } from "../src/skills";
 
-describe("discoverSkillMounts", () => {
-	it("returns an array of MountSpec", () => {
-		const mounts = discoverSkillMounts();
-		expect(Array.isArray(mounts)).toBe(true);
+describe("parseAvailableSkills", () => {
+	it("parses a single skill from <available_skills> XML", () => {
+		const prompt = `<available_skills>
+  <skill>
+    <name>ask-user</name>
+    <description>Ask the user questions</description>
+    <location>/home/user/.pi/agent-code/npm/node_modules/@yandy0725/pi-ask-user/skills/ask-user/SKILL.md</location>
+  </skill>
+</available_skills>`;
+
+		const result = parseAvailableSkills(prompt);
+		expect(result).toHaveLength(1);
+		expect(result[0].name).toBe("ask-user");
+		expect(result[0].hostFilePath).toContain("SKILL.md");
 	});
 
-	it("all mounts have source, target, and mode='ro'", () => {
-		const mounts = discoverSkillMounts();
-		for (const m of mounts) {
-			expect(typeof m.source).toBe("string");
-			expect(typeof m.target).toBe("string");
-			expect(m.target.startsWith("/skills/")).toBe(true);
-			expect(m.mode).toBe("ro");
-		}
+	it("parses multiple skills", () => {
+		const prompt = `<available_skills>
+  <skill>
+    <name>ask-user</name>
+    <description>Ask user</description>
+    <location>/a/SKILL.md</location>
+  </skill>
+  <skill>
+    <name>find-docs</name>
+    <description>Find docs</description>
+    <location>/b/SKILL.md</location>
+  </skill>
+</available_skills>`;
+
+		const result = parseAvailableSkills(prompt);
+		expect(result).toHaveLength(2);
+		expect(result[0].name).toBe("ask-user");
+		expect(result[1].name).toBe("find-docs");
+	});
+
+	it("throws when systemPrompt is empty", () => {
+		expect(() => parseAvailableSkills("")).toThrow("empty system prompt");
+	});
+
+	it("throws when no <available_skills> block exists", () => {
+		expect(() => parseAvailableSkills("no skills here")).toThrow(
+			"could not find any <available_skills>",
+		);
+	});
+
+	it("handles whitespace and newlines inside name/location tags", () => {
+		const prompt = `<available_skills>
+  <skill>
+    <name>
+      my-skill
+    </name>
+    <description>desc</description>
+    <location>
+      /path/to/my-skill/SKILL.md
+    </location>
+  </skill>
+</available_skills>`;
+
+		const result = parseAvailableSkills(prompt);
+		expect(result).toHaveLength(1);
+		expect(result[0].name).toBe("my-skill");
+		expect(result[0].hostFilePath).toBe("/path/to/my-skill/SKILL.md");
+	});
+
+	it("skips skills where name or location is empty after trim", () => {
+		const prompt = `<available_skills>
+  <skill>
+    <name></name>
+    <location>/a/SKILL.md</location>
+  </skill>
+  <skill>
+    <name>valid</name>
+    <location>/b/SKILL.md</location>
+  </skill>
+</available_skills>`;
+
+		const result = parseAvailableSkills(prompt);
+		expect(result).toHaveLength(1);
+		expect(result[0].name).toBe("valid");
+	});
+});
+
+describe("skillsToMountSpecs", () => {
+	it("converts skills to ro mount specs with /skills/<name> targets", () => {
+		const skills = [
+			{ name: "ask-user", hostFilePath: "/home/.pi/skills/ask-user/SKILL.md" },
+			{ name: "find-docs", hostFilePath: "/home/.pi/skills/find-docs/SKILL.md" },
+		];
+
+		const mounts = skillsToMountSpecs(skills);
+		expect(mounts).toHaveLength(2);
+		expect(mounts[0]).toEqual({
+			source: "/home/.pi/skills/ask-user",
+			target: "/skills/ask-user",
+			mode: "ro",
+		});
+		expect(mounts[1]).toEqual({
+			source: "/home/.pi/skills/find-docs",
+			target: "/skills/find-docs",
+			mode: "ro",
+		});
+	});
+
+	it("returns empty array for empty input", () => {
+		expect(skillsToMountSpecs([])).toEqual([]);
 	});
 });
