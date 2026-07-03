@@ -20,7 +20,7 @@ export interface LocationLink {
 	targetSelectionRange?: Range;
 }
 
-type SymbolKind = number;
+export type SymbolKind = number;
 
 export interface DocumentSymbol {
 	name: string;
@@ -38,7 +38,7 @@ export interface SymbolInformation {
 	containerName?: string;
 }
 
-interface MarkupContent {
+export interface MarkupContent {
 	kind: "plaintext" | "markdown";
 	value: string;
 }

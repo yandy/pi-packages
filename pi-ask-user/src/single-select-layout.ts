@@ -3,12 +3,12 @@ export interface QuestionOption {
 	description?: string;
 }
 
-interface AnnotatedRow {
+export interface AnnotatedRow {
 	line: string;
 	selected: boolean;
 }
 
-interface RenderSingleSelectRowsParams {
+export interface RenderSingleSelectRowsParams {
 	options: QuestionOption[];
 	selectedIndex: number;
 	width: number;
