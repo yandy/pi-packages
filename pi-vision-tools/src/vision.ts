@@ -9,7 +9,7 @@ export type CompleteFn = (
 	options?: Record<string, unknown>,
 ) => Promise<AssistantMessage>;
 
-interface VisionCallInput {
+export interface VisionCallInput {
 	model: Model<any>;
 	auth: { apiKey?: string; headers?: Record<string, string> };
 	prompt: string;
@@ -18,14 +18,14 @@ interface VisionCallInput {
 	signal?: AbortSignal;
 }
 
-interface VisionCallResult {
+export interface VisionCallResult {
 	text: string;
 	usage?: { input?: number; output?: number };
 	errorMessage?: string;
 	stopReason?: string;
 }
 
-type ResolveResult = { ok: true; model: Model<any> } | { ok: false; error: string };
+export type ResolveResult = { ok: true; model: Model<any> } | { ok: false; error: string };
 
 interface ModelLookup {
 	find(provider: string, id: string): Model<any> | undefined;

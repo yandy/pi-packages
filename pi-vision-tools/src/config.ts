@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 
-type VisionEnabledState = "auto" | "on" | "off";
+export type VisionEnabledState = "auto" | "on" | "off";
 
 export interface VisionConfig {
 	provider?: string;

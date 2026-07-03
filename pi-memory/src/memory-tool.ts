@@ -8,10 +8,10 @@ import { parseIndex, serializeIndex, upsertEntry, checkCapacity, type IndexEntry
 import { buildFrontmatter, appendContent, isEmptyAfterRemove } from "./topic-file";
 import { safeTopicPath } from "./paths";
 
-interface AddParams { content: string; topic: string; title?: string; description?: string; maxLines: number; maxBytes: number; }
-interface ReplaceParams { old_text: string; content: string; topic?: string; }
-interface RemoveParams { old_text: string; topic?: string; }
-interface ActionResult { ok: boolean; error?: string; entries?: IndexEntry[]; }
+export interface AddParams { content: string; topic: string; title?: string; description?: string; maxLines: number; maxBytes: number; }
+export interface ReplaceParams { old_text: string; content: string; topic?: string; }
+export interface RemoveParams { old_text: string; topic?: string; }
+export interface ActionResult { ok: boolean; error?: string; entries?: IndexEntry[]; }
 
 const MEMORY_MD = "MEMORY.md";
 
@@ -152,7 +152,7 @@ export async function searchMemory(memoryDir: string, query: string): Promise<st
 	return hits.length ? hits.join("\n\n") : "No matches in memory.";
 }
 
-interface MemoryToolDeps {
+export interface MemoryToolDeps {
 	getMemoryDir: () => string | null;
 	getConfig: () => { memIndexMaxLines: number; memIndexMaxBytes: number; sessionSearch: { maxSessions: number; maxMatches: number } };
 	getEnabled: () => boolean;

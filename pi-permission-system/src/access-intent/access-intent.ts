@@ -6,7 +6,7 @@ import type { AccessPath } from "../access-intent/access-path";
  * The `surface` is the tool name fed to `normalizeInput` (e.g. `"read"`, `"bash"`,
  * an MCP server name).
  */
-interface ToolAccessIntent {
+export interface ToolAccessIntent {
 	kind: "tool";
 	/** Tool name fed to input normalization. */
 	surface: string;
@@ -21,7 +21,7 @@ interface ToolAccessIntent {
  * `access-path` intent via `matchValues()`, keeping the low-level manager
  * string-based (it never imports `AccessPath`). See {@link ResolvedAccessIntent}.
  */
-interface PathValuesAccessIntent {
+export interface PathValuesAccessIntent {
 	kind: "path-values";
 	/** `"path"` or `"external_directory"`. */
 	surface: string;
@@ -36,7 +36,7 @@ interface PathValuesAccessIntent {
  * lets `AccessPath` flow into the resolver as a first-class variant so the
  * resolver — not the gate — asks it for `matchValues()` (Tell-Don't-Ask).
  */
-interface AccessPathAccessIntent {
+export interface AccessPathAccessIntent {
 	kind: "access-path";
 	surface: string;
 	path: AccessPath;

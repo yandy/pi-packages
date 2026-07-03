@@ -5,7 +5,7 @@ export interface TodoItem {
 	blockedBy?: string[];
 }
 
-interface TodoResult {
+export interface TodoResult {
 	todos: TodoItem[];
 	error?: string;
 }

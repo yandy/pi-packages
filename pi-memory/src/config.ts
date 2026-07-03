@@ -49,7 +49,7 @@ function readJsonSafe(path: string): Partial<MemoryConfig> {
 	return {};
 }
 
-interface LoadConfigContext {
+export interface LoadConfigContext {
 	cwd: string;
 	isProjectTrusted(): boolean;
 	_globalDir?: string;
