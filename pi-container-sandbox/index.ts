@@ -26,7 +26,7 @@ import {
 } from "./src/paths";
 import { DockerRuntime, deriveContainerName, type MountSpec } from "./src/runtime";
 import { clearSbx, getSbx, type SbxSession, setSbx } from "./src/session";
-import { discoverSkillMounts } from "./src/skills";
+import { fixSkillLocations, parseAvailableSkills, skillsToMountSpecs } from "./src/skills";
 import { TIER_SPECS } from "./src/tiers";
 
 export default function (pi: ExtensionAPI) {
@@ -61,7 +61,7 @@ export default function (pi: ExtensionAPI) {
 		sbx: SbxSession,
 		ctx: { ui: ExtensionUIContext; hasUI: boolean },
 	): Promise<void> {
-		const external = getExternalPath(paramsPath, sbx.hostCwd, sbx.mounts);
+		const external = getExternalPath(paramsPath, sbx.hostCwd, [...sbx.skillMounts, ...sbx.userMounts]);
 		if (!external) return;
 		if (isAllowedExternalResource(external, sbx.allowedExternalPrefixes)) return;
 		if (!ctx.hasUI) {
@@ -79,7 +79,7 @@ export default function (pi: ExtensionAPI) {
 			const sbx = getSbx();
 			if (!sbx) return localRead.execute(id, params, signal, onUpdate);
 			await guardExternalRead(params.path, sbx, _ctx);
-			const tool = createReadTool(localCwd, { operations: createReadOps(sbx) });
+			const tool = createReadTool(localCwd, { operations: createReadOps({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }) });
 			return tool.execute(id, params, signal, onUpdate);
 		},
 	});
@@ -89,7 +89,7 @@ export default function (pi: ExtensionAPI) {
 		async execute(id, params, signal, onUpdate, _ctx) {
 			const sbx = getSbx();
 			if (!sbx) return localWrite.execute(id, params, signal, onUpdate);
-			const tool = createWriteTool(localCwd, { operations: createWriteOps(sbx) });
+			const tool = createWriteTool(localCwd, { operations: createWriteOps({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }) });
 			return tool.execute(id, params, signal, onUpdate);
 		},
 	});
@@ -99,7 +99,7 @@ export default function (pi: ExtensionAPI) {
 		async execute(id, params, signal, onUpdate, _ctx) {
 			const sbx = getSbx();
 			if (!sbx) return localEdit.execute(id, params, signal, onUpdate);
-			const tool = createEditTool(localCwd, { operations: createEditOps(sbx) });
+			const tool = createEditTool(localCwd, { operations: createEditOps({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }) });
 			return tool.execute(id, params, signal, onUpdate);
 		},
 	});
@@ -116,13 +116,13 @@ export default function (pi: ExtensionAPI) {
 			if (cmdName && hostCommands.includes(cmdName)) {
 				if (!hostBashTool) {
 					hostBashTool = createBashTool(localCwd, {
-						operations: createHostBashOps(sbx.hostCwd, sbx.mounts),
+						operations: createHostBashOps(sbx.hostCwd, [...sbx.skillMounts, ...sbx.userMounts]),
 					});
 				}
 				return hostBashTool.execute(id, params, signal, onUpdate);
 			}
 
-			const tool = createBashTool(localCwd, { operations: createContainerBashOps(sbx) });
+			const tool = createBashTool(localCwd, { operations: createContainerBashOps({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }) });
 			return tool.execute(id, params, signal, onUpdate);
 		},
 	});
@@ -130,23 +130,27 @@ export default function (pi: ExtensionAPI) {
 	pi.on("user_bash", () => {
 		const sbx = getSbx();
 		if (!sbx) return;
-		return { operations: createContainerBashOps(sbx) };
+		return { operations: createContainerBashOps({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }) };
 	});
 
 	pi.on("before_agent_start", async (event) => {
 		const sbx = getSbx();
 		if (!sbx) return;
 
-		const skillTargets = sbx.mounts.filter((m) => m.target.startsWith("/skills/")).map((m) => m.target);
-		const otherMounts = sbx.mounts.filter((m) => !m.target.startsWith("/skills/"));
-		const skillsPart = skillTargets.length
-			? `Agent skills are mounted read-only at /skills/ (e.g. ${skillTargets.join(", ")}). Read skill files via /skills/<name>/SKILL.md. Writing to /skills/ is forbidden.`
-			: "No agent skill directories are mounted.";
-		const mountsPart = otherMounts.length
-			? `Additional mounts: ${otherMounts.map((m) => `${m.source} → ${m.target}${m.mode === "rw" ? " (rw)" : " (ro)"}`).join(", ")}.`
-			: "";
-		const skillInfo = [skillsPart, mountsPart].filter(Boolean).join("\n");
+		// 1. Fix <location> paths to point inside the container.
+		//    Uses skillFileMapping (from session_start) — no XML re-parsing.
+		const fixedPrompt = fixSkillLocations(event.systemPrompt, sbx.skillFileMapping);
 
+		// 2. Build skill mount info from sbx.skillMounts (no /skills/ prefix filtering)
+		const skillInfo = sbx.skillMounts.length
+			? `Skills mounted at: ${sbx.skillMounts.map((m) => m.target).join(", ")}.`
+			: "";
+
+		const userInfo = sbx.userMounts.length
+			? `User mounts: ${sbx.userMounts.map((m) => `${m.source} → ${m.target}${m.mode === "rw" ? " (rw)" : ""}`).join(", ")}.`
+			: "";
+
+		// 3. Build host command hint
 		const hostCommands = sbx.config.host.commands ?? [];
 		const hostCmdHint = hostCommands.length
 			? [
@@ -159,12 +163,13 @@ export default function (pi: ExtensionAPI) {
 				].join("\n")
 			: "";
 
+		// 4. Replace CWD line with sandbox-aware version
 		return {
-			systemPrompt: event.systemPrompt.replace(
+			systemPrompt: fixedPrompt.replace(
 				/Current working directory:\s*\S+/,
 				[
 					`Current working directory: ${CONTAINER_ROOT} (sandboxed in docker container ${sbx.name}, host cwd ${localCwd} mounted read-write)`,
-					skillInfo,
+					[skillInfo, userInfo].filter(Boolean).join("\n"),
 					hostCmdHint,
 				]
 					.filter(Boolean)
@@ -203,16 +208,19 @@ export default function (pi: ExtensionAPI) {
 				}
 			}
 
-			// Auto-discover skill mounts under home directory
-			const skillMounts = discoverSkillMounts();
+			// Dynamic skill discovery: parse <available_skills> XML from system prompt.
+			// Catches ALL pi-loaded skills — npm packages, project .agents/skills/,
+			// settings config, etc. — not just ~/.agents/skills/.
+			const skillParsed = parseAvailableSkills(ctx.getSystemPrompt());
+			const skillMounts = skillsToMountSpecs(skillParsed);
 
-			// Merge: detect target conflicts
+			// Detect target conflicts between user mounts and skill mounts
 			for (const um of userMounts) {
 				const conflict = skillMounts.find((sm) => sm.target === um.target);
 				if (conflict) {
 					throw new Error(
-						`sandbox: mount target conflict: "${um.target}" is already used by auto-discovered skill at "${conflict.source}". ` +
-							`Choose a different target for your custom mount at "${um.source}".`,
+						`sandbox: mount target "${um.target}" is reserved for skill "${conflict.source}". ` +
+							`Use a different target in sandbox.json.`,
 					);
 				}
 			}
@@ -305,7 +313,9 @@ export default function (pi: ExtensionAPI) {
 				name: sandboxName,
 				hostCwd: localCwd,
 				keep,
-				mounts: allMounts,
+				skillMounts,
+				userMounts,
+				skillFileMapping: skillParsed,
 				allowedExternalPrefixes,
 				resources,
 				imageRef: image,
@@ -342,7 +352,7 @@ export default function (pi: ExtensionAPI) {
 
 			const sbx = getSbx();
 			if (!sbx) throw new Error("sandbox not initialized");
-			const ok = (await execCapture(sbx, "id -un && pwd", 10000)).toString().trim();
+			const ok = (await execCapture({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }, "id -un && pwd", 10000)).toString().trim();
 
 			const resParts: string[] = [
 				`size=${sizeTier}`,
