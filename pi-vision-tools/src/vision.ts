@@ -3,7 +3,7 @@ import type { VisionConfig } from "./config.js";
 import type { DecodedImage } from "./image.js";
 import type { ReasoningOptions } from "./reasoning.js";
 
-type CompleteFn = (
+export type CompleteFn = (
 	model: Model<any>,
 	context: Context,
 	options?: Record<string, unknown>,
