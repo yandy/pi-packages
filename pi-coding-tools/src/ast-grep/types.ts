@@ -20,13 +20,11 @@ export interface CliMatch {
 	language: string;
 }
 
-export type SgTruncationReason = "max_matches" | "max_output_bytes" | "timeout";
-
 export interface SgResult {
 	matches: CliMatch[];
 	totalMatches: number;
 	truncated: boolean;
-	truncatedReason?: SgTruncationReason;
+	truncatedReason?: string;
 	error?: string;
 }
 
@@ -45,7 +43,7 @@ export interface SgRewriteResult {
 	matches: CliRewriteMatch[];
 	totalMatches: number;
 	truncated: boolean;
-	truncatedReason?: SgTruncationReason;
+	truncatedReason?: string;
 	error?: string;
 	applied: boolean;
 }

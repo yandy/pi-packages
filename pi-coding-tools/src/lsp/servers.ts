@@ -81,7 +81,7 @@ function applyOverride(server: ServerDef, override: ServerOverride | undefined):
 	};
 }
 
-export interface ResolvedServer {
+interface ResolvedServer {
 	server: ServerDef;
 	installed: boolean;
 }

@@ -20,7 +20,7 @@ export interface LocationLink {
 	targetSelectionRange?: Range;
 }
 
-export type SymbolKind = number;
+type SymbolKind = number;
 
 export interface DocumentSymbol {
 	name: string;
@@ -38,7 +38,7 @@ export interface SymbolInformation {
 	containerName?: string;
 }
 
-export interface MarkupContent {
+interface MarkupContent {
 	kind: "plaintext" | "markdown";
 	value: string;
 }
@@ -49,7 +49,7 @@ export type Hover = {
 } | null;
 
 // SymbolKind 常用枚举值（LSP 规范）
-export const SYMBOL_KIND: Record<string, number> = {
+const SYMBOL_KIND: Record<string, number> = {
 	File: 1,
 	Module: 2,
 	Namespace: 3,
