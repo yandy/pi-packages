@@ -1529,3 +1529,124 @@ git add pi-memory/package.json
 git commit -m "chore(pi-memory): bump version to 0.2.0"
 ```
 
+---
+
+### Task 8: Update README
+
+**Files:**
+- Modify: `pi-memory/README.md`
+- Modify: `pi-memory/README.zh.md`
+
+- [ ] **Step 1: Update README.md — Features section**
+
+Change the first bullet from:
+```
+- **One `memory` tool**, four actions: `add` (store knowledge), `replace` (edit existing), `remove` (delete), `search` (query memory or session history)
+```
+to:
+```
+- **One `memory` tool**, four actions: `add` (append entry), `remove` (delete entry by title), `read` (load topic or entry), `search` (query memory or session history)
+```
+
+- [ ] **Step 2: Update README.md — Tool reference section**
+
+Replace the entire "Tool reference" section with:
+
+```markdown
+## Tool reference
+
+```
+memory(action: "add" | "remove" | "search" | "read",
+        content?, topic?, title?,
+        entry?, query?, scope?)
+```
+
+### `add`
+
+Appends an entry to a topic file and adds a new line to the MEMORY.md index (no upsert — multiple entries per topic).
+
+- **`content`** (required) — knowledge text to persist
+- **`topic`** (required) — target filename, e.g. `"debugging.md"`. Auto-created if new
+- **`title`** (required) — short title for the index line and entry heading
+
+### `remove`
+
+Deletes an entry by exact title match on the MEMORY.md index. Removes both the index line and the corresponding `##` block from the topic file. When the last entry in a topic is removed, the topic file is deleted.
+
+- **`entry`** (required) — exact entry title to remove
+
+### `read`
+
+Loads memory content. Either an entire topic file or a single entry block.
+
+- **`topic`** (optional) — topic name, e.g. `"debugging"` or `"debugging.md"`. Loads the entire topic file
+- **`entry`** (optional) — entry title. Returns the specific `## Entry Title` block
+
+### `search`
+
+Queries either memory files or session history. Memory search returns the full entry block (entire `##` section) for each match.
+
+- **`query`** (required) — search keyword
+- **`scope`** (optional) — `"memory"` (default, scans topic files) or `"sessions"` (scans session history)
+```
+
+- [ ] **Step 3: Update README.zh.md — Features section**
+
+Change the first bullet from:
+```
+- **一个 `memory` 工具**，四种操作：`add`（存储知识）、`replace`（编辑现有内容）、`remove`（删除）、`search`（查询记忆或会话历史）
+```
+to:
+```
+- **一个 `memory` 工具**，四种操作：`add`（追加条目）、`remove`（按标题删除条目）、`read`（加载主题或条目）、`search`（查询记忆或会话历史）
+```
+
+- [ ] **Step 4: Update README.zh.md — Tool reference section**
+
+Replace the entire "工具参考" section with:
+
+```markdown
+## 工具参考
+
+\`\`\`
+memory(action: "add" | "remove" | "search" | "read",
+        content?, topic?, title?,
+        entry?, query?, scope?)
+\`\`\`
+
+### `add`
+
+向主题文件追加条目，并向 MEMORY.md 索引添加新行（不更新已有行——一个主题可以有多个条目）。
+
+- **`content`**（必填）— 要持久化的知识文本
+- **`topic`**（必填）— 目标文件名，如 `"debugging.md"`，不存在则自动创建
+- **`title`**（必填）— 索引行和条目标题
+
+### `remove`
+
+按标题精确匹配删除条目。同时删除索引行和主题文件中对应的 `##` 区块。当主题文件中的最后一条被删除后，主题文件会被清理。
+
+- **`entry`**（必填）— 要删除的条目标题
+
+### `read`
+
+加载记忆内容。可以是整个主题文件或单个条目区块。
+
+- **`topic`**（可选）— 主题名称，如 `"debugging"` 或 `"debugging.md"`。加载整个主题文件
+- **`entry`**（可选）— 条目标题。返回对应的 `## 条目标题` 区块
+
+### `search`
+
+查询记忆文件或会话历史。记忆搜索返回匹配条目的完整区块（整个 `##` 区域）。
+
+- **`query`**（必填）— 搜索关键词
+- **`scope`**（可选）— `"memory"`（默认，扫描主题文件）或 `"sessions"`（扫描会话历史）
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add pi-memory/README.md pi-memory/README.zh.md
+git commit -m "docs(pi-memory): update README for v2 API (add/remove/read/search)"
+```
+
