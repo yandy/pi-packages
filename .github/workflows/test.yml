@@ -13,7 +13,7 @@ jobs:
       packages: ${{ steps.filter-packages.outputs.packages }}
       has_root: ${{ steps.filter.outputs.root }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
         id: filter
         with:
@@ -54,7 +54,7 @@ jobs:
     if: needs.changes.outputs.has_root == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
@@ -70,7 +70,7 @@ jobs:
         package: ${{ fromJson(needs.changes.outputs.packages) }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
