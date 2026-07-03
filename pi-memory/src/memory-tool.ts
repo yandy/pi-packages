@@ -10,6 +10,8 @@ import { safeTopicPath } from "./paths";
 
 export interface AddParams { content: string; topic: string; title: string; maxLines: number; maxBytes: number; }
 export interface RemoveParams { entry: string; }
+export interface ReadParams { topic?: string; entry?: string; }
+export interface ReadResult { ok: boolean; error?: string; content?: string; }
 export interface ActionResult { ok: boolean; error?: string; entries?: IndexEntry[]; }
 
 const MEMORY_MD = "MEMORY.md";
@@ -103,17 +105,49 @@ export async function doRemove(memoryDir: string, p: RemoveParams): Promise<Acti
 	});
 }
 
-// search memory scope — implemented fully in Task 9
+export async function doRead(memoryDir: string, p: ReadParams): Promise<ReadResult> {
+	if (p.topic) {
+		const topicName = p.topic.endsWith(".md") ? p.topic : `${p.topic}.md`;
+		let topicPath: string;
+		try {
+			topicPath = safeTopicPath(memoryDir, topicName);
+		} catch (e: any) {
+			return { ok: false, error: e.message };
+		}
+		try {
+			const content = await readFile(topicPath, "utf8");
+			return { ok: true, content };
+		} catch {
+			return { ok: false, error: `Topic "${p.topic}" not found` };
+		}
+	}
+	if (p.entry) {
+		const files = (await readdir(memoryDir).catch(() => [])).filter(
+			(f) => f.endsWith(".md") && f !== MEMORY_MD,
+		);
+		for (const f of files) {
+			const raw = await readFile(join(memoryDir, f), "utf8").catch(() => "");
+			const entries = parseEntries(raw);
+			const found = entries.find((e) => e.title === p.entry);
+			if (found) {
+				return { ok: true, content: `## ${found.title}\n\n${found.content}` };
+			}
+		}
+		return { ok: false, error: `Entry "${p.entry}" not found in any topic` };
+	}
+	return { ok: false, error: "Either topic or entry must be provided" };
+}
+
 export async function searchMemory(memoryDir: string, query: string): Promise<string> {
 	const files = (await readdir(memoryDir).catch(() => [])).filter((f) => f.endsWith(".md") && f !== MEMORY_MD);
 	const q = query.toLowerCase();
 	const hits: string[] = [];
 	for (const f of files) {
-		const lines = (await readFile(join(memoryDir, f), "utf8").catch(() => "")).split("\n");
-		for (const [i, line] of lines.entries()) {
-			if (line.toLowerCase().includes(q)) {
-				const ctx = lines.slice(Math.max(0, i - 2), i + 3).join("\n");
-				hits.push(`### ${f}\n\`\`\`\n${ctx}\n\`\`\``);
+		const raw = await readFile(join(memoryDir, f), "utf8").catch(() => "");
+		const entryBlocks = parseEntries(raw);
+		for (const entry of entryBlocks) {
+			if (entry.content.toLowerCase().includes(q) || entry.title.toLowerCase().includes(q)) {
+				hits.push(`### ${f}\n\`\`\`\n## ${entry.title}\n${entry.content}\n\`\`\``);
 			}
 		}
 	}
