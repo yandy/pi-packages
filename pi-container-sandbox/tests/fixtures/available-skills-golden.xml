@@ -1,0 +1,17 @@
+<available_skills>
+  <skill>
+    <name>ask-user</name>
+    <description>Ask the user one focused question with optional multiple-choice answers to gather information interactively</description>
+    <location>/home/user/.pi/agent-code/npm/node_modules/@yandy0725/pi-ask-user/skills/ask-user/SKILL.md</location>
+  </skill>
+  <skill>
+    <name>find-docs</name>
+    <description>Retrieves up-to-date documentation, API references, and code examples for any developer technology.</description>
+    <location>/home/user/.pi/agent-code/skills/find-docs/SKILL.md</location>
+  </skill>
+  <skill>
+    <name>brainstorming</name>
+    <description>You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior.</description>
+    <location>/home/user/workspace/project/.agents/skills/brainstorming/SKILL.md</location>
+  </skill>
+</available_skills>

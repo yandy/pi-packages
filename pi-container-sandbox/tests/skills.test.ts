@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 import { describe, expect, it } from "vitest";
 import { fixSkillLocations, parseAvailableSkills, skillsToMountSpecs } from "../src/skills";
 
@@ -81,6 +83,30 @@ describe("parseAvailableSkills", () => {
 		const result = parseAvailableSkills(prompt);
 		expect(result).toHaveLength(1);
 		expect(result[0].name).toBe("valid");
+	});
+
+	it("golden: parses real pi <available_skills> fixture (format change alert)", () => {
+		// This test uses a fixture that matches pi's current <available_skills> XML format.
+		// If pi changes the format (tag names, structure, whitespace rules),
+		// this test will fail — acting as an early warning to update parseAvailableSkills.
+		//
+		// To update the fixture when pi format changes intentionally:
+		//   1. Capture a fresh system prompt from a real pi session
+		//   2. Extract the <available_skills> block
+		//   3. Replace tests/fixtures/available-skills-golden.xml
+		//   4. Update parseAvailableSkills if needed
+		//   5. Verify this test passes again
+		const fixturePath = resolvePath(__dirname, "fixtures", "available-skills-golden.xml");
+		const golden = readFileSync(fixturePath, "utf-8");
+
+		const result = parseAvailableSkills(golden);
+		expect(result).toHaveLength(3);
+		expect(result[0].name).toBe("ask-user");
+		expect(result[0].hostFilePath).toContain("pi-ask-user/skills/ask-user/SKILL.md");
+		expect(result[1].name).toBe("find-docs");
+		expect(result[1].hostFilePath).toContain("skills/find-docs/SKILL.md");
+		expect(result[2].name).toBe("brainstorming");
+		expect(result[2].hostFilePath).toContain(".agents/skills/brainstorming/SKILL.md");
 	});
 });
 
