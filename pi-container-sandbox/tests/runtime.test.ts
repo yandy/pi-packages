@@ -1,11 +1,11 @@
-import Dockerode from "dockerode";
+import { execFileSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PACKAGE_DOCKER_DIR } from "../src/config";
 import { DockerRuntime, deriveContainerName } from "../src/runtime";
 
 const dockerAvailable = (() => {
 	try {
-		new Dockerode({ socketPath: "/var/run/docker.sock" });
+		execFileSync("docker", ["info"], { stdio: "ignore", timeout: 5000 });
 		return true;
 	} catch {
 		return false;
@@ -14,19 +14,10 @@ const dockerAvailable = (() => {
 
 async function ensureTestImage(image: string) {
 	if (!dockerAvailable) return;
-	const docker = new Dockerode({ socketPath: "/var/run/docker.sock" });
 	try {
-		await docker.getImage(image).inspect();
+		execFileSync("docker", ["image", "inspect", image], { stdio: "ignore" });
 	} catch {
-		await new Promise<void>((resolve, reject) => {
-			docker.pull(image, {}, (err: any, stream: any) => {
-				if (err) return reject(err);
-				docker.modem.followProgress(stream, (err2: any) => {
-					if (err2) reject(err2 instanceof Error ? err2 : new Error(String(err2)));
-					else resolve();
-				});
-			});
-		});
+		execFileSync("docker", ["pull", image], { stdio: "inherit", timeout: 120000 });
 	}
 }
 
@@ -87,12 +78,8 @@ describe.skipIf(!dockerAvailable)("DockerRuntime lifecycle", () => {
 
 	beforeAll(() => ensureTestImage("debian:12-slim"), 120000);
 
-	afterAll(async () => {
-		const d = new Dockerode({ socketPath: "/var/run/docker.sock" });
-		try {
-			const c = d.getContainer(testName);
-			await c.remove({ force: true });
-		} catch {}
+	afterAll(() => {
+		try { execFileSync("docker", ["rm", "-f", testName], { stdio: "ignore" }); } catch {}
 	});
 
 	it("withReady() builds/starts container and sets ready state", async () => {
@@ -138,28 +125,10 @@ describe.skipIf(!dockerAvailable)("DockerRuntime exec", () => {
 
 	beforeAll(() => ensureTestImage("debian:12-slim"), 120000);
 
-	afterAll(async () => {
-		const d = new Dockerode({ socketPath: "/var/run/docker.sock" });
-		try {
-			const c = d.getContainer(`${testName}-exec1`);
-			await c.remove({ force: true });
-		} catch {}
-		try {
-			const c = d.getContainer(`${testName}-exec2`);
-			await c.remove({ force: true });
-		} catch {}
-		try {
-			const c = d.getContainer(`${testName}-exec3`);
-			await c.remove({ force: true });
-		} catch {}
-		try {
-			const c = d.getContainer(`${testName}-exec4`);
-			await c.remove({ force: true });
-		} catch {}
-		try {
-			const c = d.getContainer(`${testName}-exec5`);
-			await c.remove({ force: true });
-		} catch {}
+	afterAll(() => {
+		["exec1", "exec2", "exec3", "exec4", "exec5"].forEach((suffix) => {
+			try { execFileSync("docker", ["rm", "-f", `${testName}-${suffix}`], { stdio: "ignore" }); } catch {}
+		});
 	});
 
 	it("exec returns stdout and exitCode 0", async () => {

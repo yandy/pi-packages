@@ -1,10 +1,10 @@
-import Dockerode from "dockerode";
+import { execFileSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DockerRuntime } from "../src/runtime";
 
 const dockerAvailable = (() => {
 	try {
-		new Dockerode({ socketPath: "/var/run/docker.sock" });
+		execFileSync("docker", ["info"], { stdio: "ignore", timeout: 5000 });
 		return true;
 	} catch {
 		return false;
@@ -14,39 +14,22 @@ const dockerAvailable = (() => {
 describe.skipIf(!dockerAvailable)("DockerRuntime container reuse", () => {
 	const testName = `pi-test-reuse-${Date.now()}`;
 
-	beforeAll(async () => {
-		const docker = new Dockerode({ socketPath: "/var/run/docker.sock" });
+	beforeAll(() => {
+		if (!dockerAvailable) return;
 		try {
-			await docker.getImage("debian:12-slim").inspect();
+			execFileSync("docker", ["image", "inspect", "debian:12-slim"], { stdio: "ignore" });
 		} catch {
-			await new Promise<void>((resolve, reject) => {
-				docker.pull("debian:12-slim", {}, (err, stream) => {
-					if (err) return reject(err);
-					if (!stream) return reject(new Error("no pull stream"));
-					docker.modem.followProgress(stream, (err2) => {
-						if (err2) reject(err2 instanceof Error ? err2 : new Error(String(err2)));
-						else resolve();
-					});
-				});
-			});
+			execFileSync("docker", ["pull", "debian:12-slim"], { stdio: "inherit", timeout: 120000 });
 		}
 	}, 120000);
 
-	afterAll(async () => {
-		const d = new Dockerode({ socketPath: "/var/run/docker.sock" });
-		try {
-			const c = d.getContainer(testName);
-			await c.remove({ force: true });
-		} catch {}
-		try {
-			const c = d.getContainer(`${testName}-stopped`);
-			await c.remove({ force: true });
-		} catch {}
+	afterAll(() => {
+		try { execFileSync("docker", ["rm", "-f", testName], { stdio: "ignore" }); } catch {}
+		try { execFileSync("docker", ["rm", "-f", `${testName}-stopped`], { stdio: "ignore" }); } catch {}
 	});
 
 	it("stopped container is removed and a new one is created", async () => {
 		const stoppedName = `${testName}-stopped`;
-		const d = new Dockerode({ socketPath: "/var/run/docker.sock" });
 
 		try {
 			const rt1 = new DockerRuntime({
@@ -61,7 +44,7 @@ describe.skipIf(!dockerAvailable)("DockerRuntime container reuse", () => {
 			expect(rt1.isReady()).toBe(true);
 			const id1 = rt1.getContainerId();
 
-			await d.getContainer(stoppedName).stop({ t: 5 });
+			execFileSync("docker", ["stop", "-t", "5", stoppedName], { stdio: "ignore" });
 
 			const rt2 = new DockerRuntime({
 				image: "debian:12-slim",
@@ -79,10 +62,7 @@ describe.skipIf(!dockerAvailable)("DockerRuntime container reuse", () => {
 
 			await rt2.shutdown();
 		} finally {
-			try {
-				const c = d.getContainer(stoppedName);
-				await c.remove({ force: true });
-			} catch {}
+			try { execFileSync("docker", ["rm", "-f", stoppedName], { stdio: "ignore" }); } catch {}
 		}
 	}, 120000);
 
