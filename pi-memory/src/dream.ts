@@ -11,20 +11,22 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import type { MemoryConfig } from "./config";
 
-export const DREAM_SYSTEM_PROMPT = `You are a memory consolidation agent. Your job: read all memory files in the given directory, deduplicate entries, merge contradictions, update outdated info, and reorganize the MEMORY.md index to be concise and accurate.
+export const DREAM_SYSTEM_PROMPT = `You are a memory consolidation agent. Your job: read all memory files in the given directory, consolidate entries within each topic (merge duplicates, resolve contradictions, update outdated info), and rebuild the MEMORY.md index to be concise and accurate.
 Rules:
+- Each topic file contains entries as \`## Entry Title\` blocks.
 - Only modify files under the given directory. Never touch anything else.
-- Preserve all valuable knowledge; only remove true duplicates or outdated facts.
-- Keep MEMORY.md within the stated line limit; each line: - [Title](file.md) — description.
-- Write specific descriptions so the index alone tells what each file holds.
-- When done, output a concise summary of changes (merged N, removed N, updated N).`;
+- Deduplicate entries: if two entries in the same topic contain the same info, merge them.
+- If entries across different topics overlap, move the content to the more appropriate topic.
+- Rebuild MEMORY.md index: list entries you deem valuable (not necessarily every entry). Each line: - [Entry Title](topic.md). Accuracy matters more than completeness.
+- When done, output a concise summary of changes (merged N, removed N, moved N, updated N).`;
 
 export function buildDreamTask(memoryDir: string, maxLines: number): string {
-	return `Consolidate the memory files under ${memoryDir}. Read every .md file (including MEMORY.md), then:
-1. Deduplicate entries that say the same thing.
+  return `Consolidate the memory files under ${memoryDir}. Read every .md file (including MEMORY.md), then:
+1. Deduplicate entries within each topic that say the same thing.
 2. Merge contradictory or overlapping entries into one accurate entry.
 3. Update outdated information.
-4. Reorganize MEMORY.md so it stays <= ${maxLines} lines, one pointer per topic file: - [Title](file.md) — description.
+4. Move entries to more appropriate topic files when needed.
+5. Rebuild MEMORY.md (max ${maxLines} lines): - [Entry Title](topic.md) per entry you deem valuable (not necessarily every entry). Entries use ## Entry Title format.
 Only edit files under ${memoryDir}. When finished, print a one-line summary of changes.`;
 }
 
