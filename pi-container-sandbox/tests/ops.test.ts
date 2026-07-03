@@ -136,7 +136,37 @@ describe("extractCommandName", () => {
 	});
 });
 
-import { createHostBashOps } from "../src/ops";
+import { createHostBashOps, execStream } from "../src/ops";
+
+describe("execStream timeout", () => {
+	it("converts BashOperations timeout (seconds) to ExecOpts.timeoutMs (milliseconds)", async () => {
+		const calls: { timeoutMs?: number }[] = [];
+		const runtime = mockRuntime();
+		runtime.exec = async (opts) => {
+			calls.push({ timeoutMs: opts.timeoutMs });
+			return { exitCode: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+		};
+
+		const sbx = {
+			runtime,
+			name: "test",
+			hostCwd: "/tmp",
+			mounts: [],
+			allowedExternalPrefixes: [],
+		};
+
+		const onData = (_b: Buffer) => {};
+
+		// timeout in seconds (BashOperations contract)
+		await execStream(sbx, "echo hi", { onData, timeout: 30 });
+		expect(calls[0].timeoutMs).toBe(30000);
+
+		// undefined timeout stays undefined
+		calls.length = 0;
+		await execStream(sbx, "echo hi", { onData });
+		expect(calls[0].timeoutMs).toBeUndefined();
+	});
+});
 
 describe("createHostBashOps", () => {
 	it("returns BashOperations with exec function", () => {

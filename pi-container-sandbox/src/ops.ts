@@ -33,7 +33,7 @@ export async function execStream(
 		cmd: ["sh", "-c", command],
 		onData: opts.onData,
 		signal: opts.signal,
-		timeoutMs: opts.timeout,
+		timeoutMs: opts.timeout !== undefined ? opts.timeout * 1000 : undefined,
 	});
 	return { exitCode: result.exitCode };
 }
