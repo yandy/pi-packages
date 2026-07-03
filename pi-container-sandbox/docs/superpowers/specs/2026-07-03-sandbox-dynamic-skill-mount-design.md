@@ -20,7 +20,7 @@ session_start                          before_agent_start
 ctx.getSystemPrompt()                  event.systemPrompt
   │                                       │
   ▼                                       ▼
-parseAvailableSkills()                 构建 filePath→name 映射
+parseAvailableSkills()                 构建 hostFilePath→name 映射
   │ (解析 <available_skills> XML)         │
   ▼                                       ▼
 skillsToMountSpecs()                   fixLocationPaths()
@@ -29,7 +29,8 @@ skillsToMountSpecs()                   fixLocationPaths()
 DockerRuntime extraMounts              构建 skill/user info
   │                                       │
   ▼                                       ▼
-setSbx({ skillMounts, userMounts })    return { systemPrompt }
+setSbx({ skillMounts, userMounts,      
+          skillFileMapping: skillParsed })    return { systemPrompt }
 ```
 
 关键时序约束：
@@ -46,7 +47,7 @@ interface SbxSession {
   userMounts: MountSpec[];      // 新增：用户 sandbox.json 配置
   skillFileMapping: Array<{     // 新增：parseAvailableSkills 的原始结果，供 before_agent_start 替换 <location>
     name: string;
-    filePath: string;           // SKILL.md 绝对路径
+    hostFilePath: string;      // 宿主机上 SKILL.md 的绝对路径
   }>;
   // mounts: MountSpec[];       // 移除
 }
@@ -70,7 +71,7 @@ interface SbxSession {
 </available_skills>
 ```
 
-返回 `Array<{ name: string; filePath: string }>`，filePath 是 SKILL.md 的绝对路径。
+返回 `Array<{ name: string; hostFilePath: string }>`，hostFilePath 是宿主机上 SKILL.md 的绝对路径。
 - systemPrompt 为空 → throw
 - 无 `<available_skills>` 块 → throw
 - 单个 skill 的 name/location 为空 → 跳过该 skill
@@ -80,7 +81,7 @@ interface SbxSession {
 将解析结果转为 Docker mount specs：
 
 ```
-{ name: "ask-user", filePath: "/home/.../skills/ask-user/SKILL.md" }
+{ name: "ask-user", hostFilePath: "/home/.../skills/ask-user/SKILL.md" }
   → { source: "/home/.../skills/ask-user", target: "/skills/ask-user", mode: "ro" }
 ```
 
@@ -102,8 +103,8 @@ interface SbxSession {
 ### `before_agent_start` handler
 
 ```
-1. 遍历 sbx.skillFileMapping，对每个 { name, filePath }：
-   - 在 event.systemPrompt 中将 <location>filePath</location>
+1. 遍历 sbx.skillFileMapping，对每个 { name, hostFilePath }：
+   - 在 event.systemPrompt 中将 <location>hostFilePath</location>
      替换为 <location>/skills/{name}/SKILL.md</location>
 
 2. 构建 skill info（直接读 sbx.skillMounts，不再按 /skills/ 前缀过滤）
