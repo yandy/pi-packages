@@ -167,19 +167,23 @@ export function createMemoryTool(deps: MemoryToolDeps) {
 		name: "memory",
 		label: "Memory",
 		description:
-			"Read/write project memory across sessions. action 'add' stores content under a topic file with a title and appends to the MEMORY.md index; 'remove' deletes by exact entry title; 'search' queries memory files or history sessions (scope: memory|sessions).",
-		promptSnippet: "Read/write project memory across sessions (add/remove/search).",
+			"Read/write project memory across sessions. action 'add' appends content under a topic (auto-created) as an entry; 'remove' deletes an entry by title; 'read' loads a topic or entry; 'search' queries memory files or history sessions.",
+		promptSnippet: "Read/write project memory across sessions (add/remove/search/read).",
 		promptGuidelines: [
 			"Use memory to persist project facts, user preferences, and lessons learned across sessions.",
-			"Use memory action 'add' with an explicit topic filename when you discover something worth remembering long-term.",
+			"Use memory action 'add' with an explicit topic filename and entry title when you discover something worth remembering long-term.",
 			"Use memory action 'search' with scope='sessions' to find past work in history sessions.",
+			"Use memory action 'read' with topic or entry to load stored knowledge.",
 		],
 		parameters: Type.Object({
-			action: StringEnum(["add", "remove", "search"] as const),
+			action: StringEnum(["add", "remove", "search", "read"] as const),
+			// add
 			content: Type.Optional(Type.String({ description: "Knowledge text to store (add)." })),
-			topic: Type.Optional(Type.String({ description: "Target topic filename, e.g. 'debugging.md'. Auto-created if new (add)." })),
+			topic: Type.Optional(Type.String({ description: "Target topic filename, e.g. 'debugging.md'. Auto-created if new (add/read)." })),
 			title: Type.Optional(Type.String({ description: "Short title for the MEMORY.md index line (add). Required for add." })),
-			entry: Type.Optional(Type.String({ description: "Exact entry title to remove (remove)." })),
+			// remove
+			entry: Type.Optional(Type.String({ description: "Entry title to remove. Exact match on MEMORY.md index line (remove/read)." })),
+			// search
 			query: Type.Optional(Type.String()),
 			scope: Type.Optional(StringEnum(["memory", "sessions"] as const)),
 		}),
@@ -209,7 +213,7 @@ export function createMemoryTool(deps: MemoryToolDeps) {
 					if (!params.title) throw new Error("title is required for add");
 					const r = await doAdd(dir, { content: params.content, topic: params.topic, title: params.title, maxLines: cfg.memIndexMaxLines, maxBytes: cfg.memIndexMaxBytes });
 					if (!r.ok) throw new Error(r.error);
-					text = `Added to ${params.topic}. Index now has ${r.entries?.length ?? 0} entries.`;
+					text = `Added "${params.title}" to ${params.topic}. Index now has ${r.entries?.length ?? 0} entries.`;
 					details = { entries: r.entries?.length };
 					break;
 				}
@@ -217,7 +221,7 @@ export function createMemoryTool(deps: MemoryToolDeps) {
 					if (!params.entry) throw new Error("entry is required for remove");
 					const r = await doRemove(dir, { entry: params.entry });
 					if (!r.ok) throw new Error(r.error);
-					text = "Removed.";
+					text = `Removed entry "${params.entry}".`;
 					break;
 				}
 				case "search": {
@@ -227,6 +231,13 @@ export function createMemoryTool(deps: MemoryToolDeps) {
 					} else {
 						text = await searchMemory(dir, params.query);
 					}
+					break;
+				}
+				case "read": {
+					if (!params.topic && !params.entry) throw new Error("topic or entry is required for read");
+					const r = await doRead(dir, { topic: params.topic, entry: params.entry });
+					if (!r.ok) throw new Error(r.error);
+					text = r.content!;
 					break;
 				}
 				default:
