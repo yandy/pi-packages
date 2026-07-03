@@ -6,7 +6,12 @@ export interface SbxSession {
 	name: string;
 	hostCwd: string;
 	keep: boolean;
-	mounts: MountSpec[];
+	/** Skill mounts auto-discovered from system prompt <available_skills> XML. Always /skills/<name>, ro. */
+	skillMounts: MountSpec[];
+	/** User-defined mounts from sandbox.json runtime.mounts. */
+	userMounts: MountSpec[];
+	/** Raw parseAvailableSkills result. Used by before_agent_start to fix <location> paths. */
+	skillFileMapping: Array<{ name: string; hostFilePath: string }>;
 	allowedExternalPrefixes: string[];
 	resources?: SandboxOptions["resources"];
 	imageRef: string;
