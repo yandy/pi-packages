@@ -167,11 +167,11 @@ export function createMemoryTool(deps: MemoryToolDeps) {
 		name: "memory",
 		label: "Memory",
 		description:
-			"Read/write project memory across sessions. action 'add' appends content under a topic (auto-created) as an entry; 'remove' deletes an entry by title; 'read' loads a topic or entry; 'search' queries memory files or history sessions.",
-		promptSnippet: "Read/write project memory across sessions (add/remove/search/read).",
+			"Read/write project memory across sessions. action 'add' appends content under a topic (auto-created) as an entry; 'remove' deletes an entry by title; 'read' loads a topic or entry; 'search' queries memory files or history sessions. IMPORTANT: only MEMORY.md index lines are injected into system prompts — entry titles must be self-contained and descriptive (topic file content is NOT injected).",
+		promptSnippet: "Read/write project memory across sessions (add/remove/search/read). Only index titles are injected — make titles self-descriptive.",
 		promptGuidelines: [
 			"Use memory to persist project facts, user preferences, and lessons learned across sessions.",
-			"Use memory action 'add' with an explicit topic filename and entry title when you discover something worth remembering long-term.",
+			"Use memory action 'add' with an explicit topic filename and a descriptive, self-contained entry title — only the index line (title + topic) is injected into future prompts, NOT the topic file content. The title alone must convey what was learned.",
 			"Use memory action 'search' with scope='sessions' to find past work in history sessions.",
 			"Use memory action 'read' with topic or entry to load stored knowledge.",
 		],
@@ -180,7 +180,7 @@ export function createMemoryTool(deps: MemoryToolDeps) {
 			// add
 			content: Type.Optional(Type.String({ description: "Knowledge text to store (add)." })),
 			topic: Type.Optional(Type.String({ description: "Target topic filename, e.g. 'debugging.md'. Auto-created if new (add/read)." })),
-			title: Type.Optional(Type.String({ description: "Short title for the MEMORY.md index line (add). Required for add." })),
+			title: Type.Optional(Type.String({ description: "Descriptive, self-contained title for the MEMORY.md index line. Only index lines are injected into future prompts (NOT topic file content), so the title must convey enough context on its own. Required for add." })),
 			// remove
 			entry: Type.Optional(Type.String({ description: "Entry title to remove. Exact match on MEMORY.md index line (remove/read)." })),
 			// search
