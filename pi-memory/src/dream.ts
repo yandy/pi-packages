@@ -18,6 +18,7 @@ Rules:
 - Deduplicate entries: if two entries in the same topic contain the same info, merge them.
 - If entries across different topics overlap, move the content to the more appropriate topic.
 - Rebuild MEMORY.md index: list entries you deem valuable (not necessarily every entry). Each line: - [Entry Title](topic.md). Accuracy matters more than completeness.
+- CRITICAL for entry titles: Only the MEMORY.md index is injected into future coding sessions (topic file content is NOT seen). Every entry title must be self-descriptive and convey enough context to be useful at a glance. Prefer specific, actionable titles like "use uv instead of pip for Python package management" over vague ones like "python tools" or "workflow rules". If an existing title is too vague, rewrite it — keep the original ## heading in the topic file for full context.
 - When done, output a concise summary of changes (merged N, removed N, moved N, updated N).`;
 
 export function buildDreamTask(memoryDir: string, maxLines: number): string {
@@ -27,6 +28,7 @@ export function buildDreamTask(memoryDir: string, maxLines: number): string {
 3. Update outdated information.
 4. Move entries to more appropriate topic files when needed.
 5. Rebuild MEMORY.md (max ${maxLines} lines): - [Entry Title](topic.md) per entry you deem valuable (not necessarily every entry). Entries use ## Entry Title format.
+  IMPORTANT: Only MEMORY.md index lines are injected into future coding sessions (topic file content is NOT seen by the coding agent). Rewrite every entry title to be self-contained and descriptive — like "always use uv instead of pip for Python" instead of just "python tools". The title alone must tell the model what the entry is about.
 Only edit files under ${memoryDir}. When finished, print a one-line summary of changes.`;
 }
 
