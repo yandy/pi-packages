@@ -3,7 +3,7 @@
 	"publishConfig": {
 		"access": "public"
 	},
-	"version": "0.10.0",
+	"version": "1.0.0",
 	"description": "pi coding-agent extension that runs every read/write/edit/bash op inside a per-session Docker container",
 	"license": "MIT",
 	"repository": {
@@ -34,7 +34,6 @@
 	"peerDependencies": {
 		"@earendil-works/pi-coding-agent": ">=0.80.2"
 	},
-	"devDependencies": {
-	},
+	"devDependencies": {},
 	"dependencies": {}
 }
