@@ -31,7 +31,7 @@ export function dockerSpawn(
 		onStdout?: (d: Buffer) => void;
 		onStderr?: (d: Buffer) => void;
 	},
-): Promise<{ stdout: Buffer; stderr: Buffer; exitCode: number | null }> {
+): Promise<{ stdout: Buffer; stderr: Buffer; exitCode: number | null; error?: string }> {
 	return new Promise((resolve) => {
 		const spawnOpts: SpawnOptions = {
 			stdio: ["pipe", "pipe", "pipe"],
@@ -42,6 +42,9 @@ export function dockerSpawn(
 		const stderrChunks: Buffer[] = [];
 		let timedOut = false;
 		let settled = false;
+		let spawnError: string | undefined;
+
+		let timer: NodeJS.Timeout | null = null;
 
 		const finish = (code: number | null) => {
 			if (settled) return;
@@ -51,6 +54,7 @@ export function dockerSpawn(
 				exitCode: timedOut ? null : code,
 				stdout: Buffer.concat(stdoutChunks),
 				stderr: Buffer.concat(stderrChunks),
+				...(spawnError ? { error: spawnError } : {}),
 			});
 		};
 
@@ -66,14 +70,15 @@ export function dockerSpawn(
 		child.on("close", (code) => finish(code));
 		child.on("error", (err) => {
 			// spawn 自身的错误（如 docker 二进制找不到）
+			spawnError = err.message;
 			finish(null);
 		});
 
 		// 超时
-		let timer: NodeJS.Timeout | null = null;
 		if (opts.timeoutMs && opts.timeoutMs > 0) {
 			timer = setTimeout(() => {
 				timedOut = true;
+				spawnError = "timeout";
 				child.kill("SIGKILL");
 			}, opts.timeoutMs);
 		}
