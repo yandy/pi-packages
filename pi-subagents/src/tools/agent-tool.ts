@@ -129,9 +129,6 @@ ${typeListText}
 
 Guidelines:
 - For parallel work, use run_in_background: true on each agent. Foreground calls run sequentially — only one executes at a time.
-- Use Explore for codebase searches and code understanding.
-- Use Plan for architecture and implementation planning.
-- Use general-purpose for complex tasks that need file editing.
 - Provide clear, detailed prompts so the agent can work autonomously.
 - Subagent results are returned as text — summarize them for the user.
 - Use run_in_background for work you don't need immediately. You will be notified when it completes.
@@ -149,7 +146,7 @@ Guidelines:
 					description: "A short (3-5 word) description of the task (shown in UI).",
 				}),
 				subagent_type: Type.String({
-					description: `The type of specialized agent to use. Available types: ${availableTypesText}. Custom agents from .pi/agents/<name>.md (project) or ${agentDir}/agents/<name>.md (global) are also available.`,
+					description: `The type of specialized agent to use. Available types: ${availableTypesText}.`,
 				}),
 				model: Type.Optional(
 					Type.String({
