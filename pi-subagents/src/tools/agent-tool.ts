@@ -113,7 +113,6 @@ export class AgentTool {
 	toToolDefinition() {
 		const typeListText = this.typeListText;
 		const availableTypesText = this.availableTypesText;
-		const agentDir = this.agentDir;
 		const registry = this.registry;
 
 		return defineTool({
