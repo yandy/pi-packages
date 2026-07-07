@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import {
 	createBashTool,
 	createEditTool,
@@ -289,7 +290,7 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 
-				const dockerfile = `${labelMap.get(selected)}.Dockerfile`;
+				const dockerfile = resolve(PACKAGE_DOCKER_DIR, `${labelMap.get(selected)}.Dockerfile`);
 				const buildCtx = PACKAGE_DOCKER_DIR;
 
 				try {

@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { createSandboxCommandHandlers } from "../src/commands/sandbox";
 import { extractCommandName } from "../src/ops";
@@ -80,7 +82,7 @@ describe("/sandbox build", () => {
 		mockSbx({ runtime: rt });
 
 		await handlers.build("", ctx);
-		expect(buildDockerfile).toBe("cn.Dockerfile");
+		expect(buildDockerfile).toBe(resolve(fileURLToPath(import.meta.url), "..", "..", "docker", "cn.Dockerfile"));
 	});
 
 	it("shows message when user skips build", async () => {
