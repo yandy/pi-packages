@@ -39,7 +39,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         yq \
         python3 \
         nodejs \
-        npm
+        npm \
+        gh \
+        glab
 
 # uv — 100x faster Python package manager (replaces pip)
 COPY --from=ghcr.io/astral-sh/uv:trixie-slim /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin/
