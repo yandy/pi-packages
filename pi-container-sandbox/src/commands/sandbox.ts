@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 import { expandPath } from "../paths";
 import {
 	discoverDockerfiles,
@@ -102,7 +103,7 @@ export function createSandboxCommandHandlers(
 				return;
 			}
 
-			const dockerfile = `${labelMap.get(selected) ?? selected}.Dockerfile`;
+			const dockerfile = resolvePath(PACKAGE_DOCKER_DIR, `${labelMap.get(selected) ?? selected}.Dockerfile`);
 			const image = sbx?.imageRef ?? "pi-container-sandbox:latest";
 
 			try {
