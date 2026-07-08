@@ -44,7 +44,6 @@ Foreground agents block until complete. Background agents return an ID immediate
 |------|-------|-------|-------------|
 | `general-purpose` | all | inherit | Full parent system prompt — same rules, same conventions |
 | `Explore` | read, bash, grep, find, ls | haiku (fallback: inherit) | Fast codebase exploration (read-only) |
-| `Plan` | read, bash, grep, find, ls | inherit | Software architect for implementation planning (read-only) |
 
 ## Custom Agents
 
