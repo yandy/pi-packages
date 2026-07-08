@@ -44,7 +44,6 @@ subagent({
 |------|------|------|------|
 | `general-purpose` | 全部 | 继承父级 | 完整父级系统提示词——相同规则、相同约定 |
 | `Explore` | read, bash, grep, find, ls | haiku（回退：继承） | 快速代码库探索（只读） |
-| `Plan` | read, bash, grep, find, ls | 继承父级 | 软件架构师，实现方案设计（只读） |
 
 ## 自定义代理
 

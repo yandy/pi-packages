@@ -161,7 +161,7 @@ describe("SubagentsServiceAdapter — getRecord and listAgents", () => {
 
 	const recordB = createTestSubagent({
 		id: "b-2",
-		type: "Plan",
+		type: "Explore",
 		description: "task B",
 		status: "running",
 		toolUses: 1,
@@ -253,10 +253,10 @@ describe("SubagentsServiceAdapter — spawn", () => {
 	it("spawns as foreground when options.foreground is true", () => {
 		const mgr = createManagerStub();
 		const svc = new SubagentsServiceAdapter(mgr, vi.fn(), makeRuntimeStub());
-		svc.spawn("Plan", "plan work", { foreground: true });
+		svc.spawn("Explore", "plan work", { foreground: true });
 		expect(mgr.spawn).toHaveBeenCalledWith(
 			expect.anything(), // snapshot
-			"Plan",
+			"Explore",
 			"plan work",
 			expect.objectContaining({ isBackground: false }),
 		);

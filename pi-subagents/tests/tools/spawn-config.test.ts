@@ -16,10 +16,10 @@ function makeAgentConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
 	};
 }
 
-/** Registry with a single disabled Plan override. */
-function makeDisabledPlanRegistry(): AgentTypeRegistry {
+/** Registry with a single disabled Explore override. */
+function makeDisabledExploreRegistry(): AgentTypeRegistry {
 	return new AgentTypeRegistry(
-		() => new Map([["Plan", makeAgentConfig({ name: "Plan", description: "Disabled", enabled: false })]]),
+		() => new Map([["Explore", makeAgentConfig({ name: "Explore", description: "Disabled", enabled: false })]]),
 	);
 }
 
@@ -105,30 +105,30 @@ describe("resolveSpawnConfig — type resolution", () => {
 	});
 
 	it("returns an error for a disabled agent type (exact match)", () => {
-		const registry = makeDisabledPlanRegistry();
+		const registry = makeDisabledExploreRegistry();
 		const result = resolveSpawnConfig(
-			{ subagent_type: "Plan", prompt: "test", description: "d" },
+			{ subagent_type: "Explore", prompt: "test", description: "d" },
 			registry,
 			makeModelInfo(),
 			defaultSettings,
 		);
 		expect("error" in result).toBe(true);
 		if ("error" in result) {
-			expect(result.error).toBe('Agent type "Plan" is disabled');
+			expect(result.error).toBe('Agent type "Explore" is disabled');
 		}
 	});
 
 	it("reports the canonical casing in the disabled-agent error (case-insensitive input)", () => {
-		const registry = makeDisabledPlanRegistry();
+		const registry = makeDisabledExploreRegistry();
 		const result = resolveSpawnConfig(
-			{ subagent_type: "plan", prompt: "test", description: "d" },
+			{ subagent_type: "explore", prompt: "test", description: "d" },
 			registry,
 			makeModelInfo(),
 			defaultSettings,
 		);
 		expect("error" in result).toBe(true);
 		if ("error" in result) {
-			expect(result.error).toBe('Agent type "Plan" is disabled');
+			expect(result.error).toBe('Agent type "Explore" is disabled');
 		}
 	});
 

@@ -31,8 +31,8 @@ export interface AgentConfigLookup {
 export class AgentTypeRegistry implements AgentConfigLookup {
 	private agents = new Map<string, AgentConfig>();
 
-	/** The three embedded default agent names. */
-	static readonly DEFAULT_AGENT_NAMES = ["general-purpose", "Explore", "Plan"] as const;
+	/** The two embedded default agent names. */
+	static readonly DEFAULT_AGENT_NAMES = ["general-purpose", "Explore"] as const;
 
 	constructor(private loadUserAgents: () => Map<string, AgentConfig>) {
 		this.reload();
