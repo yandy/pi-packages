@@ -25,7 +25,6 @@ describe("AgentTypeRegistry", () => {
 			const registry = makeRegistry();
 			expect(registry.isValidType("general-purpose")).toBe(true);
 			expect(registry.isValidType("Explore")).toBe(true);
-			expect(registry.isValidType("Plan")).toBe(true);
 		});
 
 		it("does not call loadUserAgents until construction", () => {
@@ -106,10 +105,10 @@ describe("AgentTypeRegistry", () => {
 
 		it("returns config for disabled type (no fallback for existing disabled)", () => {
 			const registry = makeRegistry(
-				new Map([["Plan", makeAgentConfig({ name: "Plan", description: "Disabled", enabled: false })]]),
+				new Map([["Explore", makeAgentConfig({ name: "Explore", description: "Disabled", enabled: false })]]),
 			);
-			const config = registry.resolveAgentConfig("Plan");
-			expect(config.name).toBe("Plan");
+			const config = registry.resolveAgentConfig("Explore");
+			expect(config.name).toBe("Explore");
 			expect(config.enabled).toBe(false);
 		});
 
@@ -129,12 +128,11 @@ describe("AgentTypeRegistry", () => {
 			const types = registry.getAvailableTypes();
 			expect(types).toContain("general-purpose");
 			expect(types).toContain("Explore");
-			expect(types).toContain("Plan");
 		});
 
 		it("excludes disabled agents", () => {
-			const registry = makeRegistry(new Map([["Plan", makeAgentConfig({ name: "Plan", enabled: false })]]));
-			expect(registry.getAvailableTypes()).not.toContain("Plan");
+			const registry = makeRegistry(new Map([["Explore", makeAgentConfig({ name: "Explore", enabled: false })]]));
+			expect(registry.getAvailableTypes()).not.toContain("Explore");
 		});
 
 		it("includes user agents", () => {
@@ -145,8 +143,8 @@ describe("AgentTypeRegistry", () => {
 
 	describe("getAllTypes", () => {
 		it("includes disabled agents", () => {
-			const registry = makeRegistry(new Map([["Plan", makeAgentConfig({ name: "Plan", enabled: false })]]));
-			expect(registry.getAllTypes()).toContain("Plan");
+			const registry = makeRegistry(new Map([["Explore", makeAgentConfig({ name: "Explore", enabled: false })]]));
+			expect(registry.getAllTypes()).toContain("Explore");
 		});
 	});
 
@@ -156,7 +154,6 @@ describe("AgentTypeRegistry", () => {
 			const names = registry.getDefaultAgentNames();
 			expect(names).toContain("general-purpose");
 			expect(names).toContain("Explore");
-			expect(names).toContain("Plan");
 			expect(names).not.toContain("auditor");
 		});
 	});
@@ -189,8 +186,8 @@ describe("AgentTypeRegistry", () => {
 		});
 
 		it("returns false for disabled agents", () => {
-			const registry = makeRegistry(new Map([["Plan", makeAgentConfig({ name: "Plan", enabled: false })]]));
-			expect(registry.isValidType("Plan")).toBe(false);
+			const registry = makeRegistry(new Map([["Explore", makeAgentConfig({ name: "Explore", enabled: false })]]));
+			expect(registry.isValidType("Explore")).toBe(false);
 		});
 
 		it("returns false for unknown types", () => {
@@ -232,8 +229,8 @@ describe("AgentTypeRegistry", () => {
 			expect(AgentTypeRegistry.DEFAULT_AGENT_NAMES).toBeDefined();
 		});
 
-		it("contains the three built-in default names", () => {
-			expect(AgentTypeRegistry.DEFAULT_AGENT_NAMES).toEqual(["general-purpose", "Explore", "Plan"]);
+		it("contains the two built-in default names", () => {
+			expect(AgentTypeRegistry.DEFAULT_AGENT_NAMES).toEqual(["general-purpose", "Explore"]);
 		});
 
 		it("is no longer exported from types.ts", async () => {
