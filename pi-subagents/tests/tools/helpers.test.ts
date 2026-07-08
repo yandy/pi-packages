@@ -123,15 +123,15 @@ describe("buildTypeListText", () => {
 
 	it("excludes disabled agents from the default agents list", () => {
 		const registry = makeRegistry({
-			defaults: ["general-purpose", "Plan"],
+			defaults: ["general-purpose", "Explore"],
 			resolve: (name) =>
-				name === "Plan"
-					? { description: "Planning agent", model: undefined, enabled: false }
+				name === "Explore"
+					? { description: "Exploration agent", model: undefined, enabled: false }
 					: { description: "General purpose agent", model: undefined },
 		});
 		const result = buildTypeListText(registry, "/home/.pi");
 		expect(result).toContain("- general-purpose: General purpose agent");
-		expect(result).not.toContain("Plan");
+		expect(result).not.toContain("Explore");
 	});
 
 	it("excludes disabled agents from the custom agents list", () => {
