@@ -160,7 +160,7 @@ describe("SubagentEventsObserver", () => {
 			const { observer, emit } = makeObserver();
 			const record = createTestSubagent({
 				id: "agent-3",
-				type: "Plan",
+				type: "Explore",
 				description: "plan work",
 				compactionCount: 1,
 			});
@@ -170,7 +170,7 @@ describe("SubagentEventsObserver", () => {
 
 			expect(emit).toHaveBeenCalledExactlyOnceWith("subagents:compacted", {
 				id: "agent-3",
-				type: "Plan",
+				type: "Explore",
 				description: "plan work",
 				reason: "threshold",
 				tokensBefore: 50_000,
