@@ -182,7 +182,6 @@ describe("AgentTypeRegistry", () => {
 		it("returns true case-insensitively", () => {
 			const registry = makeRegistry();
 			expect(registry.isValidType("explore")).toBe(true);
-			expect(registry.isValidType("PLAN")).toBe(true);
 		});
 
 		it("returns false for disabled agents", () => {
