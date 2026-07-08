@@ -3,7 +3,7 @@
 	"publishConfig": {
 		"access": "public"
 	},
-	"version": "0.2.2",
+	"version": "0.3.0",
 	"description": "Focused, in-process sub-agent core for pi — autonomous agents plus a typed API and lifecycle events",
 	"license": "MIT",
 	"repository": {
