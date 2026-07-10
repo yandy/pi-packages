@@ -24,6 +24,6 @@
 		"@biomejs/biome": "^2.5.2",
 		"typescript": "~6.0.3",
 		"@types/node": "^22.0.0",
-		"vitest": "^3.0.0"
+		"vitest": "^4.1.10"
 	}
 }
