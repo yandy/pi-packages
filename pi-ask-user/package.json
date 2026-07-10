@@ -41,7 +41,7 @@
 		"@sinclair/typebox": "*"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.5.2",
+		"@biomejs/biome": "^2.5.3",
 		"@types/node": "^22.0.0",
 		"typescript": "~6.0.3",
 		"vitest": "^3.0.0"
