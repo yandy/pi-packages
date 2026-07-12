@@ -29,17 +29,17 @@ export async function shouldNudge(
 	memoryDir: string,
 	config: MemoryConfig,
 	cwd: string,
-): Promise<{ nudge: boolean; message: string }> {
+): Promise<{ nudge: boolean; message: string; sessions: number; newEntries: number }> {
 	const sessions = (await SessionManager.list(cwd)).length;
 	const meta = await readDreamMeta(memoryDir);
 	const newEntries = meta ? Math.max(0, sessions - meta.sessionCountAtDream) : sessions;
 	if (meta) {
 		const hoursSince = (Date.now() - new Date(meta.lastDreamAt).getTime()) / 3600_000;
 		if (hoursSince >= config.dream.nudgeAfterHours && newEntries >= config.dream.nudgeAfterSessions) {
-			return { nudge: true, message: formatNudge(sessions, newEntries) };
+			return { nudge: true, message: formatNudge(sessions, newEntries), sessions, newEntries };
 		}
 	} else if (sessions >= config.dream.nudgeAfterSessions) {
-		return { nudge: true, message: formatNudge(sessions, newEntries) };
+		return { nudge: true, message: formatNudge(sessions, newEntries), sessions, newEntries };
 	}
-	return { nudge: false, message: "" };
+	return { nudge: false, message: "", sessions: 0, newEntries: 0 };
 }
