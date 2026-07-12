@@ -36,7 +36,7 @@
 		"@earendil-works/pi-ai": ">=0.80.2"
 	},
 	"dependencies": {
-		"@ast-grep/cli": "^0.44.0",
+		"@ast-grep/cli": "^0.44.1",
 		"vscode-jsonrpc": "^8.2.1"
 	},
 	"devDependencies": {
