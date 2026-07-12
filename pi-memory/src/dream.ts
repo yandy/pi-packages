@@ -1,115 +1,103 @@
-import {
-	createAgentSession,
-	SessionManager,
-	DefaultResourceLoader,
-	SettingsManager,
-	AuthStorage,
-	ModelRegistry,
-} from "@earendil-works/pi-coding-agent";
-import { join } from "node:path";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import type { MemoryConfig } from "./config";
-
-export const DREAM_SYSTEM_PROMPT = `You are a memory consolidation agent. Your job: read all memory files in the given directory, consolidate entries within each topic (merge duplicates, resolve contradictions, update outdated info), and rebuild the MEMORY.md index to be concise and accurate.
-Rules:
-- Each topic file contains entries as \`## Entry Title\` blocks.
-- Only modify files under the given directory. Never touch anything else.
-- Deduplicate entries: if two entries in the same topic contain the same info, merge them.
-- If entries across different topics overlap, move the content to the more appropriate topic.
-- Rebuild MEMORY.md index: list entries you deem valuable (not necessarily every entry). Each line: - [Entry Title](topic.md). Accuracy matters more than completeness.
-- CRITICAL for entry titles: Only the MEMORY.md index is injected into future coding sessions (topic file content is NOT seen). Every entry title must be self-descriptive and convey enough context to be useful at a glance. Prefer specific, actionable titles like "use uv instead of pip for Python package management" over vague ones like "python tools" or "workflow rules". If an existing title is too vague, rewrite it — keep the original ## heading in the topic file for full context.
-- When done, output a concise summary of changes (merged N, removed N, moved N, updated N).`;
+import { getSubagentsService, type SubagentsService } from "@yandy0725/pi-subagents";
+import type { WorkspaceProvider } from "@yandy0725/pi-subagents";
+import { access } from "node:fs/promises";
 
 export function buildDreamTask(memoryDir: string, maxLines: number): string {
-  return `Consolidate the memory files under ${memoryDir}. Read every .md file (including MEMORY.md), then:
+  return `You are a memory consolidation agent. Your job: read all memory files in the given directory, consolidate entries within each topic (merge duplicates, resolve contradictions, update outdated info), and rebuild the MEMORY.md index to be concise and accurate.
+
+Task: Consolidate the memory files under ${memoryDir}. Read every .md file (including MEMORY.md), then:
 1. Deduplicate entries within each topic that say the same thing.
 2. Merge contradictory or overlapping entries into one accurate entry.
 3. Update outdated information.
 4. Move entries to more appropriate topic files when needed.
 5. Rebuild MEMORY.md (max ${maxLines} lines): - [Entry Title](topic.md) per entry you deem valuable (not necessarily every entry). Entries use ## Entry Title format.
-  IMPORTANT: Only MEMORY.md index lines are injected into future coding sessions (topic file content is NOT seen by the coding agent). Rewrite every entry title to be self-contained and descriptive — like "always use uv instead of pip for Python" instead of just "python tools". The title alone must tell the model what the entry is about.
-Only edit files under ${memoryDir}. When finished, print a one-line summary of changes.`;
+
+Rules:
+- Each topic file contains entries as \`## Entry Title\` blocks.
+- Only modify files under the given directory. Never touch anything else.
+- Rebuild MEMORY.md index: list entries you deem valuable. Each line: - [Entry Title](topic.md). Accuracy matters more than completeness.
+- CRITICAL for entry titles: Only the MEMORY.md index is injected into future coding sessions (topic file content is NOT seen by the coding agent). Rewrite every entry title to be self-contained and descriptive — like "always use uv instead of pip for Python" instead of just "python tools". The title alone must tell the model what the entry is about.
+- When done, output a concise summary of changes (merged N, removed N, moved N, updated N).`;
 }
 
-export function resolveDreamModel(config: MemoryConfig, ctx: { model: any; modelRegistry: any }): any | null {
-	if (config.dream.model === "auto") return ctx.model;
-	const slash = config.dream.model.indexOf("/");
-	if (slash === -1) return null;
-	const provider = config.dream.model.slice(0, slash);
-	const id = config.dream.model.slice(slash + 1);
-	return ctx.modelRegistry?.find(provider, id) ?? null;
-}
-
-export function extractSummary(messages: any[]): string {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const m = messages[i];
-		if (m.role === "assistant") {
-			if (typeof m.content === "string") return m.content;
-			const t = (m.content || []).find((b: any) => b.type === "text");
-			if (t) return t.text;
-		}
-	}
-	return "Dream completed.";
-}
-
-interface RunDreamOpts {
-	model: any;
-	memoryDir: string;
-	cwd: string;
-	signal?: AbortSignal;
-	createSession?: typeof createAgentSession;
+export interface RunDreamOpts {
+  model: string;
+  memoryDir: string;
+  signal?: AbortSignal;
+  events?: { on(channel: string, handler: (data: any) => void): () => void };
+  service?: SubagentsService;
 }
 
 export async function runDream(opts: RunDreamOpts): Promise<string> {
-	const createSession = opts.createSession ?? createAgentSession;
-	// DI: when opts.createSession is provided (test path), skip real loader/auth construction.
-	// When not provided (production), build the real isolated DefaultResourceLoader + AuthStorage.
-	const useReal = !opts.createSession;
-	const loader = useReal
-		? await (async () => {
-				const isolatedAgentDir = await mkdtemp(join(tmpdir(), "pi-dream-"));
-				const l = new DefaultResourceLoader({
-					cwd: opts.memoryDir,
-					agentDir: isolatedAgentDir,
-					settingsManager: SettingsManager.inMemory({}),
-					systemPromptOverride: () => DREAM_SYSTEM_PROMPT,
-				});
-				await l.reload();
-				return l;
-			})()
-		: undefined;
-	const authStorage = useReal ? AuthStorage.create() : undefined;
+  const service = opts.service ?? getSubagentsService();
+  if (!service) throw new Error("pi-subagents not available — install @yandy0725/pi-subagents");
 
-	const { session } = await createSession({
-		model: opts.model,
-		...(authStorage ? { authStorage } : {}),
-		...(useReal ? { modelRegistry: ModelRegistry.create(authStorage!) } : {}),
-		tools: ["read", "edit", "write"],
-		cwd: opts.memoryDir,
-		sessionManager: useReal ? SessionManager.inMemory(opts.memoryDir) : undefined,
-		...(loader ? { resourceLoader: loader } : {}),
-	});
+  const events = opts.events;
+  if (!events) throw new Error("events required for dream — pass pi.events");
 
-	let summary = "Dream completed.";
-	const unsub = session.subscribe((e: any) => {
-		if (e.type === "agent_end") {
-			summary = extractSummary(session.messages);
-		}
-	});
+  const model = opts.model === "auto" ? undefined : opts.model;
+  const task = buildDreamTask(opts.memoryDir, 200);
 
-	const onAbort = () => session.abort?.();
-	opts.signal?.addEventListener("abort", onAbort);
-	try {
-		await session.prompt(buildDreamTask(opts.memoryDir, 200));
-		// Extract from messages as fallback when agent_end didn't fire (test path / edge case).
-		if (summary === "Dream completed." && session.messages?.length) {
-			summary = extractSummary(session.messages);
-		}
-		return summary;
-	} finally {
-		opts.signal?.removeEventListener("abort", onAbort);
-		unsub();
-		session.dispose();
-	}
+  // Register workspace provider so the subagent runs in memoryDir
+  const provider: WorkspaceProvider = {
+    async prepare(_ctx) {
+      await access(opts.memoryDir).catch(() => {
+        throw new Error(`Memory directory not found: ${opts.memoryDir}`);
+      });
+      return {
+        cwd: opts.memoryDir,
+        dispose: () => undefined,
+      };
+    },
+  };
+  const unregister = service.registerWorkspaceProvider(provider);
+
+  // Spawn the dream subagent
+  const agentId = service.spawn(
+    "general-purpose",
+    task,
+    model ? { model } : {},
+  );
+
+  // Wait for completion/failure via events
+  try {
+    return await new Promise<string>((resolve, reject) => {
+      let settled = false;
+
+      const cleanup = () => {
+        if (settled) return;
+        settled = true;
+        unsubCompleted();
+        unsubFailed();
+        unregister();
+        opts.signal?.removeEventListener("abort", onAbort);
+      };
+
+      const onCompleted = (data: { id: string }) => {
+        if (data.id !== agentId) return;
+        cleanup();
+        const record = service.getRecord(agentId);
+        resolve(record?.result ?? "Dream completed.");
+      };
+
+      const onFailed = (data: { id: string; error?: string }) => {
+        if (data.id !== agentId) return;
+        cleanup();
+        reject(new Error(data.error ?? "Dream agent failed"));
+      };
+
+      const onAbort = () => {
+        service.abort(agentId);
+      };
+
+      const unsubCompleted = events.on("subagents:completed", onCompleted);
+      const unsubFailed = events.on("subagents:failed", onFailed);
+
+      opts.signal?.addEventListener("abort", onAbort, { once: true });
+    });
+  } catch (e) {
+    // Ensure cleanup on rejection
+    unregister();
+    throw e;
+  }
 }
