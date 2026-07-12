@@ -153,4 +153,33 @@ describe("runDream", () => {
       runDream({ model: "auto", memoryDir: "/mem/x" } as any)
     ).rejects.toThrow("pi-subagents not available");
   });
+
+  it("resolves via safety timeout when events never fire (abort-while-queued edge case)", async () => {
+    vi.useFakeTimers();
+    try {
+      const fakeService = {
+        spawn: vi.fn().mockReturnValue("agent-queued-1"),
+        getRecord: vi.fn().mockReturnValue({ result: "no events fired" }),
+        registerWorkspaceProvider: vi.fn().mockReturnValue(vi.fn()),
+        abort: vi.fn(),
+      };
+      const events = { on: vi.fn(() => () => {}) };
+
+      const promise = runDream({
+        model: "auto",
+        memoryDir: "/mem/x",
+        service: fakeService as any,
+        events: events as any,
+      });
+
+      // Fast-forward past the 15-minute safety timeout
+      vi.advanceTimersByTime(16 * 60 * 1000);
+
+      const result = await promise;
+      expect(result).toBe("no events fired");
+      expect(fakeService.getRecord).toHaveBeenCalledWith("agent-queued-1");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

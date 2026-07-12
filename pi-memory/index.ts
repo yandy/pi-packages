@@ -45,20 +45,27 @@ export default function (pi: ExtensionAPI) {
 					`${message}\n\nConsolidate memory files now?`,
 				);
 				if (ok) {
+					// Fire-and-forget via setTimeout: don't block session_start, and defer
+					// past the current microtask queue so pi-subagents' session_start has
+					// set up currentCtx before we try to spawn.
+					const dreamCtrl = new AbortController();
 					ctx.ui.setStatus("dream", "Consolidating memory...");
-					try {
-						const summary = await runDream({
-							model: config.dream.model,
-							memoryDir,
-							events: pi.events,
-						});
-						await writeDreamMeta(memoryDir, sessions);
-						ctx.ui.notify(summary, "info");
-					} catch (e: any) {
-						ctx.ui.notify(`Dream failed: ${e.message}`, "error");
-					} finally {
-						ctx.ui.setStatus("dream", undefined);
-					}
+					setTimeout(async () => {
+						try {
+							const summary = await runDream({
+								model: config.dream.model,
+								memoryDir,
+								signal: dreamCtrl.signal,
+								events: pi.events,
+							});
+							await writeDreamMeta(memoryDir, sessions);
+							ctx.ui.notify(summary, "info");
+						} catch (e: any) {
+							ctx.ui.notify(`Dream failed: ${e.message}`, "error");
+						} finally {
+							ctx.ui.setStatus("dream", undefined);
+						}
+					}, 0);
 				}
 			}
 		}
