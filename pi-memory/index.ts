@@ -4,7 +4,7 @@ import { resolveMemoryDir } from "./src/paths";
 import { loadIndexSnapshot, buildInjection } from "./src/inject";
 import { createMemoryTool } from "./src/memory-tool";
 import { searchSessions } from "./src/session-search";
-import { runDream, resolveDreamModel } from "./src/dream";
+import { runDream } from "./src/dream";
 import { shouldNudge, writeDreamMeta, readDreamMeta } from "./src/nudge";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { readdir, readFile } from "node:fs/promises";
@@ -38,8 +38,29 @@ export default function (pi: ExtensionAPI) {
 
 		// nudge
 		if (ctx.hasUI) {
-			const { nudge, message } = await shouldNudge(memoryDir, config, ctx.cwd);
-			if (nudge) ctx.ui.notify(message, "info");
+			const { nudge, message, sessions } = await shouldNudge(memoryDir, config, ctx.cwd);
+			if (nudge) {
+				const ok = await ctx.ui.confirm(
+					"Memory Consolidation",
+					`${message}\n\nConsolidate memory files now?`,
+				);
+				if (ok) {
+					ctx.ui.setStatus("dream", "Consolidating memory...");
+					try {
+						const summary = await runDream({
+							model: config.dream.model,
+							memoryDir,
+							events: pi.events,
+						});
+						await writeDreamMeta(memoryDir, sessions);
+						ctx.ui.notify(summary, "info");
+					} catch (e: any) {
+						ctx.ui.notify(`Dream failed: ${e.message}`, "error");
+					} finally {
+						ctx.ui.setStatus("dream", undefined);
+					}
+				}
+			}
 		}
 	});
 
@@ -84,14 +105,14 @@ export default function (pi: ExtensionAPI) {
 			}
 			const ok = await ctx.ui.confirm("Dream", "Consolidate all memory files? This rewrites them in-place.");
 			if (!ok) return;
-			const model = resolveDreamModel(config, ctx);
-			if (!model) {
-				ctx.ui.notify("No model available for dream (check dream.model config / API key).", "error");
-				return;
-			}
 			ctx.ui.setStatus("dream", "Consolidating memory...");
 			try {
-				const summary = await runDream({ model, memoryDir, cwd: memoryDir, signal: ctx.signal });
+				const summary = await runDream({
+					model: config.dream.model,
+					memoryDir,
+					signal: ctx.signal,
+					events: pi.events,
+				});
 				const sessions = (await SessionManager.list(ctx.cwd)).length;
 				await writeDreamMeta(memoryDir, sessions);
 				ctx.ui.notify(summary, "info");

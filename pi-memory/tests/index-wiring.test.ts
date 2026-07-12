@@ -25,7 +25,7 @@ vi.mock("../src/paths", () => ({
 }));
 
 vi.mock("../src/nudge", () => ({
-	shouldNudge: vi.fn().mockResolvedValue({ nudge: false, message: "" }),
+	shouldNudge: vi.fn().mockResolvedValue({ nudge: false, message: "", sessions: 0, newEntries: 0 }),
 	writeDreamMeta: vi.fn().mockResolvedValue(undefined),
 	readDreamMeta: vi.fn().mockResolvedValue({ lastDreamAt: null }),
 }));
@@ -36,7 +36,7 @@ vi.mock("../src/session-search", () => ({
 
 vi.mock("../src/dream", () => ({
 	runDream: vi.fn().mockResolvedValue("done"),
-	resolveDreamModel: vi.fn().mockReturnValue("test-model"),
+	buildDreamTask: vi.fn().mockReturnValue("dream task"),
 }));
 
 import memoryFactory from "../index";
