@@ -1,9 +1,38 @@
 export interface TopicMeta {
+  name: string;
+  description: string;
+  type: string;
   updated: string;
 }
 
+export const ALLOWED_TYPES = ["user", "feedback", "project", "reference"] as const;
+
 export function buildFrontmatter(meta: TopicMeta): string {
-  return `---\nupdated: ${meta.updated}\n---\n\n`;
+  return [
+    "---",
+    `name: ${meta.name}`,
+    `description: ${meta.description}`,
+    `type: ${meta.type}`,
+    `updated: ${meta.updated}`,
+    "---",
+    "",
+    "",
+  ].join("\n");
+}
+
+export function parseFrontmatter(raw: string): TopicMeta | null {
+  if (!raw.startsWith("---\n")) return null;
+  const endIdx = raw.indexOf("\n---\n", 4);
+  if (endIdx === -1) return null;
+  const block = raw.slice(4, endIdx);
+  const meta: Record<string, string> = {};
+  for (const line of block.split("\n")) {
+    const m = line.match(/^(\w+):\s*(.*)$/);
+    if (m) meta[m[1]] = m[2].trim();
+  }
+  if (!meta.name || !meta.description || !meta.type || !meta.updated) return null;
+  if (!(ALLOWED_TYPES as readonly string[]).includes(meta.type)) return null;
+  return meta as TopicMeta;
 }
 
 export function appendContent(
@@ -17,7 +46,7 @@ export function appendContent(
 }
 
 export function updateFrontmatterDate(raw: string, date: string): string {
-  return raw.replace(/^(---\n)updated: .+(\n---)/m, `$1updated: ${date}$2`);
+  return raw.replace(/^(---\n(?:.*\n)*?)updated: .+(\n---)/m, `$1updated: ${date}$2`);
 }
 
 export function removeEntrySection(raw: string, title: string): string {
