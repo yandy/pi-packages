@@ -7,7 +7,7 @@ export type ThinkLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh"
 
 export interface AutoSurfacingConfig {
 	enabled: boolean;
-	model: string;
+	model?: string;
 	thinkLevel: ThinkLevel;
 	maxFiles: number;
 	maxTopicBytes: number;
@@ -16,7 +16,7 @@ export interface AutoSurfacingConfig {
 
 export interface ExtractMemoriesConfig {
 	enabled: boolean;
-	model: string;
+	model?: string;
 	thinkLevel: ThinkLevel;
 	maxContextTokens: number;
 }
@@ -26,7 +26,7 @@ export interface MemoryConfig {
 	memoryDir: string;
 	memIndexMaxLines: number;
 	memIndexMaxBytes: number;
-	dream: { nudgeAfterSessions: number; nudgeAfterHours: number; model: string; thinkLevel: ThinkLevel };
+	dream: { nudgeAfterSessions: number; nudgeAfterHours: number; model?: string; thinkLevel: ThinkLevel };
 	sessionSearch: { maxSessions: number; maxMatches: number };
 	autoSurfacing: AutoSurfacingConfig;
 	extractMemories: ExtractMemoriesConfig;
@@ -37,11 +37,10 @@ export const DEFAULT_CONFIG: MemoryConfig = {
 	memoryDir: join(homedir(), CONFIG_DIR_NAME, "memory"),
 	memIndexMaxLines: 200,
 	memIndexMaxBytes: 25600,
-	dream: { nudgeAfterSessions: 5, nudgeAfterHours: 24, model: "auto", thinkLevel: "high" },
+	dream: { nudgeAfterSessions: 5, nudgeAfterHours: 24, thinkLevel: "high" },
 	sessionSearch: { maxSessions: 10, maxMatches: 5 },
 	autoSurfacing: {
 		enabled: true,
-		model: "auto",
 		thinkLevel: "off",
 		maxFiles: 5,
 		maxTopicBytes: 4096,
@@ -49,7 +48,6 @@ export const DEFAULT_CONFIG: MemoryConfig = {
 	},
 	extractMemories: {
 		enabled: true,
-		model: "auto",
 		thinkLevel: "high",
 		maxContextTokens: 2000,
 	},
