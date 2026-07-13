@@ -10,7 +10,7 @@ import type { WorkspaceProvider } from "../lifecycle/workspace";
 import type { SpawnOptions, SubagentRecord, SubagentsService } from "../service/service";
 import type { ModelRegistry } from "../session/model-resolver";
 import { resolveModelName } from "../tools/spawn-config";
-import type { SessionContext, Subagent } from "../types";
+import type { SessionContext, Subagent, ThinkingLevel, AgentInvocation } from "../types";
 
 /** Narrow interface for the SubagentManager — avoids coupling to the concrete class. */
 export interface SubagentManagerLike {
@@ -66,6 +66,11 @@ export class SubagentsServiceAdapter implements SubagentsService {
 		const description = options?.description ?? prompt.slice(0, 80);
 		const isBackground = !(options?.foreground ?? false);
 
+		// Build invocation with modelName + thinkingLevel (not just modelName as before)
+		const invocationObj: AgentInvocation = {};
+		if (modelName != null) invocationObj.modelName = modelName;
+		if (options?.thinkingLevel != null) invocationObj.thinking = options.thinkingLevel as ThinkingLevel;
+
 		const snapshot = this.runtime.buildSnapshot(options?.inheritContext ?? false);
 		return this.manager.spawn(snapshot, type, prompt, {
 			description,
@@ -75,9 +80,7 @@ export class SubagentsServiceAdapter implements SubagentsService {
 			inheritContext: options?.inheritContext,
 			bypassQueue: options?.bypassQueue,
 			isBackground,
-			// Service API builds a display-minimal invocation (modelName only);
-			// the tool path additionally carries thinking/maxTurns/inherit tags.
-			invocation: modelName != null ? { modelName } : undefined,
+			invocation: Object.keys(invocationObj).length > 0 ? invocationObj : undefined,
 		});
 	}
 

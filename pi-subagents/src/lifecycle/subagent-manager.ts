@@ -371,6 +371,7 @@ function toEvictedSubagent(record: Subagent, outputFile: string): EvictedSubagen
 		completedAt: record.completedAt,
 		toolUses: record.toolUses,
 		modelName: record.invocation?.modelName,
+		thinking: record.thinking,
 		outputFile,
 	};
 }

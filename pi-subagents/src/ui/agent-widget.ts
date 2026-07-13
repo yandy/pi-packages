@@ -181,6 +181,7 @@ export class AgentWidget implements SubagentManagerObserver {
 			responseText: record.responseText,
 			contextPercent: record.getContextPercent(),
 			modelName: record.invocation?.modelName,
+			thinking: record.invocation?.thinking,
 		};
 	}
 

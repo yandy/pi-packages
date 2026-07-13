@@ -91,7 +91,7 @@ describe("SubagentEventsObserver", () => {
 				error: undefined,
 				startedAt: 1000,
 				completedAt: 2000,
-				invocation: { runInBackground: true, modelName: "haiku" },
+				invocation: { runInBackground: true, modelName: "haiku", thinking: "high" },
 			});
 
 			observer.onSubagentCompleted(record);
@@ -107,6 +107,7 @@ describe("SubagentEventsObserver", () => {
 				completedAt: 2000,
 				toolUses: 3,
 				modelName: "haiku",
+				thinkingLevel: "high",
 				outputFile: record.outputFile,
 			});
 		});

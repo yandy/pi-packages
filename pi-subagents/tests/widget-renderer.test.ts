@@ -146,6 +146,13 @@ describe("renderFinishedLine", () => {
 
 		expect(line).toContain("haiku");
 	});
+
+	it("shows think:level when thinking is set", () => {
+		const agent = makeAgent({ thinking: "high" });
+		const line = renderFinishedLine(agent, testRegistry, theme);
+
+		expect(line).toContain("think:high");
+	});
 });
 
 describe("renderRunningLines", () => {
@@ -225,6 +232,13 @@ describe("renderRunningLines", () => {
 		const [header] = renderRunningLines(agent, testRegistry, 0, theme);
 
 		expect(header).toContain("haiku");
+	});
+
+	it("shows think:level when thinking is set for running agent", () => {
+		const agent = makeAgent({ status: "running", completedAt: undefined, thinking: "off" });
+		const [header] = renderRunningLines(agent, testRegistry, 0, theme);
+
+		expect(header).toContain("think:off");
 	});
 });
 

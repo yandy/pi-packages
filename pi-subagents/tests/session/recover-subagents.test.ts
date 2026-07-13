@@ -37,6 +37,7 @@ describe("recoverEvictedSubagents", () => {
 				completedAt: 4000,
 				toolUses: 7,
 				modelName: "haiku",
+				thinkingLevel: "high",
 				outputFile: "/tasks/a1.jsonl",
 			}),
 		]);
@@ -56,6 +57,7 @@ describe("recoverEvictedSubagents", () => {
 			completedAt: 4000,
 			toolUses: 7,
 			modelName: "haiku",
+			thinking: "high",
 			outputFile: "/tasks/a1.jsonl",
 		};
 		expect(entry).toEqual(expected);
@@ -134,6 +136,27 @@ describe("recoverEvictedSubagents", () => {
 
 		expect(entry.modelName).toBeUndefined();
 		expect(entry.toolUses).toBe(0);
+		expect(entry.thinking).toBeUndefined();
+	});
+
+	it("recovers thinkingLevel from persisted records", () => {
+		const jsonl = parentJsonl([
+			HEADER,
+			recordEntry({
+				id: "a1",
+				type: "Explore",
+				description: "d",
+				status: "completed",
+				startedAt: 1000,
+				completedAt: 4000,
+				thinkingLevel: "off",
+				outputFile: "/tasks/a1.jsonl",
+			}),
+		]);
+
+		const [entry] = recoverEvictedSubagents("/parent.jsonl", () => jsonl);
+
+		expect(entry.thinking).toBe("off");
 	});
 
 	it("constructs outputFile for old records that lack it, from the agent id and parent session directory", () => {

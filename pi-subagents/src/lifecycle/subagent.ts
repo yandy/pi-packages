@@ -133,6 +133,10 @@ export class Subagent {
 	get modelName(): string | undefined {
 		return this.invocation?.modelName;
 	}
+	/** Thinking level when explicitly set (e.g. "high", "off"). */
+	get thinking(): string | undefined {
+		return this.invocation?.thinking;
+	}
 
 	readonly abortController: AbortController;
 	private _promise?: Promise<void>;
