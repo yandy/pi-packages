@@ -9,6 +9,10 @@ export interface RunExtractOpts {
 	service?: SubagentsService;
 }
 
+/** Build extraction task prompt.
+ *  Session context strategy: only current turn (user + assistant messages).
+ *  No conversation history — extraction is turn-scoped.
+ *  Tool scope: file read/write only (cwd = memoryDir). */
 export function buildExtractTask(
 	memoryDir: string,
 	messages: Array<{ role: string; content: string }>,
@@ -26,10 +30,9 @@ export function buildExtractTask(
 	const truncatedAssistant = assistantText.slice(0, maxChars / 2);
 
 	return [
-		`You are a memory extraction agent. Your cwd is set to the memory directory at ${memoryDir}.`,
-		"Analyze the conversation snippet below and decide if there are any learnings worth persisting across sessions.",
+		`You are a memory extraction agent. Your cwd is the memory directory at ${memoryDir}.`,
 		"",
-		"If you find valuable information, write it to the appropriate topic file in this directory.",
+		"Analyze the conversation snippet below. If you find valuable learnings, write them to topic files in this directory using ONLY file read/write/edit tools. Do NOT use bash, web search, or any other tools.",
 		"The memory directory contains topic files with this frontmatter format:",
 		"",
 		"```yaml",
@@ -97,5 +100,5 @@ export async function runExtract(opts: RunExtractOpts): Promise<void> {
 	service.registerWorkspaceProvider(provider);
 
 	// Fire-and-forget spawn
-	service.spawn("general-purpose", task, model ? { model } : {});
+	service.spawn("general-purpose", task, model ? { model, inheritContext: false, maxTurns: 5 } : { inheritContext: false, maxTurns: 5 });
 }

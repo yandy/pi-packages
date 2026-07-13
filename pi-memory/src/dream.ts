@@ -1,6 +1,10 @@
 import { getSubagentsService, type SubagentsService, type WorkspaceProvider } from "@yandy0725/pi-subagents";
 import { access } from "node:fs/promises";
 
+/** Build dream consolidation task.
+ *  Session context strategy: cwd = memoryDir (via WorkspaceProvider).
+ *  Dream agent sees only the memory files, no parent conversation history.
+ *  Tool scope: full file read/write/edit (needed for consolidation). */
 export function buildDreamTask(memoryDir: string, maxLines: number): string {
   return `You are a memory consolidation agent. Your job is to read all memory files
 and consolidate them into a clean, deduplicated memory store.
