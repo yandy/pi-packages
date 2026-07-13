@@ -10,6 +10,10 @@ import { shouldNudge, writeDreamMeta, readDreamMeta } from "./src/nudge";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { ensureAgentTypes } from "./src/agent-types";
+
+// Register custom agent type on load (zero setup, auto-fallback on first session).
+ensureAgentTypes();
 
 export default function (pi: ExtensionAPI) {
 	let memoryDir: string | null = null;

@@ -29,7 +29,7 @@ describe("buildDreamTask", () => {
 });
 
 describe("runDream", () => {
-  it("spawns general-purpose subagent and resolves with result on completion", async () => {
+  it("spawns memory-agent subagent and resolves with result on completion", async () => {
     const completedHandlers: Array<(data: any) => void> = [];
     const failedHandlers: Array<(data: any) => void> = [];
 
@@ -57,9 +57,9 @@ describe("runDream", () => {
     // Verify spawn called
     expect(fakeService.registerWorkspaceProvider).toHaveBeenCalled();
     expect(fakeService.spawn).toHaveBeenCalledWith(
-      "general-purpose",
+      "memory-agent",
       expect.stringContaining("/mem/x"),
-      {},
+      { thinkingLevel: "high" },
     );
 
     // Simulate completed event
@@ -125,9 +125,9 @@ describe("runDream", () => {
     });
 
     expect(fakeService.spawn).toHaveBeenCalledWith(
-      "general-purpose",
+      "memory-agent",
       expect.any(String),
-      { model: "deepseek/deepseek-v4-flash" },
+      { model: "deepseek/deepseek-v4-flash", thinkingLevel: "high" },
     );
   });
 

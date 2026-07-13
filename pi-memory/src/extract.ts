@@ -100,5 +100,5 @@ export async function runExtract(opts: RunExtractOpts): Promise<void> {
 	service.registerWorkspaceProvider(provider);
 
 	// Fire-and-forget spawn
-	service.spawn("general-purpose", task, model ? { model, inheritContext: false, maxTurns: 5 } : { inheritContext: false, maxTurns: 5 });
+	service.spawn("memory-agent", task, model ? { model, inheritContext: false, maxTurns: 5, thinkingLevel: "high" } : { inheritContext: false, maxTurns: 5, thinkingLevel: "high" });
 }

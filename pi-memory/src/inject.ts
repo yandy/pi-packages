@@ -126,12 +126,10 @@ export async function runSideQuery(
 	});
 	if (candidates.length === 0) return [];
 
-	// Build a minimal selection task for the subagent
-	// Session context strategy: only current user message + topic manifest.
-	// No conversation history — relevance matching is query-scoped.
+	// Build a minimal selection prompt — only current user message + topic manifest.
+	// With prompt_mode=replace, this IS the entire system prompt (no inheritance).
 	const task = [
-		"Respond with ONLY a JSON object and nothing else.",
-		"You have NO tools available. Do NOT attempt to call any tools.",
+		"Respond with ONLY a JSON object.",
 		"",
 		"Below is a list of memory topic files and a user query.",
 		`Select up to ${maxFiles} topic files MOST relevant to the user's current query.`,
@@ -156,9 +154,10 @@ export async function runSideQuery(
 	const unregister = service.registerWorkspaceProvider(provider);
 
 	try {
-		const agentId = service.spawn("general-purpose", task, {
+		const agentId = service.spawn("memory-agent", task, {
 			maxTurns: 1,
 			inheritContext: false,
+			thinkingLevel: "off",
 		});
 
 		return await new Promise<string[]>((resolve) => {

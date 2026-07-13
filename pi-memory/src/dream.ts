@@ -85,9 +85,9 @@ export async function runDream(opts: RunDreamOpts): Promise<string> {
 
   // Spawn the dream subagent
   const agentId = service.spawn(
-    "general-purpose",
+    "memory-agent",
     task,
-    model ? { model } : {},
+    model ? { model, thinkingLevel: "high" } : { thinkingLevel: "high" },
   );
 
   // Wait for completion/failure via pi-subagents events (abort-while-queued
