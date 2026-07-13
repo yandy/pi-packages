@@ -2,20 +2,48 @@ import { getSubagentsService, type SubagentsService, type WorkspaceProvider } fr
 import { access } from "node:fs/promises";
 
 export function buildDreamTask(memoryDir: string, maxLines: number): string {
-  return `You are a memory consolidation agent. Your job: read all memory files in the given directory, consolidate entries within each topic (merge duplicates, resolve contradictions, update outdated info), and rebuild the MEMORY.md index to be concise and accurate.
+  return `You are a memory consolidation agent. Your job is to read all memory files
+and consolidate them into a clean, deduplicated memory store.
 
-Task: Consolidate the memory files under ${memoryDir}. Read every .md file (including MEMORY.md), then:
-1. Deduplicate entries within each topic that say the same thing.
-2. Merge contradictory or overlapping entries into one accurate entry.
-3. Update outdated information.
-4. Move entries to more appropriate topic files when needed.
-5. Rebuild MEMORY.md (max ${maxLines} lines): - [Entry Title](topic.md) per entry you deem valuable (not necessarily every entry). Entries use ## Entry Title format.
+Phase 1 — Orient:
+- List all files in ${memoryDir}
+- Read MEMORY.md to understand current index
+- Skim each topic file to understand its contents
 
-Rules:
-- Each topic file contains entries as \`## Entry Title\` blocks.
-- Only modify files under the given directory. Never touch anything else.
-- Rebuild MEMORY.md index: list entries you deem valuable. Each line: - [Entry Title](topic.md). Accuracy matters more than completeness.
-- CRITICAL for entry titles: Only the MEMORY.md index is injected into future coding sessions (topic file content is NOT seen by the coding agent). Rewrite every entry title to be self-contained and descriptive — like "always use uv instead of pip for Python" instead of just "python tools". The title alone must tell the model what the entry is about.
+Phase 2 — Gather Signal:
+- Find duplicate entries within and across topic files
+- Identify contradictory information
+- Spot outdated or obsolete entries
+- Note temporal references that should be absolute dates
+
+Phase 3 — Consolidate:
+- Merge duplicates into single entries
+- Resolve contradictions — pick the most accurate version
+- Convert relative dates (today, last week) to absolute dates
+- Update outdated information
+- Move entries to more appropriate topic files when needed
+- Delete entries that are no longer relevant
+
+Phase 4 — Prune & Index:
+- For each topic file, update frontmatter:
+  name: meaningful name for the topic
+  description: specific summary that helps LLM match queries (be specific!)
+  type: one of user, feedback, project, reference
+  updated: today's date
+- Generate a compact hook (~150 chars) for each topic summarizing its entries
+- Rebuild MEMORY.md with one line per topic file (max ${maxLines} lines):
+  - [Name](file.md) — hook
+- Remove topic files that have no remaining entries
+
+CRITICAL for hooks and descriptions:
+- Only the MEMORY.md index is injected into future coding sessions.
+  Topic file content is NOT seen by the coding agent unless explicitly
+  read or auto-surfaced. The hook and description must be specific
+  enough that the LLM can correctly decide relevance.
+- Bad: "Debugging tips"
+- Good: "SSH port 2222 on staging; MySQL 30s timeout; Redis auth fix"
+- Each topic file's \`## Entry Title\` blocks contain the actual memory entries.
+  The MEMORY.md line is just a pointer — only ONE line per topic file.
 - When done, output a concise summary of changes (merged N, removed N, moved N, updated N).`;
 }
 
