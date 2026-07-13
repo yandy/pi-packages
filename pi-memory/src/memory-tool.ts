@@ -71,9 +71,11 @@ export async function doAdd(memoryDir: string, p: AddParams): Promise<ActionResu
 	if (!["user", "feedback", "project", "reference"].includes(memType)) {
 		return { ok: false, error: `Invalid type "${memType}". Must be one of: user, feedback, project, reference` };
 	}
+	// Normalize topic: always .md extension (LLM may pass "debugging" or "debugging.md")
+	const topic = p.topic.endsWith(".md") ? p.topic : `${p.topic}.md`;
 	let topicPath: string;
 	try {
-		topicPath = safeTopicPath(memoryDir, p.topic);
+		topicPath = safeTopicPath(memoryDir, topic);
 		// biome-ignore lint/suspicious/noExplicitAny: error catch
 	} catch (e: any) {
 		return { ok: false, error: e.message };
@@ -81,13 +83,13 @@ export async function doAdd(memoryDir: string, p: AddParams): Promise<ActionResu
 	return withFileMutationQueue(join(memoryDir, MEMORY_MD), async () => {
 		await mkdir(dirname(topicPath), { recursive: true });
 		const entries = await readIndex(memoryDir);
-		const existing = findEntryByTopic(entries, p.topic);
+		const existing = findEntryByTopic(entries, topic);
 
 		let next: IndexEntry[];
 		if (!existing) {
 			// New topic: create index entry with topic name as display name, entry title as hook
-			const name = p.topic.replace(/\.md$/, "");
-			const entry: IndexEntry = { name, topic: p.topic, hook: p.title, raw: "" };
+			const name = topic.replace(/\.md$/, "");
+			const entry: IndexEntry = { name, topic, hook: p.title, raw: "" };
 			next = upsertEntryByTopic(entries, entry);
 			if (!checkCapacity(next, p.maxLines, p.maxBytes)) {
 				return {
@@ -100,18 +102,22 @@ export async function doAdd(memoryDir: string, p: AddParams): Promise<ActionResu
 			const topicContent = appendContent(fm, p.title, p.content);
 			await writeFile(topicPath, topicContent, "utf8");
 		} else {
-			// Existing topic: update hook and append
-			next = updateHook(entries, p.topic, p.title);
+			// Existing topic: append entry, then regenerate hook from ALL entry titles
+			const raw = await readFile(topicPath, "utf8");
+			const refreshed = updateFrontmatterDate(raw, today());
+			const topicContent = appendContent(refreshed, p.title, p.content);
+			await writeFile(topicPath, topicContent, "utf8");
+
+			// Build hook from all entries (comma-separated titles, trimmed to ~150 chars)
+			const allEntries = parseEntries(topicContent);
+			const hook = allEntries.map((e) => e.title).join("; ").slice(0, 150);
+			next = updateHook(entries, topic, hook);
 			if (!checkCapacity(next, p.maxLines, p.maxBytes)) {
 				return {
 					ok: false,
 					error: `MEMORY.md capacity exceeded (max ${p.maxLines} lines / ${p.maxBytes} bytes). Current entries: ${serializeIndex(entries)}`,
 				};
 			}
-			const raw = await readFile(topicPath, "utf8");
-			const refreshed = updateFrontmatterDate(raw, today());
-			const topicContent = appendContent(refreshed, p.title, p.content);
-			await writeFile(topicPath, topicContent, "utf8");
 		}
 
 		// write index
