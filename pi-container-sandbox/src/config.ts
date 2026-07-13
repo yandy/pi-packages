@@ -79,20 +79,44 @@ export function loadSbxConfig(hostCwd: string): SbxConfig {
 	const globalRaw = readJsonFile(resolvePath(agentDir, "sandbox.json")) || {};
 	const projectRaw = readJsonFile(getSbxConfigPath(hostCwd)) || {};
 
+	// Extract groups so array fields can be concatenated (mergeGroup replaces arrays)
+	const globalRuntime = extractGroup(globalRaw, "runtime") as Partial<RuntimeConfig>;
+	const projectRuntime = extractGroup(projectRaw, "runtime") as Partial<RuntimeConfig>;
+	const globalHost = extractGroup(globalRaw, "host") as Partial<HostConfig>;
+	const projectHost = extractGroup(projectRaw, "host") as Partial<HostConfig>;
+
 	const config: SbxConfig = {
 		image: mergeGroup(
 			mergeGroup(DEFAULT_SBX_CONFIG.image, extractGroup(globalRaw, "image") as Partial<ImageConfig>),
 			extractGroup(projectRaw, "image") as Partial<ImageConfig>,
 		),
 		runtime: mergeGroup(
-			mergeGroup(DEFAULT_SBX_CONFIG.runtime, extractGroup(globalRaw, "runtime") as Partial<RuntimeConfig>),
-			extractGroup(projectRaw, "runtime") as Partial<RuntimeConfig>,
+			mergeGroup(DEFAULT_SBX_CONFIG.runtime, globalRuntime),
+			projectRuntime,
 		),
 		host: mergeGroup(
-			mergeGroup(DEFAULT_SBX_CONFIG.host, extractGroup(globalRaw, "host") as Partial<HostConfig>),
-			extractGroup(projectRaw, "host") as Partial<HostConfig>,
+			mergeGroup(DEFAULT_SBX_CONFIG.host, globalHost),
+			projectHost,
 		),
 	};
+
+	// Concatenate array fields so global + project entries are all preserved.
+	// mergeGroup replaces entire arrays; without this, project arrays overwrite global ones.
+	config.runtime.mounts = [
+		...(DEFAULT_SBX_CONFIG.runtime.mounts),
+		...(globalRuntime.mounts ?? []),
+		...(projectRuntime.mounts ?? []),
+	];
+	config.runtime.env = [
+		...(DEFAULT_SBX_CONFIG.runtime.env ?? []),
+		...(globalRuntime.env ?? []),
+		...(projectRuntime.env ?? []),
+	];
+	config.host.commands = [
+		...(DEFAULT_SBX_CONFIG.host.commands),
+		...(globalHost.commands ?? []),
+		...(projectHost.commands ?? []),
+	];
 
 	// Expand ~ and resolve relative paths in mount source and cache
 	config.runtime.mounts = config.runtime.mounts.map((m) => ({
