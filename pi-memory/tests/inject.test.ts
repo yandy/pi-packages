@@ -121,7 +121,7 @@ describe("runSideQuery", () => {
 		];
 		const result = await runSideQuery(
 			"prompt without already-injected", manifest, 5, "off",
-			undefined, {} as any, {} as any, "/mem",
+			undefined, {} as any, {} as any, "/mem", new Set(),
 		);
 		expect(runHeadlessAgentMock).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -141,7 +141,7 @@ describe("runSideQuery", () => {
 		];
 		await runSideQuery(
 			"prompt", manifest, 5, "off",
-			"deepseek/deepseek-v4-flash", {} as any, {} as any, "/mem",
+			"deepseek/deepseek-v4-flash", {} as any, {} as any, "/mem", new Set(),
 		);
 		expect(runHeadlessAgentMock.mock.calls[0][0]).toMatchObject({
 			model: "deepseek/deepseek-v4-flash",
@@ -155,7 +155,7 @@ describe("runSideQuery", () => {
 		];
 		const result = await runSideQuery(
 			"I need to debug SSH", manifest, 5, "off",
-			undefined, {} as any, {} as any, "/mem",
+			undefined, {} as any, {} as any, "/mem", new Set(),
 		);
 		expect(result).toEqual([]);
 	});
@@ -167,7 +167,7 @@ describe("runSideQuery", () => {
 		];
 		const result = await runSideQuery(
 			"prompt", manifest, 5, "off",
-			undefined, {} as any, {} as any, "/mem",
+			undefined, {} as any, {} as any, "/mem", new Set(),
 		);
 		expect(result).toEqual([]);
 	});
@@ -175,21 +175,20 @@ describe("runSideQuery", () => {
 	it("returns [] when no candidates remain", async () => {
 		const result = await runSideQuery(
 			"some prompt", [], 5, "off",
-			undefined, {} as any, {} as any, "/mem",
+			undefined, {} as any, {} as any, "/mem", new Set(),
 		);
 		expect(result).toEqual([]);
 		expect(runHeadlessAgentMock).not.toHaveBeenCalled();
 	});
 
-	it("filters out already-injected candidates", async () => {
+	it("filters out already-injected candidates via injectedTopics set", async () => {
 		runHeadlessAgentMock.mockResolvedValueOnce('{"selected_files":["a.md"]}');
 		const manifest = [
 			{ filename: "a.md", name: "A", description: "desc", type: "feedback" as const, mtimeMs: 100 },
 		];
-		// prompt marks a.md as already injected
 		const result = await runSideQuery(
-			"blah [already injected] a.md blah", manifest, 5, "off",
-			undefined, {} as any, {} as any, "/mem",
+			"prompt", manifest, 5, "off",
+			undefined, {} as any, {} as any, "/mem", new Set(["a.md"]),
 		);
 		expect(result).toEqual([]);
 		expect(runHeadlessAgentMock).not.toHaveBeenCalled();

@@ -156,8 +156,9 @@ export async function runSideQuery(
 	modelRegistry: ModelRegistry,
 	parentModel: Model<any> | undefined,
 	memoryDir: string,
+	injectedTopics: Set<string>,
 ): Promise<string[]> {
-	const candidates = manifest.filter((t) => !prompt.includes(`[already injected] ${t.filename}`));
+	const candidates = manifest.filter((t) => !injectedTopics.has(t.filename));
 	if (candidates.length === 0) return [];
 	const task = buildSideQueryTask(prompt, maxFiles);
 	try {

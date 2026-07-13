@@ -67,8 +67,10 @@ export default function (pi: ExtensionAPI) {
 						parentModel: ctx.model,
 					})
 						.then(async (summary) => {
-							await writeDreamMeta(dir, sessions);
 							ctx.ui.notify(summary, "info");
+							writeDreamMeta(dir, sessions).catch(() => {
+								ctx.ui.notify("Failed to record dream metadata", "warning");
+							});
 						})
 						// biome-ignore lint/suspicious/noExplicitAny: error catch
 						.catch((e: any) => {
@@ -108,6 +110,7 @@ export default function (pi: ExtensionAPI) {
 						ctx.modelRegistry,
 						ctx.model,
 						memoryDir,
+						injectedTopics,
 					);
 					if (selected.length > 0) {
 						const content = await injectSurfacedContent(
@@ -214,9 +217,12 @@ export default function (pi: ExtensionAPI) {
 				parentModel: ctx.model,
 			})
 				.then(async (summary) => {
-					const sessions = (await SessionManager.list(ctx.cwd)).length;
-					await writeDreamMeta(dir, sessions);
 					ctx.ui.notify(summary, "info");
+					SessionManager.list(ctx.cwd)
+						.then((s) => writeDreamMeta(dir, s.length))
+						.catch(() => {
+							ctx.ui.notify("Failed to record dream metadata", "warning");
+						});
 				})
 				// biome-ignore lint/suspicious/noExplicitAny: command handler ctx
 				.catch((e: any) => {

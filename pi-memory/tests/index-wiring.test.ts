@@ -189,7 +189,7 @@ describe("index wiring (integration)", () => {
 		expect(runSideQueryMock).toHaveBeenCalledTimes(1);
 		expect(runSideQueryMock).toHaveBeenCalledWith(
 			expect.any(String), expect.any(Array), 5, "off",
-			undefined, expect.any(Object), undefined, MOCK_BASE,
+			undefined, expect.any(Object), undefined, MOCK_BASE, expect.any(Set),
 		);
 
 		// Result must include both injected content and MEMORY.md index
