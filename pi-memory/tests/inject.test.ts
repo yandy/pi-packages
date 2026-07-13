@@ -4,8 +4,11 @@ import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { loadIndexSnapshot, buildInjection, scanTopics, buildSurfacingPrompt, injectSurfacedContent, runSideQuery } from "../src/inject";
 
-vi.mock("@yandy0725/pi-subagents", () => ({
-	getSubagentsService: vi.fn(),
+const { runHeadlessAgentMock } = vi.hoisted(() => ({
+	runHeadlessAgentMock: vi.fn(),
+}));
+vi.mock("../src/agent-runner", () => ({
+	runHeadlessAgent: runHeadlessAgentMock,
 }));
 
 describe("loadIndexSnapshot", () => {
@@ -107,92 +110,89 @@ describe("buildSurfacingPrompt", () => {
 });
 
 describe("runSideQuery", () => {
-	it("spawns with thinkingLevel=off and maxTurns=1", async () => {
-		const { getSubagentsService } = await import("@yandy0725/pi-subagents");
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
 
-		const completedHandlers: Array<(data: any) => void> = [];
-		const fakeService = {
-			spawn: vi.fn().mockReturnValue("agent-sq-1"),
-			getRecord: vi.fn().mockReturnValue({ result: '{"selected_files":["a.md"]}' }),
-			registerWorkspaceProvider: vi.fn().mockReturnValue(vi.fn()),
-		};
-		(getSubagentsService as any).mockReturnValue(fakeService);
-
-		const events = {
-			on: vi.fn((channel: string, handler: (data: any) => void) => {
-				if (channel === "subagents:completed") completedHandlers.push(handler);
-				return () => {};
-			}),
-		};
-
+	it("calls runHeadlessAgent with maxTurns=1, timeoutMs=30000, thinkLevel, and parses selected_files", async () => {
+		runHeadlessAgentMock.mockResolvedValueOnce('{"selected_files":["a.md"]}');
 		const manifest = [
 			{ filename: "a.md", name: "A", description: "desc", type: "feedback" as const, mtimeMs: 100 },
 		];
-
-		const promise = runSideQuery("user query about something", manifest, 5, "off", events as any);
-
-		expect(fakeService.spawn).toHaveBeenCalledWith(
-			"memory-agent",
-			expect.any(String),
-			{ maxTurns: 1, inheritContext: false, thinkingLevel: "off", foreground: true, bypassQueue: true },
+		const result = await runSideQuery(
+			"prompt without already-injected", manifest, 5, "off",
+			undefined, {} as any, {} as any, "/mem",
 		);
-
-		// Complete agent so promise resolves
-		completedHandlers[0]({ id: "agent-sq-1" });
-		await promise;
+		expect(runHeadlessAgentMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				cwd: "/mem",
+				thinkLevel: "off",
+				maxTurns: 1,
+				timeoutMs: 30_000,
+			}),
+		);
+		expect(result).toEqual(["a.md"]);
 	});
 
-	it("forwards non-default thinkLevel to spawn", async () => {
-		const { getSubagentsService } = await import("@yandy0725/pi-subagents");
-
-		const completedHandlers: Array<(data: any) => void> = [];
-		const fakeService = {
-			spawn: vi.fn().mockReturnValue("agent-sq-2"),
-			getRecord: vi.fn().mockReturnValue({ result: '{"selected_files":["a.md"]}' }),
-			registerWorkspaceProvider: vi.fn().mockReturnValue(vi.fn()),
-		};
-		(getSubagentsService as any).mockReturnValue(fakeService);
-
-		const events = {
-			on: vi.fn((channel: string, handler: (data: any) => void) => {
-				if (channel === "subagents:completed") completedHandlers.push(handler);
-				return () => {};
-			}),
-		};
-
+	it("forwards configured model string", async () => {
+		runHeadlessAgentMock.mockResolvedValueOnce('{"selected_files":[]}');
 		const manifest = [
 			{ filename: "a.md", name: "A", description: "desc", type: "feedback" as const, mtimeMs: 100 },
 		];
-
-		const promise = runSideQuery("user query", manifest, 5, "medium", events as any);
-
-		expect(fakeService.spawn).toHaveBeenCalledWith(
-			"memory-agent",
-			expect.any(String),
-			{ maxTurns: 1, inheritContext: false, thinkingLevel: "medium", foreground: true, bypassQueue: true },
+		await runSideQuery(
+			"prompt", manifest, 5, "off",
+			"deepseek/deepseek-v4-flash", {} as any, {} as any, "/mem",
 		);
-
-		completedHandlers[0]({ id: "agent-sq-2" });
-		await promise;
+		expect(runHeadlessAgentMock.mock.calls[0][0]).toMatchObject({
+			model: "deepseek/deepseek-v4-flash",
+		});
 	});
 
-	it("falls back to keyword matching when service unavailable", async () => {
-		const { getSubagentsService } = await import("@yandy0725/pi-subagents");
-		(getSubagentsService as any).mockReturnValue(undefined);
-
+	it("returns [] on timeout/failure (no fallback)", async () => {
+		runHeadlessAgentMock.mockRejectedValueOnce(new Error("timed out"));
 		const manifest = [
-			{ filename: "debugging.md", name: "Debugging", description: "SSH tips and tricks", type: "project" as const, mtimeMs: 100 },
-			{ filename: "irrelevant.md", name: "Irrelevant", description: "nothing to match", type: "feedback" as const, mtimeMs: 200 },
+			{ filename: "debugging.md", name: "D", description: "SSH tips", type: "project" as const, mtimeMs: 100 },
 		];
-
-		const result = await runSideQuery("I need to debug SSH issues", manifest, 5, "off");
-		expect(result).toEqual(["debugging.md"]);
-	});
-
-	it("returns empty when no candidates remain", async () => {
-		const manifest: any[] = [];
-		const result = await runSideQuery("some prompt", manifest, 5, "off");
+		const result = await runSideQuery(
+			"I need to debug SSH", manifest, 5, "off",
+			undefined, {} as any, {} as any, "/mem",
+		);
 		expect(result).toEqual([]);
+	});
+
+	it("returns [] when response has no valid JSON", async () => {
+		runHeadlessAgentMock.mockResolvedValueOnce("not json at all");
+		const manifest = [
+			{ filename: "a.md", name: "A", description: "desc", type: "feedback" as const, mtimeMs: 100 },
+		];
+		const result = await runSideQuery(
+			"prompt", manifest, 5, "off",
+			undefined, {} as any, {} as any, "/mem",
+		);
+		expect(result).toEqual([]);
+	});
+
+	it("returns [] when no candidates remain", async () => {
+		const result = await runSideQuery(
+			"some prompt", [], 5, "off",
+			undefined, {} as any, {} as any, "/mem",
+		);
+		expect(result).toEqual([]);
+		expect(runHeadlessAgentMock).not.toHaveBeenCalled();
+	});
+
+	it("filters out already-injected candidates", async () => {
+		runHeadlessAgentMock.mockResolvedValueOnce('{"selected_files":["a.md"]}');
+		const manifest = [
+			{ filename: "a.md", name: "A", description: "desc", type: "feedback" as const, mtimeMs: 100 },
+		];
+		// prompt marks a.md as already injected
+		const result = await runSideQuery(
+			"blah [already injected] a.md blah", manifest, 5, "off",
+			undefined, {} as any, {} as any, "/mem",
+		);
+		expect(result).toEqual([]);
+		expect(runHeadlessAgentMock).not.toHaveBeenCalled();
 	});
 });
 
