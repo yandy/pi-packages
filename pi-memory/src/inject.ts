@@ -132,6 +132,11 @@ export async function runSideQuery(
 	});
 	if (candidates.length === 0) return [];
 
+	// Quick keyword pre-filter: if nothing matches keywords, skip LLM side-query
+	// entirely to avoid spawning a subagent that will return empty.
+	const keywordHits = keywordMatch(candidates, prompt, maxFiles);
+	if (keywordHits.length === 0) return [];
+
 	// Build a minimal selection prompt — only current user message + topic manifest.
 	// With prompt_mode=replace, this IS the entire system prompt (no inheritance).
 	const task = [
