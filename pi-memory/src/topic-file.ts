@@ -32,7 +32,7 @@ export function parseFrontmatter(raw: string): TopicMeta | null {
   }
   if (!meta.name || !meta.description || !meta.type || !meta.updated) return null;
   if (!(ALLOWED_TYPES as readonly string[]).includes(meta.type)) return null;
-  return meta as TopicMeta;
+  return meta as unknown as TopicMeta;
 }
 
 export function appendContent(

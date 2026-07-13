@@ -1,20 +1,43 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig, type MemoryConfig } from "./src/config";
 import { resolveMemoryDir } from "./src/paths";
-import { loadIndexSnapshot, buildInjection } from "./src/inject";
+import { loadIndexSnapshot, buildInjection, scanTopics, injectSurfacedContent, type TopicManifest } from "./src/inject";
 import { createMemoryTool } from "./src/memory-tool";
 import { searchSessions } from "./src/session-search";
 import { runDream } from "./src/dream";
+import { runExtract } from "./src/extract";
 import { shouldNudge, writeDreamMeta, readDreamMeta } from "./src/nudge";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+
+function selectRelevantTopics(
+	manifest: TopicManifest[],
+	userPrompt: string,
+	injectedTopics: Set<string>,
+	maxFiles: number,
+): string[] {
+	if (!userPrompt || maxFiles <= 0) return [];
+	const words = userPrompt.toLowerCase().split(/\W+/).filter(w => w.length > 2);
+	const scored = manifest
+		.filter(t => !injectedTopics.has(t.filename))
+		.map(t => {
+			const desc = t.description.toLowerCase();
+			const name = t.name.toLowerCase();
+			const score = words.filter(w => desc.includes(w) || name.includes(w)).length;
+			return { filename: t.filename, score };
+		})
+		.filter(t => t.score > 0)
+		.sort((a, b) => b.score - a.score);
+	return scored.slice(0, maxFiles).map(t => t.filename);
+}
 
 export default function (pi: ExtensionAPI) {
 	let memoryDir: string | null = null;
 	let config: MemoryConfig | null = null;
 	let indexSnapshot = "";
 	let toolRegistered = false;
+	let injectedTopics = new Set<string>();
 
 	pi.on("session_start", async (_event, ctx) => {
 		config = await loadConfig(ctx);
@@ -72,8 +95,53 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("before_agent_start", async (event) => {
-		if (!config?.enabled || !indexSnapshot) return;
-		return { systemPrompt: buildInjection(event.systemPrompt, indexSnapshot) };
+		if (!config?.enabled || !indexSnapshot || !memoryDir) return;
+
+		let systemPrompt = event.systemPrompt;
+
+		// Auto-surfacing: select relevant topic files and inject their content
+		const autoSurfacing = config.autoSurfacing;
+		if (autoSurfacing?.enabled && event.prompt) {
+			try {
+				const manifest = await scanTopics(memoryDir);
+				if (manifest.length > 0) {
+					const selected = selectRelevantTopics(manifest, event.prompt, injectedTopics, autoSurfacing.maxFiles);
+					if (selected.length > 0) {
+						const content = await injectSurfacedContent(memoryDir, selected, autoSurfacing.maxTopicBytes, autoSurfacing.maxInjectionBytes);
+						if (content) {
+							// Track injected topics for session-level dedup
+							for (const f of selected) injectedTopics.add(f);
+							// Inject surfaced content as a custom message
+							systemPrompt += "\n\n" + content;
+						}
+					}
+				}
+			} catch { /* silently skip auto-surfacing on error */ }
+		}
+
+		// MEMORY.md index injection (always last after auto-surfacing)
+		return { systemPrompt: buildInjection(systemPrompt, indexSnapshot) };
+	});
+
+	pi.on("agent_end", async (event) => {
+		if (!config?.enabled || !memoryDir) return;
+		const extractConfig = config.extractMemories;
+		if (!extractConfig?.enabled) return;
+		if (!event.messages || event.messages.length === 0) return;
+		// Fire-and-forget: extract memories in background
+		runExtract({
+			model: extractConfig.model,
+			memoryDir,
+			messages: event.messages.map(m => ({
+			role: String((m as any).role ?? ""),
+			content: typeof (m as any).content === "string"
+				? (m as any).content
+				: typeof (m as any).output === "string"
+					? (m as any).output
+					: JSON.stringify((m as any).content ?? ""),
+		})),
+			maxContextTokens: extractConfig.maxContextTokens,
+		}).catch(() => { /* silently ignore extract errors */ });
 	});
 
 	pi.registerCommand("memory", {
