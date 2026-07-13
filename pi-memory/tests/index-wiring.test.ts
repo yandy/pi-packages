@@ -175,8 +175,14 @@ describe("index wiring (integration)", () => {
 			},
 		};
 
-		const noUiCtx2 = { cwd: tmpDir, hasUI: false, modelRegistry: {}, model: undefined };
-		const result = await handlers["before_agent_start"][0](mainEvent, noUiCtx2);
+		const mainCtx = {
+			cwd: tmpDir,
+			hasUI: false,
+			modelRegistry: {},
+			model: undefined,
+			sessionManager: { getHeader: () => ({ id: "main", parentSession: undefined, cwd: tmpDir, timestamp: "" }) },
+		};
+		const result = await handlers["before_agent_start"][0](mainEvent, mainCtx as any);
 
 		// Auto-surfacing must have run
 		expect(scanTopicsMock).toHaveBeenCalledTimes(1);
@@ -188,6 +194,41 @@ describe("index wiring (integration)", () => {
 
 		// Result must include both injected content and MEMORY.md index
 		expect(result?.systemPrompt).toBeDefined();
+		expect(result?.systemPrompt).toContain("# Memory Index");
+	});
+
+	it("skips auto-surfacing for subsessions (parentSession set in header)", async () => {
+		const { pi, handlers } = createFakePi();
+
+		memoryFactory(pi as any);
+
+		const fakeCtx = { cwd: tmpDir, hasUI: false, isProjectTrusted: () => true };
+		await handlers["session_start"][0]({}, fakeCtx);
+
+		scanTopicsMock.mockResolvedValue([
+			{ filename: "ssh.md", name: "SSH", description: "ssh config", type: "project", mtimeMs: 100 },
+		]);
+
+		// Subsession: header has parentSession set
+		const subsessionCtx = {
+			cwd: tmpDir,
+			hasUI: false,
+			modelRegistry: {},
+			model: undefined,
+			sessionManager: { getHeader: () => ({ id: "child", parentSession: "parent-123", cwd: tmpDir, timestamp: "" }) },
+		};
+		const subsessionEvent = {
+			prompt: "how do I debug SSH?",
+			systemPrompt: "Subagent system prompt",
+			systemPromptOptions: { cwd: tmpDir, selectedTools: ["read", "write", "edit", "ls"] },
+		};
+
+		const result = await handlers["before_agent_start"][0](subsessionEvent, subsessionCtx as any);
+
+		// Auto-surfacing must NOT run for subsessions
+		expect(scanTopicsMock).not.toHaveBeenCalled();
+		expect(runSideQueryMock).not.toHaveBeenCalled();
+		// MEMORY.md index injection still happens
 		expect(result?.systemPrompt).toContain("# Memory Index");
 	});
 

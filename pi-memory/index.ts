@@ -86,9 +86,14 @@ export default function (pi: ExtensionAPI) {
 		if (!config?.enabled || !indexSnapshot || !memoryDir) return;
 
 		const autoSurfacing = config.autoSurfacing;
+		// Skip auto-surfacing in subsessions (e.g. pi-subagents children): they have a
+		// parentSession in their header, the main session does not. The headless
+		// memory-agent additionally uses noExtensions (never binds), so it never reaches here.
+		const header = ctx?.sessionManager?.getHeader?.();
+		const isSubsession = !!header?.parentSession;
 		// biome-ignore lint/suspicious/noExplicitAny: message injection result
 		let injectedMessage: any;
-		if (autoSurfacing?.enabled && event.prompt) {
+		if (autoSurfacing?.enabled && event.prompt && !isSubsession) {
 			try {
 				if (ctx.hasUI) ctx.ui.setStatus("surfacing", "Searching relevant memories…");
 				const manifest = await scanTopics(memoryDir);
