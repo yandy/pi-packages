@@ -44,6 +44,8 @@ export interface WidgetAgent {
 	readonly contextPercent: number | null;
 	/** Short display model name (always shown; falls back to parent model when unset). */
 	readonly modelName?: string;
+	/** Thinking level (e.g. "high", "off") when explicitly set. */
+	readonly thinking?: string;
 }
 
 // ── Per-agent rendering ──────────────────────────────────────────────────────
