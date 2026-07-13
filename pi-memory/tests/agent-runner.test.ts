@@ -189,4 +189,75 @@ describe("runHeadlessAgent", () => {
 		await p;
 		expect(abortMock).toHaveBeenCalled();
 	});
+
+	it("rejects after timeoutMs and disposes", async () => {
+		// prompt stays pending forever (never resolves)
+		const neverPromise = new Promise<void>(() => {});
+		promptMock.mockReturnValueOnce(neverPromise);
+
+		// subscribe mock: no-op listener that returns no-op unsubscribe
+		subscribeMock.mockReturnValue(() => {});
+
+		await expect(
+			runHeadlessAgent({
+				task: "x",
+				cwd: "/mem",
+				modelRegistry: fakeRegistry,
+				parentModel: {} as any,
+				timeoutMs: 50,
+			}),
+		).rejects.toThrow(/timed out after 50ms/);
+
+		// finally block still runs on timeout rejection
+		expect(disposeMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("enforces maxTurns soft-limit and hard-abort", async () => {
+		// prompt stays pending until we explicitly resolve
+		let resolvePrompt: () => void;
+		const pendingPrompt = new Promise<void>((r) => {
+			resolvePrompt = r;
+		});
+		promptMock.mockReturnValueOnce(pendingPrompt);
+
+		let listener: any;
+		subscribeMock.mockImplementation((l: any) => {
+			listener = l;
+			return () => {};
+		});
+
+		const promise = runHeadlessAgent({
+			task: "x",
+			cwd: "/mem",
+			modelRegistry: fakeRegistry,
+			parentModel: {} as any,
+			maxTurns: 2,
+		});
+
+		// Wait for runHeadlessAgent to reach await promptPromise
+		// (loader.reload + createAgentSession both resolve in microtasks)
+		await new Promise((r) => setTimeout(r, 0));
+
+		// 1st turn_end: no limits triggered
+		listener({ type: "turn_end", message: {}, toolResults: [] });
+		expect(steerMock).not.toHaveBeenCalled();
+		expect(abortMock).not.toHaveBeenCalled();
+
+		// 2nd turn_end: turnCount=2 >= maxTurns=2 -> soft limit, steer called
+		listener({ type: "turn_end", message: {}, toolResults: [] });
+		expect(steerMock).toHaveBeenCalledTimes(1);
+		expect(steerMock).toHaveBeenCalledWith(
+			"You have reached your turn limit. Finish now.",
+		);
+		expect(abortMock).not.toHaveBeenCalled();
+
+		// 3rd turn_end: turnCount=3 = maxTurns+GRACE_TURNS -> hard abort
+		listener({ type: "turn_end", message: {}, toolResults: [] });
+		expect(abortMock).toHaveBeenCalledTimes(1);
+
+		// Resolve prompt so the function can finish and finally block runs
+		resolvePrompt();
+		await promise;
+		expect(disposeMock).toHaveBeenCalledTimes(1);
+	});
 });
