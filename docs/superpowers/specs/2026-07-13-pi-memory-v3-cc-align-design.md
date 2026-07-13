@@ -298,6 +298,7 @@ auto-surfacing 注入的 topic 文件内容是附加的额外上下文。
    - Choose the appropriate type: user/feedback/project/reference
    - Be concise but complete
    - If you're unsure, err on the side of not writing
+```
 
 ### 上下文控制
 
