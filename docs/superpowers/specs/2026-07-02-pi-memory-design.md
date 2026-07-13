@@ -1,5 +1,8 @@
-# pi-memory 设计规格
+# pi-memory 设计规格 [已过时]
 
+> ⚠️ **此规格已被 [pi-memory v3 — Claude Code Memory 对齐设计](./2026-07-13-pi-memory-v3-cc-align-design.md) 取代。**
+> v3 对齐 Claude Code 的 auto memory 机制：MEMORY.md 每 topic 一行、auto-surfacing、extractMemories、memory 类型系统。
+>
 > 基于 `.superpowers/pi-memory-prd.md`（v0.1.0-draft）+ brainstorming 阶段确认的三处设计决策。本文档在 PRD 基础上修正了与 pi 实际能力的偏差，并细化为可实现的设计。
 
 ## 定位

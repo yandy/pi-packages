@@ -6,15 +6,20 @@ import {
   removeEntrySection,
   hasEntries,
   parseEntries,
+  parseFrontmatter,
+  ALLOWED_TYPES,
   type TopicMeta,
 } from "../src/topic-file";
 
-const meta: TopicMeta = { updated: "2026-07-03" };
-
 describe("buildFrontmatter", () => {
-  it("produces YAML frontmatter with only updated", () => {
-    const f = buildFrontmatter(meta);
-    expect(f).toBe("---\nupdated: 2026-07-03\n---\n\n");
+  it("produces YAML frontmatter with name, description, type, updated", () => {
+    const f = buildFrontmatter({
+      name: "Debugging",
+      description: "Common debugging patterns",
+      type: "feedback",
+      updated: "2026-07-03",
+    });
+    expect(f).toBe("---\nname: Debugging\ndescription: Common debugging patterns\ntype: feedback\nupdated: 2026-07-03\n---\n\n");
   });
 });
 
@@ -39,7 +44,15 @@ describe("appendContent", () => {
 });
 
 describe("updateFrontmatterDate", () => {
-  it("updates updated field in frontmatter", () => {
+  it("updates updated field in frontmatter with new format", () => {
+    const raw = "---\nname: Debugging\ndescription: desc\ntype: feedback\nupdated: 2026-07-01\n---\n\n## Entry\nbody";
+    const result = updateFrontmatterDate(raw, "2026-07-03");
+    expect(result).toContain("updated: 2026-07-03");
+    expect(result).not.toContain("updated: 2026-07-01");
+    expect(result).toContain("## Entry\nbody");
+    expect(result).toContain("name: Debugging");
+  });
+  it("updates updated field in frontmatter with old format", () => {
     const raw = "---\nupdated: 2026-07-01\n---\n\n## Entry\nbody";
     const result = updateFrontmatterDate(raw, "2026-07-03");
     expect(result).toContain("updated: 2026-07-03");
@@ -50,6 +63,43 @@ describe("updateFrontmatterDate", () => {
     const raw = "## Just content\nno frontmatter";
     const result = updateFrontmatterDate(raw, "2026-07-03");
     expect(result).toBe(raw);
+  });
+});
+
+describe("parseFrontmatter", () => {
+  it("parses full frontmatter with all fields", () => {
+    const raw = "---\nname: Debug\ndescription: desc\ntype: feedback\nupdated: 2026-07-03\n---\n\n## Entry\nbody";
+    const meta = parseFrontmatter(raw);
+    expect(meta).toEqual({
+      name: "Debug",
+      description: "desc",
+      type: "feedback",
+      updated: "2026-07-03",
+    });
+  });
+
+  it("returns null for no frontmatter", () => {
+    expect(parseFrontmatter("## No frontmatter\nbody")).toBeNull();
+  });
+
+  it("returns null for malformed frontmatter (no closing ---)", () => {
+    expect(parseFrontmatter("---\nname: X\n## Not closed")).toBeNull();
+  });
+
+  it("returns null for invalid type", () => {
+    const raw = "---\nname: X\ndescription: Y\ntype: invalid\nupdated: 2026-07-03\n---\n\n## Entry\nbody";
+    expect(parseFrontmatter(raw)).toBeNull();
+  });
+
+  it("returns null when required fields are missing", () => {
+    const raw = "---\nname: X\nupdated: 2026-07-03\n---\n\n## Entry\nbody";
+    expect(parseFrontmatter(raw)).toBeNull();
+  });
+});
+
+describe("ALLOWED_TYPES", () => {
+  it("contains four standard types", () => {
+    expect(ALLOWED_TYPES).toEqual(["user", "feedback", "project", "reference"]);
   });
 });
 

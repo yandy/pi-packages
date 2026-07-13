@@ -7,16 +7,29 @@ describe("buildDreamTask", () => {
     expect(task).toContain("/mem/abc123");
     expect(task).toContain("200");
     expect(task).toContain("## Entry Title");
-    expect(task).toContain("not necessarily every entry");
+    expect(task).toContain("MEMORY.md");
     // Rules merged from DREAM_SYSTEM_PROMPT
     expect(task).toMatch(/deduplicat|consolidat/i);
-    expect(task).toContain("self-contained");
-    expect(task).toContain("MEMORY.md index");
+    expect(task).toContain("meaningful name");
+    expect(task).toContain("one line per topic file");
+  });
+
+  it("builds four-phase dream task prompt", () => {
+    const task = buildDreamTask("/tmp/mem", 200);
+    expect(task).toContain("Phase 1 — Orient");
+    expect(task).toContain("Phase 2 — Gather Signal");
+    expect(task).toContain("Phase 3 — Consolidate");
+    expect(task).toContain("Phase 4 — Prune & Index");
+    expect(task).toContain("per topic file");
+    expect(task).toContain("~150 chars");
+    expect(task).toContain("name:");
+    expect(task).toContain("description:");
+    expect(task).toContain("type:");
   });
 });
 
 describe("runDream", () => {
-  it("spawns general-purpose subagent and resolves with result on completion", async () => {
+  it("spawns memory-agent subagent and resolves with result on completion", async () => {
     const completedHandlers: Array<(data: any) => void> = [];
     const failedHandlers: Array<(data: any) => void> = [];
 
@@ -44,9 +57,9 @@ describe("runDream", () => {
     // Verify spawn called
     expect(fakeService.registerWorkspaceProvider).toHaveBeenCalled();
     expect(fakeService.spawn).toHaveBeenCalledWith(
-      "general-purpose",
+      "memory-agent",
       expect.stringContaining("/mem/x"),
-      {},
+      { thinkingLevel: "high" },
     );
 
     // Simulate completed event
@@ -112,9 +125,9 @@ describe("runDream", () => {
     });
 
     expect(fakeService.spawn).toHaveBeenCalledWith(
-      "general-purpose",
+      "memory-agent",
       expect.any(String),
-      { model: "deepseek/deepseek-v4-flash" },
+      { model: "deepseek/deepseek-v4-flash", thinkingLevel: "high" },
     );
   });
 

@@ -9,7 +9,7 @@ describe("doAdd", () => {
   beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), "mem-add-")); });
   afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
 
-  it("creates a new topic file with simplified frontmatter + MEMORY.md entry", async () => {
+  it("creates a new topic file with full frontmatter + MEMORY.md entry (one per topic)", async () => {
     const res = await doAdd(dir, {
       content: "staging uses port 2222",
       topic: "debugging.md",
@@ -18,21 +18,24 @@ describe("doAdd", () => {
       maxBytes: 25600,
     });
     expect(res.ok).toBe(true);
+    // One index entry per topic: - [debugging](debugging.md) — SSH Gotcha
     const mem = await readFile(join(dir, "MEMORY.md"), "utf8");
-    expect(mem).toContain("[SSH Gotcha](debugging.md)");
-    // no description
-    expect(mem).not.toContain(" \u2014 ");
+    expect(mem).toContain("[debugging](debugging.md)");
+    expect(mem).toContain("SSH Gotcha");
+    expect(mem).toContain(" — ");
+    // Topic file has full frontmatter
     const topic = await readFile(join(dir, "debugging.md"), "utf8");
     expect(topic).toContain("staging uses port 2222");
     expect(topic).toContain("updated:");
-    // no # level-1 heading, no old frontmatter fields
+    expect(topic).toContain("name: debugging");
+    expect(topic).toContain("description: SSH Gotcha");
+    expect(topic).toContain("type: feedback");
+    expect(topic).toContain("## SSH Gotcha");
+    // No level-1 heading
     expect(topic).not.toMatch(/^# SSH Gotcha/m);
-    expect(topic).not.toContain("name:");
-    expect(topic).not.toContain("description:");
-    expect(topic).not.toContain("type:");
   });
 
-  it("appends second entry to same topic (multi-entry, no upsert)", async () => {
+  it("appends second entry to same topic (one index line, hook updated)", async () => {
     await doAdd(dir, {
       content: "first note",
       topic: "debugging.md",
@@ -54,9 +57,11 @@ describe("doAdd", () => {
     expect(topic).toContain("## MySQL Timeout");
     expect(topic).toContain("second note");
     const mem = await readFile(join(dir, "MEMORY.md"), "utf8");
-    // two lines for the same topic
-    expect(mem).toContain("[SSH Gotcha](debugging.md)");
-    expect(mem).toContain("[MySQL Timeout](debugging.md)");
+    // Only one index line for the topic, hook updated to latest entry title
+    const lines = mem.trim().split("\n");
+    expect(lines.length).toBe(1);
+    expect(mem).toContain("[debugging](debugging.md)");
+    expect(mem).toContain("MySQL Timeout");
   });
 
   it("refreshes updated date on append to existing topic", async () => {
@@ -114,6 +119,33 @@ describe("doAdd", () => {
     expect(res.ok).toBe(false);
   });
 
+  it("accepts explicit type parameter", async () => {
+    const res = await doAdd(dir, {
+      content: "user preference",
+      topic: "prefs.md",
+      title: "Editor",
+      type: "user",
+      maxLines: 200,
+      maxBytes: 25600,
+    });
+    expect(res.ok).toBe(true);
+    const topic = await readFile(join(dir, "prefs.md"), "utf8");
+    expect(topic).toContain("type: user");
+  });
+
+  it("rejects invalid type", async () => {
+    const res = await doAdd(dir, {
+      content: "x",
+      topic: "a.md",
+      title: "A",
+      type: "invalid",
+      maxLines: 200,
+      maxBytes: 25600,
+    });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Invalid type");
+  });
+
   it("parallel adds to different topics preserve both entries", async () => {
     const results = await Promise.all([
       doAdd(dir, {
@@ -134,8 +166,8 @@ describe("doAdd", () => {
     expect(results[0].ok).toBe(true);
     expect(results[1].ok).toBe(true);
     const mem = await readFile(join(dir, "MEMORY.md"), "utf8");
-    expect(mem).toContain("[SSH Staging](ssh.md)");
-    expect(mem).toContain("[Firewall](firewall.md)");
+    expect(mem).toContain("[ssh](ssh.md)");
+    expect(mem).toContain("[firewall](firewall.md)");
   });
 });
 
@@ -144,7 +176,7 @@ describe("doRemove", () => {
   beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), "mem-rm-")); });
   afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
 
-  it("removes entry by title: deletes index line + ## block", async () => {
+  it("removes entry by title: deletes ## block and updates hook", async () => {
     await doAdd(dir, {
       content: "staging uses port 2222",
       topic: "debugging.md",
@@ -162,15 +194,20 @@ describe("doRemove", () => {
     const res = await doRemove(dir, { entry: "SSH Gotcha" });
     expect(res.ok).toBe(true);
     const mem = await readFile(join(dir, "MEMORY.md"), "utf8");
-    expect(mem).not.toContain("[SSH Gotcha]");
-    expect(mem).toContain("[MySQL Timeout]");
+    // Index still has one entry for debugging.md, hook updated to remaining entry
+    const lines = mem.trim().split("\n");
+    expect(lines.length).toBe(1);
+    expect(mem).toContain("[debugging](debugging.md)");
+    expect(mem).toContain("MySQL Timeout");
     const topic = await readFile(join(dir, "debugging.md"), "utf8");
-    expect(topic).not.toContain("SSH Gotcha");
+    // Entry block is gone (but frontmatter description may still reference it)
+    expect(topic).not.toContain("## SSH Gotcha");
     expect(topic).not.toContain("staging uses port 2222");
-    expect(topic).toContain("MySQL Timeout");
+    expect(topic).toContain("## MySQL Timeout");
+    expect(topic).toContain("connection timeout after 30s");
   });
 
-  it("deletes topic file when last entry removed", async () => {
+  it("deletes topic file and index entry when last entry removed", async () => {
     await doAdd(dir, {
       content: "only entry",
       topic: "temp.md",
@@ -182,7 +219,7 @@ describe("doRemove", () => {
     expect(res.ok).toBe(true);
     await expect(readFile(join(dir, "temp.md"), "utf8")).rejects.toThrow();
     const mem = await readFile(join(dir, "MEMORY.md"), "utf8");
-    expect(mem).not.toContain("temp.md");
+    expect(mem.trim()).toBe("");
   });
 
   it("errors when entry not found", async () => {
@@ -191,7 +228,7 @@ describe("doRemove", () => {
     expect(res.error).toContain("not found");
   });
 
-  it("errors on multiple matches", async () => {
+  it("errors on multiple matches across different topics", async () => {
     await doAdd(dir, {
       content: "x",
       topic: "a.md",
@@ -251,6 +288,10 @@ describe("doRead", () => {
     expect(res.content).toContain("## SSH Gotcha");
     expect(res.content).toContain("staging uses port 2222");
     expect(res.content).toContain("updated:");
+    // Full frontmatter present
+    expect(res.content).toContain("name: debugging");
+    expect(res.content).toContain("description:");
+    expect(res.content).toContain("type:");
   });
 
   it("reads entire topic file by topic name (with .md)", async () => {

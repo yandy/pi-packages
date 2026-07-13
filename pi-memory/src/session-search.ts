@@ -1,11 +1,19 @@
-import { SessionManager, truncateHead } from "@earendil-works/pi-coding-agent";
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
+import { SessionManager, truncateHead } from "@earendil-works/pi-coding-agent";
 
+// biome-ignore lint/suspicious/noExplicitAny: session content parsing
 function extractText(content: any): string {
 	if (typeof content === "string") return content;
 	if (Array.isArray(content)) {
-		return content.filter((b: any) => b.type === "text").map((b: any) => b.text).join(" ");
+		return (
+			content
+				// biome-ignore lint/suspicious/noExplicitAny: content block filter
+				.filter((b: any) => b.type === "text")
+				// biome-ignore lint/suspicious/noExplicitAny: content block map
+				.map((b: any) => b.text)
+				.join(" ")
+		);
 	}
 	return "";
 }
@@ -24,8 +32,13 @@ export async function searchSessions(
 		// gather message texts in order for context windows
 		const msgs: { text: string; idx: number }[] = [];
 		for (const [i, line] of lines.entries()) {
+			// biome-ignore lint/suspicious/noExplicitAny: JSON parse entry
 			let entry: any;
-			try { entry = JSON.parse(line); } catch { continue; }
+			try {
+				entry = JSON.parse(line);
+			} catch {
+				continue;
+			}
 			if (entry.type === "message" && entry.message) {
 				const t = extractText(entry.message.content);
 				if (t) msgs.push({ text: t, idx: i });
@@ -37,7 +50,9 @@ export async function searchSessions(
 					.filter((x) => Math.abs(x.idx - m.idx) <= 50)
 					.map((x) => `  ${x.text.slice(0, 200)}`)
 					.join("\n");
-				hits.push(`## Session ${basename(s.path)} (${s.modified.toISOString().slice(0, 10)})\n…matched: "${m.text.slice(0, 150)}"…\ncontext:\n${ctx}`);
+				hits.push(
+					`## Session ${basename(s.path)} (${s.modified.toISOString().slice(0, 10)})\n…matched: "${m.text.slice(0, 150)}"…\ncontext:\n${ctx}`,
+				);
 				if (hits.length >= config.maxMatches) break;
 			}
 		}
