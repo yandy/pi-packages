@@ -40,6 +40,8 @@ export interface NavigableSubagent {
 	readonly agentMessages: readonly SessionMessage[];
 	/** Short display model name (always shown; falls back to parent model when unset). */
 	readonly modelName?: string;
+	/** Thinking level when explicitly set (e.g. "high", "off"). */
+	readonly thinking?: string;
 	isSessionReady(): boolean;
 	subscribeToUpdates(fn: (event: AgentSessionEvent) => void): (() => void) | undefined;
 	getToolDefinition(name: string): ToolDefinition | undefined;
