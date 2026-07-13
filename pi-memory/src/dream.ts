@@ -1,12 +1,12 @@
-import { getSubagentsService, type SubagentsService, type WorkspaceProvider } from "@yandy0725/pi-subagents";
 import { access } from "node:fs/promises";
+import { getSubagentsService, type SubagentsService, type WorkspaceProvider } from "@yandy0725/pi-subagents";
 
 /** Build dream consolidation task.
  *  Session context strategy: cwd = memoryDir (via WorkspaceProvider).
  *  Dream agent sees only the memory files, no parent conversation history.
  *  Tool scope: full file read/write/edit (needed for consolidation). */
 export function buildDreamTask(memoryDir: string, maxLines: number): string {
-  return `You are a memory consolidation agent. Your job is to read all memory files
+	return `You are a memory consolidation agent. Your job is to read all memory files
 and consolidate them into a clean, deduplicated memory store.
 
 Phase 1 — Orient:
@@ -52,78 +52,79 @@ CRITICAL for hooks and descriptions:
 }
 
 export interface RunDreamOpts {
-  model: string;
-  memoryDir: string;
-  signal?: AbortSignal;
-  events?: { on(channel: string, handler: (data: any) => void): () => void };
-  service?: SubagentsService;
+	model: string;
+	memoryDir: string;
+	signal?: AbortSignal;
+	// biome-ignore lint/suspicious/noExplicitAny: pi events API handler
+	events?: { on(channel: string, handler: (data: any) => void): () => void };
+	service?: SubagentsService;
 }
 
 export async function runDream(opts: RunDreamOpts): Promise<string> {
-  const service = opts.service ?? getSubagentsService();
-  if (!service) throw new Error("pi-subagents not available — install @yandy0725/pi-subagents");
+	const service = opts.service ?? getSubagentsService();
+	if (!service) throw new Error("pi-subagents not available — install @yandy0725/pi-subagents");
 
-  const events = opts.events;
-  if (!events) throw new Error("events required for dream — pass pi.events");
+	const events = opts.events;
+	if (!events) throw new Error("events required for dream — pass pi.events");
 
-  const model = opts.model === "auto" ? undefined : opts.model;
-  const task = buildDreamTask(opts.memoryDir, 200);
+	const model = opts.model === "auto" ? undefined : opts.model;
+	const task = buildDreamTask(opts.memoryDir, 200);
 
-  // Register workspace provider so the subagent runs in memoryDir
-  const provider: WorkspaceProvider = {
-    async prepare(_ctx) {
-      await access(opts.memoryDir).catch(() => {
-        throw new Error(`Memory directory not found: ${opts.memoryDir}`);
-      });
-      return {
-        cwd: opts.memoryDir,
-        dispose: () => undefined,
-      };
-    },
-  };
-  const unregister = service.registerWorkspaceProvider(provider);
+	// Register workspace provider so the subagent runs in memoryDir
+	const provider: WorkspaceProvider = {
+		async prepare(_ctx) {
+			await access(opts.memoryDir).catch(() => {
+				throw new Error(`Memory directory not found: ${opts.memoryDir}`);
+			});
+			return {
+				cwd: opts.memoryDir,
+				dispose: () => undefined,
+			};
+		},
+	};
+	const unregister = service.registerWorkspaceProvider(provider);
 
-  // Spawn the dream subagent
-  const agentId = service.spawn(
-    "memory-agent",
-    task,
-    model ? { model, thinkingLevel: "high" } : { thinkingLevel: "high" },
-  );
+	// Spawn the dream subagent
+	const agentId = service.spawn(
+		"memory-agent",
+		task,
+		model ? { model, thinkingLevel: "high" } : { thinkingLevel: "high" },
+	);
 
-  // Wait for completion/failure via pi-subagents events (abort-while-queued
-  // is handled: pi-subagents guarantees events fire for all terminal states).
-  return await new Promise<string>((resolve, reject) => {
-      let settled = false;
+	// Wait for completion/failure via pi-subagents events (abort-while-queued
+	// is handled: pi-subagents guarantees events fire for all terminal states).
+	return await new Promise<string>((resolve, reject) => {
+		let settled = false;
 
-      const cleanup = () => {
-        if (settled) return;
-        settled = true;
-        unsubCompleted();
-        unsubFailed();
-        unregister();
-        opts.signal?.removeEventListener("abort", onAbort);
-      };
+		const cleanup = () => {
+			if (settled) return;
+			settled = true;
+			unsubCompleted();
+			unsubFailed();
+			unregister();
+			opts.signal?.removeEventListener("abort", onAbort);
+		};
 
-      const onCompleted = (data: { id: string }) => {
-        if (data.id !== agentId) return;
-        cleanup();
-        const record = service.getRecord(agentId);
-        resolve(record?.result ?? "Dream completed.");
-      };
+		const onCompleted = (data: { id: string }) => {
+			if (data.id !== agentId) return;
+			cleanup();
+			const record = service.getRecord(agentId);
+			resolve(record?.result ?? "Dream completed.");
+		};
 
-      const onFailed = (data: { id: string; error?: string }) => {
-        if (data.id !== agentId) return;
-        cleanup();
-        reject(new Error(data.error ?? "Dream agent failed"));
-      };
+		const onFailed = (data: { id: string; error?: string }) => {
+			if (data.id !== agentId) return;
+			cleanup();
+			reject(new Error(data.error ?? "Dream agent failed"));
+		};
 
-      const onAbort = () => {
-        service.abort(agentId);
-      };
+		const onAbort = () => {
+			service.abort(agentId);
+		};
 
-      const unsubCompleted = events.on("subagents:completed", onCompleted);
-      const unsubFailed = events.on("subagents:failed", onFailed);
+		const unsubCompleted = events.on("subagents:completed", onCompleted);
+		const unsubFailed = events.on("subagents:failed", onFailed);
 
-      opts.signal?.addEventListener("abort", onAbort, { once: true });
-    });
+		opts.signal?.addEventListener("abort", onAbort, { once: true });
+	});
 }

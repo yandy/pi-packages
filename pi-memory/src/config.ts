@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { homedir } from "node:os";
+import { join } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 
 export interface AutoSurfacingConfig {
@@ -56,12 +56,17 @@ function expandTilde(p: string): string {
 }
 
 function deepMerge<T>(base: T, over: Partial<T>): T {
+	// biome-ignore lint/suspicious/noExplicitAny: generic deep merge
 	const out: any = { ...base };
 	for (const k of Object.keys(over) as (keyof T)[]) {
+		// biome-ignore lint/suspicious/noExplicitAny: generic deep merge
 		const ov = over[k] as any;
+		// biome-ignore lint/suspicious/noExplicitAny: generic deep merge
 		if (ov && typeof ov === "object" && !Array.isArray(ov) && typeof (out as any)[k] === "object") {
+			// biome-ignore lint/suspicious/noExplicitAny: generic deep merge
 			(out as any)[k] = deepMerge((out as any)[k], ov);
 		} else if (ov !== undefined) {
+			// biome-ignore lint/suspicious/noExplicitAny: generic deep merge
 			(out as any)[k] = ov;
 		}
 	}

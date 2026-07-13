@@ -1,9 +1,12 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { join } from "node:path";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { MemoryConfig } from "./config";
 
-export interface DreamMeta { lastDreamAt: string; sessionCountAtDream: number; }
+export interface DreamMeta {
+	lastDreamAt: string;
+	sessionCountAtDream: number;
+}
 
 const META_FILE = ".dream-meta.json";
 

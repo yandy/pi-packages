@@ -1,5 +1,5 @@
-import { getSubagentsService, type SubagentsService, type WorkspaceProvider } from "@yandy0725/pi-subagents";
 import { access } from "node:fs/promises";
+import { getSubagentsService, type SubagentsService, type WorkspaceProvider } from "@yandy0725/pi-subagents";
 
 export interface RunExtractOpts {
 	model: string;
@@ -100,5 +100,11 @@ export async function runExtract(opts: RunExtractOpts): Promise<void> {
 	service.registerWorkspaceProvider(provider);
 
 	// Fire-and-forget spawn
-	service.spawn("memory-agent", task, model ? { model, inheritContext: false, maxTurns: 5, thinkingLevel: "high" } : { inheritContext: false, maxTurns: 5, thinkingLevel: "high" });
+	service.spawn(
+		"memory-agent",
+		task,
+		model
+			? { model, inheritContext: false, maxTurns: 5, thinkingLevel: "high" }
+			: { inheritContext: false, maxTurns: 5, thinkingLevel: "high" },
+	);
 }

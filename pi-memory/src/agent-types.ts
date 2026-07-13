@@ -15,8 +15,8 @@
  */
 
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { homedir } from "node:os";
+import { join } from "node:path";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 
 const AGENTS_DIR = join(homedir(), CONFIG_DIR_NAME, "agent", "agents");
@@ -31,10 +31,14 @@ prompt_mode: replace
 export function ensureAgentTypes(): void {
 	try {
 		mkdirSync(AGENTS_DIR, { recursive: true });
-	} catch { return; }
+	} catch {
+		return;
+	}
 
 	const path = join(AGENTS_DIR, "memory-agent.md");
 	if (!existsSync(path)) {
-		try { writeFileSync(path, DEFINITION, "utf8"); } catch {}
+		try {
+			writeFileSync(path, DEFINITION, "utf8");
+		} catch {}
 	}
 }

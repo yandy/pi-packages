@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { join, resolve, normalize, sep } from "node:path";
+import { createHash } from "node:crypto";
+import { join, normalize, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
 const execFileP = promisify(execFile);
@@ -19,10 +19,7 @@ export async function projectHash(cwd: string): Promise<string> {
 	return createHash("sha256").update(key).digest("hex").slice(0, 12);
 }
 
-export async function resolveMemoryDir(
-	config: { memoryDir: string },
-	cwd: string,
-): Promise<string> {
+export async function resolveMemoryDir(config: { memoryDir: string }, cwd: string): Promise<string> {
 	const hash = await projectHash(cwd);
 	return join(config.memoryDir, hash);
 }
