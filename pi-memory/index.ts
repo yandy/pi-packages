@@ -50,14 +50,12 @@ export default function (pi: ExtensionAPI) {
 					// set up currentCtx before we try to spawn.
 					const dreamModel = config.dream.model;
 					const dir = memoryDir;
-					const dreamCtrl = new AbortController();
 					ctx.ui.setStatus("dream", "Consolidating memory...");
 					setTimeout(async () => {
 						try {
 							const summary = await runDream({
 								model: dreamModel,
 								memoryDir: dir,
-								signal: dreamCtrl.signal,
 								events: pi.events,
 							});
 							await writeDreamMeta(dir, sessions);
