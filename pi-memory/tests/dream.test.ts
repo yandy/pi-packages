@@ -140,7 +140,7 @@ describe("runDream", () => {
     controller.abort();
     expect(fakeService.abort).toHaveBeenCalledWith("agent-dream-4");
 
-    // Trigger failed after abort to resolve the promise
+    // pi-subagents ensures events fire even for abort-while-queued
     const handler = (events.on as any).mock.calls.find(
       (c: any) => c[0] === "subagents:failed"
     )?.[1];
@@ -152,34 +152,5 @@ describe("runDream", () => {
     await expect(
       runDream({ model: "auto", memoryDir: "/mem/x" } as any)
     ).rejects.toThrow("pi-subagents not available");
-  });
-
-  it("resolves via safety timeout when events never fire (abort-while-queued edge case)", async () => {
-    vi.useFakeTimers();
-    try {
-      const fakeService = {
-        spawn: vi.fn().mockReturnValue("agent-queued-1"),
-        getRecord: vi.fn().mockReturnValue({ result: "no events fired" }),
-        registerWorkspaceProvider: vi.fn().mockReturnValue(vi.fn()),
-        abort: vi.fn(),
-      };
-      const events = { on: vi.fn(() => () => {}) };
-
-      const promise = runDream({
-        model: "auto",
-        memoryDir: "/mem/x",
-        service: fakeService as any,
-        events: events as any,
-      });
-
-      // Fast-forward past the 15-minute safety timeout
-      vi.advanceTimersByTime(16 * 60 * 1000);
-
-      const result = await promise;
-      expect(result).toBe("no events fired");
-      expect(fakeService.getRecord).toHaveBeenCalledWith("agent-queued-1");
-    } finally {
-      vi.useRealTimers();
-    }
   });
 });

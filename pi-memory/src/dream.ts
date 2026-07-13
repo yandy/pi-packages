@@ -64,25 +64,9 @@ export async function runDream(opts: RunDreamOpts): Promise<string> {
     return await new Promise<string>((resolve, reject) => {
       let settled = false;
 
-      // Safety timeout: resolve/reject if events never fire (e.g. abort-while-queued)
-      const DREAM_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
-      const safetyTimer = setTimeout(() => {
-        if (settled) return;
-        const record = service.getRecord(agentId);
-        cleanup();
-        if (record?.error) {
-          reject(new Error(record.error));
-        } else if (record && (record.status === "stopped" || record.status === "aborted")) {
-          reject(new Error("Dream agent was stopped"));
-        } else {
-          resolve(record?.result ?? "Dream completed.");
-        }
-      }, DREAM_TIMEOUT_MS);
-
       const cleanup = () => {
         if (settled) return;
         settled = true;
-        clearTimeout(safetyTimer);
         unsubCompleted();
         unsubFailed();
         unregister();
