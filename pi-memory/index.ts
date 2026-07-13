@@ -53,9 +53,8 @@ export default function (pi: ExtensionAPI) {
 			if (nudge) {
 				const ok = await ctx.ui.confirm("Memory Consolidation", `${message}\n\nConsolidate memory files now?`);
 				if (ok) {
-					// Fire-and-forget: defers past the current macrotask so all
-					// session_start handlers (including pi-subagents') have completed.
-					// Does not block session_start.
+					// Fire-and-forget: does not block session_start. The headless
+					// dream agent runs independently; completion notifies the user.
 					const dreamModel = config.dream.model;
 					const dreamThinkLevel = config.dream.thinkLevel;
 					const dir = memoryDir;
