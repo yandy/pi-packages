@@ -3,6 +3,20 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 
+export interface AutoSurfacingConfig {
+	enabled: boolean;
+	model: string;
+	maxFiles: number;
+	maxTopicBytes: number;
+	maxInjectionBytes: number;
+}
+
+export interface ExtractMemoriesConfig {
+	enabled: boolean;
+	model: string;
+	maxContextTokens: number;
+}
+
 export interface MemoryConfig {
 	enabled: boolean;
 	memoryDir: string;
@@ -10,6 +24,8 @@ export interface MemoryConfig {
 	memIndexMaxBytes: number;
 	dream: { nudgeAfterSessions: number; nudgeAfterHours: number; model: string };
 	sessionSearch: { maxSessions: number; maxMatches: number };
+	autoSurfacing: AutoSurfacingConfig;
+	extractMemories: ExtractMemoriesConfig;
 }
 
 export const DEFAULT_CONFIG: MemoryConfig = {
@@ -19,6 +35,18 @@ export const DEFAULT_CONFIG: MemoryConfig = {
 	memIndexMaxBytes: 25600,
 	dream: { nudgeAfterSessions: 5, nudgeAfterHours: 24, model: "auto" },
 	sessionSearch: { maxSessions: 10, maxMatches: 5 },
+	autoSurfacing: {
+		enabled: true,
+		model: "auto",
+		maxFiles: 5,
+		maxTopicBytes: 4096,
+		maxInjectionBytes: 20480,
+	},
+	extractMemories: {
+		enabled: true,
+		model: "auto",
+		maxContextTokens: 2000,
+	},
 };
 
 function expandTilde(p: string): string {
@@ -61,11 +89,11 @@ export async function loadConfig(ctx: LoadConfigContext): Promise<MemoryConfig> 
 	const configDirName = ctx._configDirName ?? CONFIG_DIR_NAME;
 	let cfg: MemoryConfig = { ...DEFAULT_CONFIG };
 
-	const globalFile = join(agentDir, "pi-memory.json");
+	const globalFile = join(agentDir, "memory.json");
 	cfg = deepMerge(cfg, readJsonSafe(globalFile));
 
 	if (ctx.isProjectTrusted()) {
-		const projectFile = join(ctx.cwd, configDirName, "pi-memory.json");
+		const projectFile = join(ctx.cwd, configDirName, "memory.json");
 		cfg = deepMerge(cfg, readJsonSafe(projectFile));
 	}
 
