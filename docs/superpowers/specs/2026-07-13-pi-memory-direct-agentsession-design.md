@@ -54,9 +54,9 @@ interface HeadlessAgentOpts {
   task: string;            // 任务提示（prompt_mode=replace 语义，即全部指令）
   cwd: string;            // 子会话工作目录
   modelRegistry: ModelRegistry;   // 来自父 ctx，复用凭证
-  model?: string;         // "auto"/未指定→继承 parentModel；否则模糊解析
+  model?: string;         // config 原始值；undefined/"auto"→继承 parentModel，否则模糊解析
   parentModel?: Model;    // 父会话当前模型（继承用）
-  thinkLevel?: ThinkingLevel;
+  thinkLevel?: ThinkingLevel;     // config 已含默认值，直接传入
   maxTurns?: number;      // undefined=无限
   signal?: AbortSignal;   // abort 支持
   timeoutMs?: number;     // 超时
@@ -64,9 +64,10 @@ interface HeadlessAgentOpts {
 // → Promise<string>  最终 assistant 响应文本
 
 async function runHeadlessAgent(opts: HeadlessAgentOpts): Promise<string> {
-  // 1. 解析模型
-  //    model==="auto"||undefined → parentModel
+  // 1. 统一解析模型（三调用点一致逻辑，集中在 runner 内）
+  //    model===undefined || model==="auto" → parentModel
   //    否则 resolveModel(model, registry)（模糊解析）；解析失败→parentModel 兜底
+  //    ※ thinkLevel 由调用方传入（config 已含默认值），runner 不做默认
   // 2. 构造纯净资源加载器
   //    const loader = new DefaultResourceLoader({
   //      cwd, agentDir: getAgentDir(), settingsManager,
@@ -76,7 +77,7 @@ async function runHeadlessAgent(opts: HeadlessAgentOpts): Promise<string> {
   //    await loader.reload();
   //    ※ 不加载任何扩展/skill/AGENTS.md/prompt模板/主题
   // 3. createAgentSession({
-  //      cwd, tools: TOOLS, model, thinkingLevel,
+  //      cwd, tools: TOOLS, model, thinkingLevel: opts.thinkLevel,
   //      modelRegistry,                              // 复用父会话
   //      sessionManager: SessionManager.inMemory(cwd), // 内存中，无磁盘碎片
   //      settingsManager: SettingsManager.inMemory(),  // 隔离子会话设置
@@ -95,6 +96,7 @@ async function runHeadlessAgent(opts: HeadlessAgentOpts): Promise<string> {
 ```
 
 设计要点：
+- **model/thinkLevel 解析统一**：model 的 "auto"/undefined→继承 parentModel 逻辑集中在 runner 内，三调用点只传 config 原始值；thinkLevel 由 config 已含默认值直接传入（runner 不做默认）
 - **纯净会话**：`noExtensions/noSkills/noContextFiles/...` 确保子会话不加载任何外部资源，递归预防靠"根本不加载"而非"加载但不 bind"
 - **内存中**：`SessionManager.inMemory` + `SettingsManager.inMemory`，无磁盘碎片，资源即用即弃
 - **复用父 modelRegistry**：API key 解析与父会话一致
@@ -105,7 +107,9 @@ async function runHeadlessAgent(opts: HeadlessAgentOpts): Promise<string> {
 复刻 pi-subagents 的 `resolveModel`（~50 行）：
 - 精确匹配 `"provider/modelId"`（仅限已配置 auth 的可用模型）
 - 模糊匹配（id/name 包含查询串，打分选最佳，阈值 ≥20）
-- 失败返回 `undefined`（调用方用 parentModel 兜底，不抛错——fire-and-forget 友好）
+- 失败返回 `undefined`（runner 用 parentModel 兜底，不抛错——fire-and-forget 友好）
+
+**统一语义**：`agent-runner` 内部 `model === undefined || model === "auto" ? parentModel : resolveModel(model, registry) ?? parentModel`。三调用点只传 config 原始 `model` 字符串 + `parentModel`，解析逻辑不重复、一致。
 
 ### 3.4 `agent-config.ts`
 
@@ -123,8 +127,8 @@ export const MEMORY_AGENT_TOOLS = ["read", "write", "edit", "ls"] as const;
 | tools | read,write,edit,ls | read,write,edit,ls | read,write,edit,ls |
 | cwd | memoryDir | memoryDir | memoryDir |
 | systemPrompt | task（replace） | task（replace） | task（replace） |
-| model | config(auto=继承) | config(auto=继承) | config(auto=继承) |
-| thinkLevel | config | config | config(autoSurfacing.thinkLevel) |
+| model | config（auto/未配置=继承父） | config（auto/未配置=继承父） | config（auto/未配置=继承父） |
+| thinkLevel | config（默认 high） | config（默认 high） | config（默认 off） |
 | maxTurns | 5 | ∞ | 1 |
 | 等待方式 | fire-and-forget | fire-and-forget | await + 超时 |
 | 超时/失败处理 | 静默 catch | notify 错误 | 返回 [] |
@@ -135,26 +139,24 @@ export const MEMORY_AGENT_TOOLS = ["read", "write", "edit", "ls"] as const;
 export async function runExtract(opts: RunExtractOpts): Promise<void> {
   if (opts.messages.length === 0) return;
   const task = buildExtractTask(opts.memoryDir, opts.messages, opts.maxContextTokens);
-  const model = opts.model === "auto" ? undefined : opts.model;
-  // fire-and-forget：不 await，runner 内部 finally dispose 保证清理
+  // fire-and-forget：不 await，runner 内部统一解析 model + finally dispose
   runHeadlessAgent({
     task, cwd: opts.memoryDir,
-    modelRegistry: opts.modelRegistry, model, parentModel: opts.parentModel,
+    modelRegistry: opts.modelRegistry, model: opts.model, parentModel: opts.parentModel,
     thinkLevel: opts.thinkLevel, maxTurns: 5,
   }).catch(() => { /* 静默，当前行为保留 */ });
 }
 ```
-删除：`getSubagentsService` / `WorkspaceProvider` / `registerWorkspaceProvider`。新增依赖：`modelRegistry`、`parentModel`（从 index.ts 的 ctx 传入）。
+删除：`getSubagentsService` / `WorkspaceProvider` / `registerWorkspaceProvider`。新增依赖：`modelRegistry`、`parentModel`（从 index.ts 的 ctx 传入）。model 传 config 原始值（"auto"/具体），解析由 runner 统一处理。
 
 ### 4.3 dream.ts（fire-and-forget）
 
 ```ts
 export async function runDream(opts: RunDreamOpts): Promise<string> {
   const task = buildDreamTask(opts.memoryDir, 200);
-  const model = opts.model === "auto" ? undefined : opts.model;
   return runHeadlessAgent({
     task, cwd: opts.memoryDir,
-    modelRegistry: opts.modelRegistry, model, parentModel: opts.parentModel,
+    modelRegistry: opts.modelRegistry, model: opts.model, parentModel: opts.parentModel,
     thinkLevel: opts.thinkLevel, maxTurns: undefined,   // 无限
   });
 }
@@ -177,7 +179,7 @@ export async function runSideQuery(
   try {
     const result = await runHeadlessAgent({
       task, cwd: memoryDir,
-      modelRegistry, model: model === "auto" ? undefined : model, parentModel,
+      modelRegistry, model, parentModel,   // model 传 config 原始值（autoSurfacing.model）
       thinkLevel, maxTurns: 1, timeoutMs: 30_000,
     });
     return parseSelectedFiles(result, candidates, maxFiles);  // 正则解析 JSON
@@ -188,13 +190,13 @@ export async function runSideQuery(
 ```
 - 删除：`keywordMatch`（无降级）、`foreground/bypassQueue`（无队列概念）、`getSubagentsService`、事件订阅
 - 超时/失败 → `[]`（不注入任何 memory，可接受）
-- **model 改为 config**：`autoSurfacing.model`（新增配置字段，"auto"=继承父模型）
+- **model/thinkLevel 与其他两点一致**：model 传 `config.autoSurfacing.model`（"auto"=继承父模型，解析由 runner 统一）；thinkLevel 传 `config.autoSurfacing.thinkLevel`（默认 `off`）
 - **cwd 改为 memoryDir**（当前为 `process.cwd()`）：sideQuery 只读 manifest（已在 prompt 里）不操作文件，但用 memoryDir 作 cwd 更安全——万一 agent 误写，限制在 memory 目录内而非父项目目录。属顺手清理。
 
 ### 4.5 index.ts 改写要点
 
 - 删除 `ensureAgentTypes()` 调用和 import
-- `before_agent_start`：删除 `isSubagent` 检测（noExtensions 天然防递归）；传 `ctx.modelRegistry` + `ctx.model` + `config.autoSurfacing.model` 给 `runSideQuery`
+- `before_agent_start`：删除 `isSubagent` 检测（noExtensions 天然防递归）；传 `ctx.modelRegistry` + `ctx.model` + `config.autoSurfacing.model` + `config.autoSurfacing.thinkLevel` 给 `runSideQuery`
 - `agent_end`：传 `ctx.modelRegistry` + `ctx.model` 给 `runExtract`（fire-and-forget 不阻塞）
 - **session_start nudge dream**：去掉 `setTimeout(0)`（不再需等 pi-subagents 的 session_start），直接 fire-and-forget：
   ```ts
@@ -210,17 +212,13 @@ export async function runSideQuery(
 
 ### 4.6 config.ts 改动
 
-`autoSurfacing` 新增 `model` 字段（默认 `"auto"`）：
-```ts
-autoSurfacing: {
-  enabled: true,
-  model: "auto",        // 【新增】"auto"=继承父模型，或 "provider/modelId"
-  maxFiles: 5,
-  maxTopicBytes: 4096,
-  maxInjectionBytes: 20480,
-  thinkLevel: ...,
-}
-```
+**config 无需改动**——当前 `DEFAULT_CONFIG` 已满足要求：
+- `autoSurfacing.model`（默认 `"auto"`）、`dream.model`、`extractMemories.model` 均已存在
+- thinkLevel 默认值已是：dream `"high"`、extractMemories `"high"`、autoSurfacing `"off"`
+
+**统一语义**（文档明确，代码已实现）：三调用点的 model/thinkLevel 处理一致——
+- **model**：读 config，未配置（undefined）或 `"auto"` → 继承 parent session（解析逻辑集中在 `agent-runner`，调用点只传 config 原始值）
+- **thinkLevel**：读 config（已含各自默认值 dream:high / extract:high / sidequery:off），直接传入 runner
 
 ## 5. 数据流
 
