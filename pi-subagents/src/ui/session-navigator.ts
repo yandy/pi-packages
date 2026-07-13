@@ -94,6 +94,8 @@ export interface TranscriptOverlayOptions {
 	markdownTheme: MarkdownTheme;
 	/** Short model name to show in the header, or undefined to omit. */
 	modelName?: string;
+	/** Thinking level to show alongside model name, or undefined to omit. */
+	thinking?: string;
 }
 
 /**
@@ -120,13 +122,16 @@ export class SessionNavigatorHandler {
 
 		let source: TranscriptSource;
 		let modelName: string | undefined;
+		let thinking: string | undefined;
 		try {
 			if (entry.kind === "live") {
 				source = liveSource(entry.record);
 				modelName = entry.record.modelName;
+				thinking = entry.record.thinking;
 			} else {
 				source = fileSnapshotSource(entry.outputFile, readFile);
 				modelName = entry.modelName;
+				thinking = entry.thinking;
 			}
 		} catch {
 			ui.notify("Could not read the session transcript file.", "error");
@@ -135,7 +140,7 @@ export class SessionNavigatorHandler {
 		const markdownTheme = getMarkdownTheme();
 		await ui.custom<undefined>(
 			(tui, theme, _keybindings, done) =>
-				new TranscriptOverlay({ tui, theme, source, done, cwd, markdownTheme, modelName }),
+				new TranscriptOverlay({ tui, theme, source, done, cwd, markdownTheme, modelName, thinking }),
 			{
 				overlay: true,
 				overlayOptions: { anchor: "center", width: "90%", maxHeight: `${VIEWPORT_HEIGHT_PCT}%` },
@@ -186,6 +191,7 @@ export class TranscriptOverlay implements Component {
 	private readonly cwd: string;
 	private readonly markdownTheme: MarkdownTheme;
 	private readonly modelName?: string;
+	private readonly thinking?: string;
 	private content: Container;
 
 	/** Throttle bookkeeping for coalescing live-source rebuilds. */
@@ -197,7 +203,7 @@ export class TranscriptOverlay implements Component {
 	private renderedWidth = -1;
 	private linesDirty = true;
 
-	constructor({ tui, theme, source, done, cwd, markdownTheme, modelName }: TranscriptOverlayOptions) {
+	constructor({ tui, theme, source, done, cwd, markdownTheme, modelName, thinking }: TranscriptOverlayOptions) {
 		this.tui = tui;
 		this.theme = theme;
 		this.source = source;
@@ -205,6 +211,7 @@ export class TranscriptOverlay implements Component {
 		this.cwd = cwd;
 		this.markdownTheme = markdownTheme;
 		this.modelName = modelName;
+		this.thinking = thinking;
 		this.content = this.rebuild();
 		// Seed `lastRebuildAt` far in the past so the first source-change event
 		// always rebuilds immediately (leading-edge throttle). The constructor
@@ -276,7 +283,10 @@ export class TranscriptOverlay implements Component {
 		const hrMid = row(th.fg("dim", "─".repeat(innerW)));
 
 		lines.push(hrTop);
-		const title = this.modelName ? `Subagent session · ${this.modelName}` : "Subagent session";
+		const modelPart = this.modelName
+			? this.thinking ? ` · ${this.modelName} (${this.thinking})` : ` · ${this.modelName}`
+			: "";
+		const title = modelPart ? `Subagent session${modelPart}` : "Subagent session";
 		lines.push(row(th.bold(title)));
 		lines.push(hrMid);
 

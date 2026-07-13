@@ -67,7 +67,7 @@ describe("listNavigableAgents", () => {
 			modelName: "haiku",
 		});
 		const [entry] = listNavigableAgents([record], [], registry);
-		expect(entry.label).toBe("Agent (Investigate the bug) · 3 tools · completed · 3.0s · model:haiku");
+		expect(entry.label).toBe("Agent (Investigate the bug) · 3 tools · completed · 3.0s · haiku");
 	});
 
 	it("includes the model name in an evicted entry's label when set", () => {
@@ -77,7 +77,7 @@ describe("listNavigableAgents", () => {
 			modelName: "sonnet",
 		});
 		const [entry] = listNavigableAgents([], [descriptor], registry);
-		expect(entry.label).toBe("Agent (Old task) · 5 tools · completed · 3.0s · model:sonnet · evicted (snapshot)");
+		expect(entry.label).toBe("Agent (Old task) · 5 tools · completed · 3.0s · sonnet · evicted (snapshot)");
 	});
 
 	it("appends evicted entries with a snapshot marker and their outputFile", () => {

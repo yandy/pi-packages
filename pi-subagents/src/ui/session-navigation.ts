@@ -40,6 +40,8 @@ export interface NavigableSubagent {
 	readonly agentMessages: readonly SessionMessage[];
 	/** Short display model name (always shown; falls back to parent model when unset). */
 	readonly modelName?: string;
+	/** Thinking level when explicitly set (e.g. "high", "off"). */
+	readonly thinking?: string;
 	isSessionReady(): boolean;
 	subscribeToUpdates(fn: (event: AgentSessionEvent) => void): (() => void) | undefined;
 	getToolDefinition(name: string): ToolDefinition | undefined;
@@ -53,7 +55,7 @@ export interface NavigableSubagent {
  */
 export type NavigationEntry =
 	| { readonly kind: "live"; readonly label: string; readonly record: NavigableSubagent }
-	| { readonly kind: "evicted"; readonly label: string; readonly outputFile: string; readonly modelName?: string };
+	| { readonly kind: "evicted"; readonly label: string; readonly outputFile: string; readonly modelName?: string; readonly thinking?: string };
 
 /** The fields `buildLabel` reads — shared by a live record and an evicted descriptor. */
 interface LabelFields {
@@ -64,6 +66,7 @@ interface LabelFields {
 	readonly completedAt: number | undefined;
 	readonly toolUses: number;
 	readonly modelName?: string;
+	readonly thinking?: string;
 }
 
 /** Running-agent streaming state, surfaced by a live source. */
@@ -104,6 +107,7 @@ export function listNavigableAgents(
 				kind: "evicted",
 				outputFile: descriptor.outputFile,
 				modelName: descriptor.modelName,
+				thinking: descriptor.thinking,
 				label: buildLabel(descriptor, registry, true),
 			}),
 		);
@@ -146,7 +150,9 @@ export function liveSource(record: NavigableSubagent): TranscriptSource {
 function buildLabel(fields: LabelFields, registry: AgentConfigLookup, evicted = false): string {
 	const name = getDisplayName(fields.type, registry);
 	const duration = formatDuration(fields.startedAt, fields.completedAt);
-	const modelTag = fields.modelName ? ` · model:${fields.modelName}` : "";
+	const modelTag = fields.modelName
+		? fields.thinking ? ` · ${fields.modelName} (${fields.thinking})` : ` · ${fields.modelName}`
+		: fields.thinking ? ` · think:${fields.thinking}` : "";
 	const marker = evicted ? " · evicted (snapshot)" : "";
 	return `${name} (${fields.description}) · ${fields.toolUses} tools · ${fields.status} · ${duration}${modelTag}${marker}`;
 }

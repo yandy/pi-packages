@@ -64,6 +64,7 @@ export class SubagentEventsObserver implements SubagentManagerObserver {
 			completedAt: record.completedAt,
 			toolUses: record.toolUses,
 			modelName: record.modelName,
+			thinking: record.thinking,
 			outputFile: record.outputFile,
 		});
 

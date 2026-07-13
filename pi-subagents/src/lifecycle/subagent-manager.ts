@@ -38,6 +38,8 @@ export interface EvictedSubagent {
 	readonly toolUses: number;
 	/** Short display model name (always shown; falls back to parent model when unset). */
 	readonly modelName?: string;
+	/** Thinking level when explicitly set (e.g. "high", "off"). */
+	readonly thinking?: string;
 	readonly outputFile: string;
 }
 
@@ -371,6 +373,7 @@ function toEvictedSubagent(record: Subagent, outputFile: string): EvictedSubagen
 		completedAt: record.completedAt,
 		toolUses: record.toolUses,
 		modelName: record.invocation?.modelName,
+		thinking: record.thinking,
 		outputFile,
 	};
 }
