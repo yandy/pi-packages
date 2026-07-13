@@ -93,7 +93,7 @@ export default function (pi: ExtensionAPI) {
 		let injectedMessage: any;
 		if (autoSurfacing?.enabled && event.prompt) {
 			try {
-				if (ctx.hasUI) ctx.ui.setStatus("surfacing", "Searching relevant memories…");
+				if (ctx.hasUI) ctx.ui.setWorkingMessage("Searching relevant memories…");
 				const manifest = await scanTopics(memoryDir);
 				if (manifest.length > 0) {
 					const queryPrompt = buildSurfacingPrompt(manifest, event.prompt.slice(0, 4000), injectedTopics);
@@ -116,7 +116,7 @@ export default function (pi: ExtensionAPI) {
 			} catch {
 				/* silently skip auto-surfacing on error */
 			} finally {
-				if (ctx.hasUI) ctx.ui.setStatus("surfacing", undefined);
+				if (ctx.hasUI) ctx.ui.setWorkingMessage();
 			}
 		}
 
