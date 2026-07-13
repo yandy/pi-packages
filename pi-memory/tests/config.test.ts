@@ -79,6 +79,7 @@ describe("loadConfig", () => {
 		expect(cfg.autoSurfacing).toEqual({
 			enabled: true,
 			model: "auto",
+			thinkLevel: "off",
 			maxFiles: 5,
 			maxTopicBytes: 4096,
 			maxInjectionBytes: 20480,
@@ -90,6 +91,7 @@ describe("loadConfig", () => {
 		expect(cfg.extractMemories).toEqual({
 			enabled: true,
 			model: "auto",
+			thinkLevel: "high",
 			maxContextTokens: 2000,
 		});
 	});

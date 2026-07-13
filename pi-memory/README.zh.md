@@ -47,7 +47,8 @@ pi install npm:@yandy0725/pi-memory
   "dream": {
     "nudgeAfterSessions": 5,
     "nudgeAfterHours": 24,
-    "model": "auto"
+    "model": "auto",
+    "thinkLevel": "high"
   },
   "sessionSearch": {
     "maxSessions": 10,
@@ -56,6 +57,7 @@ pi install npm:@yandy0725/pi-memory
   "autoSurfacing": {
     "enabled": true,
     "model": "auto",
+    "thinkLevel": "off",
     "maxFiles": 5,
     "maxTopicBytes": 4096,
     "maxInjectionBytes": 20480
@@ -63,6 +65,7 @@ pi install npm:@yandy0725/pi-memory
   "extractMemories": {
     "enabled": true,
     "model": "auto",
+    "thinkLevel": "high",
     "maxContextTokens": 2000
   }
 }
@@ -77,15 +80,18 @@ pi install npm:@yandy0725/pi-memory
 | `dream.nudgeAfterSessions` | `5` | 触发提醒需经过的会话数 |
 | `dream.nudgeAfterHours` | `24` | 触发提醒需经过的小时数 |
 | `dream.model` | `"auto"` | 整理使用的模型（`"auto"` = 当前模型，或 `"provider/id"`） |
+| `dream.thinkLevel` | `"high"` | 整理子 agent 的思考深度：`"off"` / `"minimal"` / `"low"` / `"medium"` / `"high"` / `"xhigh"` |
 | `sessionSearch.maxSessions` | `10` | 搜索历史时最多扫描的会话数 |
 | `sessionSearch.maxMatches` | `5` | 历史搜索最多返回的匹配数 |
 | `autoSurfacing.enabled` | `true` | ⭐ 启用 per-turn topic 文件自动注入 |
 | `autoSurfacing.model` | `"auto"` | ⭐ side-query 相关性选择模型 |
+| `autoSurfacing.thinkLevel` | `"off"` | ⭐ side-query 思考深度（推荐 `"off"`，轻量选择任务） |
 | `autoSurfacing.maxFiles` | `5` | ⭐ 每轮最多注入的 topic 文件数 |
 | `autoSurfacing.maxTopicBytes` | `4096` | ⭐ 单个注入 topic 文件最大字节数（截断） |
 | `autoSurfacing.maxInjectionBytes` | `20480` | ⭐ 每轮注入内容总字节数上限 |
 | `extractMemories.enabled` | `true` | ⭐ 启用 per-turn 记忆自动提取 |
 | `extractMemories.model` | `"auto"` | ⭐ 提取子 agent 使用的模型 |
+| `extractMemories.thinkLevel` | `"high"` | ⭐ 提取的思考深度：`"off"` / `"minimal"` / `"low"` / `"medium"` / `"high"` / `"xhigh"` |
 | `extractMemories.maxContextTokens` | `2000` | ⭐ 分析对话的最大 token 数 |
 
 项目级配置（`.pi/memory.json`）仅在项目受信任时加载。

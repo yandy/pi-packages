@@ -117,10 +117,13 @@ export async function injectSurfacedContent(
 /** Run a lightweight LLM side-query to select relevant topic files.
  *  Uses pi-subagents spawn + Promise pattern (same as dream.ts).
  *  Falls back to keyword matching if subagent service is unavailable. */
+import type { ThinkLevel } from "./config";
+
 export async function runSideQuery(
 	prompt: string,
 	manifest: TopicManifest[],
 	maxFiles: number,
+	thinkLevel: ThinkLevel,
 	// biome-ignore lint/suspicious/noExplicitAny: pi events API handler
 	events?: { on(channel: string, handler: (data: any) => void): () => void },
 ): Promise<string[]> {
@@ -219,7 +222,7 @@ export async function runSideQuery(
 			const agentId = service.spawn("memory-agent", task, {
 				maxTurns: 1,
 				inheritContext: false,
-				thinkingLevel: "off",
+				thinkingLevel: thinkLevel,
 				foreground: true,
 				bypassQueue: true,
 			});

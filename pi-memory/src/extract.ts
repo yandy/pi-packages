@@ -1,8 +1,10 @@
 import { access } from "node:fs/promises";
+import type { ThinkLevel } from "./config";
 import { getSubagentsService, type SubagentsService, type WorkspaceProvider } from "@yandy0725/pi-subagents";
 
 export interface RunExtractOpts {
 	model: string;
+	thinkLevel: ThinkLevel;
 	memoryDir: string;
 	messages: Array<{ role: string; content: string }>;
 	maxContextTokens: number;
@@ -84,6 +86,7 @@ export async function runExtract(opts: RunExtractOpts): Promise<void> {
 	if (!service) return; // silently skip if no subagent service
 
 	const model = opts.model === "auto" ? undefined : opts.model;
+	const thinkLevel = opts.thinkLevel;
 	const task = buildExtractTask(opts.memoryDir, opts.messages, opts.maxContextTokens);
 
 	const provider: WorkspaceProvider = {
@@ -104,7 +107,7 @@ export async function runExtract(opts: RunExtractOpts): Promise<void> {
 		"memory-agent",
 		task,
 		model
-			? { model, inheritContext: false, maxTurns: 5, thinkingLevel: "high" }
-			: { inheritContext: false, maxTurns: 5, thinkingLevel: "high" },
+			? { model, inheritContext: false, maxTurns: 5, thinkingLevel: thinkLevel }
+			: { inheritContext: false, maxTurns: 5, thinkingLevel: thinkLevel },
 	);
 }

@@ -61,12 +61,14 @@ export default function (pi: ExtensionAPI) {
 					// session_start handlers (including pi-subagents') have completed.
 					// Does not block session_start.
 					const dreamModel = config.dream.model;
+					const dreamThinkLevel = config.dream.thinkLevel;
 					const dir = memoryDir;
 					ctx.ui.setStatus("dream", "Consolidating memory...");
 					setTimeout(async () => {
 						try {
 							const summary = await runDream({
 								model: dreamModel,
+								thinkLevel: dreamThinkLevel,
 								memoryDir: dir,
 								events: pi.events,
 							});
@@ -103,7 +105,7 @@ export default function (pi: ExtensionAPI) {
 				const manifest = await scanTopics(memoryDir);
 				if (manifest.length > 0) {
 					const queryPrompt = buildSurfacingPrompt(manifest, event.prompt.slice(0, 4000), injectedTopics);
-					const selected = await runSideQuery(queryPrompt, manifest, autoSurfacing.maxFiles, pi.events);
+					const selected = await runSideQuery(queryPrompt, manifest, autoSurfacing.maxFiles, autoSurfacing.thinkLevel, pi.events);
 					if (selected.length > 0) {
 						const content = await injectSurfacedContent(
 							memoryDir,
@@ -141,6 +143,7 @@ export default function (pi: ExtensionAPI) {
 		// Fire-and-forget: extract memories in background
 		runExtract({
 			model: extractConfig.model,
+			thinkLevel: extractConfig.thinkLevel,
 			memoryDir,
 			messages: event.messages.map((m) => ({
 				// biome-ignore lint/suspicious/noExplicitAny: pi event message union type
@@ -203,6 +206,7 @@ export default function (pi: ExtensionAPI) {
 			try {
 				const summary = await runDream({
 					model: config.dream.model,
+					thinkLevel: config.dream.thinkLevel,
 					memoryDir,
 					signal: ctx.signal,
 					events: pi.events,
