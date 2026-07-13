@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
 import { buildDreamTask, runDream } from "../src/dream";
-import { access } from "node:fs/promises";
 
 describe("buildDreamTask", () => {
   it("includes memory dir + consolidation instructions + line limit + rules from DREAM_SYSTEM_PROMPT", () => {

@@ -45,9 +45,9 @@ export default function (pi: ExtensionAPI) {
 					`${message}\n\nConsolidate memory files now?`,
 				);
 				if (ok) {
-					// Fire-and-forget via setTimeout: don't block session_start, and defer
-					// past the current microtask queue so pi-subagents' session_start has
-					// set up currentCtx before we try to spawn.
+					// Fire-and-forget: defers past the current macrotask so all
+					// session_start handlers (including pi-subagents') have completed.
+					// Does not block session_start.
 					const dreamModel = config.dream.model;
 					const dir = memoryDir;
 					ctx.ui.setStatus("dream", "Consolidating memory...");

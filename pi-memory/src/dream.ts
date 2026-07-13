@@ -1,5 +1,4 @@
-import { getSubagentsService, type SubagentsService } from "@yandy0725/pi-subagents";
-import type { WorkspaceProvider } from "@yandy0725/pi-subagents";
+import { getSubagentsService, type SubagentsService, type WorkspaceProvider } from "@yandy0725/pi-subagents";
 import { access } from "node:fs/promises";
 
 export function buildDreamTask(memoryDir: string, maxLines: number): string {
@@ -59,9 +58,9 @@ export async function runDream(opts: RunDreamOpts): Promise<string> {
     model ? { model } : {},
   );
 
-  // Wait for completion/failure via events
-  try {
-    return await new Promise<string>((resolve, reject) => {
+  // Wait for completion/failure via pi-subagents events (abort-while-queued
+  // is handled: pi-subagents guarantees events fire for all terminal states).
+  return await new Promise<string>((resolve, reject) => {
       let settled = false;
 
       const cleanup = () => {
@@ -95,9 +94,4 @@ export async function runDream(opts: RunDreamOpts): Promise<string> {
 
       opts.signal?.addEventListener("abort", onAbort, { once: true });
     });
-  } catch (e) {
-    // Ensure cleanup on rejection
-    unregister();
-    throw e;
-  }
 }
