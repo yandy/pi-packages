@@ -37,7 +37,7 @@ describe("recoverEvictedSubagents", () => {
 				completedAt: 4000,
 				toolUses: 7,
 				modelName: "haiku",
-				thinkingLevel: "high",
+				thinking: "high",
 				outputFile: "/tasks/a1.jsonl",
 			}),
 		]);
@@ -139,7 +139,7 @@ describe("recoverEvictedSubagents", () => {
 		expect(entry.thinking).toBeUndefined();
 	});
 
-	it("recovers thinkingLevel from persisted records", () => {
+	it("recovers thinking from persisted records", () => {
 		const jsonl = parentJsonl([
 			HEADER,
 			recordEntry({
@@ -149,7 +149,7 @@ describe("recoverEvictedSubagents", () => {
 				status: "completed",
 				startedAt: 1000,
 				completedAt: 4000,
-				thinkingLevel: "off",
+				thinking: "off",
 				outputFile: "/tasks/a1.jsonl",
 			}),
 		]);

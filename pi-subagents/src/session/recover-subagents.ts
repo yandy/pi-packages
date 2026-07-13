@@ -37,7 +37,7 @@ interface PersistedSubagentRecord {
 	completedAt: number | undefined;
 	toolUses?: number;
 	modelName?: string;
-	thinkingLevel?: string;
+	thinking?: string;
 	outputFile?: string;
 }
 
@@ -101,7 +101,7 @@ export function recoverEvictedSubagents(
 			completedAt: data.completedAt,
 			toolUses: data.toolUses ?? 0,
 			modelName: data.modelName,
-			thinking: data.thinkingLevel,
+			thinking: data.thinking,
 			outputFile,
 		});
 	}

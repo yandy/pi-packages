@@ -107,7 +107,7 @@ describe("SubagentEventsObserver", () => {
 				completedAt: 2000,
 				toolUses: 3,
 				modelName: "haiku",
-				thinkingLevel: "high",
+				thinking: "high",
 				outputFile: record.outputFile,
 			});
 		});
