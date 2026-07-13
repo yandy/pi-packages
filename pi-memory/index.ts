@@ -61,13 +61,14 @@ export default function (pi: ExtensionAPI) {
 					// session_start handlers (including pi-subagents') have completed.
 					// Does not block session_start.
 					const dreamModel = config.dream.model;
+					const dreamThinkLevel = config.dream.thinkLevel;
 					const dir = memoryDir;
 					ctx.ui.setStatus("dream", "Consolidating memory...");
 					setTimeout(async () => {
 						try {
 							const summary = await runDream({
 								model: dreamModel,
-								thinkLevel: config.dream.thinkLevel,
+								thinkLevel: dreamThinkLevel,
 								memoryDir: dir,
 								events: pi.events,
 							});
