@@ -87,11 +87,17 @@ export default function (pi: ExtensionAPI) {
 	pi.on("before_agent_start", async (event, ctx) => {
 		if (!config?.enabled || !indexSnapshot || !memoryDir) return;
 
-		// Auto-surfacing: select relevant topic files via LLM side-query and inject as message
+		// Auto-surfacing: select relevant topic files via LLM side-query and inject as message.
+		// Skip for subagents: pi-subagents strips "subagent" from all children's
+		// tool sets, so its absence reliably identifies subagents. Without this guard,
+		// runSideQuery's subagent spawn → before_agent_start → re-enter here → OOM.
+		const agentTools = event.systemPromptOptions?.selectedTools;
+		const isSubagent = agentTools && !agentTools.includes("subagent");
+
 		const autoSurfacing = config.autoSurfacing;
 		// biome-ignore lint/suspicious/noExplicitAny: message injection result
 		let injectedMessage: any;
-		if (autoSurfacing?.enabled && event.prompt) {
+		if (autoSurfacing?.enabled && event.prompt && !isSubagent) {
 			try {
 				if (ctx.hasUI) ctx.ui.setStatus("surfacing", "Searching relevant memories…");
 				const manifest = await scanTopics(memoryDir);
