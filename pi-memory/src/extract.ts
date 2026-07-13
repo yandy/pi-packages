@@ -1,9 +1,10 @@
 import { access } from "node:fs/promises";
+import type { ThinkLevel } from "./config";
 import { getSubagentsService, type SubagentsService, type WorkspaceProvider } from "@yandy0725/pi-subagents";
 
 export interface RunExtractOpts {
 	model: string;
-	thinkLevel: string;
+	thinkLevel: ThinkLevel;
 	memoryDir: string;
 	messages: Array<{ role: string; content: string }>;
 	maxContextTokens: number;

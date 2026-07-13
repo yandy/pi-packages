@@ -142,6 +142,40 @@ describe("runSideQuery", () => {
 		await promise;
 	});
 
+	it("forwards non-default thinkLevel to spawn", async () => {
+		const { getSubagentsService } = await import("@yandy0725/pi-subagents");
+
+		const completedHandlers: Array<(data: any) => void> = [];
+		const fakeService = {
+			spawn: vi.fn().mockReturnValue("agent-sq-2"),
+			getRecord: vi.fn().mockReturnValue({ result: '{"selected_files":["a.md"]}' }),
+			registerWorkspaceProvider: vi.fn().mockReturnValue(vi.fn()),
+		};
+		(getSubagentsService as any).mockReturnValue(fakeService);
+
+		const events = {
+			on: vi.fn((channel: string, handler: (data: any) => void) => {
+				if (channel === "subagents:completed") completedHandlers.push(handler);
+				return () => {};
+			}),
+		};
+
+		const manifest = [
+			{ filename: "a.md", name: "A", description: "desc", type: "feedback" as const, mtimeMs: 100 },
+		];
+
+		const promise = runSideQuery("user query", manifest, 5, "medium", events as any);
+
+		expect(fakeService.spawn).toHaveBeenCalledWith(
+			"memory-agent",
+			expect.any(String),
+			{ maxTurns: 1, inheritContext: false, thinkingLevel: "medium", foreground: true, bypassQueue: true },
+		);
+
+		completedHandlers[0]({ id: "agent-sq-2" });
+		await promise;
+	});
+
 	it("falls back to keyword matching when service unavailable", async () => {
 		const { getSubagentsService } = await import("@yandy0725/pi-subagents");
 		(getSubagentsService as any).mockReturnValue(undefined);

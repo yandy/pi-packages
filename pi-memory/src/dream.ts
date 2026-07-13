@@ -1,4 +1,5 @@
 import { access } from "node:fs/promises";
+import type { ThinkLevel } from "./config";
 import { getSubagentsService, type SubagentsService, type WorkspaceProvider } from "@yandy0725/pi-subagents";
 
 /** Build dream consolidation task.
@@ -53,7 +54,7 @@ CRITICAL for hooks and descriptions:
 
 export interface RunDreamOpts {
 	model: string;
-	thinkLevel: string;
+	thinkLevel: ThinkLevel;
 	memoryDir: string;
 	signal?: AbortSignal;
 	// biome-ignore lint/suspicious/noExplicitAny: pi events API handler
