@@ -204,6 +204,7 @@ export default function (pi: ExtensionAPI) {
 			}
 			const ok = await ctx.ui.confirm("Dream", "Consolidate all memory files? This rewrites them in-place.");
 			if (!ok) return;
+			const dir = memoryDir;
 			ctx.ui.setStatus("dream", "Consolidating memory...");
 			runDream({
 				model: config.dream.model,
@@ -214,7 +215,7 @@ export default function (pi: ExtensionAPI) {
 			})
 				.then(async (summary) => {
 					const sessions = (await SessionManager.list(ctx.cwd)).length;
-					await writeDreamMeta(memoryDir, sessions);
+					await writeDreamMeta(dir, sessions);
 					ctx.ui.notify(summary, "info");
 				})
 				// biome-ignore lint/suspicious/noExplicitAny: command handler ctx

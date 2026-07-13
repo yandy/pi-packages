@@ -20,19 +20,19 @@ describe("resolveModel", () => {
 	it("exact match provider/modelId", () => {
 		const m = resolveModel("deepseek/deepseek-v4-flash", makeRegistry(models));
 		expect(m).toBeDefined();
-		expect(m.id).toBe("deepseek-v4-flash");
+		expect(m!.id).toBe("deepseek-v4-flash");
 	});
 
 	it("fuzzy match by id substring (haiku)", () => {
 		const m = resolveModel("haiku", makeRegistry(models));
 		expect(m).toBeDefined();
-		expect(m.id).toBe("claude-haiku-4-5");
+		expect(m!.id).toBe("claude-haiku-4-5");
 	});
 
 	it("fuzzy match by name substring", () => {
 		const m = resolveModel("Pro", makeRegistry(models));
 		expect(m).toBeDefined();
-		expect(m.id).toBe("deepseek-v4-pro");
+		expect(m!.id).toBe("deepseek-v4-pro");
 	});
 
 	it("returns undefined when no match", () => {
@@ -48,6 +48,6 @@ describe("resolveModel", () => {
 	it("exact match is case-insensitive", () => {
 		const m = resolveModel("DeepSeek/DeepSeek-V4-Flash", makeRegistry(models));
 		expect(m).toBeDefined();
-		expect(m.id).toBe("deepseek-v4-flash");
+		expect(m!.id).toBe("deepseek-v4-flash");
 	});
 });

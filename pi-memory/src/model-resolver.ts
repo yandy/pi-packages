@@ -1,4 +1,5 @@
-import type { Model, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import type { Model } from "@earendil-works/pi-ai";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 
 interface ModelEntry {
 	id: string;

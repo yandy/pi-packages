@@ -214,7 +214,7 @@ describe("runHeadlessAgent", () => {
 
 	it("enforces maxTurns soft-limit and hard-abort", async () => {
 		// prompt stays pending until we explicitly resolve
-		let resolvePrompt: () => void;
+		let resolvePrompt: () => void = () => {};
 		const pendingPrompt = new Promise<void>((r) => {
 			resolvePrompt = r;
 		});
