@@ -161,18 +161,14 @@ export async function runSideQuery(
 	const unregister = service.registerWorkspaceProvider(provider);
 
 	try {
-		const agentId = service.spawn("memory-agent", task, {
-			maxTurns: 1,
-			inheritContext: false,
-			thinkingLevel: "off",
-		});
-
-		return await new Promise<string[]>((resolve) => {
+		// Subscribe to events BEFORE spawn to prevent race: if the subagent
+		// completes between spawn and subscribe, the event is lost and
+		// the Promise never resolves except by timeout.
+		const result = await new Promise<string[]>((resolve) => {
 			const timeout = setTimeout(() => {
 				cleanup();
-				// Timeout fallback: keyword matching
 				resolve(keywordMatch(candidates, prompt, maxFiles));
-			}, 10_000);
+			}, 30_000);
 
 			let settled = false;
 			const cleanup = () => {
@@ -194,7 +190,6 @@ export async function runSideQuery(
 					if (jsonMatch) {
 						const parsed = JSON.parse(jsonMatch[0]);
 						const files: string[] = parsed.selected_files ?? [];
-						// Validate filenames are in manifest
 						const valid = files.filter((f: string) => candidates.some((c) => c.filename === f)).slice(0, maxFiles);
 						resolve(valid);
 					} else {
@@ -214,12 +209,21 @@ export async function runSideQuery(
 			const unsubCompleted = events?.on("subagents:completed", onCompleted) ?? (() => {});
 			const unsubFailed = events?.on("subagents:failed", onFailed) ?? (() => {});
 
-			// If no events channel, fallback immediately
 			if (!events) {
 				cleanup();
 				resolve(keywordMatch(candidates, prompt, maxFiles));
+				return;
 			}
+
+			// Spawn AFTER subscriptions are active
+			const agentId = service.spawn("memory-agent", task, {
+				maxTurns: 1,
+				inheritContext: false,
+				thinkingLevel: "off",
+			});
 		});
+
+		return result;
 	} catch {
 		unregister();
 		return keywordMatch(candidates, prompt, maxFiles);
