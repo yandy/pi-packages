@@ -1,16 +1,16 @@
+import type { Model } from "@earendil-works/pi-ai";
 import {
 	type AgentSession,
 	type AgentSessionEvent,
+	createAgentSession,
 	DefaultResourceLoader,
+	getAgentDir,
 	SessionManager,
 	SettingsManager,
-	createAgentSession,
-	getAgentDir,
 } from "@earendil-works/pi-coding-agent";
-import type { Model } from "@earendil-works/pi-ai";
 import { MEMORY_AGENT_TOOLS } from "./agent-config";
-import { resolveModel } from "./model-resolver";
 import type { ThinkLevel } from "./config";
+import { resolveModel } from "./model-resolver";
 
 export interface HeadlessAgentOpts {
 	task: string;
@@ -37,7 +37,7 @@ export async function runHeadlessAgent(opts: HeadlessAgentOpts): Promise<string>
 	// 1. Resolve model: undefined → parentModel; otherwise fuzzy resolve (fallback parent)
 	const resolvedModel = !opts.model
 		? opts.parentModel
-		: resolveModel(opts.model, opts.modelRegistry) ?? opts.parentModel;
+		: (resolveModel(opts.model, opts.modelRegistry) ?? opts.parentModel);
 
 	// 2. Build a pure resource loader (no extensions/skills/context files/etc.)
 	const settingsManager = SettingsManager.inMemory();
@@ -80,10 +80,7 @@ export async function runHeadlessAgent(opts: HeadlessAgentOpts): Promise<string>
 	const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
 		if (event.type === "message_start") {
 			text = "";
-		} else if (
-			event.type === "message_update" &&
-			event.assistantMessageEvent.type === "text_delta"
-		) {
+		} else if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
 			text += event.assistantMessageEvent.delta;
 		} else if (event.type === "turn_end") {
 			turnCount++;
@@ -104,7 +101,10 @@ export async function runHeadlessAgent(opts: HeadlessAgentOpts): Promise<string>
 		if (opts.timeoutMs != null) {
 			let timeoutId: ReturnType<typeof setTimeout> | undefined;
 			const timeoutPromise = new Promise<never>((_, reject) => {
-				timeoutId = setTimeout(() => reject(new Error(`headless agent timed out after ${opts.timeoutMs}ms`)), opts.timeoutMs);
+				timeoutId = setTimeout(
+					() => reject(new Error(`headless agent timed out after ${opts.timeoutMs}ms`)),
+					opts.timeoutMs,
+				);
 			});
 			await Promise.race([promptPromise, timeoutPromise]).finally(() => {
 				if (timeoutId) clearTimeout(timeoutId);

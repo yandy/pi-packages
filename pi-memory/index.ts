@@ -100,8 +100,14 @@ export default function (pi: ExtensionAPI) {
 				if (manifest.length > 0) {
 					const queryPrompt = buildSurfacingPrompt(manifest, event.prompt.slice(0, 4000), injectedTopics);
 					const selected = await runSideQuery(
-						queryPrompt, manifest, autoSurfacing.maxFiles, autoSurfacing.thinkLevel,
-						autoSurfacing.model, ctx.modelRegistry, ctx.model, memoryDir,
+						queryPrompt,
+						manifest,
+						autoSurfacing.maxFiles,
+						autoSurfacing.thinkLevel,
+						autoSurfacing.model,
+						ctx.modelRegistry,
+						ctx.model,
+						memoryDir,
 					);
 					if (selected.length > 0) {
 						const content = await injectSurfacedContent(

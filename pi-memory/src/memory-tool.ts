@@ -110,7 +110,10 @@ export async function doAdd(memoryDir: string, p: AddParams): Promise<ActionResu
 
 			// Build hook from all entries (comma-separated titles, trimmed to ~150 chars)
 			const allEntries = parseEntries(topicContent);
-			const hook = allEntries.map((e) => e.title).join("; ").slice(0, 150);
+			const hook = allEntries
+				.map((e) => e.title)
+				.join("; ")
+				.slice(0, 150);
 			next = updateHook(entries, topic, hook);
 			if (!checkCapacity(next, p.maxLines, p.maxBytes)) {
 				return {

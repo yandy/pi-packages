@@ -2,10 +2,10 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { Model } from "@earendil-works/pi-ai";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
-import { truncateForInjection } from "./index-file";
-import { parseFrontmatter } from "./topic-file";
 import { runHeadlessAgent } from "./agent-runner";
 import type { ThinkLevel } from "./config";
+import { truncateForInjection } from "./index-file";
+import { parseFrontmatter } from "./topic-file";
 
 export async function loadIndexSnapshot(memoryDir: string, maxLines: number, maxBytes: number): Promise<string> {
 	try {

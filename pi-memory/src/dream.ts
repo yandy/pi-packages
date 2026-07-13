@@ -1,7 +1,7 @@
 import type { Model } from "@earendil-works/pi-ai";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
-import type { ThinkLevel } from "./config";
 import { runHeadlessAgent } from "./agent-runner";
+import type { ThinkLevel } from "./config";
 
 /** Build dream consolidation task. (unchanged) */
 export function buildDreamTask(memoryDir: string, maxLines: number): string {
