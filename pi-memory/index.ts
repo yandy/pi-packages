@@ -48,17 +48,19 @@ export default function (pi: ExtensionAPI) {
 					// Fire-and-forget via setTimeout: don't block session_start, and defer
 					// past the current microtask queue so pi-subagents' session_start has
 					// set up currentCtx before we try to spawn.
+					const dreamModel = config.dream.model;
+					const dir = memoryDir;
 					const dreamCtrl = new AbortController();
 					ctx.ui.setStatus("dream", "Consolidating memory...");
 					setTimeout(async () => {
 						try {
 							const summary = await runDream({
-								model: config.dream.model,
-								memoryDir,
+								model: dreamModel,
+								memoryDir: dir,
 								signal: dreamCtrl.signal,
 								events: pi.events,
 							});
-							await writeDreamMeta(memoryDir, sessions);
+							await writeDreamMeta(dir, sessions);
 							ctx.ui.notify(summary, "info");
 						} catch (e: any) {
 							ctx.ui.notify(`Dream failed: ${e.message}`, "error");
