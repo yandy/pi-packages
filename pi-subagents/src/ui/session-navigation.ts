@@ -148,8 +148,9 @@ export function liveSource(record: NavigableSubagent): TranscriptSource {
 function buildLabel(fields: LabelFields, registry: AgentConfigLookup, evicted = false): string {
 	const name = getDisplayName(fields.type, registry);
 	const duration = formatDuration(fields.startedAt, fields.completedAt);
-	const modelTag = fields.modelName ? ` · model:${fields.modelName}` : "";
-	const thinkTag = fields.thinking ? ` · think:${fields.thinking}` : "";
+	const modelTag = fields.modelName
+		? fields.thinking ? ` · ${fields.modelName} (${fields.thinking})` : ` · ${fields.modelName}`
+		: fields.thinking ? ` · think:${fields.thinking}` : "";
 	const marker = evicted ? " · evicted (snapshot)" : "";
-	return `${name} (${fields.description}) · ${fields.toolUses} tools · ${fields.status} · ${duration}${modelTag}${thinkTag}${marker}`;
+	return `${name} (${fields.description}) · ${fields.toolUses} tools · ${fields.status} · ${duration}${modelTag}${marker}`;
 }

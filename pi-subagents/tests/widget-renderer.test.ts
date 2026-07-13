@@ -147,11 +147,19 @@ describe("renderFinishedLine", () => {
 		expect(line).toContain("haiku");
 	});
 
-	it("shows think:level when thinking is set", () => {
+	it("shows think level combined with model name when both set", () => {
+		const agent = makeAgent({ modelName: "haiku", thinking: "high" });
+		const line = renderFinishedLine(agent, testRegistry, theme);
+
+		expect(line).toContain("haiku (high)");
+		expect(line).not.toContain("think:high");
+	});
+
+	it("shows think:level when thinking is set without modelName", () => {
 		const agent = makeAgent({ thinking: "high" });
 		const line = renderFinishedLine(agent, testRegistry, theme);
 
-		expect(line).toContain("think:high");
+		expect(line).toContain("[dim:think:high]");
 	});
 });
 
@@ -234,11 +242,12 @@ describe("renderRunningLines", () => {
 		expect(header).toContain("haiku");
 	});
 
-	it("shows think:level when thinking is set for running agent", () => {
-		const agent = makeAgent({ status: "running", completedAt: undefined, thinking: "off" });
+	it("shows think level combined with model name for running agent", () => {
+		const agent = makeAgent({ status: "running", completedAt: undefined, modelName: "sonnet", thinking: "off" });
 		const [header] = renderRunningLines(agent, testRegistry, 0, theme);
 
-		expect(header).toContain("think:off");
+		expect(header).toContain("sonnet (off)");
+		expect(header).not.toContain("think:off");
 	});
 });
 

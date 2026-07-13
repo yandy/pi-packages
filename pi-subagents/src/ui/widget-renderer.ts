@@ -76,8 +76,11 @@ export function renderFinishedLine(agent: WidgetAgent, registry: AgentConfigLook
 	}
 
 	const parts: string[] = [];
-	if (agent.modelName) parts.push(agent.modelName);
-	if (agent.thinking) parts.push(theme.fg("dim", `think:${agent.thinking}`));
+	if (agent.modelName) {
+		parts.push(agent.thinking ? `${agent.modelName} (${agent.thinking})` : agent.modelName);
+	} else if (agent.thinking) {
+		parts.push(theme.fg("dim", `think:${agent.thinking}`));
+	}
 	parts.push(formatTurns(agent.turnCount, agent.maxTurns));
 	if (agent.toolUses > 0) parts.push(`${agent.toolUses} tool use${agent.toolUses === 1 ? "" : "s"}`);
 	parts.push(duration);
@@ -102,8 +105,11 @@ export function renderRunningLines(
 	const tokenText = tokens > 0 ? formatSessionTokens(tokens, agent.contextPercent, theme, agent.compactionCount) : "";
 
 	const parts: string[] = [];
-	if (agent.modelName) parts.push(agent.modelName);
-	if (agent.thinking) parts.push(theme.fg("dim", `think:${agent.thinking}`));
+	if (agent.modelName) {
+		parts.push(agent.thinking ? `${agent.modelName} (${agent.thinking})` : agent.modelName);
+	} else if (agent.thinking) {
+		parts.push(theme.fg("dim", `think:${agent.thinking}`));
+	}
 	parts.push(formatTurns(agent.turnCount, agent.maxTurns));
 	if (agent.toolUses > 0) parts.push(`${agent.toolUses} tool use${agent.toolUses === 1 ? "" : "s"}`);
 	if (tokenText) parts.push(tokenText);
