@@ -84,7 +84,7 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("before_agent_start", async (event) => {
+	pi.on("before_agent_start", async (event, ctx) => {
 		if (!config?.enabled || !indexSnapshot || !memoryDir) return;
 
 		// Auto-surfacing: select relevant topic files via LLM side-query and inject as message
@@ -93,11 +93,10 @@ export default function (pi: ExtensionAPI) {
 		let injectedMessage: any;
 		if (autoSurfacing?.enabled && event.prompt) {
 			try {
+				if (ctx.hasUI) ctx.ui.setStatus("surfacing", "Searching relevant memories…");
 				const manifest = await scanTopics(memoryDir);
 				if (manifest.length > 0) {
-					// Build side-query prompt (truncates userPrompt + manifest)
 					const queryPrompt = buildSurfacingPrompt(manifest, event.prompt.slice(0, 4000), injectedTopics);
-					// LLM side-query (falls back to keyword matching)
 					const selected = await runSideQuery(queryPrompt, manifest, autoSurfacing.maxFiles, pi.events);
 					if (selected.length > 0) {
 						const content = await injectSurfacedContent(
@@ -116,6 +115,8 @@ export default function (pi: ExtensionAPI) {
 				}
 			} catch {
 				/* silently skip auto-surfacing on error */
+			} finally {
+				if (ctx.hasUI) ctx.ui.setStatus("surfacing", undefined);
 			}
 		}
 

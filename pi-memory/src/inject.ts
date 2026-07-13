@@ -220,6 +220,8 @@ export async function runSideQuery(
 				maxTurns: 1,
 				inheritContext: false,
 				thinkingLevel: "off",
+				foreground: true,
+				bypassQueue: true,
 			});
 		});
 
