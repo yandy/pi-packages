@@ -54,7 +54,7 @@ interface HeadlessAgentOpts {
   task: string;            // 任务提示（prompt_mode=replace 语义，即全部指令）
   cwd: string;            // 子会话工作目录
   modelRegistry: ModelRegistry;   // 来自父 ctx，复用凭证
-  model?: string;         // config 原始值；undefined/"auto"→继承 parentModel，否则模糊解析
+  model?: string;         // config 原始值；undefined→继承 parentModel，否则模糊解析
   parentModel?: Model;    // 父会话当前模型（继承用）
   thinkLevel?: ThinkingLevel;     // config 已含默认值，直接传入
   maxTurns?: number;      // undefined=无限
@@ -65,9 +65,9 @@ interface HeadlessAgentOpts {
 
 async function runHeadlessAgent(opts: HeadlessAgentOpts): Promise<string> {
   // 1. 统一解析模型（三调用点一致逻辑，集中在 runner 内）
-  //    model===undefined || model==="auto" → parentModel
+  //    !model → parentModel（未配置即继承）
   //    否则 resolveModel(model, registry)（模糊解析）；解析失败→parentModel 兜底
-  //    ※ thinkLevel 由调用方传入（config 已含默认值），runner 不做默认
+  //    ※ 不再有 "auto" 概念；thinkLevel 由调用方传入（config 已含默认值），runner 不做默认
   // 2. 构造纯净资源加载器
   //    const loader = new DefaultResourceLoader({
   //      cwd, agentDir: getAgentDir(), settingsManager,
@@ -96,7 +96,7 @@ async function runHeadlessAgent(opts: HeadlessAgentOpts): Promise<string> {
 ```
 
 设计要点：
-- **model/thinkLevel 解析统一**：model 的 "auto"/undefined→继承 parentModel 逻辑集中在 runner 内，三调用点只传 config 原始值；thinkLevel 由 config 已含默认值直接传入（runner 不做默认）
+- **model/thinkLevel 解析统一**：model 解析集中在 runner 内——未配置（undefined）→继承 parentModel，配置了具体值→模糊解析（失败兜底 parentModel）；三调用点只传 config 原始值。thinkLevel 由 config 已含默认值直接传入（runner 不做默认）
 - **纯净会话**：`noExtensions/noSkills/noContextFiles/...` 确保子会话不加载任何外部资源，递归预防靠"根本不加载"而非"加载但不 bind"
 - **内存中**：`SessionManager.inMemory` + `SettingsManager.inMemory`，无磁盘碎片，资源即用即弃
 - **复用父 modelRegistry**：API key 解析与父会话一致
@@ -109,7 +109,7 @@ async function runHeadlessAgent(opts: HeadlessAgentOpts): Promise<string> {
 - 模糊匹配（id/name 包含查询串，打分选最佳，阈值 ≥20）
 - 失败返回 `undefined`（runner 用 parentModel 兜底，不抛错——fire-and-forget 友好）
 
-**统一语义**：`agent-runner` 内部 `model === undefined || model === "auto" ? parentModel : resolveModel(model, registry) ?? parentModel`。三调用点只传 config 原始 `model` 字符串 + `parentModel`，解析逻辑不重复、一致。
+**统一语义**：`agent-runner` 内部 `!opts.model ? parentModel : resolveModel(opts.model, registry) ?? parentModel`。三调用点只传 config 原始 `model`（可能为 undefined）+ `parentModel`，解析逻辑不重复、一致。**不再有 "auto" 配置值**（见 4.6）。
 
 ### 3.4 `agent-config.ts`
 
@@ -127,7 +127,7 @@ export const MEMORY_AGENT_TOOLS = ["read", "write", "edit", "ls"] as const;
 | tools | read,write,edit,ls | read,write,edit,ls | read,write,edit,ls |
 | cwd | memoryDir | memoryDir | memoryDir |
 | systemPrompt | task（replace） | task（replace） | task（replace） |
-| model | config（auto/未配置=继承父） | config（auto/未配置=继承父） | config（auto/未配置=继承父） |
+| model | config（未配置=继承父） | config（未配置=继承父） | config（未配置=继承父） |
 | thinkLevel | config（默认 high） | config（默认 high） | config（默认 off） |
 | maxTurns | 5 | ∞ | 1 |
 | 等待方式 | fire-and-forget | fire-and-forget | await + 超时 |
@@ -147,7 +147,7 @@ export async function runExtract(opts: RunExtractOpts): Promise<void> {
   }).catch(() => { /* 静默，当前行为保留 */ });
 }
 ```
-删除：`getSubagentsService` / `WorkspaceProvider` / `registerWorkspaceProvider`。新增依赖：`modelRegistry`、`parentModel`（从 index.ts 的 ctx 传入）。model 传 config 原始值（"auto"/具体），解析由 runner 统一处理。
+删除：`getSubagentsService` / `WorkspaceProvider` / `registerWorkspaceProvider`。新增依赖：`modelRegistry`、`parentModel`（从 index.ts 的 ctx 传入）。model 传 config 原始值（具体模型或 undefined），解析由 runner 统一处理。
 
 ### 4.3 dream.ts（fire-and-forget）
 
@@ -190,7 +190,7 @@ export async function runSideQuery(
 ```
 - 删除：`keywordMatch`（无降级）、`foreground/bypassQueue`（无队列概念）、`getSubagentsService`、事件订阅
 - 超时/失败 → `[]`（不注入任何 memory，可接受）
-- **model/thinkLevel 与其他两点一致**：model 传 `config.autoSurfacing.model`（"auto"=继承父模型，解析由 runner 统一）；thinkLevel 传 `config.autoSurfacing.thinkLevel`（默认 `off`）
+- **model/thinkLevel 与其他两点一致**：model 传 `config.autoSurfacing.model`（未配置=继承父模型，解析由 runner 统一）；thinkLevel 传 `config.autoSurfacing.thinkLevel`（默认 `off`）
 - **cwd 改为 memoryDir**（当前为 `process.cwd()`）：sideQuery 只读 manifest（已在 prompt 里）不操作文件，但用 memoryDir 作 cwd 更安全——万一 agent 误写，限制在 memory 目录内而非父项目目录。属顺手清理。
 
 ### 4.5 index.ts 改写要点
@@ -212,12 +212,16 @@ export async function runSideQuery(
 
 ### 4.6 config.ts 改动
 
-**config 无需改动**——当前 `DEFAULT_CONFIG` 已满足要求：
-- `autoSurfacing.model`（默认 `"auto"`）、`dream.model`、`extractMemories.model` 均已存在
-- thinkLevel 默认值已是：dream `"high"`、extractMemories `"high"`、autoSurfacing `"off"`
+**去掉 `"auto"` 配置值**——`"auto"` 与“未配置”语义重复（都是继承 parent session），无存在意义。改动：
 
-**统一语义**（文档明确，代码已实现）：三调用点的 model/thinkLevel 处理一致——
-- **model**：读 config，未配置（undefined）或 `"auto"` → 继承 parent session（解析逻辑集中在 `agent-runner`，调用点只传 config 原始值）
+1. **类型**：三个 config 接口的 `model: string` → `model?: string`（可选）
+   - `dream.model?`、`extractMemories.model?`、`autoSurfacing.model?`
+2. **默认值**：`DEFAULT_CONFIG` 中三处 `model: "auto"` → **删除**（即 `undefined`）
+3. **向后兼容**：`loadConfig` 归一化 `model === "auto" → undefined`（消除旧配置显式写 `"auto"` 时 `resolveModel("auto")` 模糊误匹配的风险）
+4. **thinkLevel 不变**：默认值已是 dream `"high"`、extract `"high"`、autoSurfacing `"off"`，符合要求
+
+**统一语义**：三调用点的 model/thinkLevel 处理一致——
+- **model**：读 config，未配置（undefined）→ 继承 parent session（解析逻辑集中在 `agent-runner`，调用点只传 config 原始值）
 - **thinkLevel**：读 config（已含各自默认值 dream:high / extract:high / sidequery:off），直接传入 runner
 
 ## 5. 数据流
