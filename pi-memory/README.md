@@ -47,7 +47,8 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
   "dream": {
     "nudgeAfterSessions": 5,
     "nudgeAfterHours": 24,
-    "model": "auto"
+    "model": "auto",
+    "thinkLevel": "high"
   },
   "sessionSearch": {
     "maxSessions": 10,
@@ -56,6 +57,7 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
   "autoSurfacing": {
     "enabled": true,
     "model": "auto",
+    "thinkLevel": "off",
     "maxFiles": 5,
     "maxTopicBytes": 4096,
     "maxInjectionBytes": 20480
@@ -63,6 +65,7 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
   "extractMemories": {
     "enabled": true,
     "model": "auto",
+    "thinkLevel": "high",
     "maxContextTokens": 2000
   }
 }
@@ -77,15 +80,18 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
 | `dream.nudgeAfterSessions` | `5` | Sessions since last dream before nudge is shown |
 | `dream.nudgeAfterHours` | `24` | Hours since last dream before nudge is shown |
 | `dream.model` | `"auto"` | Model for dream consolidation (`"auto"` = same as current, or `"provider/id"`) |
+| `dream.thinkLevel` | `"high"` | Thinking effort for dream subagent: `"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"` |
 | `sessionSearch.maxSessions` | `10` | Max sessions to scan when searching history |
 | `sessionSearch.maxMatches` | `5` | Max matches to return from history search |
 | `autoSurfacing.enabled` | `true` | ⭐ Enable per-turn topic file auto-injection |
 | `autoSurfacing.model` | `"auto"` | ⭐ Model for side-query relevance selection |
+| `autoSurfacing.thinkLevel` | `"off"` | ⭐ Thinking effort for side-query (recommended: `"off"` for lightweight selection) |
 | `autoSurfacing.maxFiles` | `5` | ⭐ Max topic files to inject per turn |
 | `autoSurfacing.maxTopicBytes` | `4096` | ⭐ Max bytes per injected topic file (truncated) |
 | `autoSurfacing.maxInjectionBytes` | `20480` | ⭐ Max total bytes of injected content per turn |
 | `extractMemories.enabled` | `true` | ⭐ Enable per-turn memory extraction |
 | `extractMemories.model` | `"auto"` | ⭐ Model for the extraction subagent |
+| `extractMemories.thinkLevel` | `"high"` | ⭐ Thinking effort for extraction: `"off"` / `"minimal"` / `"low"` / `"medium"` / `"high"` / `"xhigh"` |
 | `extractMemories.maxContextTokens` | `2000` | ⭐ Max tokens of conversation to analyze |
 
 Project-level config (`.pi/memory.json`) is only loaded when the project is trusted.
