@@ -49,6 +49,7 @@ describe("runDream", () => {
 
     const promise = runDream({
       model: "auto",
+      thinkLevel: "high",
       memoryDir: "/mem/x",
       service: fakeService as any,
       events: events as any,
@@ -87,6 +88,7 @@ describe("runDream", () => {
 
     const promise = runDream({
       model: "auto",
+      thinkLevel: "high",
       memoryDir: "/mem/x",
       service: fakeService as any,
       events: events as any,
@@ -119,6 +121,7 @@ describe("runDream", () => {
 
     await runDream({
       model: "deepseek/deepseek-v4-flash",
+      thinkLevel: "medium",
       memoryDir: "/mem/x",
       service: fakeService as any,
       events: events as any,
@@ -127,7 +130,7 @@ describe("runDream", () => {
     expect(fakeService.spawn).toHaveBeenCalledWith(
       "memory-agent",
       expect.any(String),
-      { model: "deepseek/deepseek-v4-flash", thinkingLevel: "high" },
+      { model: "deepseek/deepseek-v4-flash", thinkingLevel: "medium" },
     );
   });
 
@@ -143,6 +146,7 @@ describe("runDream", () => {
 
     const promise = runDream({
       model: "auto",
+      thinkLevel: "high",
       memoryDir: "/mem/x",
       service: fakeService as any,
       events: events as any,
@@ -162,7 +166,7 @@ describe("runDream", () => {
 
   it("throws when service is undefined", async () => {
     await expect(
-      runDream({ model: "auto", memoryDir: "/mem/x" } as any)
+      runDream({ model: "auto", thinkLevel: "high", memoryDir: "/mem/x" } as any)
     ).rejects.toThrow("pi-subagents not available");
   });
 });

@@ -1,8 +1,12 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { loadIndexSnapshot, buildInjection, scanTopics, buildSurfacingPrompt, injectSurfacedContent } from "../src/inject";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { loadIndexSnapshot, buildInjection, scanTopics, buildSurfacingPrompt, injectSurfacedContent, runSideQuery } from "../src/inject";
+
+vi.mock("@yandy0725/pi-subagents", () => ({
+	getSubagentsService: vi.fn(),
+}));
 
 describe("loadIndexSnapshot", () => {
 	let dir: string;
@@ -99,6 +103,62 @@ describe("buildSurfacingPrompt", () => {
 		const prompt = buildSurfacingPrompt(manifest, "hello", new Set());
 		expect(prompt).toContain("[feedback] a.md — first topic");
 		expect(prompt).not.toContain("already injected");
+	});
+});
+
+describe("runSideQuery", () => {
+	it("spawns with thinkingLevel=off and maxTurns=1", async () => {
+		const { getSubagentsService } = await import("@yandy0725/pi-subagents");
+
+		const completedHandlers: Array<(data: any) => void> = [];
+		const fakeService = {
+			spawn: vi.fn().mockReturnValue("agent-sq-1"),
+			getRecord: vi.fn().mockReturnValue({ result: '{"selected_files":["a.md"]}' }),
+			registerWorkspaceProvider: vi.fn().mockReturnValue(vi.fn()),
+		};
+		(getSubagentsService as any).mockReturnValue(fakeService);
+
+		const events = {
+			on: vi.fn((channel: string, handler: (data: any) => void) => {
+				if (channel === "subagents:completed") completedHandlers.push(handler);
+				return () => {};
+			}),
+		};
+
+		const manifest = [
+			{ filename: "a.md", name: "A", description: "desc", type: "feedback" as const, mtimeMs: 100 },
+		];
+
+		const promise = runSideQuery("user query about something", manifest, 5, "off", events as any);
+
+		expect(fakeService.spawn).toHaveBeenCalledWith(
+			"memory-agent",
+			expect.any(String),
+			{ maxTurns: 1, inheritContext: false, thinkingLevel: "off", foreground: true, bypassQueue: true },
+		);
+
+		// Complete agent so promise resolves
+		completedHandlers[0]({ id: "agent-sq-1" });
+		await promise;
+	});
+
+	it("falls back to keyword matching when service unavailable", async () => {
+		const { getSubagentsService } = await import("@yandy0725/pi-subagents");
+		(getSubagentsService as any).mockReturnValue(undefined);
+
+		const manifest = [
+			{ filename: "debugging.md", name: "Debugging", description: "SSH tips and tricks", type: "project" as const, mtimeMs: 100 },
+			{ filename: "irrelevant.md", name: "Irrelevant", description: "nothing to match", type: "feedback" as const, mtimeMs: 200 },
+		];
+
+		const result = await runSideQuery("I need to debug SSH issues", manifest, 5, "off");
+		expect(result).toEqual(["debugging.md"]);
+	});
+
+	it("returns empty when no candidates remain", async () => {
+		const manifest: any[] = [];
+		const result = await runSideQuery("some prompt", manifest, 5, "off");
+		expect(result).toEqual([]);
 	});
 });
 

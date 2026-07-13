@@ -53,6 +53,7 @@ CRITICAL for hooks and descriptions:
 
 export interface RunDreamOpts {
 	model: string;
+	thinkLevel: string;
 	memoryDir: string;
 	signal?: AbortSignal;
 	// biome-ignore lint/suspicious/noExplicitAny: pi events API handler
@@ -88,7 +89,7 @@ export async function runDream(opts: RunDreamOpts): Promise<string> {
 	const agentId = service.spawn(
 		"memory-agent",
 		task,
-		model ? { model, thinkingLevel: "high" } : { thinkingLevel: "high" },
+		model ? { model, thinkingLevel: opts.thinkLevel } : { thinkingLevel: opts.thinkLevel },
 	);
 
 	// Wait for completion/failure via pi-subagents events (abort-while-queued

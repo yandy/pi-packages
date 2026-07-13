@@ -121,6 +121,7 @@ export async function runSideQuery(
 	prompt: string,
 	manifest: TopicManifest[],
 	maxFiles: number,
+	thinkLevel: string,
 	// biome-ignore lint/suspicious/noExplicitAny: pi events API handler
 	events?: { on(channel: string, handler: (data: any) => void): () => void },
 ): Promise<string[]> {
@@ -219,7 +220,7 @@ export async function runSideQuery(
 			const agentId = service.spawn("memory-agent", task, {
 				maxTurns: 1,
 				inheritContext: false,
-				thinkingLevel: "off",
+				thinkingLevel: thinkLevel,
 				foreground: true,
 				bypassQueue: true,
 			});
