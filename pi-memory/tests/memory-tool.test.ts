@@ -29,7 +29,7 @@ describe("doAdd", () => {
     expect(topic).toContain("updated:");
     expect(topic).toContain("name: debugging");
     expect(topic).toContain("description: SSH Gotcha");
-    expect(topic).toContain("type: reference");
+    expect(topic).toContain("type: feedback");
     expect(topic).toContain("## SSH Gotcha");
     // No level-1 heading
     expect(topic).not.toMatch(/^# SSH Gotcha/m);
@@ -117,6 +117,33 @@ describe("doAdd", () => {
       maxBytes: 25600,
     } as any);
     expect(res.ok).toBe(false);
+  });
+
+  it("accepts explicit type parameter", async () => {
+    const res = await doAdd(dir, {
+      content: "user preference",
+      topic: "prefs.md",
+      title: "Editor",
+      type: "user",
+      maxLines: 200,
+      maxBytes: 25600,
+    });
+    expect(res.ok).toBe(true);
+    const topic = await readFile(join(dir, "prefs.md"), "utf8");
+    expect(topic).toContain("type: user");
+  });
+
+  it("rejects invalid type", async () => {
+    const res = await doAdd(dir, {
+      content: "x",
+      topic: "a.md",
+      title: "A",
+      type: "invalid",
+      maxLines: 200,
+      maxBytes: 25600,
+    });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Invalid type");
   });
 
   it("parallel adds to different topics preserve both entries", async () => {

@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig, type MemoryConfig } from "./src/config";
 import { resolveMemoryDir } from "./src/paths";
-import { loadIndexSnapshot, buildInjection, scanTopics, injectSurfacedContent, type TopicManifest } from "./src/inject";
+import { loadIndexSnapshot, buildInjection, scanTopics, injectSurfacedContent, buildSurfacingPrompt, runSideQuery, type TopicManifest } from "./src/inject";
 import { createMemoryTool } from "./src/memory-tool";
 import { searchSessions } from "./src/session-search";
 import { runDream } from "./src/dream";
@@ -10,27 +10,6 @@ import { shouldNudge, writeDreamMeta, readDreamMeta } from "./src/nudge";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-
-function selectRelevantTopics(
-	manifest: TopicManifest[],
-	userPrompt: string,
-	injectedTopics: Set<string>,
-	maxFiles: number,
-): string[] {
-	if (!userPrompt || maxFiles <= 0) return [];
-	const words = userPrompt.toLowerCase().split(/\W+/).filter(w => w.length > 2);
-	const scored = manifest
-		.filter(t => !injectedTopics.has(t.filename))
-		.map(t => {
-			const desc = t.description.toLowerCase();
-			const name = t.name.toLowerCase();
-			const score = words.filter(w => desc.includes(w) || name.includes(w)).length;
-			return { filename: t.filename, score };
-		})
-		.filter(t => t.score > 0)
-		.sort((a, b) => b.score - a.score);
-	return scored.slice(0, maxFiles).map(t => t.filename);
-}
 
 export default function (pi: ExtensionAPI) {
 	let memoryDir: string | null = null;
@@ -97,22 +76,26 @@ export default function (pi: ExtensionAPI) {
 	pi.on("before_agent_start", async (event) => {
 		if (!config?.enabled || !indexSnapshot || !memoryDir) return;
 
-		let systemPrompt = event.systemPrompt;
-
-		// Auto-surfacing: select relevant topic files and inject their content
+		// Auto-surfacing: select relevant topic files via LLM side-query and inject as message
 		const autoSurfacing = config.autoSurfacing;
+		let injectedMessage: any = undefined;
 		if (autoSurfacing?.enabled && event.prompt) {
 			try {
 				const manifest = await scanTopics(memoryDir);
 				if (manifest.length > 0) {
-					const selected = selectRelevantTopics(manifest, event.prompt, injectedTopics, autoSurfacing.maxFiles);
+					// Build side-query prompt (truncates userPrompt + manifest)
+					const queryPrompt = buildSurfacingPrompt(manifest, event.prompt.slice(0, 4000), injectedTopics);
+					// LLM side-query (falls back to keyword matching)
+					const selected = await runSideQuery(
+						queryPrompt, manifest, autoSurfacing.maxFiles, pi.events,
+					);
 					if (selected.length > 0) {
 						const content = await injectSurfacedContent(memoryDir, selected, autoSurfacing.maxTopicBytes, autoSurfacing.maxInjectionBytes);
 						if (content) {
 							// Track injected topics for session-level dedup
 							for (const f of selected) injectedTopics.add(f);
-							// Inject surfaced content as a custom message
-							systemPrompt += "\n\n" + content;
+							// Inject as a custom message (NOT systemPrompt)
+							injectedMessage = { customType: "memory-auto-surfacing", content, display: false };
 						}
 					}
 				}
@@ -120,7 +103,10 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		// MEMORY.md index injection (always last after auto-surfacing)
-		return { systemPrompt: buildInjection(systemPrompt, indexSnapshot) };
+		return {
+			systemPrompt: buildInjection(event.systemPrompt, indexSnapshot),
+			...(injectedMessage ? { message: injectedMessage } : {}),
+		};
 	});
 
 	pi.on("agent_end", async (event) => {

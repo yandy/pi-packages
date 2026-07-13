@@ -8,7 +8,7 @@ import { parseIndex, serializeIndex, upsertEntryByTopic, removeEntryByTopic, fin
 import { buildFrontmatter, appendContent, updateFrontmatterDate, removeEntrySection, hasEntries, parseEntries } from "./topic-file";
 import { safeTopicPath } from "./paths";
 
-export interface AddParams { content: string; topic: string; title: string; maxLines: number; maxBytes: number; }
+export interface AddParams { content: string; topic: string; title: string; type?: string; maxLines: number; maxBytes: number; }
 export interface RemoveParams { entry: string; }
 export interface ReadParams { topic?: string; entry?: string; }
 export interface ReadResult { ok: boolean; error?: string; content?: string; }
@@ -31,6 +31,10 @@ function today(): string {
 
 export async function doAdd(memoryDir: string, p: AddParams): Promise<ActionResult> {
 	if (!p.title) return { ok: false, error: "title is required" };
+	const memType = p.type ?? "feedback";
+	if (!["user", "feedback", "project", "reference"].includes(memType)) {
+		return { ok: false, error: `Invalid type "${memType}". Must be one of: user, feedback, project, reference` };
+	}
 	let topicPath: string;
 	try {
 		topicPath = safeTopicPath(memoryDir, p.topic);
@@ -55,7 +59,7 @@ export async function doAdd(memoryDir: string, p: AddParams): Promise<ActionResu
 				};
 			}
 			// Create topic file with full frontmatter
-			const fm = buildFrontmatter({ name, description: p.title, type: "reference", updated: today() });
+			const fm = buildFrontmatter({ name, description: p.title, type: memType, updated: today() });
 			const topicContent = appendContent(fm, p.title, p.content);
 			await writeFile(topicPath, topicContent, "utf8");
 		} else {
@@ -213,6 +217,7 @@ export function createMemoryTool(deps: MemoryToolDeps) {
 			content: Type.Optional(Type.String({ description: "Knowledge text to store (add)." })),
 			topic: Type.Optional(Type.String({ description: "Target topic filename, e.g. 'debugging.md'. Auto-created if new (add/read)." })),
 			title: Type.Optional(Type.String({ description: "Descriptive, self-contained title for the MEMORY.md index line. Only index lines are injected into future prompts (NOT topic file content), so the title must convey enough context on its own. Required for add." })),
+			type: Type.Optional(StringEnum(["user", "feedback", "project", "reference"] as const)),
 			// remove
 			entry: Type.Optional(Type.String({ description: "Entry title to remove. Exact match on MEMORY.md index line (remove/read)." })),
 			// search
@@ -243,7 +248,7 @@ export function createMemoryTool(deps: MemoryToolDeps) {
 					if (!params.content) throw new Error("content is required for add");
 					if (!params.topic) throw new Error("topic is required for add");
 					if (!params.title) throw new Error("title is required for add");
-					const r = await doAdd(dir, { content: params.content, topic: params.topic, title: params.title, maxLines: cfg.memIndexMaxLines, maxBytes: cfg.memIndexMaxBytes });
+					const r = await doAdd(dir, { content: params.content, topic: params.topic, title: params.title, type: params.type, maxLines: cfg.memIndexMaxLines, maxBytes: cfg.memIndexMaxBytes });
 					if (!r.ok) throw new Error(r.error);
 					text = `Added "${params.title}" to ${params.topic}. Index now has ${r.entries?.length ?? 0} entries.`;
 					details = { entries: r.entries?.length };

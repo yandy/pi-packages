@@ -2,6 +2,8 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { truncateForInjection } from "./index-file";
 import { parseFrontmatter } from "./topic-file";
+import { getSubagentsService } from "@yandy0725/pi-subagents";
+import { access } from "node:fs/promises";
 
 export async function loadIndexSnapshot(memoryDir: string, maxLines: number, maxBytes: number): Promise<string> {
 	try {
@@ -105,4 +107,127 @@ export async function injectSurfacedContent(
 
 	if (blocks.length === 0) return "";
 	return `<relevant_memories>\n${blocks.join("\n\n")}\n</relevant_memories>`;
+}
+
+/** Run a lightweight LLM side-query to select relevant topic files.
+ *  Uses pi-subagents spawn + Promise pattern (same as dream.ts).
+ *  Falls back to keyword matching if subagent service is unavailable. */
+export async function runSideQuery(
+	prompt: string,
+	manifest: TopicManifest[],
+	maxFiles: number,
+	events?: { on(channel: string, handler: (data: any) => void): () => void },
+): Promise<string[]> {
+	// Filter to uninjected candidates only
+	const candidates = manifest.filter(t => {
+		// already-injected topics are marked in the prompt, but we also
+		// filter here as a safety net
+		return !prompt.includes(`[already injected] ${t.filename}`);
+	});
+	if (candidates.length === 0) return [];
+
+	// Build a compact selection task for the subagent
+	const task = [
+		"You are a memory relevance selector.",
+		"Below is a list of memory topic files and a user query.",
+		`Select up to ${maxFiles} topic files MOST relevant to the user's current query.`,
+		"Respond with ONLY a JSON object: {\"selected_files\": [...]}",
+		"If nothing is relevant, return {\"selected_files\": []}.",
+		"",
+		prompt,
+	].join("\n");
+
+	const service = getSubagentsService();
+	if (!service) {
+		// Fallback: keyword matching when subagent service unavailable
+		return keywordMatch(candidates, prompt, maxFiles);
+	}
+
+	const provider = {
+		async prepare(_ctx: any) {
+			return { cwd: process.cwd(), dispose: () => undefined };
+		},
+	};
+	const unregister = service.registerWorkspaceProvider(provider);
+
+	try {
+		const agentId = service.spawn("general-purpose", task, {});
+
+		return await new Promise<string[]>((resolve) => {
+			const timeout = setTimeout(() => {
+				cleanup();
+				// Timeout fallback: keyword matching
+				resolve(keywordMatch(candidates, prompt, maxFiles));
+			}, 10_000);
+
+			let settled = false;
+			const cleanup = () => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(timeout);
+				unsubCompleted();
+				unsubFailed();
+				unregister();
+			};
+
+			const onCompleted = (data: { id: string }) => {
+				if (data.id !== agentId) return;
+				cleanup();
+				const record = service.getRecord(agentId);
+				const result = record?.result ?? "";
+				try {
+					const jsonMatch = result.match(/\{[^}]*"selected_files"[^}]*\}/s);
+					if (jsonMatch) {
+						const parsed = JSON.parse(jsonMatch[0]);
+						const files: string[] = parsed.selected_files ?? [];
+						// Validate filenames are in manifest
+						const valid = files.filter((f: string) =>
+							candidates.some(c => c.filename === f)
+						).slice(0, maxFiles);
+						resolve(valid);
+					} else {
+						resolve([]);
+					}
+				} catch {
+					resolve([]);
+				}
+			};
+
+			const onFailed = (data: { id: string }) => {
+				if (data.id !== agentId) return;
+				cleanup();
+				resolve(keywordMatch(candidates, prompt, maxFiles));
+			};
+
+			const unsubCompleted = events?.on("subagents:completed", onCompleted) ?? (() => {});
+			const unsubFailed = events?.on("subagents:failed", onFailed) ?? (() => {});
+
+			// If no events channel, fallback immediately
+			if (!events) {
+				cleanup();
+				resolve(keywordMatch(candidates, prompt, maxFiles));
+			}
+		});
+	} catch {
+		unregister();
+		return keywordMatch(candidates, prompt, maxFiles);
+	}
+}
+
+/** Keyword-matching fallback for topic selection (no LLM required). */
+function keywordMatch(
+	manifest: TopicManifest[],
+	userPrompt: string,
+	maxFiles: number,
+): string[] {
+	const words = userPrompt.toLowerCase().split(/\W+/).filter(w => w.length > 2);
+	const scored = manifest
+		.map(t => {
+			const desc = (t.description + " " + t.name).toLowerCase();
+			const score = words.filter(w => desc.includes(w)).length;
+			return { filename: t.filename, score };
+		})
+		.filter(t => t.score > 0)
+		.sort((a, b) => b.score - a.score);
+	return scored.slice(0, maxFiles).map(t => t.filename);
 }
