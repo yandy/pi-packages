@@ -4,7 +4,7 @@ import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
-import { parseIndex, serializeIndex, addEntry, removeEntryByTitle, matchEntryByTitle, checkCapacity, type IndexEntry } from "./index-file";
+import { parseIndex, serializeIndex, upsertEntryByTopic, removeEntryByTopic, findEntryByTopic, updateHook, checkCapacity, type IndexEntry } from "./index-file";
 import { buildFrontmatter, appendContent, updateFrontmatterDate, removeEntrySection, hasEntries, parseEntries } from "./topic-file";
 import { safeTopicPath } from "./paths";
 
@@ -40,24 +40,39 @@ export async function doAdd(memoryDir: string, p: AddParams): Promise<ActionResu
 	return withFileMutationQueue(join(memoryDir, MEMORY_MD), async () => {
 		await mkdir(dirname(topicPath), { recursive: true });
 		const entries = await readIndex(memoryDir);
-		const next = addEntry(entries, { title: p.title, topic: p.topic, raw: "" });
-		if (!checkCapacity(next, p.maxLines, p.maxBytes)) {
-			return {
-				ok: false,
-				error: `MEMORY.md capacity exceeded (max ${p.maxLines} lines / ${p.maxBytes} bytes). Current entries: ${serializeIndex(entries)}`,
-			};
-		}
-		// write topic file
-		let existing: string | null = null;
-		try { existing = await readFile(topicPath, "utf8"); } catch { existing = null; }
+		const existing = findEntryByTopic(entries, p.topic);
+
+		let next: IndexEntry[];
 		if (!existing) {
-			const out = `${buildFrontmatter({ updated: today() })}${appendContent(null, p.title, p.content)}`;
-			await writeFile(topicPath, out, "utf8");
+			// New topic: create index entry with topic name as display name, entry title as hook
+			const name = p.topic.replace(/\.md$/, "");
+			const entry: IndexEntry = { name, topic: p.topic, hook: p.title, raw: "" };
+			next = upsertEntryByTopic(entries, entry);
+			if (!checkCapacity(next, p.maxLines, p.maxBytes)) {
+				return {
+					ok: false,
+					error: `MEMORY.md capacity exceeded (max ${p.maxLines} lines / ${p.maxBytes} bytes). Current entries: ${serializeIndex(entries)}`,
+				};
+			}
+			// Create topic file with full frontmatter
+			const fm = buildFrontmatter({ name, description: p.title, type: "reference", updated: today() });
+			const topicContent = appendContent(fm, p.title, p.content);
+			await writeFile(topicPath, topicContent, "utf8");
 		} else {
-			const updated = updateFrontmatterDate(existing, today());
-			const out = appendContent(updated, p.title, p.content);
-			await writeFile(topicPath, out, "utf8");
+			// Existing topic: update hook and append
+			next = updateHook(entries, p.topic, p.title);
+			if (!checkCapacity(next, p.maxLines, p.maxBytes)) {
+				return {
+					ok: false,
+					error: `MEMORY.md capacity exceeded (max ${p.maxLines} lines / ${p.maxBytes} bytes). Current entries: ${serializeIndex(entries)}`,
+				};
+			}
+			const raw = await readFile(topicPath, "utf8");
+			const refreshed = updateFrontmatterDate(raw, today());
+			const topicContent = appendContent(refreshed, p.title, p.content);
+			await writeFile(topicPath, topicContent, "utf8");
 		}
+
 		// write index
 		await writeFile(join(memoryDir, MEMORY_MD), serializeIndex(next) + "\n", "utf8");
 		return { ok: true, entries: next };
@@ -67,38 +82,54 @@ export async function doAdd(memoryDir: string, p: AddParams): Promise<ActionResu
 export async function doRemove(memoryDir: string, p: RemoveParams): Promise<ActionResult> {
 	return withFileMutationQueue(join(memoryDir, MEMORY_MD), async () => {
 		const entries = await readIndex(memoryDir);
-		const match = matchEntryByTitle(entries, p.entry);
-		if (!match.entry) {
-			return { ok: false, error: `Entry "${p.entry}" not found in index` };
-		}
-		if (!match.unique) {
-			const matchingTopics = entries
-				.filter((e) => e.title === p.entry)
-				.map((e) => e.topic)
-				.join(", ");
-			return { ok: false, error: `Multiple matches for entry "${p.entry}" in topics: ${matchingTopics}` };
+
+		// Search across all topic files to find which one contains this entry
+		const files = await readdir(memoryDir).catch(() => []);
+		let foundTopic: string | null = null;
+		let foundTopics: string[] = [];
+
+		for (const f of files) {
+			if (!f.endsWith(".md") || f === MEMORY_MD) continue;
+			const raw = await readFile(join(memoryDir, f), "utf8").catch(() => "");
+			const parsed = parseEntries(raw);
+			if (parsed.some((e) => e.title === p.entry)) {
+				foundTopics.push(f);
+				foundTopic = f;
+			}
 		}
 
-		const topicFile = match.entry.topic;
+		if (foundTopics.length === 0) {
+			return { ok: false, error: `Entry "${p.entry}" not found in any topic` };
+		}
+		if (foundTopics.length > 1) {
+			return { ok: false, error: `Multiple matches for entry "${p.entry}" in topics: ${foundTopics.join(", ")}` };
+		}
+
+		const topicFile = foundTopic;
 		const topicPath = safeTopicPath(memoryDir, topicFile);
 
-		// remove index line
-		const updated = removeEntryByTitle(entries, p.entry);
-		await writeFile(join(memoryDir, MEMORY_MD), serializeIndex(updated) + "\n", "utf8");
-
-		// remove ## block from topic file
+		// Remove ## block from topic file
 		try {
 			const raw = await readFile(topicPath, "utf8");
 			const afterRemoval = removeEntrySection(raw, p.entry);
+
 			if (hasEntries(afterRemoval)) {
+				// Still has entries: update hook to remaining first entry, refresh date
+				const remaining = parseEntries(afterRemoval);
+				const newHook = remaining.length > 0 ? remaining[0].title : "";
+				const nextEntries = updateHook(entries, topicFile, newHook);
 				const refreshed = updateFrontmatterDate(afterRemoval, today());
 				await writeFile(topicPath, refreshed, "utf8");
+				await writeFile(join(memoryDir, MEMORY_MD), serializeIndex(nextEntries) + "\n", "utf8");
 			} else {
+				// Last entry removed: delete topic file and remove from index
+				const nextEntries = removeEntryByTopic(entries, topicFile);
 				await unlink(topicPath).catch(() => {});
+				await writeFile(join(memoryDir, MEMORY_MD), serializeIndex(nextEntries) + "\n", "utf8");
 			}
 		} catch (e: any) {
-			// topic file missing — still ok, index already removed
 			if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+			return { ok: false, error: `Topic file "${topicFile}" not found` };
 		}
 
 		return { ok: true };
