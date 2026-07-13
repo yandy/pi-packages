@@ -217,8 +217,9 @@ export async function runSideQuery(
 1. **类型**：三个 config 接口的 `model: string` → `model?: string`（可选）
    - `dream.model?`、`extractMemories.model?`、`autoSurfacing.model?`
 2. **默认值**：`DEFAULT_CONFIG` 中三处 `model: "auto"` → **删除**（即 `undefined`）
-3. **向后兼容**：`loadConfig` 归一化 `model === "auto" → undefined`（消除旧配置显式写 `"auto"` 时 `resolveModel("auto")` 模糊误匹配的风险）
-4. **thinkLevel 不变**：默认值已是 dream `"high"`、extract `"high"`、autoSurfacing `"off"`，符合要求
+3. **thinkLevel 不变**：默认值已是 dream `"high"`、extract `"high"`、autoSurfacing `"off"`，符合要求
+
+**不做向后兼容**：`"auto"` 本是默认值，用户无需显式写；显式写 `"auto"` 属配置错误，不归一化、不兑底（`resolveModel("auto")` 会走模糊匹配，由用户自行修正配置）。
 
 **统一语义**：三调用点的 model/thinkLevel 处理一致——
 - **model**：读 config，未配置（undefined）→ 继承 parent session（解析逻辑集中在 `agent-runner`，调用点只传 config 原始值）
