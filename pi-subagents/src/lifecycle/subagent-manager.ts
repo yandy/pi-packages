@@ -258,10 +258,15 @@ export class SubagentManager {
 		const record = this.agents.get(id);
 		if (!record) return false;
 
-		// A queued agent has not started; mark it stopped. Its scheduled thunk
-		// becomes a no-op (status guard) when its slot finally opens.
+		// A queued agent has not started; mark it stopped and notify observers.
+		// Its scheduled thunk becomes a no-op (status guard) when the slot opens.
 		if (record.status === "queued") {
 			record.markStopped();
+			try {
+				this.observer?.onSubagentCompleted(record);
+			} catch (err) {
+				debugLog("onSubagentCompleted observer", err);
+			}
 			return true;
 		}
 

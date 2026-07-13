@@ -59,10 +59,14 @@ describe("shouldNudge", () => {
 		for (let i = 0; i < 8; i++) await writeFile(join(dir, "__sessions__", `s${i}.jsonl`), "{}");
 		const r = await shouldNudge(dir, { dream: { nudgeAfterSessions: 5, nudgeAfterHours: 24, model: "auto" } } as any, dir);
 		expect(r.nudge).toBe(true);
+		expect(r.sessions).toBe(8);
+		expect(r.newEntries).toBe(6); // 8 sessions - 2 at last dream
 	});
 	it("does not nudge when recent dream", async () => {
 		await writeFile(join(dir, ".dream-meta.json"), JSON.stringify({ lastDreamAt: new Date().toISOString(), sessionCountAtDream: 0 }));
 		const r = await shouldNudge(dir, { dream: { nudgeAfterSessions: 5, nudgeAfterHours: 24, model: "auto" } } as any, dir);
 		expect(r.nudge).toBe(false);
+		expect(r.sessions).toBeGreaterThanOrEqual(0);
+		expect(r.newEntries).toBeGreaterThanOrEqual(0);
 	});
 });
