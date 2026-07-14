@@ -346,7 +346,7 @@ runDream({
 - **`agent-runner.test.ts`**（新增）：mock `createAgentSession`，验证 turn 循环、maxTurns 软/硬限制、响应收集、dispose 清理、abort、timeout、model 解析（未配置→继承、配置但失败→兜底）
 - **`model-resolver.test.ts`**（新增）：精确/模糊匹配、失败兜底
 - **`extract/dream/inject.test.ts`**：mock 目标从 `@yandy0725/pi-subagents` 改为 `./agent-runner`，验证传给 `runHeadlessAgent` 的参数（task、cwd、maxTurns、timeoutMs）；dream 验证 fire-and-forget（不 await）；inject 验证超时/失败返回 `[]`、删 keywordMatch 测试
-- **`index-wiring.test.ts`**：删 `isSubagent` 测试；验证 `session_start` nudge 不再用 `setTimeout`；验证 `ctx.modelRegistry` 传递
+- **`index-wiring.test.ts`**：删除旧的 "subagent" 工具检测测试；新增 `<active_agent name=` 正向检测测试（含 `event.systemPrompt` 包含/不包含标记的场景）；验证 `session_start` nudge 不再用 `setTimeout`；验证 `ctx.modelRegistry` 传递
 
 ---
 
