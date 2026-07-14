@@ -1,6 +1,5 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { getSubagentsService } from "@yandy0725/pi-subagents";
 import { truncateForInjection } from "./index-file";
 import { parseFrontmatter } from "./topic-file";
 
@@ -115,29 +114,15 @@ export async function injectSurfacedContent(
 }
 
 /** Run a lightweight LLM side-query to select relevant topic files.
- *  Uses pi-subagents spawn + Promise pattern (same as dream.ts).
- *  Falls back to keyword matching if subagent service is unavailable. */
+ *  Uses runHeadlessAgent with maxTurns=1 and 30s timeout.
+ *  Errors return empty array (graceful fallback). */
 import type { ThinkLevel } from "./config";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import type { Model } from "@earendil-works/pi-ai";
+import { runHeadlessAgent } from "./agent-runner";
 
-export async function runSideQuery(
-	prompt: string,
-	manifest: TopicManifest[],
-	maxFiles: number,
-	thinkLevel: ThinkLevel,
-	// biome-ignore lint/suspicious/noExplicitAny: pi events API handler
-	events?: { on(channel: string, handler: (data: any) => void): () => void },
-): Promise<string[]> {
-	// Filter to uninjected candidates only
-	const candidates = manifest.filter((t) => {
-		// already-injected topics are marked in the prompt, but we also
-		// filter here as a safety net
-		return !prompt.includes(`[already injected] ${t.filename}`);
-	});
-	if (candidates.length === 0) return [];
-
-	// Build a minimal selection prompt — only current user message + topic manifest.
-	// With prompt_mode=replace, this IS the entire system prompt (no inheritance).
-	const task = [
+export function buildSideQueryTask(prompt: string, maxFiles: number): string {
+	return [
 		"Respond with ONLY a JSON object.",
 		"",
 		"Below is a list of memory topic files and a user query.",
@@ -148,106 +133,55 @@ export async function runSideQuery(
 		"",
 		'Respond with EXACTLY: {"selected_files": [...]}',
 	].join("\n");
+}
 
-	const service = getSubagentsService();
-	if (!service) {
-		// Fallback: keyword matching when subagent service unavailable
-		return keywordMatch(candidates, prompt, maxFiles);
-	}
-
-	const provider = {
-		// biome-ignore lint/suspicious/noExplicitAny: WorkspaceProvider prepare ctx
-		async prepare(_ctx: any) {
-			return { cwd: process.cwd(), dispose: () => undefined };
-		},
-	};
-	const unregister = service.registerWorkspaceProvider(provider);
-
+function parseSelectedFiles(
+	result: string,
+	candidates: TopicManifest[],
+	maxFiles: number,
+): string[] {
 	try {
-		// Subscribe to events BEFORE spawn to prevent race: if the subagent
-		// completes between spawn and subscribe, the event is lost and
-		// the Promise never resolves except by timeout.
-		const result = await new Promise<string[]>((resolve) => {
-			const timeout = setTimeout(() => {
-				cleanup();
-				resolve(keywordMatch(candidates, prompt, maxFiles));
-			}, 30_000);
-
-			let settled = false;
-			const cleanup = () => {
-				if (settled) return;
-				settled = true;
-				clearTimeout(timeout);
-				unsubCompleted();
-				unsubFailed();
-				unregister();
-			};
-
-			const onCompleted = (data: { id: string }) => {
-				if (data.id !== agentId) return;
-				cleanup();
-				const record = service.getRecord(agentId);
-				const result = record?.result ?? "";
-				try {
-					const jsonMatch = result.match(/\{[^}]*"selected_files"[^}]*\}/s);
-					if (jsonMatch) {
-						const parsed = JSON.parse(jsonMatch[0]);
-						const files: string[] = parsed.selected_files ?? [];
-						const valid = files.filter((f: string) => candidates.some((c) => c.filename === f)).slice(0, maxFiles);
-						resolve(valid);
-					} else {
-						resolve([]);
-					}
-				} catch {
-					resolve([]);
-				}
-			};
-
-			const onFailed = (data: { id: string }) => {
-				if (data.id !== agentId) return;
-				cleanup();
-				resolve(keywordMatch(candidates, prompt, maxFiles));
-			};
-
-			const unsubCompleted = events?.on("subagents:completed", onCompleted) ?? (() => {});
-			const unsubFailed = events?.on("subagents:failed", onFailed) ?? (() => {});
-
-			if (!events) {
-				cleanup();
-				resolve(keywordMatch(candidates, prompt, maxFiles));
-				return;
-			}
-
-			// Spawn AFTER subscriptions are active
-			const agentId = service.spawn("memory-agent", task, {
-				maxTurns: 1,
-				inheritContext: false,
-				thinkingLevel: thinkLevel,
-				foreground: true,
-				bypassQueue: true,
-			});
-		});
-
-		return result;
+		const jsonMatch = result.match(/\{[^}]*"selected_files"[^}]*\}/s);
+		if (!jsonMatch) return [];
+		const parsed = JSON.parse(jsonMatch[0]);
+		const files: string[] = parsed.selected_files ?? [];
+		return files
+			.filter((f: string) => candidates.some((c) => c.filename === f))
+			.slice(0, maxFiles);
 	} catch {
-		unregister();
-		return keywordMatch(candidates, prompt, maxFiles);
+		return [];
 	}
 }
 
-/** Keyword-matching fallback for topic selection (no LLM required). */
-function keywordMatch(manifest: TopicManifest[], userPrompt: string, maxFiles: number): string[] {
-	const words = userPrompt
-		.toLowerCase()
-		.split(/\W+/)
-		.filter((w) => w.length > 2);
-	const scored = manifest
-		.map((t) => {
-			const desc = `${t.description} ${t.name}`.toLowerCase();
-			const score = words.filter((w) => desc.includes(w)).length;
-			return { filename: t.filename, score };
-		})
-		.filter((t) => t.score > 0)
-		.sort((a, b) => b.score - a.score);
-	return scored.slice(0, maxFiles).map((t) => t.filename);
+export async function runSideQuery(
+	prompt: string,
+	manifest: TopicManifest[],
+	maxFiles: number,
+	thinkLevel: ThinkLevel,
+	model: string | undefined,
+	modelRegistry: ModelRegistry,
+	parentModel: Model<any> | undefined,
+	memoryDir: string,
+): Promise<string[]> {
+	const candidates = manifest.filter(
+		(t) => !prompt.includes(`[already injected] ${t.filename}`),
+	);
+	if (candidates.length === 0) return [];
+
+	const task = buildSideQueryTask(prompt, maxFiles);
+	try {
+		const result = await runHeadlessAgent({
+			task,
+			cwd: memoryDir,
+			modelRegistry,
+			model,
+			parentModel,
+			thinkLevel,
+			maxTurns: 1,
+			timeoutMs: 30_000,
+		});
+		return parseSelectedFiles(result, candidates, maxFiles);
+	} catch {
+		return [];
+	}
 }
