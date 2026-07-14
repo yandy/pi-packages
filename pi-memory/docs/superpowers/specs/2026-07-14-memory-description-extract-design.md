@@ -64,7 +64,7 @@ const withDesc = replaceFrontmatterField(raw, "description", newDesc);
 ```
 runHeadlessAgent({ tools?, customTools? })
   ├── side-query (inject.ts): tools: [], customTools: []
-  ├── extract (extract.ts):   tools: [], customTools: createMemoryTools(memoryDir)
+  ├── extract (extract.ts):   tools: ["read", "ls"], customTools: createMemoryTools(memoryDir)
   └── dream (dream.ts):       tools: FILE_IO_TOOLS (default), customTools: []
 ```
 
@@ -117,8 +117,8 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 export function createMemoryTools(memoryDir: string, cfg: {
   maxLines: number; maxBytes: number;
 }): ToolDefinition[] {
-  // Returns three ToolDefinition objects: memory_add, memory_read, memory_search
-  // Each tool.execute() calls doAdd/doRead/searchMemory directly.
+  // Returns two ToolDefinition objects: memory_add, memory_search (built-in read + ls replace memory_read)
+  // Each tool.execute() calls doAdd/searchMemory directly.
   // No need for doRemove — extract agent doesn't delete.
 }
 ```
@@ -129,7 +129,7 @@ Tool definitions mirror the existing `memory` tool's JSON schema for `add`/`read
 
 Current prompt instructs LLM to "use ONLY file read/write/edit tools". New prompt:
 
-> "Use the memory_add tool to persist learnings, memory_read to check existing topics, and memory_search to find related memories. Do NOT use file read/write/edit/ls tools."
+> "Use the memory_add and memory_search tools. Use built-in ls and read to explore the memory directory. Do NOT use bash, web search, write, or edit tools."
 
 Remove references to frontmatter format, MEMORY.md structure — the tools handle that.
 

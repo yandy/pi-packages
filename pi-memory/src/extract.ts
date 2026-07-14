@@ -39,7 +39,7 @@ export function buildExtractTask(
 		"- memory_search: search across all memory files for relevant existing entries",
 		"- memory_add: persist a new memory entry to a topic file (creates the topic if new)",
 		"",
-		"Use 'ls' to list files and 'read' to inspect MEMORY.md and topic files. Use memory_search to find related entries. Use memory_add to write new memories. Do NOT use the 'write' or 'edit' tools.",
+		"Use 'ls' to list files and 'read' to inspect MEMORY.md and topic files. Use memory_search to find related entries. Use memory_add to write new memories. Do NOT use 'bash', 'write', 'edit', or any other tools.",
 		"",
 		"Worth remembering:",
 		"- User preferences, coding style choices, tooling preferences",

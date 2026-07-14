@@ -36,7 +36,7 @@ describe("buildExtractTask", () => {
 		expect(task).toContain("memory_add");
 		expect(task).toContain("ls");
 		expect(task).toContain("memory_search");
-		expect(task).toContain("Do NOT use the 'write' or 'edit' tools");
+		expect(task).toContain("Do NOT use 'bash', 'write', 'edit', or any other tools");
 		expect(task).not.toContain("file read/write/edit tools");
 	});
 });
