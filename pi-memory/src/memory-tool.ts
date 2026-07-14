@@ -1,7 +1,7 @@
 import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { withFileMutationQueue, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
@@ -250,6 +250,100 @@ export interface MemoryToolDeps {
 	getEnabled: () => boolean;
 	searchSessions: (cwd: string, query: string, cfg: { maxSessions: number; maxMatches: number }) => Promise<string>;
 	cwd: () => string;
+}
+
+export function createMemoryTools(
+	memoryDir: string,
+	cfg: { maxLines: number; maxBytes: number },
+): ToolDefinition[] {
+	return [
+		{
+			name: "memory_add",
+			description:
+				"Add a new memory entry to a topic file. Creates the topic if it doesn't exist. Use memory_read first to check for existing topics.",
+			parameters: Type.Object({
+				content: Type.String({ description: "Knowledge text to store." }),
+				topic: Type.String({ description: "Target topic filename, e.g. 'debugging.md'." }),
+				title: Type.String({
+					description:
+						"Descriptive, self-contained title. Only index lines are injected into prompts — make titles self-descriptive.",
+				}),
+				type: Type.Optional(
+					StringEnum(["user", "feedback", "project", "reference"] as const),
+				),
+			}),
+			async execute(
+				_id: string,
+				params: any,
+				_signal: AbortSignal | undefined,
+				_onUpdate: any,
+				_ctx: any,
+			) {
+				if (!params.content) throw new Error("content is required");
+				if (!params.topic) throw new Error("topic is required");
+				if (!params.title) throw new Error("title is required");
+				const r = await doAdd(memoryDir, {
+					content: params.content,
+					topic: params.topic,
+					title: params.title,
+					type: params.type,
+					maxLines: cfg.maxLines,
+					maxBytes: cfg.maxBytes,
+				});
+				if (!r.ok) throw new Error(r.error);
+				return {
+					content: [{
+						type: "text",
+						text: `Added "${params.title}" to ${params.topic}. Index has ${r.entries?.length ?? 0} entries.`,
+					}],
+				};
+			},
+		},
+		{
+			name: "memory_read",
+			description:
+				"Read a topic file (by topic name) or a single entry (by entry title). Use this to check for existing topics before adding new memories.",
+			parameters: Type.Object({
+				topic: Type.Optional(
+					Type.String({ description: "Topic filename, e.g. 'debugging.md' or 'debugging'." }),
+				),
+				entry: Type.Optional(
+					Type.String({ description: "Entry title to read a single entry." }),
+				),
+			}),
+			async execute(
+				_id: string,
+				params: any,
+				_signal: AbortSignal | undefined,
+				_onUpdate: any,
+				_ctx: any,
+			) {
+				if (!params.topic && !params.entry) throw new Error("topic or entry is required");
+				const r = await doRead(memoryDir, { topic: params.topic, entry: params.entry });
+				if (!r.ok) throw new Error(r.error);
+				return { content: [{ type: "text", text: r.content ?? "" }] };
+			},
+		},
+		{
+			name: "memory_search",
+			description:
+				"Search all memory topic files for entries matching a query. Case-insensitive. Use this to find related memories before adding new ones.",
+			parameters: Type.Object({
+				query: Type.String({ description: "Search query." }),
+			}),
+			async execute(
+				_id: string,
+				params: any,
+				_signal: AbortSignal | undefined,
+				_onUpdate: any,
+				_ctx: any,
+			) {
+				if (!params.query) throw new Error("query is required");
+				const text = await searchMemory(memoryDir, params.query);
+				return { content: [{ type: "text", text }] };
+			},
+		},
+	];
 }
 
 export function createMemoryTool(deps: MemoryToolDeps) {

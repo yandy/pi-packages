@@ -2,7 +2,7 @@ import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { doAdd, doRemove, doRead, searchMemory } from "../src/memory-tool";
+import { doAdd, doRemove, doRead, searchMemory, createMemoryTools } from "../src/memory-tool";
 
 describe("doAdd", () => {
   let dir: string;
@@ -465,4 +465,67 @@ describe("searchMemory", () => {
     const result = await searchMemory(dir, "staging");
     expect(result).toContain("STAGING uses Port 2222");
   });
+});
+
+describe("createMemoryTools", () => {
+	let dir: string;
+	beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), "mem-tools-")); });
+	afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+
+	it("returns three tool definitions", () => {
+		const tools = createMemoryTools(dir, { maxLines: 200, maxBytes: 25600 });
+		expect(tools).toHaveLength(3);
+		expect(tools.map((t) => t.name).sort()).toEqual(["memory_add", "memory_read", "memory_search"]);
+	});
+
+	it("memory_add writes a topic file and returns ok", async () => {
+		const tools = createMemoryTools(dir, { maxLines: 200, maxBytes: 25600 });
+		const addTool = tools.find((t) => t.name === "memory_add")!;
+		const result = await addTool.execute("id", {
+			content: "staging uses port 2222",
+			topic: "debugging.md",
+			title: "SSH Gotcha",
+		}, undefined, undefined, undefined);
+		expect(result.content[0].type).toBe("text");
+		expect(result.content[0].text).toContain("Added");
+		const topic = await readFile(join(dir, "debugging.md"), "utf8");
+		expect(topic).toContain("staging uses port 2222");
+	});
+
+	it("memory_read returns topic content", async () => {
+		// Set up via doAdd first
+		await doAdd(dir, {
+			content: "some content",
+			topic: "misc.md",
+			title: "Entry",
+			maxLines: 200,
+			maxBytes: 25600,
+		});
+		const tools = createMemoryTools(dir, { maxLines: 200, maxBytes: 25600 });
+		const readTool = tools.find((t) => t.name === "memory_read")!;
+		const result = await readTool.execute("id", { topic: "misc" }, undefined, undefined, undefined);
+		expect(result.content[0].text).toContain("## Entry");
+	});
+
+	it("memory_search finds matching entries", async () => {
+		await doAdd(dir, {
+			content: "port 2222 for SSH",
+			topic: "net.md",
+			title: "Port",
+			maxLines: 200,
+			maxBytes: 25600,
+		});
+		const tools = createMemoryTools(dir, { maxLines: 200, maxBytes: 25600 });
+		const searchTool = tools.find((t) => t.name === "memory_search")!;
+		const result = await searchTool.execute("id", { query: "2222" }, undefined, undefined, undefined);
+		expect(result.content[0].text).toContain("port 2222 for SSH");
+	});
+
+	it("memory_add throws on missing required params", async () => {
+		const tools = createMemoryTools(dir, { maxLines: 200, maxBytes: 25600 });
+		const addTool = tools.find((t) => t.name === "memory_add")!;
+		await expect(
+			addTool.execute("id", { content: "x" }, undefined, undefined, undefined),
+		).rejects.toThrow("topic is required");
+	});
 });
