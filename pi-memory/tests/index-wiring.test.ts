@@ -180,7 +180,6 @@ describe("index wiring (integration)", () => {
 			hasUI: false,
 			modelRegistry: {},
 			model: undefined,
-			sessionManager: { getHeader: () => ({ id: "main", parentSession: undefined, cwd: tmpDir, timestamp: "" }) },
 		};
 		const result = await handlers["before_agent_start"][0](mainEvent, mainCtx as any);
 
@@ -197,7 +196,7 @@ describe("index wiring (integration)", () => {
 		expect(result?.systemPrompt).toContain("# Memory Index");
 	});
 
-	it("skips auto-surfacing for subsessions (parentSession set in header)", async () => {
+	it("skips auto-surfacing for subagents (has <active_agent> tag in systemPrompt)", async () => {
 		const { pi, handlers } = createFakePi();
 
 		memoryFactory(pi as any);
@@ -209,23 +208,22 @@ describe("index wiring (integration)", () => {
 			{ filename: "ssh.md", name: "SSH", description: "ssh config", type: "project", mtimeMs: 100 },
 		]);
 
-		// Subsession: header has parentSession set
-		const subsessionCtx = {
+		// Subagent: systemPrompt contains pi-subagents' <active_agent> marker
+		const subagentCtx = {
 			cwd: tmpDir,
 			hasUI: false,
 			modelRegistry: {},
 			model: undefined,
-			sessionManager: { getHeader: () => ({ id: "child", parentSession: "parent-123", cwd: tmpDir, timestamp: "" }) },
 		};
-		const subsessionEvent = {
+		const subagentEvent = {
 			prompt: "how do I debug SSH?",
-			systemPrompt: "Subagent system prompt",
+			systemPrompt: "Normal system prompt\n\n<active_agent name=\"general-purpose\"/>\n\n# Environment\nWorking directory: /project",
 			systemPromptOptions: { cwd: tmpDir, selectedTools: ["read", "write", "edit", "ls"] },
 		};
 
-		const result = await handlers["before_agent_start"][0](subsessionEvent, subsessionCtx as any);
+		const result = await handlers["before_agent_start"][0](subagentEvent, subagentCtx as any);
 
-		// Auto-surfacing must NOT run for subsessions
+		// Auto-surfacing must NOT run for subagents
 		expect(scanTopicsMock).not.toHaveBeenCalled();
 		expect(runSideQueryMock).not.toHaveBeenCalled();
 		// MEMORY.md index injection still happens
