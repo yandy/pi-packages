@@ -112,7 +112,7 @@ export async function runHeadlessAgent(opts: HeadlessAgentOpts): Promise<string>
 		} else {
 			await promptPromise;
 		}
-		return text;
+		return text || (session.getLastAssistantText() ?? "");
 	} finally {
 		opts.signal?.removeEventListener("abort", onAbort);
 		unsubscribe();

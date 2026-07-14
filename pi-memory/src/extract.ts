@@ -89,6 +89,7 @@ export async function runExtract(opts: RunExtractOpts): Promise<void> {
 		parentModel: opts.parentModel,
 		thinkLevel: opts.thinkLevel,
 		maxTurns: 5,
+		timeoutMs: 120_000,
 	}).catch(() => {
 		/* silently ignore extract errors */
 	});

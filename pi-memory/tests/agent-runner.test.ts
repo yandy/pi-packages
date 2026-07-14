@@ -33,6 +33,7 @@ mocks.createAgentSessionMock.mockResolvedValue({
 		abort: mocks.abortMock,
 		steer: mocks.steerMock,
 		dispose: mocks.disposeMock,
+		getLastAssistantText: vi.fn().mockReturnValue(""),
 		getActiveToolNames: () => ["read", "write", "edit", "ls"],
 		setActiveToolsByName: vi.fn(),
 	},

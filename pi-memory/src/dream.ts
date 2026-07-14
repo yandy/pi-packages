@@ -69,5 +69,6 @@ export async function runDream(opts: RunDreamOpts): Promise<string> {
 		parentModel: opts.parentModel,
 		thinkLevel: opts.thinkLevel,
 		maxTurns: undefined,
+		timeoutMs: 600_000,
 	});
 }
