@@ -50,7 +50,7 @@ pi-memory/src/
   ├── config.ts          【改】三处 model 从 `string` 改为 `string | undefined`，去掉 "auto" 默认值
   └── ...其他不变
 
-pi-memory/index.ts       【改写】删除 ensureAgentTypes()、删除 isSubagent 检测、传 ctx.modelRegistry/model、去 setTimeout(0)
+pi-memory/index.ts       【改写】删除 ensureAgentTypes()、isSubagent 检测改用 parentSession、传 ctx.modelRegistry/model、去 setTimeout(0)
 pi-memory/package.json   【改】peerDependencies 移除 @yandy0725/pi-subagents
 ```
 
@@ -241,7 +241,7 @@ export async function runSideQuery(
 
 - 删除 `ensureAgentTypes()` 调用和 import
 - **`before_agent_start`**：
-  - `isSubagent` 检测改为正向匹配：`event.systemPrompt.includes("<active_agent")`（pi-subagents 在所有子 agent 系统提示中注入 `<active_agent name="..."/>` 标签，可靠且不依赖工具名）
+  - `isSubagent` 检测改为 `ctx.sessionManager.getHeader()?.parentSession`（pi-subagents 创建子 session 时在 SessionHeader 中设置 parentSession，结构化属性比 prompt 字符串匹配更可靠）
   - 传 `ctx.modelRegistry` + `ctx.model` + `config.autoSurfacing.model` + `config.autoSurfacing.thinkLevel` + `memoryDir` 给 `runSideQuery`
 - **`agent_end`**：传 `ctx.modelRegistry` + `ctx.model` 给 `runExtract`（fire-and-forget 不阻塞）
 - **`session_start` nudge dream**：去掉 `setTimeout(0)`（不再需等 pi-subagents 的 session_start），直接 fire-and-forget：
@@ -352,7 +352,7 @@ runDream({
 - `src/agent-types.ts`（整文件）
 - `package.json` peerDependencies 的 `@yandy0725/pi-subagents`
 - 所有 `import ... from "@yandy0725/pi-subagents"`
-- `index.ts` 的 `isSubagent` 检测逻辑（改为正向检测 `event.systemPrompt.includes("<active_agent")`，不再依赖工具名 `"subagent"` 的缺失）
+- `index.ts` 的 `isSubagent` 检测逻辑（改为正向检测 `ctx.sessionManager.getHeader()?.parentSession`，不再依赖工具名 `"subagent"` 的缺失）
 - `inject.ts` 的 `keywordMatch` 函数
 - `dream.ts` 的 `signal` / `events` / 事件订阅逻辑
 - `session_start` nudge 的 `setTimeout(callback, 0)`
@@ -363,7 +363,7 @@ runDream({
 
 1. ✅ extract 的 disposer 丢弃 → runner 统一 `finally dispose`
 2. ✅ WorkspaceProvider 单例冲突 → 无 WorkspaceProvider 概念
-3. ✅ isSubagent 检测依赖 "subagent" 工具 → 改为正向检测 `event.systemPrompt.includes("<active_agent")`
+3. ✅ isSubagent 检测依赖 "subagent" 工具 → 改为正向检测 `ctx.sessionManager.getHeader()?.parentSession`
 4. ✅ memory-agent.md 文件约定 → 内嵌 TOOLS 常量
 5. ✅ sideQuery 的 foreground/bypassQueue → 无队列概念，自然简化
 6. ✅ session_start 的 setTimeout(0)（为等 pi-subagents）→ 直接 fire-and-forget
