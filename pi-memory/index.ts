@@ -2,7 +2,6 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { ensureAgentTypes } from "./src/agent-types";
 import { loadConfig, type MemoryConfig } from "./src/config";
 import { runDream } from "./src/dream";
 import { runExtract } from "./src/extract";
@@ -18,9 +17,6 @@ import { createMemoryTool } from "./src/memory-tool";
 import { readDreamMeta, shouldNudge, writeDreamMeta } from "./src/nudge";
 import { resolveMemoryDir } from "./src/paths";
 import { searchSessions } from "./src/session-search";
-
-// Register custom agent type on load (zero setup, auto-fallback on first session).
-ensureAgentTypes();
 
 export default function (pi: ExtensionAPI) {
 	let memoryDir: string | null = null;
