@@ -208,25 +208,57 @@ cd /home/yandy/workspace/pri/pi-packages && git add pi-memory/tests/config.test.
 - Consumes: `SessionPersistenceConfig` from `./config`
 - Produces: 更新后的 `HeadlessAgentOpts`（新增 `sessionPersistence` 字段）
 
-- [ ] **Step 1: 更新 agent-runner mock，新增 persistence 测试（RED）**
+- [ ] **Step 1: 更新 agent-runner mock + 新增 persistence 测试（RED）**
 
-在 `tests/agent-runner.test.ts` 的 `vi.mock` 中，给 `SessionManager` mock 新增 `create` 方法：
+**1a. 将 SessionManager mock 移入 hoisted mocks**（替换现有 mock，使 inMemory/create 可以在 beforeEach 中清除）：
 
 ```ts
-// 将:
-// SessionManager: { inMemory: vi.fn().mockReturnValue({ getSessionId: () => "s1" }) },
-// 替换为:
+// 在 vi.hoisted() 中新增 inMemoryMock 和 createMock
+const mocks = vi.hoisted(() => ({
+	promptMock: vi.fn(),
+	abortMock: vi.fn(),
+	steerMock: vi.fn(),
+	disposeMock: vi.fn(),
+	subscribeMock: vi.fn(),
+	createAgentSessionMock: vi.fn(),
+	inMemoryMock: vi.fn().mockReturnValue({ getSessionId: () => "s1" }),
+	createSessionMock: vi.fn().mockReturnValue({ getSessionId: () => "s2" }),
+}));
+
+// vi.mock 中引用 hoisted mocks
+vi.mock("@earendil-works/pi-coding-agent", () => ({
+	createAgentSession: mocks.createAgentSessionMock,
+	DefaultResourceLoader: vi.fn().mockImplementation(() => ({
+		reload: vi.fn().mockResolvedValue(undefined),
+	})),
 	SessionManager: {
-		inMemory: vi.fn().mockReturnValue({ getSessionId: () => "s1" }),
-		create: vi.fn().mockReturnValue({ getSessionId: () => "s2" }),
+		inMemory: mocks.inMemoryMock,
+		create: mocks.createSessionMock,
 	},
+	SettingsManager: { inMemory: vi.fn().mockReturnValue({}) },
+	getAgentDir: vi.fn().mockReturnValue("/home/fake/.pi/agent"),
+}));
+
+// 解构 mocks（在已有解构中加入）
+const { promptMock, abortMock, steerMock, disposeMock, subscribeMock, createAgentSessionMock, inMemoryMock, createSessionMock } = mocks;
+
+// beforeEach 中新增清除
+beforeEach(() => {
+	promptMock.mockClear();
+	abortMock.mockClear();
+	steerMock.mockClear();
+	disposeMock.mockClear();
+	subscribeMock.mockClear();
+	createAgentSessionMock.mockClear();
+	inMemoryMock.mockClear();
+	createSessionMock.mockClear();
+});
 ```
 
-在 describe 块末尾（最后一个 `it` 之后）新增测试：
+**1b. 在 describe 块末尾新增 persistence 测试：**
 
 ```ts
 	it("uses SessionManager.create when sessionPersistence.enabled is true", async () => {
-		const { SessionManager } = await import("@earendil-works/pi-coding-agent");
 		subscribeMock.mockImplementation((listener: any) => {
 			queueMicrotask(() => {
 				listener({ type: "message_end", message: {} });
@@ -244,12 +276,11 @@ cd /home/yandy/workspace/pri/pi-packages && git add pi-memory/tests/config.test.
 			sessionPersistence: { enabled: true },
 		});
 
-		expect(SessionManager.create).toHaveBeenCalledWith("/mem", "/mem/sessions");
-		expect(SessionManager.inMemory).not.toHaveBeenCalled();
+		expect(createSessionMock).toHaveBeenCalledWith("/mem", "/mem/sessions");
+		expect(inMemoryMock).not.toHaveBeenCalled();
 	});
 
 	it("uses custom sessionDir when sessionPersistence.sessionDir is set", async () => {
-		const { SessionManager } = await import("@earendil-works/pi-coding-agent");
 		subscribeMock.mockImplementation((listener: any) => {
 			queueMicrotask(() => {
 				listener({ type: "message_end", message: {} });
@@ -267,7 +298,8 @@ cd /home/yandy/workspace/pri/pi-packages && git add pi-memory/tests/config.test.
 			sessionPersistence: { enabled: true, sessionDir: "/custom/sessions" },
 		});
 
-		expect(SessionManager.create).toHaveBeenCalledWith("/mem", "/custom/sessions");
+		expect(createSessionMock).toHaveBeenCalledWith("/mem", "/custom/sessions");
+		expect(inMemoryMock).not.toHaveBeenCalled();
 	});
 ```
 
@@ -356,21 +388,20 @@ cd /home/yandy/workspace/pri/pi-packages && git add pi-memory/tests/agent-runner
 - Consumes: `SessionPersistenceConfig` from `./config`
 - Produces: 更新后的 `RunDreamOpts`, `RunExtractOpts`, `runSideQuery` 签名，index.ts 的 resolveDefault + call site 连线
 
-- [ ] **Step 1: 更新 dream.test.ts，验证 sessionPersistence 透传（RED）**
+- [ ] **Step 1: 更新 dream.test.ts + extract.test.ts，验证 sessionPersistence 透传（RED）**
 
-查看 dream.test.ts 中 runHeadlessAgent 的 mock 或 spy，在已有测试后新增：
+**dream.test.ts** — 在 `describe("runDream", ...)` 块末尾新增（直接使用已有的 `runHeadlessAgentMock`）：
 
 ```ts
 	it("passes sessionPersistence through to runHeadlessAgent", async () => {
-		const { runHeadlessAgent } = await import("../src/agent-runner");
+		runHeadlessAgentMock.mockResolvedValueOnce("ok");
 		await runDream({
-			model: undefined,
 			thinkLevel: "high",
-			memoryDir: "/mem",
+			memoryDir: "/mem/x",
 			modelRegistry: {} as any,
 			sessionPersistence: { enabled: true, sessionDir: "/custom" },
 		});
-		expect(runHeadlessAgent).toHaveBeenCalledWith(
+		expect(runHeadlessAgentMock).toHaveBeenCalledWith(
 			expect.objectContaining({
 				sessionPersistence: { enabled: true, sessionDir: "/custom" },
 			}),
@@ -378,20 +409,20 @@ cd /home/yandy/workspace/pri/pi-packages && git add pi-memory/tests/agent-runner
 	});
 ```
 
-同理在 extract.test.ts 中新增类似测试：
+**extract.test.ts** — 在 `describe("runExtract", ...)` 块末尾新增（直接使用已有的 `runHeadlessAgentMock`，注意 `runExtract` 是 fire-and-forget，不需要 `await`）：
 
 ```ts
-	it("passes sessionPersistence through to runHeadlessAgent", async () => {
-		const { runHeadlessAgent } = await import("../src/agent-runner");
-		await runExtract({
-			memoryDir: "/mem",
+	it("passes sessionPersistence through to runHeadlessAgent", () => {
+		runHeadlessAgentMock.mockClear();
+		runExtract({
 			thinkLevel: "high",
+			memoryDir: "/mem/x",
 			messages: [{ role: "user", content: "hi" }],
 			maxContextTokens: 1000,
 			modelRegistry: {} as any,
 			sessionPersistence: { enabled: true },
 		});
-		expect(runHeadlessAgent).toHaveBeenCalledWith(
+		expect(runHeadlessAgentMock).toHaveBeenCalledWith(
 			expect.objectContaining({
 				sessionPersistence: { enabled: true },
 			}),
@@ -405,7 +436,7 @@ cd /home/yandy/workspace/pri/pi-packages && git add pi-memory/tests/agent-runner
 cd /home/yandy/workspace/pri/pi-packages/pi-memory && npx vitest run tests/dream.test.ts tests/extract.test.ts 2>&1 | tail -20
 ```
 
-Expected: 新测试 FAIL——`RunDreamOpts` / `RunExtractOpts` 尚无 `sessionPersistence` 字段。
+Expected: 新测试 FAIL——TypeScript 编译报错，`RunDreamOpts` / `RunExtractOpts` 尚无 `sessionPersistence` 字段。
 
 - [ ] **Step 3: 实现 dream.ts / extract.ts / inject.ts 透传 + index.ts 连线（GREEN）**
 
