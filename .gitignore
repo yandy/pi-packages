@@ -147,3 +147,7 @@ vite.config.ts.timestamp-*
 
 # superpowers reference materials (external project clones, not part of this repo)
 .superpowers
+
+# superpowers plans are scratch, not committed
+docs/superpowers/plans/
+pi-memory/docs/superpowers/plans/
