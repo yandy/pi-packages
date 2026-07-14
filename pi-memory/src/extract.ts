@@ -1,5 +1,5 @@
 import type { Model } from "@earendil-works/pi-ai";
-import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import type { ModelRegistry, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { runHeadlessAgent } from "./agent-runner";
 import type { ThinkLevel } from "./config";
 
@@ -11,9 +11,10 @@ export interface RunExtractOpts {
 	maxContextTokens: number;
 	modelRegistry: ModelRegistry;
 	parentModel?: Model<any>;
+	customTools?: ToolDefinition[];
 }
 
-/** Build extraction task prompt. (unchanged) */
+/** Build extraction task prompt using memory tools instead of raw file I/O. */
 export function buildExtractTask(
 	memoryDir: string,
 	messages: Array<{ role: string; content: string }>,
@@ -29,25 +30,16 @@ export function buildExtractTask(
 	const truncatedAssistant = assistantText.slice(0, maxChars / 2);
 
 	return [
-		`You are a memory extraction agent. Your cwd is the memory directory at ${memoryDir}.`,
+		`You are a memory extraction agent. Your working directory is the memory directory at ${memoryDir}.`,
 		"",
-		"Analyze the conversation snippet below. If you find valuable learnings, write them to topic files in this directory using ONLY file read/write/edit tools. Do NOT use bash, web search, or any other tools.",
-		"The memory directory contains topic files with this frontmatter format:",
+		"Analyze the conversation snippet below. If you find valuable learnings, persist them using the memory tools.",
 		"",
-		"```yaml",
-		"---",
-		"name: Topic Name",
-		"description: Brief summary for relevance matching",
-		"type: feedback  # one of: user, feedback, project, reference",
-		"updated: 2026-07-13",
-		"---",
+		"You have three tools available:",
+		"- memory_read: read existing topic files or entries to check for related memories",
+		"- memory_search: search across all memory files for relevant existing entries",
+		"- memory_add: persist a new memory entry to a topic file (creates the topic if new)",
 		"",
-		"## Entry Title",
-		"Entry content here.",
-		"```",
-		"",
-		"And MEMORY.md index:",
-		"- [Name](file.md) — one-line hook summary",
+		"Do NOT use file read/write/edit/ls tools. Only use memory_add, memory_read, and memory_search.",
 		"",
 		"Worth remembering:",
 		"- User preferences, coding style choices, tooling preferences",
@@ -63,12 +55,12 @@ export function buildExtractTask(
 		"- Git history or recent changes",
 		"",
 		"When writing memories:",
+		"- Use memory_read first to check for existing topic files on related subjects",
+		"- Use memory_search to find overlapping or related memories before adding",
 		"- Use descriptive, self-contained entry titles (only index lines are injected into future sessions)",
-		"- Choose the appropriate type: user, feedback, project, reference",
-		'- Default type is "feedback"',
+		'- Choose the appropriate type: user, feedback, project, reference (default "feedback")',
 		"- Be concise but complete",
 		"- If unsure, do NOT write anything",
-		"- Use the write/edit tools to directly modify topic files and MEMORY.md",
 		"",
 		"=== Conversation ===",
 		`User: ${truncatedUser}`,
@@ -90,6 +82,8 @@ export async function runExtract(opts: RunExtractOpts): Promise<void> {
 		thinkLevel: opts.thinkLevel,
 		maxTurns: 5,
 		timeoutMs: 120_000,
+		tools: [],
+		customTools: opts.customTools ?? [],
 	}).catch(() => {
 		/* silently ignore extract errors */
 	});
