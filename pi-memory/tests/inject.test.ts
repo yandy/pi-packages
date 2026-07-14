@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { loadIndexSnapshot, buildInjection, scanTopics, buildSurfacingPrompt, injectSurfacedContent, runSideQuery } from "../src/inject";
+import { loadIndexSnapshot, buildInjection, scanTopics, injectSurfacedContent, runSideQuery } from "../src/inject";
 
 const { runHeadlessAgentMock } = vi.hoisted(() => ({
 	runHeadlessAgentMock: vi.fn(),
@@ -86,29 +86,6 @@ describe("scanTopics", () => {
 	});
 });
 
-describe("buildSurfacingPrompt", () => {
-	it("builds prompt with manifest and user message", () => {
-		const manifest = [
-			{ filename: "a.md", name: "Alpha", description: "first topic", type: "feedback" as const, mtimeMs: 100 },
-			{ filename: "b.md", name: "Beta", description: "second topic", type: "project" as const, mtimeMs: 200 },
-		];
-		const prompt = buildSurfacingPrompt(manifest, "how do I debug SSH?", new Set(["b.md"]));
-		expect(prompt).toContain("[feedback] a.md — first topic");
-		expect(prompt).toContain("[project] b.md — second topic");
-		expect(prompt).toContain("how do I debug SSH?");
-		expect(prompt).toContain("already injected");
-	});
-
-	it("omits already-injected note when none injected", () => {
-		const manifest = [
-			{ filename: "a.md", name: "Alpha", description: "first topic", type: "feedback" as const, mtimeMs: 100 },
-		];
-		const prompt = buildSurfacingPrompt(manifest, "hello", new Set());
-		expect(prompt).toContain("[feedback] a.md — first topic");
-		expect(prompt).not.toContain("already injected");
-	});
-});
-
 describe("runSideQuery", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
@@ -120,8 +97,8 @@ describe("runSideQuery", () => {
 			{ filename: "a.md", name: "A", description: "desc", type: "feedback" as const, mtimeMs: 100 },
 		];
 		const result = await runSideQuery(
-			"prompt without already-injected", manifest, 5, "off",
-			undefined, {} as any, {} as any, "/mem", new Set(),
+			manifest, "how do I debug?", new Set(), 5, "off",
+			undefined, {} as any, {} as any, "/mem",
 		);
 		expect(runHeadlessAgentMock).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -140,8 +117,8 @@ describe("runSideQuery", () => {
 			{ filename: "a.md", name: "A", description: "desc", type: "feedback" as const, mtimeMs: 100 },
 		];
 		await runSideQuery(
-			"prompt", manifest, 5, "off",
-			"deepseek/deepseek-v4-flash", {} as any, {} as any, "/mem", new Set(),
+			manifest, "some query", new Set(), 5, "off",
+			"deepseek/deepseek-v4-flash", {} as any, {} as any, "/mem",
 		);
 		expect(runHeadlessAgentMock.mock.calls[0][0]).toMatchObject({
 			model: "deepseek/deepseek-v4-flash",
@@ -154,8 +131,8 @@ describe("runSideQuery", () => {
 			{ filename: "debugging.md", name: "D", description: "SSH tips", type: "project" as const, mtimeMs: 100 },
 		];
 		const result = await runSideQuery(
-			"I need to debug SSH", manifest, 5, "off",
-			undefined, {} as any, {} as any, "/mem", new Set(),
+			manifest, "I need to debug SSH", new Set(), 5, "off",
+			undefined, {} as any, {} as any, "/mem",
 		);
 		expect(result).toEqual([]);
 	});
@@ -166,16 +143,16 @@ describe("runSideQuery", () => {
 			{ filename: "a.md", name: "A", description: "desc", type: "feedback" as const, mtimeMs: 100 },
 		];
 		const result = await runSideQuery(
-			"prompt", manifest, 5, "off",
-			undefined, {} as any, {} as any, "/mem", new Set(),
+			manifest, "some query", new Set(), 5, "off",
+			undefined, {} as any, {} as any, "/mem",
 		);
 		expect(result).toEqual([]);
 	});
 
 	it("returns [] when no candidates remain", async () => {
 		const result = await runSideQuery(
-			"some prompt", [], 5, "off",
-			undefined, {} as any, {} as any, "/mem", new Set(),
+			[], "some prompt", new Set(), 5, "off",
+			undefined, {} as any, {} as any, "/mem",
 		);
 		expect(result).toEqual([]);
 		expect(runHeadlessAgentMock).not.toHaveBeenCalled();
@@ -187,8 +164,8 @@ describe("runSideQuery", () => {
 			{ filename: "a.md", name: "A", description: "desc", type: "feedback" as const, mtimeMs: 100 },
 		];
 		const result = await runSideQuery(
-			"prompt", manifest, 5, "off",
-			undefined, {} as any, {} as any, "/mem", new Set(["a.md"]),
+			manifest, "some query", new Set(["a.md"]), 5, "off",
+			undefined, {} as any, {} as any, "/mem",
 		);
 		expect(result).toEqual([]);
 		expect(runHeadlessAgentMock).not.toHaveBeenCalled();
