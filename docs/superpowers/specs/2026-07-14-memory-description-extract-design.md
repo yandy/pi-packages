@@ -98,6 +98,9 @@ export interface HeadlessAgentOpts {
 
 In `createAgentSession`:
 ```ts
+// NOTE: SDK default tools are ["read", "bash", "edit", "write"].
+// We override with FILE_IO_TOOLS = ["read", "write", "edit", "ls"]
+// because memory agents must not execute commands.
 const created = await createAgentSession({
   tools: opts.tools ?? [...FILE_IO_TOOLS],
   customTools: opts.customTools ?? [],
