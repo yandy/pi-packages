@@ -48,5 +48,6 @@ export function resolveModel(modelStr: string, registry: ModelRegistry): Model<a
   if (scored.length === 0) return undefined;
 
   const best = scored[0].model;
-  return best as Model<any>;
+  const found = registry.find(best.provider, best.id);
+  return (found as Model<any>) ?? undefined;
 }

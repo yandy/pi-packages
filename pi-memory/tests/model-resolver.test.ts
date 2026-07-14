@@ -28,7 +28,7 @@ describe("resolveModel", () => {
   it("fuzzy match by name fragment", () => {
     const model = { provider: "deepseek", id: "deepseek-v4-flash" };
     const registry = {
-      find: vi.fn().mockReturnValue(undefined),
+      find: vi.fn().mockReturnValue({ ...model }),
       getAvailable: vi.fn().mockReturnValue([
         { provider: "deepseek", id: "deepseek-v4-flash" },
         { provider: "openai", id: "gpt-4" },
@@ -50,7 +50,7 @@ describe("resolveModel", () => {
   it("no slash in query → fuzzy match only", () => {
     const model = { provider: "anthropic", id: "claude-sonnet-4-5" };
     const registry = {
-      find: vi.fn(),
+      find: vi.fn().mockReturnValue({ ...model }),
       getAvailable: vi.fn().mockReturnValue([
         { provider: "anthropic", id: "claude-sonnet-4-5" },
       ]),
