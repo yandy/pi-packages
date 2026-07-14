@@ -106,6 +106,7 @@ describe("runSideQuery", () => {
 				thinkLevel: "off",
 				maxTurns: 1,
 				timeoutMs: 30_000,
+				tools: [],
 			}),
 		);
 		expect(result).toEqual(["a.md"]);
@@ -122,6 +123,7 @@ describe("runSideQuery", () => {
 		);
 		expect(runHeadlessAgentMock.mock.calls[0][0]).toMatchObject({
 			model: "deepseek/deepseek-v4-flash",
+			tools: [],
 		});
 	});
 
