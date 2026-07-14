@@ -148,7 +148,8 @@ const MEMORY_AGENT_TOOLS = ["read", "write", "edit", "ls"] as const;
 | cwd | memoryDir | memoryDir | memoryDir |
 | model | config（未配置 = 继承父） | config（未配置 = 继承父）| config（未配置 = 继承父）|
 | thinkLevel | config（默认 high）| config（默认 high）| config（默认 off）|
-| maxTurns | 5 | ∞ | 1 |
+| maxTurns | 5 | ∞（无限制）| 1 |
+| timeoutMs | 120_000 (2min) | 600_000 (10min) | 30_000 (30s) |
 | 等待方式 | fire-and-forget | fire-and-forget | await + 超时 |
 | 超时/失败处理 | 静默 catch | notify 错误 | 返回 [] |
 
@@ -167,6 +168,7 @@ export async function runExtract(opts: RunExtractOpts): Promise<void> {
     parentModel: opts.parentModel,
     thinkLevel: opts.thinkLevel,
     maxTurns: 5,
+    timeoutMs: 120_000,
   }).catch(() => { /* 静默，当前行为保留 */ });
 }
 ```
@@ -176,7 +178,7 @@ export async function runExtract(opts: RunExtractOpts): Promise<void> {
 ### 4.3 dream.ts（fire-and-forget）
 
 ```typescript
-export async function runDream(opts: RunDreamOpts): Promise<void> {
+export async function runDream(opts: RunDreamOpts): Promise<string> {
   const task = buildDreamTask(opts.memoryDir, 200);
   // 返回 Promise，调用方挂 .then/.catch 处理通知
   return runHeadlessAgent({
@@ -186,7 +188,8 @@ export async function runDream(opts: RunDreamOpts): Promise<void> {
     model: opts.model,
     parentModel: opts.parentModel,
     thinkLevel: opts.thinkLevel,
-    maxTurns: undefined, // 无限（软限制 50，硬限制 53）
+    maxTurns: undefined,
+    timeoutMs: 600_000,
   });
 }
 ```
