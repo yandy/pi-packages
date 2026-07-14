@@ -7,6 +7,7 @@ import {
   hasEntries,
   parseEntries,
   parseFrontmatter,
+  replaceFrontmatterField,
   ALLOWED_TYPES,
   type TopicMeta,
 } from "../src/topic-file";
@@ -180,5 +181,45 @@ describe("parseEntries", () => {
     const entries = parseEntries(raw);
     expect(entries).toHaveLength(2);
     expect(entries[0].content).toBe("line 1\n\nline 2\n\nmore");
+  });
+});
+
+describe("replaceFrontmatterField", () => {
+  const raw = [
+    "---",
+    "name: Debugging",
+    "description: old description",
+    "type: feedback",
+    "updated: 2026-07-03",
+    "---",
+    "",
+    "## Entry",
+    "body",
+  ].join("\n");
+
+  it("replaces an existing field value", () => {
+    const result = replaceFrontmatterField(raw, "description", "new description");
+    expect(result).toContain("description: new description");
+    expect(result).not.toContain("description: old description");
+    expect(result).toContain("name: Debugging");
+    expect(result).toContain("## Entry");
+  });
+
+  it("is a no-op when the field is not found", () => {
+    const result = replaceFrontmatterField(raw, "nonexistent", "value");
+    expect(result).toBe(raw);
+  });
+
+  it("handles frontmatter with only one field", () => {
+    const minimal = "---\ndescription: only\n---\n\n## Entry\nbody";
+    const result = replaceFrontmatterField(minimal, "description", "replaced");
+    expect(result).toContain("description: replaced");
+    expect(result).not.toContain("description: only");
+  });
+
+  it("returns input unchanged when no frontmatter exists", () => {
+    const noFm = "## Just a heading\ncontent";
+    const result = replaceFrontmatterField(noFm, "description", "value");
+    expect(result).toBe(noFm);
   });
 });
