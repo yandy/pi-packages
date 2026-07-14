@@ -1,4 +1,5 @@
 import type { Model } from "@earendil-works/pi-ai";
+import { join } from "node:path";
 import {
 	type AgentSession,
 	type AgentSessionEvent,
@@ -22,13 +23,16 @@ export interface HeadlessAgentOpts {
 	maxTurns?: number;
 	signal?: AbortSignal;
 	timeoutMs?: number;
+	/** Session persistence config. When enabled, sessions are written to disk. */
+	sessionPersistence?: import("./config").SessionPersistenceConfig;
 }
 
 const GRACE_TURNS = 1;
 
 /**
- * Run a headless memory-agent sub-session: create an in-memory, resource-free
- * session, drive the turn loop, collect the assistant response text, and dispose.
+ * Run a headless memory-agent sub-session: create a session (in-memory by default,
+ * persisted to disk when sessionPersistence.enabled is true), drive the turn loop,
+ * collect the assistant response text, and dispose.
  *
  * Does NOT call bindExtensions — no extension hooks fire in the sub-session,
  * so pi-memory's own before_agent_start cannot recurse.
@@ -60,14 +64,21 @@ export async function runHeadlessAgent(opts: HeadlessAgentOpts): Promise<string>
 	};
 	opts.signal?.addEventListener("abort", onAbort, { once: true });
 
-	// 4. Create the in-memory session (no bindExtensions)
+	// 4. Create session (in-memory or persisted based on config)
+	const sessionManager = opts.sessionPersistence?.enabled
+		? SessionManager.create(
+				opts.cwd,
+				opts.sessionPersistence.sessionDir ?? join(opts.cwd, "sessions"),
+			)
+		: SessionManager.inMemory(opts.cwd);
+
 	const created = await createAgentSession({
 		cwd: opts.cwd,
 		tools: [...MEMORY_AGENT_TOOLS],
 		model: resolvedModel as any,
 		thinkingLevel: opts.thinkLevel as any,
 		modelRegistry: opts.modelRegistry,
-		sessionManager: SessionManager.inMemory(opts.cwd),
+		sessionManager,
 		settingsManager,
 		resourceLoader: loader,
 	});
