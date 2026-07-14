@@ -128,6 +128,6 @@ export async function runHeadlessAgent(opts: HeadlessAgentOpts): Promise<string>
   } finally {
     clearTimeout(timeout);
     unsub();
-    session.dispose().catch(() => {});
+    session.dispose();
   }
 }
