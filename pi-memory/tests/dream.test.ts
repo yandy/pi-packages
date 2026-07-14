@@ -1,6 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 import { buildDreamTask, runDream } from "../src/dream";
 
+const { runHeadlessAgentMock } = vi.hoisted(() => ({
+	runHeadlessAgentMock: vi.fn(),
+}));
+vi.mock("../src/agent-runner", () => ({
+	runHeadlessAgent: runHeadlessAgentMock,
+}));
+
 describe("buildDreamTask", () => {
   it("includes memory dir + consolidation instructions + line limit + rules from DREAM_SYSTEM_PROMPT", () => {
     const task = buildDreamTask("/mem/abc123", 200);
@@ -29,144 +36,63 @@ describe("buildDreamTask", () => {
 });
 
 describe("runDream", () => {
-  it("spawns memory-agent subagent and resolves with result on completion", async () => {
-    const completedHandlers: Array<(data: any) => void> = [];
-    const failedHandlers: Array<(data: any) => void> = [];
+	const fakeRegistry = { find: vi.fn(), getAvailable: vi.fn().mockReturnValue([]) };
 
-    const fakeService = {
-      spawn: vi.fn().mockReturnValue("agent-dream-1"),
-      getRecord: vi.fn().mockReturnValue({ result: "merged 3 entries" }),
-      registerWorkspaceProvider: vi.fn().mockReturnValue(vi.fn()),
-      abort: vi.fn(),
-    };
-    const events = {
-      on: vi.fn((channel: string, handler: (data: any) => void) => {
-        if (channel === "subagents:completed") completedHandlers.push(handler);
-        if (channel === "subagents:failed") failedHandlers.push(handler);
-        return () => {}; // unsubscribe stub
-      }),
-    };
+	it("calls runHeadlessAgent with correct params and returns result", async () => {
+		runHeadlessAgentMock.mockResolvedValue("merged 3 entries");
 
-    const promise = runDream({
-      model: "auto",
-      thinkLevel: "high",
-      memoryDir: "/mem/x",
-      service: fakeService as any,
-      events: events as any,
-    });
+		const result = await runDream({
+			model: undefined,
+			thinkLevel: "high",
+			memoryDir: "/mem/x",
+			modelRegistry: fakeRegistry as any,
+		});
 
-    // Verify spawn called
-    expect(fakeService.registerWorkspaceProvider).toHaveBeenCalled();
-    expect(fakeService.spawn).toHaveBeenCalledWith(
-      "memory-agent",
-      expect.stringContaining("/mem/x"),
-      { thinkingLevel: "high" },
-    );
+		expect(runHeadlessAgentMock).toHaveBeenCalledWith({
+			task: expect.stringContaining("/mem/x"),
+			cwd: "/mem/x",
+			modelRegistry: fakeRegistry,
+			model: undefined,
+			parentModel: undefined,
+			thinkLevel: "high",
+			maxTurns: undefined,
+			timeoutMs: 600_000,
+		});
+		expect(result).toBe("merged 3 entries");
+	});
 
-    // Simulate completed event
-    completedHandlers[0]({ id: "agent-dream-1" });
+	it("rejects when runHeadlessAgent throws", async () => {
+		runHeadlessAgentMock.mockRejectedValue(new Error("something broke"));
 
-    const summary = await promise;
-    expect(summary).toBe("merged 3 entries");
-  });
+		await expect(
+			runDream({
+				model: undefined,
+				thinkLevel: "high",
+				memoryDir: "/mem/x",
+				modelRegistry: fakeRegistry as any,
+			}),
+		).rejects.toThrow("something broke");
+	});
 
-  it("rejects when subagent fails", async () => {
-    const failedHandlers: Array<(data: any) => void> = [];
+	it("passes model and parentModel to runHeadlessAgent", async () => {
+		runHeadlessAgentMock.mockResolvedValue("done");
 
-    const fakeService = {
-      spawn: vi.fn().mockReturnValue("agent-dream-2"),
-      getRecord: vi.fn().mockReturnValue({ error: "something broke" }),
-      registerWorkspaceProvider: vi.fn().mockReturnValue(vi.fn()),
-      abort: vi.fn(),
-    };
-    const events = {
-      on: vi.fn((channel: string, handler: (data: any) => void) => {
-        if (channel === "subagents:failed") failedHandlers.push(handler);
-        return () => {};
-      }),
-    };
+		const fakeParentModel = { provider: "test", id: "test-model" };
 
-    const promise = runDream({
-      model: "auto",
-      thinkLevel: "high",
-      memoryDir: "/mem/x",
-      service: fakeService as any,
-      events: events as any,
-    });
+		await runDream({
+			model: "deepseek/deepseek-v4-flash",
+			thinkLevel: "medium",
+			memoryDir: "/mem/x",
+			modelRegistry: fakeRegistry as any,
+			parentModel: fakeParentModel as any,
+		});
 
-    // Simulate failed event
-    failedHandlers[0]({ id: "agent-dream-2", error: "something broke" });
-
-    await expect(promise).rejects.toThrow("something broke");
-  });
-
-  it("passes model to spawn when not auto", async () => {
-    const fakeService = {
-      spawn: vi.fn().mockReturnValue("agent-dream-3"),
-      getRecord: vi.fn().mockReturnValue({}),
-      registerWorkspaceProvider: vi.fn().mockReturnValue(vi.fn()),
-      abort: vi.fn(),
-    };
-    const events = {
-      on: vi.fn(() => () => {}),
-    };
-
-    // Fire completion immediately after spawn via microtask
-    setTimeout(() => {
-      const handler = (events.on as any).mock.calls.find(
-        (c: any) => c[0] === "subagents:completed"
-      )?.[1];
-      handler?.({ id: "agent-dream-3" });
-    }, 0);
-
-    await runDream({
-      model: "deepseek/deepseek-v4-flash",
-      thinkLevel: "medium",
-      memoryDir: "/mem/x",
-      service: fakeService as any,
-      events: events as any,
-    });
-
-    expect(fakeService.spawn).toHaveBeenCalledWith(
-      "memory-agent",
-      expect.any(String),
-      { model: "deepseek/deepseek-v4-flash", thinkingLevel: "medium" },
-    );
-  });
-
-  it("aborts on signal", async () => {
-    const fakeService = {
-      spawn: vi.fn().mockReturnValue("agent-dream-4"),
-      getRecord: vi.fn().mockReturnValue({}),
-      registerWorkspaceProvider: vi.fn().mockReturnValue(vi.fn()),
-      abort: vi.fn(),
-    };
-    const events = { on: vi.fn(() => () => {}) };
-    const controller = new AbortController();
-
-    const promise = runDream({
-      model: "auto",
-      thinkLevel: "high",
-      memoryDir: "/mem/x",
-      service: fakeService as any,
-      events: events as any,
-      signal: controller.signal,
-    });
-
-    controller.abort();
-    expect(fakeService.abort).toHaveBeenCalledWith("agent-dream-4");
-
-    // pi-subagents ensures events fire even for abort-while-queued
-    const handler = (events.on as any).mock.calls.find(
-      (c: any) => c[0] === "subagents:failed"
-    )?.[1];
-    handler?.({ id: "agent-dream-4", error: "aborted" });
-    await expect(promise).rejects.toThrow("aborted");
-  });
-
-  it("throws when service is undefined", async () => {
-    await expect(
-      runDream({ model: "auto", thinkLevel: "high", memoryDir: "/mem/x" } as any)
-    ).rejects.toThrow("pi-subagents not available");
-  });
+		expect(runHeadlessAgentMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				model: "deepseek/deepseek-v4-flash",
+				parentModel: fakeParentModel,
+				thinkLevel: "medium",
+			}),
+		);
+	});
 });

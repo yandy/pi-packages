@@ -130,7 +130,7 @@ export default function (pi: ExtensionAPI) {
 		};
 	});
 
-	pi.on("agent_end", async (event) => {
+	pi.on("agent_end", async (event, ctx) => {
 		if (!config?.enabled || !memoryDir) return;
 		const extractConfig = config.extractMemories;
 		if (!extractConfig?.enabled) return;
@@ -200,16 +200,17 @@ export default function (pi: ExtensionAPI) {
 			const ok = await ctx.ui.confirm("Dream", "Consolidate all memory files? This rewrites them in-place.");
 			if (!ok) return;
 			ctx.ui.setStatus("dream", "Consolidating memory...");
+			const dir = memoryDir;
 			runDream({
 				model: config.dream.model,
 				thinkLevel: config.dream.thinkLevel,
-				memoryDir,
+				memoryDir: dir,
 				modelRegistry: ctx.modelRegistry,
 				parentModel: ctx.model,
 			})
 				.then(async (summary) => {
 					const sessions = (await SessionManager.list(ctx.cwd)).length;
-					await writeDreamMeta(memoryDir, sessions);
+					await writeDreamMeta(dir, sessions);
 					ctx.ui.notify(summary, "info");
 				})
 				.catch((e: any) => ctx.ui.notify(`Dream failed: ${e.message}`, "error"))

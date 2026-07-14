@@ -9,7 +9,8 @@ describe("DEFAULT_CONFIG", () => {
 		expect(DEFAULT_CONFIG.enabled).toBe(true);
 		expect(DEFAULT_CONFIG.memIndexMaxLines).toBe(200);
 		expect(DEFAULT_CONFIG.memIndexMaxBytes).toBe(25600);
-		expect(DEFAULT_CONFIG.dream.model).toBe("auto");
+		expect(DEFAULT_CONFIG.dream.thinkLevel).toBe("high");
+		expect(DEFAULT_CONFIG.dream.model).toBeUndefined();
 		expect(DEFAULT_CONFIG.sessionSearch.maxSessions).toBe(10);
 	});
 });
@@ -78,7 +79,6 @@ describe("loadConfig", () => {
 		const cfg = await loadConfig({ cwd: "/tmp", isProjectTrusted: () => false, _globalDir: globalDir, _configDirName: ".pi" });
 		expect(cfg.autoSurfacing).toEqual({
 			enabled: true,
-			model: "auto",
 			thinkLevel: "off",
 			maxFiles: 5,
 			maxTopicBytes: 4096,
@@ -90,7 +90,6 @@ describe("loadConfig", () => {
 		const cfg = await loadConfig({ cwd: "/tmp", isProjectTrusted: () => false, _globalDir: globalDir, _configDirName: ".pi" });
 		expect(cfg.extractMemories).toEqual({
 			enabled: true,
-			model: "auto",
 			thinkLevel: "high",
 			maxContextTokens: 2000,
 		});
@@ -106,7 +105,7 @@ describe("loadConfig", () => {
 		const cfg1 = await loadConfig({ cwd: "/tmp", isProjectTrusted: () => true, _globalDir: dir, _configDirName: ".pi" });
 		expect(cfg1.autoSurfacing.enabled).toBe(false);
 		expect(cfg1.extractMemories.maxContextTokens).toBe(1000);
-		expect(cfg1.autoSurfacing.model).toBe("auto");
+		expect(cfg1.autoSurfacing.model).toBeUndefined();
 	});
 
 	it("deep-merges autoSurfacing sub-config", async () => {
@@ -117,7 +116,7 @@ describe("loadConfig", () => {
 		const cfg = await loadConfig({ cwd: pdir, isProjectTrusted: () => true, _globalDir: gdir, _configDirName: ".pi" });
 		expect(cfg.autoSurfacing.enabled).toBe(false);
 		expect(cfg.autoSurfacing.maxFiles).toBe(3);
-		expect(cfg.autoSurfacing.model).toBe("auto"); // default preserved
+		expect(cfg.autoSurfacing.model).toBeUndefined(); // model is optional, default undefined
 		await rm(gdir, { recursive: true, force: true });
 		await rm(pdir, { recursive: true, force: true });
 	});

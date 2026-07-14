@@ -19,18 +19,18 @@ vi.mock("../src/config", () => ({
 		memoryDir: MOCK_BASE,
 		memIndexMaxLines: 200,
 		memIndexMaxBytes: 25600,
-		dream: { nudgeAfterSessions: 5, nudgeAfterHours: 24, model: "auto" },
+		dream: { nudgeAfterSessions: 5, nudgeAfterHours: 24, thinkLevel: "high" },
 		sessionSearch: { maxSessions: 10, maxMatches: 5 },
 		autoSurfacing: {
 			enabled: true,
-			model: "auto",
+			thinkLevel: "off",
 			maxFiles: 5,
 			maxTopicBytes: 4096,
 			maxInjectionBytes: 20480,
 		},
 		extractMemories: {
 			enabled: false,
-			model: "auto",
+			thinkLevel: "high",
 			maxContextTokens: 2000,
 		},
 	}),
@@ -93,6 +93,8 @@ function createFakePi() {
 	};
 }
 
+const fakeModelRegistry = { find: vi.fn(), getAvailable: vi.fn().mockReturnValue([]) };
+
 describe("index wiring (integration)", () => {
 	let tmpDir: string;
 
@@ -124,7 +126,7 @@ describe("index wiring (integration)", () => {
 		expect(handlers["session_start"]).toBeDefined();
 		expect(handlers["before_agent_start"]).toBeDefined();
 
-		const fakeCtx = { cwd: tmpDir, hasUI: false, isProjectTrusted: () => true };
+		const fakeCtx = { cwd: tmpDir, hasUI: false, isProjectTrusted: () => true, modelRegistry: fakeModelRegistry };
 		await handlers["session_start"][0]({}, fakeCtx);
 
 		// Drive before_agent_start twice (no prompt → auto-surfacing skipped)
@@ -147,77 +149,58 @@ describe("index wiring (integration)", () => {
 		expect(commands["dream"]).toBeDefined();
 	});
 
-	it("skips auto-surfacing for subagents (no 'subagent' tool in selectedTools)", async () => {
+	it("skips auto-surfacing when systemPrompt has <active_agent name= marker", async () => {
 		const { pi, handlers } = createFakePi();
 
 		memoryFactory(pi as any);
 
-		const fakeCtx = { cwd: tmpDir, hasUI: false, isProjectTrusted: () => true };
+		const fakeCtx = { cwd: tmpDir, hasUI: false, isProjectTrusted: () => true, modelRegistry: fakeModelRegistry };
 		await handlers["session_start"][0]({}, fakeCtx);
 
-		// Mock scanTopics to verify it's NOT called
 		scanTopicsMock.mockResolvedValue([]);
 
-		// Simulate a subagent event: pi-subagents strips "subagent" from all children.
-		// Even if the subagent has bash, the absence of "subagent" identifies it.
 		const subagentEvent = {
 			prompt: "Some subagent task...",
-			systemPrompt: "Subagent system prompt",
+			systemPrompt: "Base prompt\n<active_agent name=\"general-purpose\"/>\n\n# Environment\n...",
 			systemPromptOptions: {
 				cwd: tmpDir,
-				// has bash but no "subagent" = subagent (dispatch tools stripped by pi-subagents)
-				selectedTools: ["read", "write", "edit", "ls", "bash"],
+				selectedTools: ["read", "write", "edit", "ls"],
 			},
 		};
 
-		const noUiCtx = { cwd: tmpDir, hasUI: false };
-		const result = await handlers["before_agent_start"][0](subagentEvent, noUiCtx);
-
-		// Must still return a valid result (MEMORY.md index injection)
-		expect(result?.systemPrompt).toBeDefined();
+		const result = await handlers["before_agent_start"][0](subagentEvent, fakeCtx);
 		expect(result?.systemPrompt).toContain("# Memory Index");
-
-		// Auto-surfacing must NOT run for subagents
 		expect(scanTopicsMock).not.toHaveBeenCalled();
 	});
 
-	it("runs auto-surfacing for main agents (has 'subagent' tool)", async () => {
+	it("runs auto-surfacing when systemPrompt has no <active_agent name= marker", async () => {
 		const { pi, handlers } = createFakePi();
 
 		memoryFactory(pi as any);
 
-		const fakeCtx = { cwd: tmpDir, hasUI: false, isProjectTrusted: () => true };
+		const fakeCtx = { cwd: tmpDir, hasUI: false, isProjectTrusted: () => true, modelRegistry: fakeModelRegistry };
 		await handlers["session_start"][0]({}, fakeCtx);
 
-		// Mock auto-surfacing functions
 		scanTopicsMock.mockResolvedValue([
 			{ filename: "ssh.md", name: "SSH", description: "ssh config", type: "project", mtimeMs: 100 },
 		]);
 		runSideQueryMock.mockResolvedValue(["ssh.md"]);
-		// biome-ignore lint/style/useTemplate: clear separator
 		injectSurfacedContentMock.mockResolvedValue(
 			"<relevant_memories>\n## ssh.md\nssh config\n</relevant_memories>",
 		);
 
-		// Main agent event: has "subagent" tool = can spawn subagents
 		const mainEvent = {
 			prompt: "how do I debug SSH?",
 			systemPrompt: "Normal system prompt",
 			systemPromptOptions: {
 				cwd: tmpDir,
-				selectedTools: ["read", "bash", "edit", "write", "grep", "find", "websearch", "subagent"],
+				selectedTools: ["read", "bash", "edit", "write"],
 			},
 		};
 
-		const noUiCtx2 = { cwd: tmpDir, hasUI: false };
-		const result = await handlers["before_agent_start"][0](mainEvent, noUiCtx2);
-
-		// Auto-surfacing must have run
+		const result = await handlers["before_agent_start"][0](mainEvent, fakeCtx);
 		expect(scanTopicsMock).toHaveBeenCalledTimes(1);
 		expect(runSideQueryMock).toHaveBeenCalledTimes(1);
-
-		// Result must include both injected content and MEMORY.md index
-		expect(result?.systemPrompt).toBeDefined();
 		expect(result?.systemPrompt).toContain("# Memory Index");
 	});
 

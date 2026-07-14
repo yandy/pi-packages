@@ -4,8 +4,11 @@ import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { loadIndexSnapshot, buildInjection, scanTopics, buildSurfacingPrompt, injectSurfacedContent, runSideQuery } from "../src/inject";
 
-vi.mock("@yandy0725/pi-subagents", () => ({
-	getSubagentsService: vi.fn(),
+const { runHeadlessAgentMock } = vi.hoisted(() => ({
+	runHeadlessAgentMock: vi.fn(),
+}));
+vi.mock("../src/agent-runner", () => ({
+	runHeadlessAgent: runHeadlessAgentMock,
 }));
 
 describe("loadIndexSnapshot", () => {
@@ -107,92 +110,105 @@ describe("buildSurfacingPrompt", () => {
 });
 
 describe("runSideQuery", () => {
-	it("spawns with thinkingLevel=off and maxTurns=1", async () => {
-		const { getSubagentsService } = await import("@yandy0725/pi-subagents");
+	const fakeRegistry = { find: vi.fn(), getAvailable: vi.fn().mockReturnValue([]) };
 
-		const completedHandlers: Array<(data: any) => void> = [];
-		const fakeService = {
-			spawn: vi.fn().mockReturnValue("agent-sq-1"),
-			getRecord: vi.fn().mockReturnValue({ result: '{"selected_files":["a.md"]}' }),
-			registerWorkspaceProvider: vi.fn().mockReturnValue(vi.fn()),
-		};
-		(getSubagentsService as any).mockReturnValue(fakeService);
-
-		const events = {
-			on: vi.fn((channel: string, handler: (data: any) => void) => {
-				if (channel === "subagents:completed") completedHandlers.push(handler);
-				return () => {};
-			}),
-		};
+	it("calls runHeadlessAgent with maxTurns=1, timeoutMs=30000, thinkLevel=off", async () => {
+		runHeadlessAgentMock.mockResolvedValue('{"selected_files":["a.md"]}');
 
 		const manifest = [
 			{ filename: "a.md", name: "A", description: "desc", type: "feedback" as const, mtimeMs: 100 },
 		];
 
-		const promise = runSideQuery("user query about something", manifest, 5, "off", events as any);
-
-		expect(fakeService.spawn).toHaveBeenCalledWith(
-			"memory-agent",
-			expect.any(String),
-			{ maxTurns: 1, inheritContext: false, thinkingLevel: "off", foreground: true, bypassQueue: true },
+		const result = await runSideQuery(
+			"user query about something",
+			manifest,
+			5,
+			"off",
+			undefined,
+			fakeRegistry as any,
+			undefined,
+			"/mem/x",
 		);
 
-		// Complete agent so promise resolves
-		completedHandlers[0]({ id: "agent-sq-1" });
-		await promise;
+		expect(runHeadlessAgentMock).toHaveBeenCalledWith({
+			task: expect.any(String),
+			cwd: "/mem/x",
+			modelRegistry: fakeRegistry,
+			model: undefined,
+			parentModel: undefined,
+			thinkLevel: "off",
+			maxTurns: 1,
+			timeoutMs: 30_000,
+		});
+		expect(result).toEqual(["a.md"]);
 	});
 
-	it("forwards non-default thinkLevel to spawn", async () => {
-		const { getSubagentsService } = await import("@yandy0725/pi-subagents");
-
-		const completedHandlers: Array<(data: any) => void> = [];
-		const fakeService = {
-			spawn: vi.fn().mockReturnValue("agent-sq-2"),
-			getRecord: vi.fn().mockReturnValue({ result: '{"selected_files":["a.md"]}' }),
-			registerWorkspaceProvider: vi.fn().mockReturnValue(vi.fn()),
-		};
-		(getSubagentsService as any).mockReturnValue(fakeService);
-
-		const events = {
-			on: vi.fn((channel: string, handler: (data: any) => void) => {
-				if (channel === "subagents:completed") completedHandlers.push(handler);
-				return () => {};
-			}),
-		};
+	it("forwards non-default thinkLevel and model to runHeadlessAgent", async () => {
+		runHeadlessAgentMock.mockResolvedValue('{"selected_files":["a.md"]}');
 
 		const manifest = [
 			{ filename: "a.md", name: "A", description: "desc", type: "feedback" as const, mtimeMs: 100 },
 		];
 
-		const promise = runSideQuery("user query", manifest, 5, "medium", events as any);
+		const fakeParentModel = { provider: "test", id: "test-model" };
 
-		expect(fakeService.spawn).toHaveBeenCalledWith(
-			"memory-agent",
-			expect.any(String),
-			{ maxTurns: 1, inheritContext: false, thinkingLevel: "medium", foreground: true, bypassQueue: true },
+		await runSideQuery(
+			"user query",
+			manifest,
+			5,
+			"medium",
+			"deepseek/deepseek-v4-flash",
+			fakeRegistry as any,
+			fakeParentModel as any,
+			"/mem/x",
 		);
 
-		completedHandlers[0]({ id: "agent-sq-2" });
-		await promise;
+		expect(runHeadlessAgentMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				thinkLevel: "medium",
+				model: "deepseek/deepseek-v4-flash",
+				parentModel: fakeParentModel,
+			}),
+		);
 	});
 
-	it("falls back to keyword matching when service unavailable", async () => {
-		const { getSubagentsService } = await import("@yandy0725/pi-subagents");
-		(getSubagentsService as any).mockReturnValue(undefined);
+	it("returns empty array when runHeadlessAgent throws", async () => {
+		runHeadlessAgentMock.mockRejectedValue(new Error("agent failed"));
 
 		const manifest = [
-			{ filename: "debugging.md", name: "Debugging", description: "SSH tips and tricks", type: "project" as const, mtimeMs: 100 },
-			{ filename: "irrelevant.md", name: "Irrelevant", description: "nothing to match", type: "feedback" as const, mtimeMs: 200 },
+			{ filename: "a.md", name: "A", description: "desc", type: "feedback" as const, mtimeMs: 100 },
 		];
 
-		const result = await runSideQuery("I need to debug SSH issues", manifest, 5, "off");
-		expect(result).toEqual(["debugging.md"]);
+		const result = await runSideQuery(
+			"user query",
+			manifest,
+			5,
+			"off",
+			undefined,
+			fakeRegistry as any,
+			undefined,
+			"/mem/x",
+		);
+
+		expect(result).toEqual([]);
 	});
 
 	it("returns empty when no candidates remain", async () => {
+		runHeadlessAgentMock.mockClear();
+
 		const manifest: any[] = [];
-		const result = await runSideQuery("some prompt", manifest, 5, "off");
+		const result = await runSideQuery(
+			"some prompt",
+			manifest,
+			5,
+			"off",
+			undefined,
+			fakeRegistry as any,
+			undefined,
+			"/mem/x",
+		);
 		expect(result).toEqual([]);
+		expect(runHeadlessAgentMock).not.toHaveBeenCalled();
 	});
 });
 
