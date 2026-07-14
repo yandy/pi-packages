@@ -260,7 +260,7 @@ export function createMemoryTools(
 		{
 			name: "memory_add",
 			description:
-				"Add a new memory entry to a topic file. Creates the topic if it doesn't exist. Use memory_read first to check for existing topics.",
+				"Add a new memory entry to a topic file. Creates the topic if it doesn't exist. Use memory_search and the 'ls'/'read' tools to check for existing topics first.",
 			parameters: Type.Object({
 				content: Type.String({ description: "Knowledge text to store." }),
 				topic: Type.String({ description: "Target topic filename, e.g. 'debugging.md'." }),
@@ -297,31 +297,6 @@ export function createMemoryTools(
 						text: `Added "${params.title}" to ${params.topic}. Index has ${r.entries?.length ?? 0} entries.`,
 					}],
 				};
-			},
-		},
-		{
-			name: "memory_read",
-			description:
-				"Read a topic file (by topic name) or a single entry (by entry title). Use this to check for existing topics before adding new memories.",
-			parameters: Type.Object({
-				topic: Type.Optional(
-					Type.String({ description: "Topic filename, e.g. 'debugging.md' or 'debugging'." }),
-				),
-				entry: Type.Optional(
-					Type.String({ description: "Entry title to read a single entry." }),
-				),
-			}),
-			async execute(
-				_id: string,
-				params: any,
-				_signal: AbortSignal | undefined,
-				_onUpdate: any,
-				_ctx: any,
-			) {
-				if (!params.topic && !params.entry) throw new Error("topic or entry is required");
-				const r = await doRead(memoryDir, { topic: params.topic, entry: params.entry });
-				if (!r.ok) throw new Error(r.error);
-				return { content: [{ type: "text", text: r.content ?? "" }] };
 			},
 		},
 		{

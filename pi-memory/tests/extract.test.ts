@@ -27,17 +27,17 @@ describe("buildExtractTask", () => {
 		expect(task.length).toBeLessThan(5000);
 	});
 
-	it("buildExtractTask instructs LLM to use memory tools not file I/O", () => {
+	it("buildExtractTask instructs LLM to use ls/read + memory tools not write/edit", () => {
 		const messages = [
 			{ role: "user", content: "help" },
 			{ role: "assistant", content: "answer" },
 		];
 		const task = buildExtractTask("/mem", messages, 2000);
 		expect(task).toContain("memory_add");
-		expect(task).toContain("memory_read");
+		expect(task).toContain("ls");
 		expect(task).toContain("memory_search");
+		expect(task).toContain("Do NOT use the 'write' or 'edit' tools");
 		expect(task).not.toContain("file read/write/edit tools");
-		expect(task).not.toContain("write/edit tools to directly modify");
 	});
 });
 
@@ -62,7 +62,7 @@ describe("runExtract", () => {
 				thinkLevel: "high",
 				maxTurns: 5,
 				parentModel: { id: "parent" },
-				tools: [],
+				tools: ["read", "ls"],
 				customTools: fakeTools,
 			}),
 		);
@@ -83,7 +83,7 @@ describe("runExtract", () => {
 		expect(runHeadlessAgentMock.mock.calls[0][0]).toMatchObject({
 			model: "deepseek/deepseek-v4-flash",
 			thinkLevel: "medium",
-			tools: [],
+			tools: ["read", "ls"],
 		});
 	});
 
