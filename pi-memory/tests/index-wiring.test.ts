@@ -3,8 +3,28 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-const { MOCK_BASE } = vi.hoisted(() => ({
+const { MOCK_BASE, mockConfigValue } = vi.hoisted(() => ({
 	MOCK_BASE: `/tmp/pi-memory-wiring-${process.pid}`,
+	mockConfigValue: {
+		enabled: true,
+		memoryDir: "",
+		memIndexMaxLines: 200,
+		memIndexMaxBytes: 25600,
+		dream: { nudgeAfterSessions: 5, nudgeAfterHours: 24, thinkLevel: "high" as const },
+		sessionSearch: { maxSessions: 10, maxMatches: 5 },
+		autoSurfacing: {
+			enabled: true,
+			maxFiles: 5,
+			maxTopicBytes: 4096,
+			maxInjectionBytes: 20480,
+			thinkLevel: "off" as const,
+		} as any,
+		extractMemories: {
+			enabled: false,
+			maxContextTokens: 2000,
+			thinkLevel: "high" as const,
+		} as any,
+	},
 }));
 
 const { scanTopicsMock, runSideQueryMock, injectSurfacedContentMock } = vi.hoisted(() => ({
@@ -14,25 +34,10 @@ const { scanTopicsMock, runSideQueryMock, injectSurfacedContentMock } = vi.hoist
 }));
 
 vi.mock("../src/config", () => ({
-	loadConfig: vi.fn().mockResolvedValue({
-		enabled: true,
-		memoryDir: MOCK_BASE,
-		memIndexMaxLines: 200,
-		memIndexMaxBytes: 25600,
-		dream: { nudgeAfterSessions: 5, nudgeAfterHours: 24, thinkLevel: "high" },
-		sessionSearch: { maxSessions: 10, maxMatches: 5 },
-		autoSurfacing: {
-			enabled: true,
-			maxFiles: 5,
-			maxTopicBytes: 4096,
-			maxInjectionBytes: 20480,
-			thinkLevel: "off",
-		},
-		extractMemories: {
-			enabled: false,
-			maxContextTokens: 2000,
-			thinkLevel: "high",
-		},
+	loadConfig: vi.fn().mockImplementation(async () => {
+		const cfg = { ...mockConfigValue };
+		cfg.memoryDir = MOCK_BASE;
+		return cfg;
 	}),
 }));
 
@@ -228,6 +233,76 @@ describe("index wiring (integration)", () => {
 		expect(runSideQueryMock).not.toHaveBeenCalled();
 		// MEMORY.md index injection still happens
 		expect(result?.systemPrompt).toContain("# Memory Index");
+	});
+
+	it("resolveDefault: uses defaults.sessionPersistence when per-task is undefined", async () => {
+		mockConfigValue.defaults = { sessionPersistence: { enabled: true } };
+		// Ensure per-task has no sessionPersistence
+		delete (mockConfigValue.autoSurfacing as any).sessionPersistence;
+
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		const fakeCtx = { cwd: tmpDir, hasUI: false, isProjectTrusted: () => true };
+		await handlers["session_start"][0]({}, fakeCtx);
+
+		scanTopicsMock.mockResolvedValue([
+			{ filename: "ssh.md", name: "SSH", description: "ssh config", type: "project", mtimeMs: 100 },
+		]);
+		runSideQueryMock.mockResolvedValue(["ssh.md"]);
+		injectSurfacedContentMock.mockResolvedValue("<relevant_memories>\n## ssh.md\nssh config\n</relevant_memories>");
+
+		const mainEvent = {
+			prompt: "how do I debug SSH?",
+			systemPrompt: "Normal system prompt",
+			systemPromptOptions: { cwd: tmpDir, selectedTools: ["read", "bash"] },
+		};
+		const mainCtx = { cwd: tmpDir, hasUI: false, modelRegistry: {}, model: undefined };
+		await handlers["before_agent_start"][0](mainEvent, mainCtx as any);
+
+		// defaults.sessionPersistence flows through resolveDefault to runSideQuery
+		expect(runSideQueryMock).toHaveBeenCalledWith(
+			expect.any(Array), expect.any(String), expect.any(Set), 5, "off",
+			undefined, expect.any(Object), undefined, MOCK_BASE, { enabled: true },
+		);
+
+		// Clean up
+		delete mockConfigValue.defaults;
+	});
+
+	it("resolveDefault: per-task sessionPersistence overrides defaults.sessionPersistence", async () => {
+		mockConfigValue.defaults = { sessionPersistence: { enabled: true } };
+		(mockConfigValue.autoSurfacing as any).sessionPersistence = { enabled: false };
+
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		const fakeCtx = { cwd: tmpDir, hasUI: false, isProjectTrusted: () => true };
+		await handlers["session_start"][0]({}, fakeCtx);
+
+		scanTopicsMock.mockResolvedValue([
+			{ filename: "ssh.md", name: "SSH", description: "ssh config", type: "project", mtimeMs: 100 },
+		]);
+		runSideQueryMock.mockResolvedValue(["ssh.md"]);
+		injectSurfacedContentMock.mockResolvedValue("<relevant_memories>\n## ssh.md\nssh config\n</relevant_memories>");
+
+		const mainEvent = {
+			prompt: "how do I debug SSH?",
+			systemPrompt: "Normal system prompt",
+			systemPromptOptions: { cwd: tmpDir, selectedTools: ["read", "bash"] },
+		};
+		const mainCtx = { cwd: tmpDir, hasUI: false, modelRegistry: {}, model: undefined };
+		await handlers["before_agent_start"][0](mainEvent, mainCtx as any);
+
+		// Per-task override wins over defaults
+		expect(runSideQueryMock).toHaveBeenCalledWith(
+			expect.any(Array), expect.any(String), expect.any(Set), 5, "off",
+			undefined, expect.any(Object), undefined, MOCK_BASE, { enabled: false },
+		);
+
+		// Clean up
+		delete mockConfigValue.defaults;
+		delete (mockConfigValue.autoSurfacing as any).sessionPersistence;
 	});
 
 	it("tool execute throws when config.enabled is false", async () => {

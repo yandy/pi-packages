@@ -10,7 +10,7 @@ import {
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { MEMORY_AGENT_TOOLS } from "./agent-config";
-import type { ThinkLevel } from "./config";
+import type { SessionPersistenceConfig, ThinkLevel } from "./config";
 import { resolveModel } from "./model-resolver";
 
 export interface HeadlessAgentOpts {
@@ -24,7 +24,7 @@ export interface HeadlessAgentOpts {
 	signal?: AbortSignal;
 	timeoutMs?: number;
 	/** Session persistence config. When enabled, sessions are written to disk. */
-	sessionPersistence?: import("./config").SessionPersistenceConfig;
+	sessionPersistence?: SessionPersistenceConfig;
 }
 
 const GRACE_TURNS = 1;

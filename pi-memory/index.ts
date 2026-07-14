@@ -17,14 +17,12 @@ import { readDreamMeta, shouldNudge, writeDreamMeta } from "./src/nudge";
 import { resolveMemoryDir } from "./src/paths";
 import { searchSessions } from "./src/session-search";
 
-function resolveDefault<K extends "model" | "sessionPersistence">(
-	cfg: MemoryConfig,
-	task: "dream" | "autoSurfacing" | "extractMemories",
-	key: K,
-): K extends "model" ? string | undefined : SessionPersistenceConfig | undefined {
+function resolveDefault(cfg: MemoryConfig, task: "dream" | "autoSurfacing" | "extractMemories", key: "model"): string | undefined;
+function resolveDefault(cfg: MemoryConfig, task: "dream" | "autoSurfacing" | "extractMemories", key: "sessionPersistence"): SessionPersistenceConfig | undefined;
+function resolveDefault(cfg: MemoryConfig, task: "dream" | "autoSurfacing" | "extractMemories", key: "model" | "sessionPersistence"): string | SessionPersistenceConfig | undefined {
 	const perTask = cfg[task][key];
-	if (perTask !== undefined) return perTask as any;
-	return cfg.defaults?.[key] as any;
+	if (perTask !== undefined) return perTask;
+	return cfg.defaults?.[key];
 }
 
 export default function (pi: ExtensionAPI) {
