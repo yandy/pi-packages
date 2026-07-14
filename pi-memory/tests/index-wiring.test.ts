@@ -3,9 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-const { MOCK_BASE, mockConfigValue } = vi.hoisted(() => ({
-	MOCK_BASE: `/tmp/pi-memory-wiring-${process.pid}`,
-	mockConfigValue: {
+const { MOCK_BASE, mockConfigValue } = vi.hoisted(() => {
+	const cfg: Record<string, any> = {
 		enabled: true,
 		memoryDir: "",
 		memIndexMaxLines: 200,
@@ -18,14 +17,15 @@ const { MOCK_BASE, mockConfigValue } = vi.hoisted(() => ({
 			maxTopicBytes: 4096,
 			maxInjectionBytes: 20480,
 			thinkLevel: "off" as const,
-		} as any,
+		},
 		extractMemories: {
 			enabled: false,
 			maxContextTokens: 2000,
 			thinkLevel: "high" as const,
-		} as any,
-	},
-}));
+		},
+	};
+	return { MOCK_BASE: `/tmp/pi-memory-wiring-${process.pid}`, mockConfigValue: cfg };
+});
 
 const { scanTopicsMock, runSideQueryMock, injectSurfacedContentMock } = vi.hoisted(() => ({
 	scanTopicsMock: vi.fn(),
