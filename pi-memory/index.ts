@@ -7,7 +7,6 @@ import { runDream } from "./src/dream";
 import { runExtract } from "./src/extract";
 import {
 	buildInjection,
-	buildSurfacingPrompt,
 	injectSurfacedContent,
 	loadIndexSnapshot,
 	runSideQuery,
@@ -98,17 +97,16 @@ export default function (pi: ExtensionAPI) {
 				if (ctx.hasUI) ctx.ui.setStatus("surfacing", "Searching relevant memories…");
 				const manifest = await scanTopics(memoryDir);
 				if (manifest.length > 0) {
-					const queryPrompt = buildSurfacingPrompt(manifest, event.prompt.slice(0, 4000), injectedTopics);
 					const selected = await runSideQuery(
-						queryPrompt,
 						manifest,
+						event.prompt.slice(0, 4000),
+						injectedTopics,
 						autoSurfacing.maxFiles,
 						autoSurfacing.thinkLevel,
 						autoSurfacing.model,
 						ctx.modelRegistry,
 						ctx.model,
 						memoryDir,
-						injectedTopics,
 					);
 					if (selected.length > 0) {
 						const content = await injectSurfacedContent(

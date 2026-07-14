@@ -60,25 +60,15 @@ export async function scanTopics(memoryDir: string): Promise<TopicManifest[]> {
 	return manifests.sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
 
-export function buildSurfacingPrompt(
-	manifest: TopicManifest[],
-	userPrompt: string,
-	injectedTopics: Set<string>,
-): string {
+function buildSurfacingPrompt(manifest: TopicManifest[], userPrompt: string): string {
 	const lines = manifest.map((t) => {
-		const marker = injectedTopics.has(t.filename) ? " [already injected]" : "";
-		return `[${t.type}] ${t.filename} — ${t.description.slice(0, 80)}${marker}`;
+		return `[${t.type}] ${t.filename} — ${t.description.slice(0, 80)}`;
 	});
-	const alreadyInjected =
-		injectedTopics.size > 0
-			? `\n\nNote: ${injectedTopics.size} topic file(s) have already been injected in this session and are marked [already injected]. Prefer selecting uninjected topics.`
-			: "";
 
 	return [
 		"You are a memory relevance selector. Below is a list of memory topic files and a user message.",
 		"Select up to N topic files that are relevant to the user's current query.",
 		"Response format: JSON with a 'selected_files' array of filenames.",
-		alreadyInjected,
 		"",
 		"=== Topic Files ===",
 		...lines,
@@ -148,19 +138,20 @@ function parseSelectedFiles(result: string, candidates: TopicManifest[], maxFile
 /** Run a lightweight headless side-query to select relevant topic files.
  *  Returns [] on timeout/failure — no fallback. */
 export async function runSideQuery(
-	prompt: string,
 	manifest: TopicManifest[],
+	userPrompt: string,
+	injectedTopics: Set<string>,
 	maxFiles: number,
 	thinkLevel: ThinkLevel,
 	model: string | undefined,
 	modelRegistry: ModelRegistry,
 	parentModel: Model<any> | undefined,
 	memoryDir: string,
-	injectedTopics: Set<string>,
 ): Promise<string[]> {
 	const candidates = manifest.filter((t) => !injectedTopics.has(t.filename));
 	if (candidates.length === 0) return [];
-	const task = buildSideQueryTask(prompt, maxFiles);
+	const surfacingPrompt = buildSurfacingPrompt(candidates, userPrompt);
+	const task = buildSideQueryTask(surfacingPrompt, maxFiles);
 	try {
 		const result = await runHeadlessAgent({
 			task,
