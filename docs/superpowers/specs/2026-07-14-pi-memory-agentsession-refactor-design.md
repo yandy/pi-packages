@@ -352,13 +352,50 @@ runDream({
 
 ## 8. 删除/移除清单
 
+### 文件
 - `src/agent-types.ts`（整文件）
-- `package.json` peerDependencies 的 `@yandy0725/pi-subagents`
-- 所有 `import ... from "@yandy0725/pi-subagents"`
-- `index.ts` 的 `isSubagent` 检测逻辑（改为 `event.systemPrompt.includes("<active_agent name=")`）
-- `inject.ts` 的 `keywordMatch` 函数
-- `dream.ts` 的 `signal` / `events` / 事件订阅逻辑
-- `session_start` nudge 的 `setTimeout(callback, 0)`
+
+### package.json
+- peerDependencies 的 `@yandy0725/pi-subagents`
+
+### 导入
+- `index.ts`: `import { ensureAgentTypes } from "./src/agent-types"`
+- `dream.ts`: `import { getSubagentsService, type SubagentsService, type WorkspaceProvider } from "@yandy0725/pi-subagents"`
+- `extract.ts`: `import { getSubagentsService, type SubagentsService, type WorkspaceProvider } from "@yandy0725/pi-subagents"`
+- `inject.ts`: `import { getSubagentsService } from "@yandy0725/pi-subagents"`
+
+### 代码逻辑
+- `index.ts`
+  - `ensureAgentTypes()` 调用
+  - `isSubagent` 检测逻辑（改为 `event.systemPrompt.includes("<active_agent name=")`）
+  - 注释 "session_start handlers (including pi-subagents') have completed."（line ~61）
+  - 注释 "Skip for subagents: pi-subagents strips 'subagent'..." 块（lines ~93-95）
+  - `pi.events` 传入 `runDream()` / `runSideQuery()` 的所有调用（lines 73, 108, 212）
+  - nudge 的 `setTimeout(callback, 0)` 包装
+- `dream.ts`
+  - `signal` / `events` 参数和所有事件订阅逻辑
+  - `WorkspaceProvider` 注册 / 注销逻辑
+  - `getRecord(agentId)` 结果读取
+  - `service?.abort(agentId)` abort 逻辑
+- `extract.ts`
+  - `getSubagentsService()` 获取和空值检查
+  - `WorkspaceProvider` 注册 / 注销逻辑（当前丢弃 disposer）
+- `inject.ts`
+  - `keywordMatch` 函数
+  - `getSubagentsService()` 获取和 fallback 检查
+  - `WorkspaceProvider` 注册 / 注销逻辑
+  - `events` 参数和事件订阅逻辑
+  - `foreground` / `bypassQueue` spawn 选项
+  - 注释 "Uses pi-subagents spawn + Promise pattern..."
+
+### 测试
+- `tests/inject.test.ts`: `vi.mock("@yandy0725/pi-subagents", ...)` mock 声明
+- `tests/dream.test.ts`: 所有 pi-subagents service mock（spawn / getRecord / registerWorkspaceProvider / abort / 事件监听）
+- `tests/extract.test.ts`: 同上
+- `tests/index-wiring.test.ts`
+  - "skips auto-surfacing for subagents (no 'subagent' tool)" 测试
+  - "runs auto-surfacing for main agents (has 'subagent' tool)" 测试
+  - 替换为验证 `<active_agent name=` 正向检测的测试
 
 ---
 
