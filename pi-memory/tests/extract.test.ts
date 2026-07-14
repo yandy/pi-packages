@@ -81,4 +81,21 @@ describe("runExtract", () => {
 		});
 		expect(runHeadlessAgentMock).not.toHaveBeenCalled();
 	});
+
+	it("passes sessionPersistence through to runHeadlessAgent", () => {
+		runHeadlessAgentMock.mockClear();
+		runExtract({
+			thinkLevel: "high",
+			memoryDir: "/mem/x",
+			messages: [{ role: "user", content: "hi" }],
+			maxContextTokens: 1000,
+			modelRegistry: {} as any,
+			sessionPersistence: { enabled: true },
+		});
+		expect(runHeadlessAgentMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionPersistence: { enabled: true },
+			}),
+		);
+	});
 });

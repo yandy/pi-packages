@@ -5,6 +5,20 @@ import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 
 export type ThinkLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
+/** Session persistence configuration for headless memory-agent sub-sessions. */
+export interface SessionPersistenceConfig {
+	/** Enable disk persistence (default: false = in-memory). */
+	enabled: boolean;
+	/** Custom session directory. Defaults to memoryDir/sessions/. */
+	sessionDir?: string;
+}
+
+/** Shared defaults that per-task configs inherit. Per-task fields override these. */
+export interface DefaultsConfig {
+	model?: string;
+	sessionPersistence?: SessionPersistenceConfig;
+}
+
 export interface AutoSurfacingConfig {
 	enabled: boolean;
 	model?: string;
@@ -23,13 +37,25 @@ export interface ExtractMemoriesConfig {
 
 export interface MemoryConfig {
 	enabled: boolean;
+	/** Shared defaults for model and sessionPersistence. Per-task configs override. */
+	defaults?: DefaultsConfig;
 	memoryDir: string;
 	memIndexMaxLines: number;
 	memIndexMaxBytes: number;
-	dream: { nudgeAfterSessions: number; nudgeAfterHours: number; model?: string; thinkLevel: ThinkLevel };
+	dream: {
+		nudgeAfterSessions: number;
+		nudgeAfterHours: number;
+		model?: string;
+		thinkLevel: ThinkLevel;
+		sessionPersistence?: SessionPersistenceConfig;
+	};
 	sessionSearch: { maxSessions: number; maxMatches: number };
-	autoSurfacing: AutoSurfacingConfig;
-	extractMemories: ExtractMemoriesConfig;
+	autoSurfacing: AutoSurfacingConfig & {
+		sessionPersistence?: SessionPersistenceConfig;
+	};
+	extractMemories: ExtractMemoriesConfig & {
+		sessionPersistence?: SessionPersistenceConfig;
+	};
 }
 
 export const DEFAULT_CONFIG: MemoryConfig = {
