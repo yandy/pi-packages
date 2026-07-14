@@ -1,32 +1,29 @@
-import { access } from "node:fs/promises";
+import type { Model } from "@earendil-works/pi-ai";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { runHeadlessAgent } from "./agent-runner";
 import type { ThinkLevel } from "./config";
-import { getSubagentsService, type SubagentsService, type WorkspaceProvider } from "@yandy0725/pi-subagents";
 
 export interface RunExtractOpts {
-	model: string;
+	model?: string;
 	thinkLevel: ThinkLevel;
 	memoryDir: string;
 	messages: Array<{ role: string; content: string }>;
 	maxContextTokens: number;
-	service?: SubagentsService;
+	modelRegistry: ModelRegistry;
+	parentModel?: Model<any>;
 }
 
-/** Build extraction task prompt.
- *  Session context strategy: only current turn (user + assistant messages).
- *  No conversation history — extraction is turn-scoped.
- *  Tool scope: file read/write only (cwd = memoryDir). */
+/** Build extraction task prompt. (unchanged) */
 export function buildExtractTask(
 	memoryDir: string,
 	messages: Array<{ role: string; content: string }>,
 	maxTokens: number,
 ): string {
-	// Find user and assistant messages for context
 	const fromUser = messages.find((m) => m.role === "user");
 	const fromAssistant = messages.findLast((m) => m.role === "assistant");
 	const userText = fromUser?.content ?? "";
 	const assistantText = fromAssistant?.content ?? "";
 
-	// Truncate by maxTokens (rough estimate: ~4 chars/token)
 	const maxChars = maxTokens * 4;
 	const truncatedUser = userText.slice(0, maxChars / 2);
 	const truncatedAssistant = assistantText.slice(0, maxChars / 2);
@@ -79,35 +76,21 @@ export function buildExtractTask(
 	].join("\n");
 }
 
+/** Fire-and-forget memory extraction. Does not await the headless agent. */
 export async function runExtract(opts: RunExtractOpts): Promise<void> {
 	if (opts.messages.length === 0) return;
-
-	const service = opts.service ?? getSubagentsService();
-	if (!service) return; // silently skip if no subagent service
-
-	const model = opts.model === "auto" ? undefined : opts.model;
-	const thinkLevel = opts.thinkLevel;
 	const task = buildExtractTask(opts.memoryDir, opts.messages, opts.maxContextTokens);
-
-	const provider: WorkspaceProvider = {
-		async prepare(_ctx) {
-			await access(opts.memoryDir).catch(() => {
-				throw new Error(`Memory directory not found: ${opts.memoryDir}`);
-			});
-			return {
-				cwd: opts.memoryDir,
-				dispose: () => undefined,
-			};
-		},
-	};
-	service.registerWorkspaceProvider(provider);
-
-	// Fire-and-forget spawn
-	service.spawn(
-		"memory-agent",
+	// fire-and-forget: runner disposes internally via finally
+	runHeadlessAgent({
 		task,
-		model
-			? { model, inheritContext: false, maxTurns: 5, thinkingLevel: thinkLevel }
-			: { inheritContext: false, maxTurns: 5, thinkingLevel: thinkLevel },
-	);
+		cwd: opts.memoryDir,
+		modelRegistry: opts.modelRegistry,
+		model: opts.model,
+		parentModel: opts.parentModel,
+		thinkLevel: opts.thinkLevel,
+		maxTurns: 5,
+		timeoutMs: 120_000,
+	}).catch(() => {
+		/* silently ignore extract errors */
+	});
 }

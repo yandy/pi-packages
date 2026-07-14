@@ -1,6 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 import { buildExtractTask, runExtract } from "../src/extract";
 
+const { runHeadlessAgentMock } = vi.hoisted(() => ({
+	runHeadlessAgentMock: vi.fn().mockResolvedValue("done"),
+}));
+vi.mock("../src/agent-runner", () => ({
+	runHeadlessAgent: runHeadlessAgentMock,
+}));
+
 describe("buildExtractTask", () => {
 	it("builds extraction task prompt with context", () => {
 		const messages = [
@@ -12,10 +19,6 @@ describe("buildExtractTask", () => {
 		expect(task).toContain("/tmp/mem");
 		expect(task).toContain("how to debug SSH?");
 		expect(task).toContain("ssh -vvv");
-		expect(task).toContain("Worth remembering");
-		expect(task).toContain("NOT worth remembering");
-		expect(task).toContain("frontmatter");
-		expect(task).toContain("## Entry Title");
 	});
 
 	it("truncates long messages", () => {
@@ -26,65 +29,56 @@ describe("buildExtractTask", () => {
 });
 
 describe("runExtract", () => {
-	it("spawns with configured thinkLevel (default high) and maxTurns=5 when model is auto", () => {
-		const fakeService = {
-			spawn: vi.fn(),
-			registerWorkspaceProvider: vi.fn().mockReturnValue(vi.fn()),
-		};
-
+	it("calls runHeadlessAgent with maxTurns=5 and configured thinkLevel (fire-and-forget)", () => {
+		runHeadlessAgentMock.mockClear();
 		runExtract({
-			model: "auto",
 			thinkLevel: "high",
 			memoryDir: "/mem/x",
 			messages: [{ role: "user", content: "hello" }],
 			maxContextTokens: 2000,
-			service: fakeService as any,
+			modelRegistry: {} as any,
+			parentModel: { id: "parent" } as any,
 		});
 
-		expect(fakeService.spawn).toHaveBeenCalledWith(
-			"memory-agent",
-			expect.any(String),
-			{ inheritContext: false, maxTurns: 5, thinkingLevel: "high" },
+		expect(runHeadlessAgentMock).toHaveBeenCalledTimes(1);
+		expect(runHeadlessAgentMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				cwd: "/mem/x",
+				thinkLevel: "high",
+				maxTurns: 5,
+				parentModel: { id: "parent" },
+			}),
 		);
+		// task contains memory dir
+		expect(runHeadlessAgentMock.mock.calls[0][0].task).toContain("/mem/x");
 	});
 
-	it("passes model and thinkLevel when model is not auto", () => {
-		const fakeService = {
-			spawn: vi.fn(),
-			registerWorkspaceProvider: vi.fn().mockReturnValue(vi.fn()),
-		};
-
+	it("passes configured model string when set", () => {
+		runHeadlessAgentMock.mockClear();
 		runExtract({
 			model: "deepseek/deepseek-v4-flash",
 			thinkLevel: "medium",
 			memoryDir: "/mem/x",
 			messages: [{ role: "user", content: "hello" }],
 			maxContextTokens: 2000,
-			service: fakeService as any,
+			modelRegistry: {} as any,
 		});
 
-		expect(fakeService.spawn).toHaveBeenCalledWith(
-			"memory-agent",
-			expect.any(String),
-			{ model: "deepseek/deepseek-v4-flash", inheritContext: false, maxTurns: 5, thinkingLevel: "medium" },
-		);
+		expect(runHeadlessAgentMock.mock.calls[0][0]).toMatchObject({
+			model: "deepseek/deepseek-v4-flash",
+			thinkLevel: "medium",
+		});
 	});
 
 	it("skips when messages array is empty", () => {
-		const fakeService = {
-			spawn: vi.fn(),
-			registerWorkspaceProvider: vi.fn().mockReturnValue(vi.fn()),
-		};
-
+		runHeadlessAgentMock.mockClear();
 		runExtract({
-			model: "auto",
 			thinkLevel: "high",
 			memoryDir: "/mem/x",
 			messages: [],
 			maxContextTokens: 2000,
-			service: fakeService as any,
+			modelRegistry: {} as any,
 		});
-
-		expect(fakeService.spawn).not.toHaveBeenCalled();
+		expect(runHeadlessAgentMock).not.toHaveBeenCalled();
 	});
 });

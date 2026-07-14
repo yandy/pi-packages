@@ -2,7 +2,6 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { ensureAgentTypes } from "./src/agent-types";
 import { loadConfig, type MemoryConfig } from "./src/config";
 import { runDream } from "./src/dream";
 import { runExtract } from "./src/extract";
@@ -18,9 +17,6 @@ import { createMemoryTool } from "./src/memory-tool";
 import { readDreamMeta, shouldNudge, writeDreamMeta } from "./src/nudge";
 import { resolveMemoryDir } from "./src/paths";
 import { searchSessions } from "./src/session-search";
-
-// Register custom agent type on load (zero setup, auto-fallback on first session).
-ensureAgentTypes();
 
 export default function (pi: ExtensionAPI) {
 	let memoryDir: string | null = null;
@@ -57,30 +53,30 @@ export default function (pi: ExtensionAPI) {
 			if (nudge) {
 				const ok = await ctx.ui.confirm("Memory Consolidation", `${message}\n\nConsolidate memory files now?`);
 				if (ok) {
-					// Fire-and-forget: defers past the current macrotask so all
-					// session_start handlers (including pi-subagents') have completed.
-					// Does not block session_start.
+					// Fire-and-forget: does not block session_start. The headless
+					// dream agent runs independently; completion notifies the user.
 					const dreamModel = config.dream.model;
 					const dreamThinkLevel = config.dream.thinkLevel;
 					const dir = memoryDir;
 					ctx.ui.setStatus("dream", "Consolidating memory...");
-					setTimeout(async () => {
-						try {
-							const summary = await runDream({
-								model: dreamModel,
-								thinkLevel: dreamThinkLevel,
-								memoryDir: dir,
-								events: pi.events,
-							});
+					runDream({
+						model: dreamModel,
+						thinkLevel: dreamThinkLevel,
+						memoryDir: dir,
+						modelRegistry: ctx.modelRegistry,
+						parentModel: ctx.model,
+					})
+						.then(async (summary) => {
 							await writeDreamMeta(dir, sessions);
 							ctx.ui.notify(summary, "info");
-							// biome-ignore lint/suspicious/noExplicitAny: error catch
-						} catch (e: any) {
+						})
+						// biome-ignore lint/suspicious/noExplicitAny: error catch
+						.catch((e: any) => {
 							ctx.ui.notify(`Dream failed: ${e.message}`, "error");
-						} finally {
+						})
+						.finally(() => {
 							ctx.ui.setStatus("dream", undefined);
-						}
-					}, 0);
+						});
 				}
 			}
 		}
@@ -89,14 +85,12 @@ export default function (pi: ExtensionAPI) {
 	pi.on("before_agent_start", async (event, ctx) => {
 		if (!config?.enabled || !indexSnapshot || !memoryDir) return;
 
-		// Auto-surfacing: select relevant topic files via LLM side-query and inject as message.
-		// Skip for subagents: pi-subagents strips "subagent" from all children's
-		// tool sets, so its absence reliably identifies subagents. Without this guard,
-		// runSideQuery's subagent spawn → before_agent_start → re-enter here → OOM.
-		const agentTools = event.systemPromptOptions?.selectedTools;
-		const isSubagent = agentTools && !agentTools.includes("subagent");
-
 		const autoSurfacing = config.autoSurfacing;
+		// Skip auto-surfacing in subagent sessions: pi-subagents injects an
+		// <active_agent name="..."/> tag into every subagent's system prompt.
+		// Main sessions (including forks) never have this tag. Our own headless
+		// sessions use noExtensions (never bind), so they never reach here.
+		const isSubagent = event.systemPrompt?.includes("<active_agent name=\"");
 		// biome-ignore lint/suspicious/noExplicitAny: message injection result
 		let injectedMessage: any;
 		if (autoSurfacing?.enabled && event.prompt && !isSubagent) {
@@ -105,7 +99,17 @@ export default function (pi: ExtensionAPI) {
 				const manifest = await scanTopics(memoryDir);
 				if (manifest.length > 0) {
 					const queryPrompt = buildSurfacingPrompt(manifest, event.prompt.slice(0, 4000), injectedTopics);
-					const selected = await runSideQuery(queryPrompt, manifest, autoSurfacing.maxFiles, autoSurfacing.thinkLevel, pi.events);
+					const selected = await runSideQuery(
+						queryPrompt,
+						manifest,
+						autoSurfacing.maxFiles,
+						autoSurfacing.thinkLevel,
+						autoSurfacing.model,
+						ctx.modelRegistry,
+						ctx.model,
+						memoryDir,
+						injectedTopics,
+					);
 					if (selected.length > 0) {
 						const content = await injectSurfacedContent(
 							memoryDir,
@@ -114,9 +118,7 @@ export default function (pi: ExtensionAPI) {
 							autoSurfacing.maxInjectionBytes,
 						);
 						if (content) {
-							// Track injected topics for session-level dedup
 							for (const f of selected) injectedTopics.add(f);
-							// Inject as a custom message (NOT systemPrompt)
 							injectedMessage = { customType: "memory-auto-surfacing", content, display: false };
 						}
 					}
@@ -135,16 +137,17 @@ export default function (pi: ExtensionAPI) {
 		};
 	});
 
-	pi.on("agent_end", async (event) => {
+	pi.on("agent_end", async (event, ctx) => {
 		if (!config?.enabled || !memoryDir) return;
 		const extractConfig = config.extractMemories;
 		if (!extractConfig?.enabled) return;
 		if (!event.messages || event.messages.length === 0) return;
-		// Fire-and-forget: extract memories in background
 		runExtract({
 			model: extractConfig.model,
 			thinkLevel: extractConfig.thinkLevel,
 			memoryDir,
+			modelRegistry: ctx.modelRegistry,
+			parentModel: ctx.model,
 			messages: event.messages.map((m) => ({
 				// biome-ignore lint/suspicious/noExplicitAny: pi event message union type
 				role: String((m as any).role ?? ""),
@@ -202,24 +205,27 @@ export default function (pi: ExtensionAPI) {
 			}
 			const ok = await ctx.ui.confirm("Dream", "Consolidate all memory files? This rewrites them in-place.");
 			if (!ok) return;
+			const dir = memoryDir;
 			ctx.ui.setStatus("dream", "Consolidating memory...");
-			try {
-				const summary = await runDream({
-					model: config.dream.model,
-					thinkLevel: config.dream.thinkLevel,
-					memoryDir,
-					signal: ctx.signal,
-					events: pi.events,
-				});
-				const sessions = (await SessionManager.list(ctx.cwd)).length;
-				await writeDreamMeta(memoryDir, sessions);
-				ctx.ui.notify(summary, "info");
+			runDream({
+				model: config.dream.model,
+				thinkLevel: config.dream.thinkLevel,
+				memoryDir,
+				modelRegistry: ctx.modelRegistry,
+				parentModel: ctx.model,
+			})
+				.then(async (summary) => {
+					const sessions = (await SessionManager.list(ctx.cwd)).length;
+					await writeDreamMeta(dir, sessions);
+					ctx.ui.notify(summary, "info");
+				})
 				// biome-ignore lint/suspicious/noExplicitAny: command handler ctx
-			} catch (e: any) {
-				ctx.ui.notify(`Dream failed: ${e.message}`, "error");
-			} finally {
-				ctx.ui.setStatus("dream", undefined);
-			}
+				.catch((e: any) => {
+					ctx.ui.notify(`Dream failed: ${e.message}`, "error");
+				})
+				.finally(() => {
+					ctx.ui.setStatus("dream", undefined);
+				});
 		},
 	});
 }
