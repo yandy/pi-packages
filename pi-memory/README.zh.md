@@ -6,12 +6,12 @@
 
 ## 功能
 
-- **一个 `memory` 工具**，四种操作：`add`（追加条目）、`remove`（按标题删除条目）、`read`（加载主题或条目）、`search`（查询记忆或会话历史）
+- **一个 `memory` 工具**，三种操作：`add`（追加条目）、`remove`（按标题删除条目）、`search`（查询记忆或会话历史）
 - **基于主题的文件组织**：每次 `memory add` 向指定名称的 `.md` 文件写入 `## 条目` 区块
 - **`MEMORY.md` 索引**：每个 topic 文件一行紧凑指针 `- [名称](文件.md) — 摘要`，同 topic 自动合并
 - **记忆类型系统**：四种分类 — `user`（用户）、`feedback`（反馈，默认）、`project`（项目）、`reference`（引用）— 存储在 topic 文件 frontmatter 中
-- **Auto-surfacing** ⭐：每次用户发消息时，side-query LLM 自动选出最多 N 个相关 topic 文件并将其内容注入 agent context。无需手动 `memory read`。Session 内去重防止同一 topic 重复注入
-- **Extract memories** ⭐：每次 agent 运行结束后，异步子 agent 分析对话内容，自动将 learnings 写入 memory — 偏好、约定、调试心法等
+- **Auto-surfacing** ⭐：每次用户发消息时，side-query LLM 自动选出最多 N 个相关 topic 文件并将其内容注入 agent context。无需手动 `read` — 用内置 `read` 工具即可查看记忆文件。Session 内去重防止同一 topic 重复注入
+- **Extract memories** ⭐：每次 agent 运行结束后，异步无头子 agent 分析对话内容，用 `ls`/`read` 检查已有 topic 文件，再用 `memory_add` 写入新记忆 — 偏好、约定、调试心法等
 - **快照注入**：每个新会话启动时，MEMORY.md 索引追加到系统提示中
 - **`/dream` 命令**：四阶段（Orient → Gather → Consolidate → Prune）无头代理整理，去重、合并、重建全部记忆文件
 - **梦醒提醒**：经过 N 个会话或 N 小时后，温和通知建议运行 `/dream`
@@ -107,7 +107,7 @@ MEMORY.md 是一个**紧凑指针索引** — 每个 topic 文件一行，而非
 - [API Conventions](api.md) — REST handlers 在 src/api/handlers/；使用标准错误格式
 ```
 
-每次会话只有索引被注入系统提示（前 200 行 / 25KB）。Topic 文件内容**不会**在启动时加载 — 通过 auto-surfacing 按需注入或显式 `memory read`。
+每次会话只有索引被注入系统提示（前 200 行 / 25KB）。Topic 文件内容**不会**在启动时加载 — 通过 auto-surfacing 按需注入或内置 `read` 工具显式加载。
 
 ### Topic 文件格式
 
@@ -160,7 +160,7 @@ staging 上连接超时 30s
 ## 工具参考
 
 ```
-memory(action: "add" | "remove" | "search" | "read",
+memory(action: "add" | "remove" | "search",
         content?, topic?, title?, type?,
         entry?, query?, scope?)
 ```
@@ -179,13 +179,6 @@ memory(action: "add" | "remove" | "search" | "read",
 按标题删除条目。遍历所有 topic 文件查找匹配的 `##` 区块。更新受影响 topic 的 MEMORY.md hook。当 topic 文件中最后一条被删除后，topic 文件及其索引行均被清理。
 
 - **`entry`**（必填）— 要删除的条目标题
-
-### `read`
-
-加载记忆内容。可以是整个 topic 文件或单个条目区块。
-
-- **`topic`**（可选）— 主题名称，如 `"debugging"` 或 `"debugging.md"`。加载整个 topic 文件
-- **`entry`**（可选）— 条目标题。返回对应的 `## 条目标题` 区块
 
 ### `search`
 
@@ -235,4 +228,4 @@ memory(action: "add" | "remove" | "search" | "read",
 
 每次 `session_start` 读取 `MEMORY.md` 索引，通过 `before_agent_start` 追加到系统提示中。超限则截断并标记 `[truncated]`。此快照是会话开始时的静态副本。
 
-Topic 文件内容通过 **auto-surfacing**（自动、per-turn、基于相关性）或显式 `memory read` 按需加载。
+Topic 文件内容通过 **auto-surfacing**（自动、per-turn、基于相关性）或内置 `read` 工具按需加载。
