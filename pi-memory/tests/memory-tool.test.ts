@@ -85,6 +85,29 @@ describe("doAdd", () => {
     expect(topic).toContain(`updated: ${today}`);
   });
 
+  it("updates description on append to existing topic to match hook", async () => {
+    await doAdd(dir, {
+      content: "first note",
+      topic: "misc.md",
+      title: "Entry One",
+      maxLines: 200,
+      maxBytes: 25600,
+    });
+    await doAdd(dir, {
+      content: "second note",
+      topic: "misc.md",
+      title: "Entry Two plus more",
+      maxLines: 200,
+      maxBytes: 25600,
+    });
+    const topic = await readFile(join(dir, "misc.md"), "utf8");
+    // description should be regenerated from all entry titles
+    expect(topic).toContain("description: Entry One; Entry Two plus more");
+    // MEMORY.md hook should match description
+    const mem = await readFile(join(dir, "MEMORY.md"), "utf8");
+    expect(mem).toContain("Entry One; Entry Two plus more");
+  });
+
   it("rejects when over capacity", async () => {
     const res = await doAdd(dir, {
       content: "x",
@@ -267,6 +290,28 @@ describe("doRemove", () => {
     const topic = await readFile(join(dir, "misc.md"), "utf8");
     const today = new Date().toISOString().slice(0, 10);
     expect(topic).toContain(`updated: ${today}`);
+  });
+
+  it("updates description after removing one entry from multi-entry topic", async () => {
+    await doAdd(dir, {
+      content: "first",
+      topic: "misc.md",
+      title: "Entry Alpha",
+      maxLines: 200,
+      maxBytes: 25600,
+    });
+    await doAdd(dir, {
+      content: "second",
+      topic: "misc.md",
+      title: "Entry Beta",
+      maxLines: 200,
+      maxBytes: 25600,
+    });
+    await doRemove(dir, { entry: "Entry Alpha" });
+    const topic = await readFile(join(dir, "misc.md"), "utf8");
+    expect(topic).toContain("description: Entry Beta");
+    const mem = await readFile(join(dir, "MEMORY.md"), "utf8");
+    expect(mem).toContain("Entry Beta");
   });
 });
 

@@ -21,6 +21,7 @@ import {
 	hasEntries,
 	parseEntries,
 	removeEntrySection,
+	replaceFrontmatterField,
 	updateFrontmatterDate,
 } from "./topic-file";
 
@@ -102,18 +103,20 @@ export async function doAdd(memoryDir: string, p: AddParams): Promise<ActionResu
 			const topicContent = appendContent(fm, p.title, p.content);
 			await writeFile(topicPath, topicContent, "utf8");
 		} else {
-			// Existing topic: append entry, then regenerate hook from ALL entry titles
+			// Existing topic: append entry, then regenerate hook + description from ALL entry titles
 			const raw = await readFile(topicPath, "utf8");
 			const refreshed = updateFrontmatterDate(raw, today());
 			const topicContent = appendContent(refreshed, p.title, p.content);
-			await writeFile(topicPath, topicContent, "utf8");
 
-			// Build hook from all entries (comma-separated titles, trimmed to ~150 chars)
+			// Build hook + description from all entries
 			const allEntries = parseEntries(topicContent);
 			const hook = allEntries
 				.map((e) => e.title)
 				.join("; ")
 				.slice(0, 150);
+			const withDesc = replaceFrontmatterField(topicContent, "description", hook);
+			await writeFile(topicPath, withDesc, "utf8");
+
 			next = updateHook(entries, topic, hook);
 			if (!checkCapacity(next, p.maxLines, p.maxBytes)) {
 				return {
@@ -165,12 +168,13 @@ export async function doRemove(memoryDir: string, p: RemoveParams): Promise<Acti
 			const afterRemoval = removeEntrySection(raw, p.entry);
 
 			if (hasEntries(afterRemoval)) {
-				// Still has entries: update hook to remaining first entry, refresh date
+				// Still has entries: update hook + description from remaining entries, refresh date
 				const remaining = parseEntries(afterRemoval);
-				const newHook = remaining.length > 0 ? remaining[0].title : "";
+				const newHook = remaining.map((e) => e.title).join("; ").slice(0, 150);
 				const nextEntries = updateHook(entries, topicFile, newHook);
-				const refreshed = updateFrontmatterDate(afterRemoval, today());
-				await writeFile(topicPath, refreshed, "utf8");
+				const withDate = updateFrontmatterDate(afterRemoval, today());
+				const withDesc = replaceFrontmatterField(withDate, "description", newHook);
+				await writeFile(topicPath, withDesc, "utf8");
 				await writeFile(join(memoryDir, MEMORY_MD), `${serializeIndex(nextEntries)}\n`, "utf8");
 			} else {
 				// Last entry removed: delete topic file and remove from index
