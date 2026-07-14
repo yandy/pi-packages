@@ -57,14 +57,7 @@ export async function runHeadlessAgent(opts: HeadlessAgentOpts): Promise<string>
 	});
 	await loader.reload();
 
-	// 3. Forward abort signal BEFORE createAgentSession (handle early abort)
-	let session: AgentSession | undefined;
-	const onAbort = (): void => {
-		void session?.abort();
-	};
-	opts.signal?.addEventListener("abort", onAbort, { once: true });
-
-	// 4. Create session (in-memory or persisted based on config)
+	// 3. Create session (in-memory or persisted based on config)
 	const sessionManager = opts.sessionPersistence?.enabled
 		? SessionManager.create(
 				opts.cwd,
@@ -82,7 +75,13 @@ export async function runHeadlessAgent(opts: HeadlessAgentOpts): Promise<string>
 		settingsManager,
 		resourceLoader: loader,
 	});
-	session = created.session as AgentSession;
+
+	// 4. Forward abort signal after session exists (avoid listener leak if creation throws)
+	let session: AgentSession | undefined = created.session as AgentSession;
+	const onAbort = (): void => {
+		void session?.abort();
+	};
+	opts.signal?.addEventListener("abort", onAbort, { once: true });
 
 	// 5. Collect response text + enforce turn limits
 	let text = "";
