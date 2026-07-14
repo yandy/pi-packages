@@ -326,15 +326,15 @@ export function createMemoryTool(deps: MemoryToolDeps) {
 		name: "memory",
 		label: "Memory",
 		description:
-			"Read/write project memory across sessions. action 'add' appends content under a topic (auto-created) as an entry; 'remove' deletes an entry by title; 'read' loads a topic or entry; 'search' queries memory files or history sessions. IMPORTANT: only MEMORY.md index lines are injected into system prompts — entry titles must be self-contained and descriptive (topic file content is NOT injected automatically — it is auto-surfaced for relevant queries).",
+			"Read/write project memory across sessions. action 'add' appends content under a topic (auto-created) as an entry; 'remove' deletes an entry by title; 'search' queries memory files or history sessions. IMPORTANT: only MEMORY.md index lines are injected into system prompts — entry titles must be self-contained and descriptive (topic file content is NOT injected automatically — it is auto-surfaced for relevant queries). Use built-in 'read' and 'ls' tools to read topic files and MEMORY.md.",
 		promptSnippet:
-			"Read/write project memory across sessions (add/remove/search/read). Only index titles are injected — make titles self-descriptive.",
+			"Read/write project memory across sessions (add/remove/search). Only index titles are injected — make titles self-descriptive.",
 		promptGuidelines: [
 			"Use memory to persist project facts, user preferences, and lessons learned across sessions.",
 			"Use memory action 'add' with an explicit topic filename and a descriptive, self-contained entry title — only the index line (title + topic) is injected into future prompts, NOT the topic file content. The title alone must convey what was learned.",
 			"Use memory action 'search' with scope='sessions' to find past work in history sessions.",
 			"Use memory action 'read' with topic or entry to load stored knowledge.",
-			"Auto-surfacing: relevant topic files are automatically selected and their content injected into the conversation context. Use 'read' to load additional topics when needed — you don't need to read what's already been surfaced.",
+			"Auto-surfacing: relevant topic files are automatically selected and their content injected into the conversation context. Use built-in 'read' and 'ls' to load additional topics when needed — you don't need to read what's already been surfaced.",
 		],
 		parameters: Type.Object({
 			action: StringEnum(["add", "remove", "search", "read"] as const),
@@ -413,14 +413,6 @@ export function createMemoryTool(deps: MemoryToolDeps) {
 					} else {
 						text = await searchMemory(dir, params.query);
 					}
-					break;
-				}
-				case "read": {
-					if (!params.topic && !params.entry) throw new Error("topic or entry is required for read");
-					const r = await doRead(dir, { topic: params.topic, entry: params.entry });
-					if (!r.ok) throw new Error(r.error);
-					// biome-ignore lint/style/noNonNullAssertion: content assertion
-					text = r.content!;
 					break;
 				}
 				default:
