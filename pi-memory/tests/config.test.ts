@@ -119,4 +119,83 @@ describe("loadConfig", () => {
 		await rm(gdir, { recursive: true, force: true });
 		await rm(pdir, { recursive: true, force: true });
 	});
+
+	it("propagates defaults.sessionPersistence to all tasks", async () => {
+		await writeFile(
+			join(globalDir, "memory.json"),
+			JSON.stringify({ defaults: { sessionPersistence: { enabled: true } } }),
+		);
+		const cfg = await loadConfig({
+			cwd: projectDir,
+			isProjectTrusted: () => true,
+			_globalDir: globalDir,
+			_configDirName: ".pi",
+		});
+		expect(cfg.defaults?.sessionPersistence).toEqual({ enabled: true });
+		expect(cfg.dream.sessionPersistence).toBeUndefined();
+		expect(cfg.autoSurfacing.sessionPersistence).toBeUndefined();
+		expect(cfg.extractMemories.sessionPersistence).toBeUndefined();
+	});
+
+	it("per-task sessionPersistence overrides defaults", async () => {
+		await writeFile(
+			join(globalDir, "memory.json"),
+			JSON.stringify({
+				defaults: { sessionPersistence: { enabled: true } },
+				dream: { sessionPersistence: { enabled: false } },
+			}),
+		);
+		const cfg = await loadConfig({
+			cwd: projectDir,
+			isProjectTrusted: () => true,
+			_globalDir: globalDir,
+			_configDirName: ".pi",
+		});
+		expect(cfg.defaults?.sessionPersistence).toEqual({ enabled: true });
+		expect(cfg.dream.sessionPersistence).toEqual({ enabled: false });
+	});
+
+	it("defaults.model propagates correctly", async () => {
+		await writeFile(
+			join(globalDir, "memory.json"),
+			JSON.stringify({ defaults: { model: "deepseek/flash" } }),
+		);
+		const cfg = await loadConfig({
+			cwd: projectDir,
+			isProjectTrusted: () => true,
+			_globalDir: globalDir,
+			_configDirName: ".pi",
+		});
+		expect(cfg.defaults?.model).toBe("deepseek/flash");
+		expect(cfg.dream.model).toBeUndefined();
+	});
+
+	it("per-task model overrides defaults.model", async () => {
+		await writeFile(
+			join(globalDir, "memory.json"),
+			JSON.stringify({
+				defaults: { model: "deepseek/flash" },
+				dream: { model: "tencent/glm" },
+			}),
+		);
+		const cfg = await loadConfig({
+			cwd: projectDir,
+			isProjectTrusted: () => true,
+			_globalDir: globalDir,
+			_configDirName: ".pi",
+		});
+		expect(cfg.dream.model).toBe("tencent/glm");
+	});
+
+	it("backward compatible: no defaults, no sessionPersistence in config", async () => {
+		const cfg = await loadConfig({
+			cwd: projectDir,
+			isProjectTrusted: () => true,
+			_globalDir: globalDir,
+			_configDirName: ".pi",
+		});
+		expect(cfg.defaults).toBeUndefined();
+		expect(cfg.dream.thinkLevel).toBe("high");
+		expect(cfg.dream.sessionPersistence).toBeUndefined();
+	});
 });

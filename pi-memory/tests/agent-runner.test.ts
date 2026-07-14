@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
 	disposeMock: vi.fn(),
 	subscribeMock: vi.fn(),
 	createAgentSessionMock: vi.fn(),
+	inMemoryMock: vi.fn().mockReturnValue({ getSessionId: () => "s1" }),
+	createSessionMock: vi.fn().mockReturnValue({ getSessionId: () => "s2" }),
 }));
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
@@ -16,7 +18,10 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 	DefaultResourceLoader: vi.fn().mockImplementation(() => ({
 		reload: vi.fn().mockResolvedValue(undefined),
 	})),
-	SessionManager: { inMemory: vi.fn().mockReturnValue({ getSessionId: () => "s1" }) },
+	SessionManager: {
+		inMemory: mocks.inMemoryMock,
+		create: mocks.createSessionMock,
+	},
 	SettingsManager: { inMemory: vi.fn().mockReturnValue({}) },
 	getAgentDir: vi.fn().mockReturnValue("/home/fake/.pi/agent"),
 }));
@@ -42,7 +47,7 @@ mocks.createAgentSessionMock.mockResolvedValue({
 
 import { runHeadlessAgent } from "../src/agent-runner";
 
-const { promptMock, abortMock, steerMock, disposeMock, subscribeMock, createAgentSessionMock } = mocks;
+const { promptMock, abortMock, steerMock, disposeMock, subscribeMock, createAgentSessionMock, inMemoryMock, createSessionMock } = mocks;
 
 const fakeRegistry = {
 	find: vi.fn((_p: string, id: string) => (id === "deepseek-v4-flash" ? { id } : undefined)),
@@ -57,6 +62,8 @@ beforeEach(() => {
 	disposeMock.mockClear();
 	subscribeMock.mockClear();
 	createAgentSessionMock.mockClear();
+	inMemoryMock.mockClear();
+	createSessionMock.mockClear();
 });
 
 describe("runHeadlessAgent", () => {
@@ -262,6 +269,7 @@ describe("runHeadlessAgent", () => {
 		expect(disposeMock).toHaveBeenCalledTimes(1);
 	});
 
+
 	it("uses default FILE_IO_TOOLS when tools is not provided", async () => {
 		subscribeMock.mockImplementation((listener: any) => {
 			queueMicrotask(() => {
@@ -304,5 +312,48 @@ describe("runHeadlessAgent", () => {
 		const opts = createAgentSessionMock.mock.calls[0][0];
 		expect(opts.tools).toEqual([]);
 		expect(opts.customTools).toEqual([customTool]);
+	});
+	it("uses SessionManager.create when sessionPersistence.enabled is true", async () => {
+		subscribeMock.mockImplementation((listener: any) => {
+			queueMicrotask(() => {
+				listener({ type: "message_end", message: {} });
+				listener({ type: "turn_end", message: {}, toolResults: [] });
+				listener({ type: "agent_end", messages: [], willRetry: false });
+			});
+			return () => {};
+		});
+
+		await runHeadlessAgent({
+			task: "x",
+			cwd: "/mem",
+			modelRegistry: fakeRegistry,
+			parentModel: {} as any,
+			sessionPersistence: { enabled: true },
+		});
+
+		expect(createSessionMock).toHaveBeenCalledWith("/mem", "/mem/sessions");
+		expect(inMemoryMock).not.toHaveBeenCalled();
+	});
+
+	it("uses custom sessionDir when sessionPersistence.sessionDir is set", async () => {
+		subscribeMock.mockImplementation((listener: any) => {
+			queueMicrotask(() => {
+				listener({ type: "message_end", message: {} });
+				listener({ type: "turn_end", message: {}, toolResults: [] });
+				listener({ type: "agent_end", messages: [], willRetry: false });
+			});
+			return () => {};
+		});
+
+		await runHeadlessAgent({
+			task: "x",
+			cwd: "/mem",
+			modelRegistry: fakeRegistry,
+			parentModel: {} as any,
+			sessionPersistence: { enabled: true, sessionDir: "/custom/sessions" },
+		});
+
+		expect(createSessionMock).toHaveBeenCalledWith("/mem", "/custom/sessions");
+		expect(inMemoryMock).not.toHaveBeenCalled();
 	});
 });

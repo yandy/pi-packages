@@ -44,11 +44,16 @@ pi install npm:@yandy0725/pi-memory
   "memoryDir": "~/.pi/memory",
   "memIndexMaxLines": 200,
   "memIndexMaxBytes": 25600,
+  "defaults": {
+    "model": "deepseek/deepseek-v4-flash",
+    "sessionPersistence": { "enabled": false }
+  },
   "dream": {
     "nudgeAfterSessions": 5,
     "nudgeAfterHours": 24,
     "model": "auto",
-    "thinkLevel": "high"
+    "thinkLevel": "high",
+    "sessionPersistence": { "enabled": false }
   },
   "sessionSearch": {
     "maxSessions": 10,
@@ -60,13 +65,15 @@ pi install npm:@yandy0725/pi-memory
     "thinkLevel": "off",
     "maxFiles": 5,
     "maxTopicBytes": 4096,
-    "maxInjectionBytes": 20480
+    "maxInjectionBytes": 20480,
+    "sessionPersistence": { "enabled": false }
   },
   "extractMemories": {
     "enabled": true,
     "model": "auto",
     "thinkLevel": "high",
-    "maxContextTokens": 2000
+    "maxContextTokens": 2000,
+    "sessionPersistence": { "enabled": false }
   }
 }
 ```
@@ -77,21 +84,28 @@ pi install npm:@yandy0725/pi-memory
 | `memoryDir` | `~/.pi/memory` | 所有记忆数据的根目录 |
 | `memIndexMaxLines` | `200` | `MEMORY.md` 最大行数 |
 | `memIndexMaxBytes` | `25600` | `MEMORY.md` 最大字节数 |
+| `defaults.model` | — | 所有子任务共享的模型回退值。per-task `model` 会覆盖 |
+| `defaults.sessionPersistence.enabled` | `false` | 共享的 session 持久化回退（默认不持久化）。per-task 可覆盖 |
+| `defaults.sessionPersistence.sessionDir` | `memoryDir/sessions/` | 自定义持久化目录 |
 | `dream.nudgeAfterSessions` | `5` | 触发提醒需经过的会话数 |
 | `dream.nudgeAfterHours` | `24` | 触发提醒需经过的小时数 |
-| `dream.model` | `"auto"` | 整理使用的模型（`"auto"` = 当前模型，或 `"provider/id"`） |
+| `dream.model` | — | 整理使用的模型（`"provider/id"`）。回退链：per-task → `defaults.model` → 父模型 |
 | `dream.thinkLevel` | `"high"` | 整理子 agent 的思考深度：`"off"` / `"minimal"` / `"low"` / `"medium"` / `"high"` / `"xhigh"` |
+| `dream.sessionPersistence.enabled` | `false` | 持久化 dream agent 的 session 到磁盘（调试/审计）。回退到 `defaults.sessionPersistence.enabled` |
+| `dream.sessionPersistence.sessionDir` | `memoryDir/sessions/` | dream session 自定义目录 |
 | `sessionSearch.maxSessions` | `10` | 搜索历史时最多扫描的会话数 |
 | `sessionSearch.maxMatches` | `5` | 历史搜索最多返回的匹配数 |
 | `autoSurfacing.enabled` | `true` | ⭐ 启用 per-turn topic 文件自动注入 |
-| `autoSurfacing.model` | `"auto"` | ⭐ side-query 相关性选择模型 |
+| `autoSurfacing.model` | — | ⭐ side-query 相关性选择模型。回退链：per-task → `defaults.model` → 父模型 |
 | `autoSurfacing.thinkLevel` | `"off"` | ⭐ side-query 思考深度（推荐 `"off"`，轻量选择任务） |
+| `autoSurfacing.sessionPersistence.enabled` | `false` | 持久化 side-query agent 的 session。回退到 `defaults.sessionPersistence.enabled` |
 | `autoSurfacing.maxFiles` | `5` | ⭐ 每轮最多注入的 topic 文件数 |
 | `autoSurfacing.maxTopicBytes` | `4096` | ⭐ 单个注入 topic 文件最大字节数（截断） |
 | `autoSurfacing.maxInjectionBytes` | `20480` | ⭐ 每轮注入内容总字节数上限 |
 | `extractMemories.enabled` | `true` | ⭐ 启用 per-turn 记忆自动提取 |
-| `extractMemories.model` | `"auto"` | ⭐ 提取子 agent 使用的模型 |
+| `extractMemories.model` | — | ⭐ 提取子 agent 使用的模型。回退链：per-task → `defaults.model` → 父模型 |
 | `extractMemories.thinkLevel` | `"high"` | ⭐ 提取的思考深度：`"off"` / `"minimal"` / `"low"` / `"medium"` / `"high"` / `"xhigh"` |
+| `extractMemories.sessionPersistence.enabled` | `false` | 持久化 extract agent 的 session。回退到 `defaults.sessionPersistence.enabled` |
 | `extractMemories.maxContextTokens` | `2000` | ⭐ 分析对话的最大 token 数 |
 
 项目级配置（`.pi/memory.json`）仅在项目受信任时加载。

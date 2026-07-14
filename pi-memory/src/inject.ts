@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { Model } from "@earendil-works/pi-ai";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { runHeadlessAgent } from "./agent-runner";
-import type { ThinkLevel } from "./config";
+import type { SessionPersistenceConfig, ThinkLevel } from "./config";
 import { truncateForInjection } from "./index-file";
 import { parseFrontmatter } from "./topic-file";
 
@@ -147,6 +147,7 @@ export async function runSideQuery(
 	modelRegistry: ModelRegistry,
 	parentModel: Model<any> | undefined,
 	memoryDir: string,
+	sessionPersistence?: SessionPersistenceConfig,
 ): Promise<string[]> {
 	const candidates = manifest.filter((t) => !injectedTopics.has(t.filename));
 	if (candidates.length === 0) return [];
@@ -163,6 +164,7 @@ export async function runSideQuery(
 			maxTurns: 1,
 			timeoutMs: 30_000,
 			tools: [],
+			sessionPersistence,
 		});
 		return parseSelectedFiles(result, candidates, maxFiles);
 	} catch {

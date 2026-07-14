@@ -23,6 +23,11 @@
 	"peerDependencies": {
 		"dingtalk-workspace-cli": "*"
 	},
+	"peerDependenciesMeta": {
+		"dingtalk-workspace-cli": {
+			"optional": true
+		}
+	},
 	"scripts": {
 		"download-skills": "node scripts/download-skills.mjs",
 		"prepublishOnly": "npm run download-skills"

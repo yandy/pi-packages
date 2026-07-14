@@ -44,11 +44,16 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
   "memoryDir": "~/.pi/memory",
   "memIndexMaxLines": 200,
   "memIndexMaxBytes": 25600,
+  "defaults": {
+    "model": "deepseek/deepseek-v4-flash",
+    "sessionPersistence": { "enabled": false }
+  },
   "dream": {
     "nudgeAfterSessions": 5,
     "nudgeAfterHours": 24,
     "model": "auto",
-    "thinkLevel": "high"
+    "thinkLevel": "high",
+    "sessionPersistence": { "enabled": false }
   },
   "sessionSearch": {
     "maxSessions": 10,
@@ -60,13 +65,15 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
     "thinkLevel": "off",
     "maxFiles": 5,
     "maxTopicBytes": 4096,
-    "maxInjectionBytes": 20480
+    "maxInjectionBytes": 20480,
+    "sessionPersistence": { "enabled": false }
   },
   "extractMemories": {
     "enabled": true,
     "model": "auto",
     "thinkLevel": "high",
-    "maxContextTokens": 2000
+    "maxContextTokens": 2000,
+    "sessionPersistence": { "enabled": false }
   }
 }
 ```
@@ -77,21 +84,28 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
 | `memoryDir` | `~/.pi/memory` | Root directory for all memory data |
 | `memIndexMaxLines` | `200` | Max lines in `MEMORY.md` before capacity errors |
 | `memIndexMaxBytes` | `25600` | Max bytes in `MEMORY.md` before capacity errors |
+| `defaults.model` | — | Shared model fallback for all sub-tasks. Per-task `model` overrides |
+| `defaults.sessionPersistence.enabled` | `false` | Shared session persistence fallback (default: in-memory). Per-task overrides |
+| `defaults.sessionPersistence.sessionDir` | `memoryDir/sessions/` | Custom session directory for persisted headless agent sessions |
 | `dream.nudgeAfterSessions` | `5` | Sessions since last dream before nudge is shown |
 | `dream.nudgeAfterHours` | `24` | Hours since last dream before nudge is shown |
-| `dream.model` | `"auto"` | Model for dream consolidation (`"auto"` = same as current, or `"provider/id"`) |
+| `dream.model` | — | Model for dream consolidation (`"provider/id"`). Falls back to `defaults.model` → parent model |
 | `dream.thinkLevel` | `"high"` | Thinking effort for dream subagent: `"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"` |
+| `dream.sessionPersistence.enabled` | `false` | Persist dream agent sessions to disk (debug/audit). Falls back to `defaults.sessionPersistence.enabled` |
+| `dream.sessionPersistence.sessionDir` | `memoryDir/sessions/` | Custom session directory for dream sessions |
 | `sessionSearch.maxSessions` | `10` | Max sessions to scan when searching history |
 | `sessionSearch.maxMatches` | `5` | Max matches to return from history search |
 | `autoSurfacing.enabled` | `true` | ⭐ Enable per-turn topic file auto-injection |
-| `autoSurfacing.model` | `"auto"` | ⭐ Model for side-query relevance selection |
+| `autoSurfacing.model` | — | ⭐ Model for side-query relevance selection. Falls back to `defaults.model` → parent model |
 | `autoSurfacing.thinkLevel` | `"off"` | ⭐ Thinking effort for side-query (recommended: `"off"` for lightweight selection) |
+| `autoSurfacing.sessionPersistence.enabled` | `false` | Persist side-query agent sessions to disk. Falls back to `defaults.sessionPersistence.enabled` |
 | `autoSurfacing.maxFiles` | `5` | ⭐ Max topic files to inject per turn |
 | `autoSurfacing.maxTopicBytes` | `4096` | ⭐ Max bytes per injected topic file (truncated) |
 | `autoSurfacing.maxInjectionBytes` | `20480` | ⭐ Max total bytes of injected content per turn |
 | `extractMemories.enabled` | `true` | ⭐ Enable per-turn memory extraction |
-| `extractMemories.model` | `"auto"` | ⭐ Model for the extraction subagent |
+| `extractMemories.model` | — | ⭐ Model for the extraction subagent. Falls back to `defaults.model` → parent model |
 | `extractMemories.thinkLevel` | `"high"` | ⭐ Thinking effort for extraction: `"off"` / `"minimal"` / `"low"` / `"medium"` / `"high"` / `"xhigh"` |
+| `extractMemories.sessionPersistence.enabled` | `false` | Persist extract agent sessions to disk. Falls back to `defaults.sessionPersistence.enabled` |
 | `extractMemories.maxContextTokens` | `2000` | ⭐ Max tokens of conversation to analyze |
 
 Project-level config (`.pi/memory.json`) is only loaded when the project is trusted.

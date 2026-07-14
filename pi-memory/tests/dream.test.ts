@@ -74,4 +74,19 @@ describe("runDream", () => {
 			runDream({ thinkLevel: "high", memoryDir: "/mem/x", modelRegistry: {} as any }),
 		).rejects.toThrow("dream failed");
 	});
+
+	it("passes sessionPersistence through to runHeadlessAgent", async () => {
+		runHeadlessAgentMock.mockResolvedValueOnce("ok");
+		await runDream({
+			thinkLevel: "high",
+			memoryDir: "/mem/x",
+			modelRegistry: {} as any,
+			sessionPersistence: { enabled: true, sessionDir: "/custom" },
+		});
+		expect(runHeadlessAgentMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionPersistence: { enabled: true, sessionDir: "/custom" },
+			}),
+		);
+	});
 });
