@@ -7,6 +7,7 @@ import {
 	getAgentDir,
 	SessionManager,
 	SettingsManager,
+	type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { FILE_IO_TOOLS } from "./agent-config";
 import type { ThinkLevel } from "./config";
@@ -22,6 +23,10 @@ export interface HeadlessAgentOpts {
 	maxTurns?: number;
 	signal?: AbortSignal;
 	timeoutMs?: number;
+	/** Built-in tool name allowlist. Defaults to FILE_IO_TOOLS. Pass [] for no built-in tools. */
+	tools?: string[];
+	/** Custom tool definitions. Defaults to []. */
+	customTools?: ToolDefinition[];
 }
 
 const GRACE_TURNS = 1;
@@ -63,7 +68,8 @@ export async function runHeadlessAgent(opts: HeadlessAgentOpts): Promise<string>
 	// 4. Create the in-memory session (no bindExtensions)
 	const created = await createAgentSession({
 		cwd: opts.cwd,
-		tools: [...FILE_IO_TOOLS],
+		tools: opts.tools ?? [...FILE_IO_TOOLS],
+		customTools: opts.customTools ?? [],
 		model: resolvedModel as any,
 		thinkingLevel: opts.thinkLevel as any,
 		modelRegistry: opts.modelRegistry,
