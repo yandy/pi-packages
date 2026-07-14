@@ -36,18 +36,7 @@ export interface AddParams {
 export interface RemoveParams {
 	entry: string;
 }
-export interface ReadParams {
-	topic?: string;
-	entry?: string;
-}
-export interface ReadResult {
-	ok: boolean;
-	error?: string;
-	content?: string;
-}
 export interface ActionResult {
-	ok: boolean;
-	error?: string;
 	entries?: IndexEntry[];
 }
 
@@ -192,38 +181,6 @@ export async function doRemove(memoryDir: string, p: RemoveParams): Promise<Acti
 	});
 }
 
-export async function doRead(memoryDir: string, p: ReadParams): Promise<ReadResult> {
-	if (p.topic) {
-		const topicName = p.topic.endsWith(".md") ? p.topic : `${p.topic}.md`;
-		let topicPath: string;
-		try {
-			topicPath = safeTopicPath(memoryDir, topicName);
-			// biome-ignore lint/suspicious/noExplicitAny: error catch
-		} catch (e: any) {
-			return { ok: false, error: e.message };
-		}
-		try {
-			const content = await readFile(topicPath, "utf8");
-			return { ok: true, content };
-		} catch {
-			return { ok: false, error: `Topic "${p.topic}" not found` };
-		}
-	}
-	if (p.entry) {
-		const files = (await readdir(memoryDir).catch(() => [])).filter((f) => f.endsWith(".md") && f !== MEMORY_MD);
-		for (const f of files) {
-			const raw = await readFile(join(memoryDir, f), "utf8").catch(() => "");
-			const entries = parseEntries(raw);
-			const found = entries.find((e) => e.title === p.entry);
-			if (found) {
-				return { ok: true, content: `## ${found.title}\n\n${found.content}` };
-			}
-		}
-		return { ok: false, error: `Entry "${p.entry}" not found in any topic` };
-	}
-	return { ok: false, error: "Either topic or entry must be provided" };
-}
-
 export async function searchMemory(memoryDir: string, query: string): Promise<string> {
 	const files = (await readdir(memoryDir).catch(() => [])).filter((f) => f.endsWith(".md") && f !== MEMORY_MD);
 	const q = query.toLowerCase();
@@ -333,11 +290,10 @@ export function createMemoryTool(deps: MemoryToolDeps) {
 			"Use memory to persist project facts, user preferences, and lessons learned across sessions.",
 			"Use memory action 'add' with an explicit topic filename and a descriptive, self-contained entry title — only the index line (title + topic) is injected into future prompts, NOT the topic file content. The title alone must convey what was learned.",
 			"Use memory action 'search' with scope='sessions' to find past work in history sessions.",
-			"Use memory action 'read' with topic or entry to load stored knowledge.",
 			"Auto-surfacing: relevant topic files are automatically selected and their content injected into the conversation context. Use built-in 'read' and 'ls' to load additional topics when needed — you don't need to read what's already been surfaced.",
 		],
 		parameters: Type.Object({
-			action: StringEnum(["add", "remove", "search", "read"] as const),
+			action: StringEnum(["add", "remove", "search"] as const),
 			// add
 			content: Type.Optional(Type.String({ description: "Knowledge text to store (add)." })),
 			topic: Type.Optional(

@@ -2,7 +2,7 @@ import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { doAdd, doRemove, doRead, searchMemory, createMemoryTools } from "../src/memory-tool";
+import { doAdd, doRemove, searchMemory, createMemoryTools } from "../src/memory-tool";
 
 describe("doAdd", () => {
   let dir: string;
@@ -312,84 +312,6 @@ describe("doRemove", () => {
     expect(topic).toContain("description: Entry Beta");
     const mem = await readFile(join(dir, "MEMORY.md"), "utf8");
     expect(mem).toContain("Entry Beta");
-  });
-});
-
-describe("doRead", () => {
-  let dir: string;
-  beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), "mem-read-")); });
-  afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
-
-  it("reads entire topic file by topic name (without .md)", async () => {
-    await doAdd(dir, {
-      content: "staging uses port 2222",
-      topic: "debugging.md",
-      title: "SSH Gotcha",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    const res = await doRead(dir, { topic: "debugging" });
-    expect(res.ok).toBe(true);
-    expect(res.content).toContain("## SSH Gotcha");
-    expect(res.content).toContain("staging uses port 2222");
-    expect(res.content).toContain("updated:");
-    // Full frontmatter present
-    expect(res.content).toContain("name: debugging");
-    expect(res.content).toContain("description:");
-    expect(res.content).toContain("type:");
-  });
-
-  it("reads entire topic file by topic name (with .md)", async () => {
-    await doAdd(dir, {
-      content: "note",
-      topic: "misc.md",
-      title: "Misc",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    const res = await doRead(dir, { topic: "misc.md" });
-    expect(res.ok).toBe(true);
-    expect(res.content).toContain("## Misc");
-  });
-
-  it("reads single entry block by entry title", async () => {
-    await doAdd(dir, {
-      content: "first entry content",
-      topic: "debugging.md",
-      title: "SSH Gotcha",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    await doAdd(dir, {
-      content: "second entry content",
-      topic: "debugging.md",
-      title: "MySQL Timeout",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    const res = await doRead(dir, { entry: "MySQL Timeout" });
-    expect(res.ok).toBe(true);
-    expect(res.content).toContain("## MySQL Timeout");
-    expect(res.content).toContain("second entry content");
-    expect(res.content).not.toContain("first entry content");
-  });
-
-  it("errors when topic file not found", async () => {
-    const res = await doRead(dir, { topic: "nonexistent" });
-    expect(res.ok).toBe(false);
-    expect(res.error).toMatch(/not found/i);
-  });
-
-  it("errors when entry not found in any topic", async () => {
-    const res = await doRead(dir, { entry: "NoSuch" });
-    expect(res.ok).toBe(false);
-    expect(res.error).toMatch(/not found/i);
-  });
-
-  it("rejects path traversal in topic", async () => {
-    const res = await doRead(dir, { topic: "../escape" });
-    expect(res.ok).toBe(false);
-    expect(res.error).toMatch(/unsafe|traversal/i);
   });
 });
 
