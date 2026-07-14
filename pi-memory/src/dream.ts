@@ -1,4 +1,5 @@
-import type { ThinkingLevel, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import type { ThinkingLevel } from "./agent-runner";
 import type { Model } from "@earendil-works/pi-ai";
 import { runHeadlessAgent } from "./agent-runner";
 

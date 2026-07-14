@@ -53,30 +53,23 @@ export default function (pi: ExtensionAPI) {
 			if (nudge) {
 				const ok = await ctx.ui.confirm("Memory Consolidation", `${message}\n\nConsolidate memory files now?`);
 				if (ok) {
-					// Fire-and-forget: defers past the current macrotask so all
-					// session_start handlers (including pi-subagents') have completed.
-					// Does not block session_start.
 					const dreamModel = config.dream.model;
 					const dreamThinkLevel = config.dream.thinkLevel;
 					const dir = memoryDir;
 					ctx.ui.setStatus("dream", "Consolidating memory...");
-					setTimeout(async () => {
-						try {
-							const summary = await runDream({
-								model: dreamModel,
-								thinkLevel: dreamThinkLevel,
-								memoryDir: dir,
-								events: pi.events,
-							});
+					runDream({
+						model: dreamModel,
+						thinkLevel: dreamThinkLevel,
+						memoryDir: dir,
+						modelRegistry: ctx.modelRegistry,
+						parentModel: ctx.model,
+					})
+						.then(async (summary) => {
 							await writeDreamMeta(dir, sessions);
 							ctx.ui.notify(summary, "info");
-							// biome-ignore lint/suspicious/noExplicitAny: error catch
-						} catch (e: any) {
-							ctx.ui.notify(`Dream failed: ${e.message}`, "error");
-						} finally {
-							ctx.ui.setStatus("dream", undefined);
-						}
-					}, 0);
+						})
+						.catch((e: any) => ctx.ui.notify(`Dream failed: ${e.message}`, "error"))
+						.finally(() => ctx.ui.setStatus("dream", undefined));
 				}
 			}
 		}
@@ -86,11 +79,8 @@ export default function (pi: ExtensionAPI) {
 		if (!config?.enabled || !indexSnapshot || !memoryDir) return;
 
 		// Auto-surfacing: select relevant topic files via LLM side-query and inject as message.
-		// Skip for subagents: pi-subagents strips "subagent" from all children's
-		// tool sets, so its absence reliably identifies subagents. Without this guard,
-		// runSideQuery's subagent spawn → before_agent_start → re-enter here → OOM.
-		const agentTools = event.systemPromptOptions?.selectedTools;
-		const isSubagent = agentTools && !agentTools.includes("subagent");
+		// Skip for subagents (detected by active_agent tag in system prompt).
+		const isSubagent = event.systemPrompt.includes("<active_agent name=");
 
 		const autoSurfacing = config.autoSurfacing;
 		// biome-ignore lint/suspicious/noExplicitAny: message injection result
@@ -101,7 +91,16 @@ export default function (pi: ExtensionAPI) {
 				const manifest = await scanTopics(memoryDir);
 				if (manifest.length > 0) {
 					const queryPrompt = buildSurfacingPrompt(manifest, event.prompt.slice(0, 4000), injectedTopics);
-					const selected = await runSideQuery(queryPrompt, manifest, autoSurfacing.maxFiles, autoSurfacing.thinkLevel, pi.events);
+					const selected = await runSideQuery(
+						queryPrompt,
+						manifest,
+						autoSurfacing.maxFiles,
+						autoSurfacing.thinkLevel,
+						autoSurfacing.model,
+						ctx.modelRegistry,
+						ctx.model,
+						memoryDir,
+					);
 					if (selected.length > 0) {
 						const content = await injectSurfacedContent(
 							memoryDir,
@@ -157,6 +156,8 @@ export default function (pi: ExtensionAPI) {
 								JSON.stringify((m as any).content ?? ""),
 			})),
 			maxContextTokens: extractConfig.maxContextTokens,
+			modelRegistry: ctx.modelRegistry,
+			parentModel: ctx.model,
 		}).catch(() => {
 			/* silently ignore extract errors */
 		});
@@ -199,23 +200,20 @@ export default function (pi: ExtensionAPI) {
 			const ok = await ctx.ui.confirm("Dream", "Consolidate all memory files? This rewrites them in-place.");
 			if (!ok) return;
 			ctx.ui.setStatus("dream", "Consolidating memory...");
-			try {
-				const summary = await runDream({
-					model: config.dream.model,
-					thinkLevel: config.dream.thinkLevel,
-					memoryDir,
-					signal: ctx.signal,
-					events: pi.events,
-				});
-				const sessions = (await SessionManager.list(ctx.cwd)).length;
-				await writeDreamMeta(memoryDir, sessions);
-				ctx.ui.notify(summary, "info");
-				// biome-ignore lint/suspicious/noExplicitAny: command handler ctx
-			} catch (e: any) {
-				ctx.ui.notify(`Dream failed: ${e.message}`, "error");
-			} finally {
-				ctx.ui.setStatus("dream", undefined);
-			}
+			runDream({
+				model: config.dream.model,
+				thinkLevel: config.dream.thinkLevel,
+				memoryDir,
+				modelRegistry: ctx.modelRegistry,
+				parentModel: ctx.model,
+			})
+				.then(async (summary) => {
+					const sessions = (await SessionManager.list(ctx.cwd)).length;
+					await writeDreamMeta(memoryDir, sessions);
+					ctx.ui.notify(summary, "info");
+				})
+				.catch((e: any) => ctx.ui.notify(`Dream failed: ${e.message}`, "error"))
+				.finally(() => ctx.ui.setStatus("dream", undefined));
 		},
 	});
 }
