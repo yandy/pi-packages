@@ -269,6 +269,50 @@ describe("runHeadlessAgent", () => {
 		expect(disposeMock).toHaveBeenCalledTimes(1);
 	});
 
+
+	it("uses default FILE_IO_TOOLS when tools is not provided", async () => {
+		subscribeMock.mockImplementation((listener: any) => {
+			queueMicrotask(() => {
+				listener({ type: "message_end", message: {} });
+				listener({ type: "turn_end", message: {}, toolResults: [] });
+				listener({ type: "agent_end", messages: [], willRetry: false });
+			});
+			return () => {};
+		});
+
+		await runHeadlessAgent({
+			task: "x",
+			cwd: "/mem",
+			modelRegistry: fakeRegistry,
+			parentModel: {} as any,
+		});
+		const opts = createAgentSessionMock.mock.calls[0][0];
+		expect(opts.tools).toEqual(["read", "write", "edit", "ls"]);
+	});
+
+	it("passes custom tools and empty built-in tools when specified", async () => {
+		subscribeMock.mockImplementation((listener: any) => {
+			queueMicrotask(() => {
+				listener({ type: "message_end", message: {} });
+				listener({ type: "turn_end", message: {}, toolResults: [] });
+				listener({ type: "agent_end", messages: [], willRetry: false });
+			});
+			return () => {};
+		});
+
+		const customTool = { name: "my_tool", label: "My Tool", description: "custom", parameters: {}, execute: async () => ({ details: {}, content: [] }) };
+		await runHeadlessAgent({
+			task: "x",
+			cwd: "/mem",
+			modelRegistry: fakeRegistry,
+			parentModel: {} as any,
+			tools: [],
+			customTools: [customTool],
+		});
+		const opts = createAgentSessionMock.mock.calls[0][0];
+		expect(opts.tools).toEqual([]);
+		expect(opts.customTools).toEqual([customTool]);
+	});
 	it("uses SessionManager.create when sessionPersistence.enabled is true", async () => {
 		subscribeMock.mockImplementation((listener: any) => {
 			queueMicrotask(() => {

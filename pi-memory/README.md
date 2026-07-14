@@ -6,11 +6,11 @@ Aligned with Claude Code's auto memory mechanism: per-topic MEMORY.md index, aut
 
 ## Features
 
-- **One `memory` tool**, four actions: `add` (append entry), `remove` (delete entry by title), `read` (load topic or entry), `search` (query memory or session history)
+- **One `memory` tool**, three actions: `add` (append entry), `remove` (delete entry by title), `search` (query memory or session history)
 - **Topic-based file organization**: each `memory add` writes a `## entry` block to a named `.md` file under the project's memory directory
 - **`MEMORY.md` index** — one compact line per topic file with a relevance hook: `- [Name](file.md) — summary`
 - **Memory types**: four categories — `user`, `feedback` (default), `project`, `reference` — stored in topic file frontmatter
-- **Auto-surfacing** ⭐: on every user message, a side-query LLM selects up to N relevant topic files and injects their content into the agent's context. No manual `memory read` needed. Session-level deduplication prevents re-injecting the same topic.
+- **Auto-surfacing** ⭐: on every user message, a side-query LLM selects up to N relevant topic files and injects their content into the agent's context. No manual `read` needed — use the built-in `read` tool to inspect memory files. Session-level deduplication prevents re-injecting the same topic.
 - **Extract memories** ⭐: after each agent run, an async subagent analyzes the conversation and automatically writes learnings to memory — preferences, conventions, debugging insights
 - **Snapshot injection**: on every new session, the MEMORY.md index is appended to the system prompt, keeping the agent aware of past work
 - **`/dream` command**: launches a headless agent with a four-phase consolidation (Orient → Gather → Consolidate → Prune) to deduplicate, merge, and rebuild all memory files
@@ -121,7 +121,7 @@ MEMORY.md is a compact **pointer index** — one line per topic file, not per en
 - [API Conventions](api.md) — REST handlers in src/api/handlers/; standard error format
 ```
 
-Only the index is injected into the system prompt on every session (first 200 lines / 25KB). Topic file content is **not** loaded at session start — it's surfaced on demand via auto-surfacing or explicit `memory read`.
+Only the index is injected into the system prompt on every session (first 200 lines / 25KB). Topic file content is **not** loaded at session start — it's surfaced on demand via auto-surfacing or the built-in `read` tool.
 
 ### Topic file format
 
@@ -164,9 +164,9 @@ On every user message (`before_agent_start` hook):
 ### Extract memories
 
 After each agent run (`agent_end` hook):
-1. An async subagent is forked with the conversation transcript
-2. It analyzes whether there are learnings worth persisting
-3. If yes, it writes directly to memory files — preferences, conventions, debugging insights
+1. An async headless subagent is spawned with the conversation transcript
+2. It uses `ls` and `read` to check existing topic files and MEMORY.md, then `memory_add` to persist learnings
+3. If it finds learnings worth persisting, it writes them — preferences, conventions, debugging insights
 4. The subagent runs independently; its results benefit future sessions
 
 Memory extraction is selective: it ignores one-time tasks, code snippets derivable from the project, and anything already in CLAUDE.md.
@@ -174,7 +174,7 @@ Memory extraction is selective: it ignores one-time tasks, code snippets derivab
 ## Tool reference
 
 ```
-memory(action: "add" | "remove" | "search" | "read",
+memory(action: "add" | "remove" | "search",
         content?, topic?, title?, type?,
         entry?, query?, scope?)
 ```
@@ -193,13 +193,6 @@ Appends a `## entry` block to a topic file. If the topic already exists in the i
 Deletes an entry by title. Searches across all topic files for the matching `##` block. Updates the MEMORY.md hook for the affected topic. When the last entry in a topic is removed, the topic file and its index line are deleted.
 
 - **`entry`** (required) — exact entry title to remove
-
-### `read`
-
-Loads memory content. Either an entire topic file or a single entry block.
-
-- **`topic`** (optional) — topic name, e.g. `"debugging"` or `"debugging.md"`. Loads the entire topic file
-- **`entry`** (optional) — entry title. Returns the specific `## Entry Title` block
 
 ### `search`
 
@@ -251,4 +244,4 @@ The hash is derived from the project's git root (or absolute path), ensuring eac
 
 On every `session_start`, the `MEMORY.md` index is read and appended to the system prompt via `before_agent_start`. If the index exceeds `memIndexMaxLines` or `memIndexMaxBytes`, it is truncated with a `[truncated]` marker — the agent still gets the most relevant portion. This snapshot is a static copy at the start of the session.
 
-Topic file content is surfaced separately via **auto-surfacing** (automatic, per-turn, relevance-based) or explicit `memory read`.
+Topic file content is surfaced separately via **auto-surfacing** (automatic, per-turn, relevance-based) or the built-in `read` tool.

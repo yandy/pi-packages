@@ -1,7 +1,7 @@
 import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { withFileMutationQueue, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
@@ -21,6 +21,7 @@ import {
 	hasEntries,
 	parseEntries,
 	removeEntrySection,
+	replaceFrontmatterField,
 	updateFrontmatterDate,
 } from "./topic-file";
 
@@ -34,15 +35,6 @@ export interface AddParams {
 }
 export interface RemoveParams {
 	entry: string;
-}
-export interface ReadParams {
-	topic?: string;
-	entry?: string;
-}
-export interface ReadResult {
-	ok: boolean;
-	error?: string;
-	content?: string;
 }
 export interface ActionResult {
 	ok: boolean;
@@ -102,18 +94,19 @@ export async function doAdd(memoryDir: string, p: AddParams): Promise<ActionResu
 			const topicContent = appendContent(fm, p.title, p.content);
 			await writeFile(topicPath, topicContent, "utf8");
 		} else {
-			// Existing topic: append entry, then regenerate hook from ALL entry titles
+			// Existing topic: append entry, then regenerate hook + description from ALL entry titles
 			const raw = await readFile(topicPath, "utf8");
 			const refreshed = updateFrontmatterDate(raw, today());
 			const topicContent = appendContent(refreshed, p.title, p.content);
-			await writeFile(topicPath, topicContent, "utf8");
 
-			// Build hook from all entries (comma-separated titles, trimmed to ~150 chars)
+			// Build hook + description from all entries
 			const allEntries = parseEntries(topicContent);
 			const hook = allEntries
 				.map((e) => e.title)
 				.join("; ")
 				.slice(0, 150);
+			const withDesc = replaceFrontmatterField(topicContent, "description", hook);
+
 			next = updateHook(entries, topic, hook);
 			if (!checkCapacity(next, p.maxLines, p.maxBytes)) {
 				return {
@@ -121,6 +114,7 @@ export async function doAdd(memoryDir: string, p: AddParams): Promise<ActionResu
 					error: `MEMORY.md capacity exceeded (max ${p.maxLines} lines / ${p.maxBytes} bytes). Current entries: ${serializeIndex(entries)}`,
 				};
 			}
+			await writeFile(topicPath, withDesc, "utf8");
 		}
 
 		// write index
@@ -165,12 +159,13 @@ export async function doRemove(memoryDir: string, p: RemoveParams): Promise<Acti
 			const afterRemoval = removeEntrySection(raw, p.entry);
 
 			if (hasEntries(afterRemoval)) {
-				// Still has entries: update hook to remaining first entry, refresh date
+				// Still has entries: update hook + description from remaining entries, refresh date
 				const remaining = parseEntries(afterRemoval);
-				const newHook = remaining.length > 0 ? remaining[0].title : "";
+				const newHook = remaining.map((e) => e.title).join("; ").slice(0, 150);
 				const nextEntries = updateHook(entries, topicFile, newHook);
-				const refreshed = updateFrontmatterDate(afterRemoval, today());
-				await writeFile(topicPath, refreshed, "utf8");
+				const withDate = updateFrontmatterDate(afterRemoval, today());
+				const withDesc = replaceFrontmatterField(withDate, "description", newHook);
+				await writeFile(topicPath, withDesc, "utf8");
 				await writeFile(join(memoryDir, MEMORY_MD), `${serializeIndex(nextEntries)}\n`, "utf8");
 			} else {
 				// Last entry removed: delete topic file and remove from index
@@ -186,38 +181,6 @@ export async function doRemove(memoryDir: string, p: RemoveParams): Promise<Acti
 
 		return { ok: true };
 	});
-}
-
-export async function doRead(memoryDir: string, p: ReadParams): Promise<ReadResult> {
-	if (p.topic) {
-		const topicName = p.topic.endsWith(".md") ? p.topic : `${p.topic}.md`;
-		let topicPath: string;
-		try {
-			topicPath = safeTopicPath(memoryDir, topicName);
-			// biome-ignore lint/suspicious/noExplicitAny: error catch
-		} catch (e: any) {
-			return { ok: false, error: e.message };
-		}
-		try {
-			const content = await readFile(topicPath, "utf8");
-			return { ok: true, content };
-		} catch {
-			return { ok: false, error: `Topic "${p.topic}" not found` };
-		}
-	}
-	if (p.entry) {
-		const files = (await readdir(memoryDir).catch(() => [])).filter((f) => f.endsWith(".md") && f !== MEMORY_MD);
-		for (const f of files) {
-			const raw = await readFile(join(memoryDir, f), "utf8").catch(() => "");
-			const entries = parseEntries(raw);
-			const found = entries.find((e) => e.title === p.entry);
-			if (found) {
-				return { ok: true, content: `## ${found.title}\n\n${found.content}` };
-			}
-		}
-		return { ok: false, error: `Entry "${p.entry}" not found in any topic` };
-	}
-	return { ok: false, error: "Either topic or entry must be provided" };
 }
 
 export async function searchMemory(memoryDir: string, query: string): Promise<string> {
@@ -248,23 +211,94 @@ export interface MemoryToolDeps {
 	cwd: () => string;
 }
 
+export function createMemoryTools(
+	memoryDir: string,
+	cfg: { maxLines: number; maxBytes: number },
+): ToolDefinition[] {
+	return [
+		{
+			name: "memory_add",
+			label: "Memory Add",
+			description:
+				"Add a new memory entry to a topic file. Creates the topic if it doesn't exist. Use memory_search and the 'ls'/'read' tools to check for existing topics first.",
+			parameters: Type.Object({
+				content: Type.String({ description: "Knowledge text to store." }),
+				topic: Type.String({ description: "Target topic filename, e.g. 'debugging.md'." }),
+				title: Type.String({
+					description:
+						"Descriptive, self-contained title. Only index lines are injected into prompts — make titles self-descriptive.",
+				}),
+				type: Type.Optional(
+					StringEnum(["user", "feedback", "project", "reference"] as const),
+				),
+			}),
+			async execute(
+				_id: string,
+				params: any,
+				_signal: AbortSignal | undefined,
+				_onUpdate: any,
+				_ctx: any,
+			) {
+				if (!params.content) throw new Error("content is required");
+				if (!params.topic) throw new Error("topic is required");
+				if (!params.title) throw new Error("title is required");
+				const r = await doAdd(memoryDir, {
+					content: params.content,
+					topic: params.topic,
+					title: params.title,
+					type: params.type,
+					maxLines: cfg.maxLines,
+					maxBytes: cfg.maxBytes,
+				});
+				if (!r.ok) throw new Error(r.error);
+				return {
+					details: {},
+					content: [{
+						type: "text",
+						text: `Added "${params.title}" to ${params.topic}. Index has ${r.entries?.length ?? 0} entries.`,
+					}],
+				};
+			},
+		},
+		{
+			name: "memory_search",
+			label: "Memory Search",
+			description:
+				"Search all memory topic files for entries matching a query. Case-insensitive. Use this to find related memories before adding new ones.",
+			parameters: Type.Object({
+				query: Type.String({ description: "Search query." }),
+			}),
+			async execute(
+				_id: string,
+				params: any,
+				_signal: AbortSignal | undefined,
+				_onUpdate: any,
+				_ctx: any,
+			) {
+				if (!params.query) throw new Error("query is required");
+				const text = await searchMemory(memoryDir, params.query);
+				return { details: {}, content: [{ type: "text", text }] };
+			},
+		},
+	];
+}
+
 export function createMemoryTool(deps: MemoryToolDeps) {
 	return {
 		name: "memory",
 		label: "Memory",
 		description:
-			"Read/write project memory across sessions. action 'add' appends content under a topic (auto-created) as an entry; 'remove' deletes an entry by title; 'read' loads a topic or entry; 'search' queries memory files or history sessions. IMPORTANT: only MEMORY.md index lines are injected into system prompts — entry titles must be self-contained and descriptive (topic file content is NOT injected automatically — it is auto-surfaced for relevant queries).",
+			"Read/write project memory across sessions. action 'add' appends content under a topic (auto-created) as an entry; 'remove' deletes an entry by title; 'search' queries memory files or history sessions. IMPORTANT: only MEMORY.md index lines are injected into system prompts — entry titles must be self-contained and descriptive (topic file content is NOT injected automatically — it is auto-surfaced for relevant queries). Use built-in 'read' and 'ls' tools to read topic files and MEMORY.md.",
 		promptSnippet:
-			"Read/write project memory across sessions (add/remove/search/read). Only index titles are injected — make titles self-descriptive.",
+			"Read/write project memory across sessions (add/remove/search). Only index titles are injected — make titles self-descriptive.",
 		promptGuidelines: [
 			"Use memory to persist project facts, user preferences, and lessons learned across sessions.",
 			"Use memory action 'add' with an explicit topic filename and a descriptive, self-contained entry title — only the index line (title + topic) is injected into future prompts, NOT the topic file content. The title alone must convey what was learned.",
 			"Use memory action 'search' with scope='sessions' to find past work in history sessions.",
-			"Use memory action 'read' with topic or entry to load stored knowledge.",
-			"Auto-surfacing: relevant topic files are automatically selected and their content injected into the conversation context. Use 'read' to load additional topics when needed — you don't need to read what's already been surfaced.",
+			"Auto-surfacing: relevant topic files are automatically selected and their content injected into the conversation context. Use built-in 'read' and 'ls' to load additional topics when needed — you don't need to read what's already been surfaced.",
 		],
 		parameters: Type.Object({
-			action: StringEnum(["add", "remove", "search", "read"] as const),
+			action: StringEnum(["add", "remove", "search"] as const),
 			// add
 			content: Type.Optional(Type.String({ description: "Knowledge text to store (add)." })),
 			topic: Type.Optional(
@@ -340,14 +374,6 @@ export function createMemoryTool(deps: MemoryToolDeps) {
 					} else {
 						text = await searchMemory(dir, params.query);
 					}
-					break;
-				}
-				case "read": {
-					if (!params.topic && !params.entry) throw new Error("topic or entry is required for read");
-					const r = await doRead(dir, { topic: params.topic, entry: params.entry });
-					if (!r.ok) throw new Error(r.error);
-					// biome-ignore lint/style/noNonNullAssertion: content assertion
-					text = r.content!;
 					break;
 				}
 				default:

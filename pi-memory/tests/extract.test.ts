@@ -26,11 +26,25 @@ describe("buildExtractTask", () => {
 		const task = buildExtractTask("/tmp/mem", [{ role: "user", content: longMsg }], 100);
 		expect(task.length).toBeLessThan(5000);
 	});
+
+	it("buildExtractTask instructs LLM to use ls/read + memory tools not write/edit", () => {
+		const messages = [
+			{ role: "user", content: "help" },
+			{ role: "assistant", content: "answer" },
+		];
+		const task = buildExtractTask("/mem", messages, 2000);
+		expect(task).toContain("memory_add");
+		expect(task).toContain("ls");
+		expect(task).toContain("memory_search");
+		expect(task).toContain("Do NOT use 'bash', 'write', 'edit', or any other tools");
+		expect(task).not.toContain("file read/write/edit tools");
+	});
 });
 
 describe("runExtract", () => {
-	it("calls runHeadlessAgent with maxTurns=5 and configured thinkLevel (fire-and-forget)", () => {
+	it("calls runHeadlessAgent with maxTurns=5, tools=[\"read\",\"ls\"], customTools, and configured thinkLevel (fire-and-forget)", () => {
 		runHeadlessAgentMock.mockClear();
+		const fakeTools = [{ name: "memory_add", label: "Memory Add", description: "", parameters: {}, execute: async () => ({ details: {}, content: [] }) }];
 		runExtract({
 			thinkLevel: "high",
 			memoryDir: "/mem/x",
@@ -38,6 +52,7 @@ describe("runExtract", () => {
 			maxContextTokens: 2000,
 			modelRegistry: {} as any,
 			parentModel: { id: "parent" } as any,
+			customTools: fakeTools,
 		});
 
 		expect(runHeadlessAgentMock).toHaveBeenCalledTimes(1);
@@ -47,9 +62,10 @@ describe("runExtract", () => {
 				thinkLevel: "high",
 				maxTurns: 5,
 				parentModel: { id: "parent" },
+				tools: ["read", "ls"],
+				customTools: fakeTools,
 			}),
 		);
-		// task contains memory dir
 		expect(runHeadlessAgentMock.mock.calls[0][0].task).toContain("/mem/x");
 	});
 
@@ -67,6 +83,7 @@ describe("runExtract", () => {
 		expect(runHeadlessAgentMock.mock.calls[0][0]).toMatchObject({
 			model: "deepseek/deepseek-v4-flash",
 			thinkLevel: "medium",
+			tools: ["read", "ls"],
 		});
 	});
 

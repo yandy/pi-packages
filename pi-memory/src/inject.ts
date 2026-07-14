@@ -163,6 +163,7 @@ export async function runSideQuery(
 			thinkLevel,
 			maxTurns: 1,
 			timeoutMs: 30_000,
+			tools: [],
 			sessionPersistence,
 		});
 		return parseSelectedFiles(result, candidates, maxFiles);

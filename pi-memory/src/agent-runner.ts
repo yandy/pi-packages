@@ -8,8 +8,9 @@ import {
 	getAgentDir,
 	SessionManager,
 	SettingsManager,
+	type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { MEMORY_AGENT_TOOLS } from "./agent-config";
+import { FILE_IO_TOOLS } from "./agent-config";
 import type { SessionPersistenceConfig, ThinkLevel } from "./config";
 import { resolveModel } from "./model-resolver";
 
@@ -25,6 +26,10 @@ export interface HeadlessAgentOpts {
 	timeoutMs?: number;
 	/** Session persistence config. When enabled, sessions are written to disk. */
 	sessionPersistence?: SessionPersistenceConfig;
+	/** Built-in tool name allowlist. Defaults to FILE_IO_TOOLS. Pass [] for no built-in tools. */
+	tools?: string[];
+	/** Custom tool definitions. Defaults to []. */
+	customTools?: ToolDefinition[];
 }
 
 const GRACE_TURNS = 1;
@@ -67,7 +72,8 @@ export async function runHeadlessAgent(opts: HeadlessAgentOpts): Promise<string>
 
 	const created = await createAgentSession({
 		cwd: opts.cwd,
-		tools: [...MEMORY_AGENT_TOOLS],
+		tools: opts.tools ?? [...FILE_IO_TOOLS],
+		customTools: opts.customTools ?? [],
 		model: resolvedModel as any,
 		thinkingLevel: opts.thinkLevel as any,
 		modelRegistry: opts.modelRegistry,

@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { MEMORY_AGENT_TOOLS } from "../src/agent-config";
+import { FILE_IO_TOOLS } from "../src/agent-config";
 
-describe("MEMORY_AGENT_TOOLS", () => {
+describe("FILE_IO_TOOLS", () => {
 	it("contains read/write/edit/ls only", () => {
-		expect([...MEMORY_AGENT_TOOLS]).toEqual(["read", "write", "edit", "ls"]);
-		expect(MEMORY_AGENT_TOOLS).not.toContain("bash");
-		expect(MEMORY_AGENT_TOOLS).not.toContain("websearch");
+		expect([...FILE_IO_TOOLS]).toEqual(["read", "write", "edit", "ls"]);
+		expect(FILE_IO_TOOLS).not.toContain("bash");
+		expect(FILE_IO_TOOLS).not.toContain("websearch");
 	});
 });

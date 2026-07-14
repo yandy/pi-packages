@@ -12,7 +12,7 @@ import {
 	runSideQuery,
 	scanTopics,
 } from "./src/inject";
-import { createMemoryTool } from "./src/memory-tool";
+import { createMemoryTool, createMemoryTools } from "./src/memory-tool";
 import { readDreamMeta, shouldNudge, writeDreamMeta } from "./src/nudge";
 import { resolveMemoryDir } from "./src/paths";
 import { searchSessions } from "./src/session-search";
@@ -156,6 +156,10 @@ export default function (pi: ExtensionAPI) {
 			memoryDir,
 			modelRegistry: ctx.modelRegistry,
 			parentModel: ctx.model,
+			customTools: createMemoryTools(memoryDir, {
+				maxLines: config.memIndexMaxLines,
+				maxBytes: config.memIndexMaxBytes,
+			}),
 			sessionPersistence: resolveDefault(config, "extractMemories", "sessionPersistence"),
 			messages: event.messages.map((m) => ({
 				// biome-ignore lint/suspicious/noExplicitAny: pi event message union type
