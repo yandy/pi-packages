@@ -8,7 +8,7 @@ import {
 	SessionManager,
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { MEMORY_AGENT_TOOLS } from "./agent-config";
+import { FILE_IO_TOOLS } from "./agent-config";
 import type { ThinkLevel } from "./config";
 import { resolveModel } from "./model-resolver";
 
@@ -63,7 +63,7 @@ export async function runHeadlessAgent(opts: HeadlessAgentOpts): Promise<string>
 	// 4. Create the in-memory session (no bindExtensions)
 	const created = await createAgentSession({
 		cwd: opts.cwd,
-		tools: [...MEMORY_AGENT_TOOLS],
+		tools: [...FILE_IO_TOOLS],
 		model: resolvedModel as any,
 		thinkingLevel: opts.thinkLevel as any,
 		modelRegistry: opts.modelRegistry,
