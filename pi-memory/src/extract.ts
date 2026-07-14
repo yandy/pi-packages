@@ -1,14 +1,15 @@
-import { access } from "node:fs/promises";
-import type { ThinkLevel } from "./config";
-import { getSubagentsService, type SubagentsService, type WorkspaceProvider } from "@yandy0725/pi-subagents";
+import type { ThinkingLevel, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import type { Model } from "@earendil-works/pi-ai";
+import { runHeadlessAgent } from "./agent-runner";
 
 export interface RunExtractOpts {
-	model: string;
-	thinkLevel: ThinkLevel;
+	model?: string;
+	thinkLevel: ThinkingLevel;
 	memoryDir: string;
 	messages: Array<{ role: string; content: string }>;
 	maxContextTokens: number;
-	service?: SubagentsService;
+	modelRegistry: ModelRegistry;
+	parentModel?: Model<any>;
 }
 
 /** Build extraction task prompt.
@@ -79,35 +80,18 @@ export function buildExtractTask(
 	].join("\n");
 }
 
+/** Fire-and-forget memory extraction. Errors silently caught. */
 export async function runExtract(opts: RunExtractOpts): Promise<void> {
 	if (opts.messages.length === 0) return;
-
-	const service = opts.service ?? getSubagentsService();
-	if (!service) return; // silently skip if no subagent service
-
-	const model = opts.model === "auto" ? undefined : opts.model;
-	const thinkLevel = opts.thinkLevel;
 	const task = buildExtractTask(opts.memoryDir, opts.messages, opts.maxContextTokens);
-
-	const provider: WorkspaceProvider = {
-		async prepare(_ctx) {
-			await access(opts.memoryDir).catch(() => {
-				throw new Error(`Memory directory not found: ${opts.memoryDir}`);
-			});
-			return {
-				cwd: opts.memoryDir,
-				dispose: () => undefined,
-			};
-		},
-	};
-	service.registerWorkspaceProvider(provider);
-
-	// Fire-and-forget spawn
-	service.spawn(
-		"memory-agent",
+	runHeadlessAgent({
 		task,
-		model
-			? { model, inheritContext: false, maxTurns: 5, thinkingLevel: thinkLevel }
-			: { inheritContext: false, maxTurns: 5, thinkingLevel: thinkLevel },
-	);
+		cwd: opts.memoryDir,
+		modelRegistry: opts.modelRegistry,
+		model: opts.model,
+		parentModel: opts.parentModel,
+		thinkLevel: opts.thinkLevel,
+		maxTurns: 5,
+		timeoutMs: 120_000,
+	}).catch(() => { /* silent */ });
 }
