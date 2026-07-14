@@ -37,6 +37,8 @@ export interface RemoveParams {
 	entry: string;
 }
 export interface ActionResult {
+	ok: boolean;
+	error?: string;
 	entries?: IndexEntry[];
 }
 
@@ -104,7 +106,6 @@ export async function doAdd(memoryDir: string, p: AddParams): Promise<ActionResu
 				.join("; ")
 				.slice(0, 150);
 			const withDesc = replaceFrontmatterField(topicContent, "description", hook);
-			await writeFile(topicPath, withDesc, "utf8");
 
 			next = updateHook(entries, topic, hook);
 			if (!checkCapacity(next, p.maxLines, p.maxBytes)) {
@@ -113,6 +114,7 @@ export async function doAdd(memoryDir: string, p: AddParams): Promise<ActionResu
 					error: `MEMORY.md capacity exceeded (max ${p.maxLines} lines / ${p.maxBytes} bytes). Current entries: ${serializeIndex(entries)}`,
 				};
 			}
+			await writeFile(topicPath, withDesc, "utf8");
 		}
 
 		// write index
@@ -216,6 +218,7 @@ export function createMemoryTools(
 	return [
 		{
 			name: "memory_add",
+			label: "Memory Add",
 			description:
 				"Add a new memory entry to a topic file. Creates the topic if it doesn't exist. Use memory_search and the 'ls'/'read' tools to check for existing topics first.",
 			parameters: Type.Object({
@@ -249,6 +252,7 @@ export function createMemoryTools(
 				});
 				if (!r.ok) throw new Error(r.error);
 				return {
+					details: {},
 					content: [{
 						type: "text",
 						text: `Added "${params.title}" to ${params.topic}. Index has ${r.entries?.length ?? 0} entries.`,
@@ -258,6 +262,7 @@ export function createMemoryTools(
 		},
 		{
 			name: "memory_search",
+			label: "Memory Search",
 			description:
 				"Search all memory topic files for entries matching a query. Case-insensitive. Use this to find related memories before adding new ones.",
 			parameters: Type.Object({
@@ -272,7 +277,7 @@ export function createMemoryTools(
 			) {
 				if (!params.query) throw new Error("query is required");
 				const text = await searchMemory(memoryDir, params.query);
-				return { content: [{ type: "text", text }] };
+				return { details: {}, content: [{ type: "text", text }] };
 			},
 		},
 	];

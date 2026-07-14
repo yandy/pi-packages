@@ -47,7 +47,7 @@ export function updateFrontmatterDate(raw: string, date: string): string {
 
 export function replaceFrontmatterField(raw: string, field: string, value: string): string {
 	const regex = new RegExp(`^(---\n(?:.*\n)*?)${field}: .+(\n)`, "m");
-	return raw.replace(regex, `$1${field}: ${value}$2`);
+	return raw.replace(regex, (_full: string, prefix: string, nl: string) => `${prefix}${field}: ${value}${nl}`);
 }
 
 export function removeEntrySection(raw: string, title: string): string {

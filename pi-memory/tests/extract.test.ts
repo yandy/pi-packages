@@ -42,9 +42,9 @@ describe("buildExtractTask", () => {
 });
 
 describe("runExtract", () => {
-	it("calls runHeadlessAgent with maxTurns=5, tools=[], customTools, and configured thinkLevel (fire-and-forget)", () => {
+	it("calls runHeadlessAgent with maxTurns=5, tools=[\"read\",\"ls\"], customTools, and configured thinkLevel (fire-and-forget)", () => {
 		runHeadlessAgentMock.mockClear();
-		const fakeTools = [{ name: "memory_add", description: "", parameters: {}, execute: async () => ({ content: [] }) }];
+		const fakeTools = [{ name: "memory_add", label: "Memory Add", description: "", parameters: {}, execute: async () => ({ details: {}, content: [] }) }];
 		runExtract({
 			thinkLevel: "high",
 			memoryDir: "/mem/x",

@@ -300,7 +300,7 @@ describe("runHeadlessAgent", () => {
 			return () => {};
 		});
 
-		const customTool = { name: "my_tool", description: "custom", parameters: {}, execute: async () => ({ content: [] }) };
+		const customTool = { name: "my_tool", label: "My Tool", description: "custom", parameters: {}, execute: async () => ({ details: {}, content: [] }) };
 		await runHeadlessAgent({
 			task: "x",
 			cwd: "/mem",

@@ -407,9 +407,9 @@ describe("createMemoryTools", () => {
 			content: "staging uses port 2222",
 			topic: "debugging.md",
 			title: "SSH Gotcha",
-		}, undefined, undefined, undefined);
+		}, undefined, undefined, undefined as any);
 		expect(result.content[0].type).toBe("text");
-		expect(result.content[0].text).toContain("Added");
+		expect((result.content[0] as any).text).toContain("Added");
 		const topic = await readFile(join(dir, "debugging.md"), "utf8");
 		expect(topic).toContain("staging uses port 2222");
 	});
@@ -424,15 +424,15 @@ it("memory_search finds matching entries", async () => {
 		});
 		const tools = createMemoryTools(dir, { maxLines: 200, maxBytes: 25600 });
 		const searchTool = tools.find((t) => t.name === "memory_search")!;
-		const result = await searchTool.execute("id", { query: "2222" }, undefined, undefined, undefined);
-		expect(result.content[0].text).toContain("port 2222 for SSH");
+		const result = await searchTool.execute("id", { query: "2222" }, undefined, undefined, undefined as any);
+		expect((result.content[0] as any).text).toContain("port 2222 for SSH");
 	});
 
 	it("memory_add throws on missing required params", async () => {
 		const tools = createMemoryTools(dir, { maxLines: 200, maxBytes: 25600 });
 		const addTool = tools.find((t) => t.name === "memory_add")!;
 		await expect(
-			addTool.execute("id", { content: "x" }, undefined, undefined, undefined),
+			addTool.execute("id", { content: "x" }, undefined, undefined, undefined as any),
 		).rejects.toThrow("topic is required");
 	});
 });
