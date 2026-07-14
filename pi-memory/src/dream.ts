@@ -4,7 +4,6 @@ import type { Model } from "@earendil-works/pi-ai";
 import { runHeadlessAgent } from "./agent-runner";
 
 /** Build dream consolidation task.
- *  Session context strategy: cwd = memoryDir (via WorkspaceProvider).
  *  Dream agent sees only the memory files, no parent conversation history.
  *  Tool scope: full file read/write/edit (needed for consolidation). */
 export function buildDreamTask(memoryDir: string, maxLines: number): string {
