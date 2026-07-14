@@ -2,7 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { loadConfig, type MemoryConfig } from "./src/config";
+import { loadConfig, type MemoryConfig, type SessionPersistenceConfig } from "./src/config";
 import { runDream } from "./src/dream";
 import { runExtract } from "./src/extract";
 import {
@@ -16,6 +16,16 @@ import { createMemoryTool } from "./src/memory-tool";
 import { readDreamMeta, shouldNudge, writeDreamMeta } from "./src/nudge";
 import { resolveMemoryDir } from "./src/paths";
 import { searchSessions } from "./src/session-search";
+
+function resolveDefault<K extends "model" | "sessionPersistence">(
+	cfg: MemoryConfig,
+	task: "dream" | "autoSurfacing" | "extractMemories",
+	key: K,
+): K extends "model" ? string | undefined : SessionPersistenceConfig | undefined {
+	const perTask = cfg[task][key];
+	if (perTask !== undefined) return perTask as any;
+	return cfg.defaults?.[key] as any;
+}
 
 export default function (pi: ExtensionAPI) {
 	let memoryDir: string | null = null;
@@ -54,7 +64,7 @@ export default function (pi: ExtensionAPI) {
 				if (ok) {
 					// Fire-and-forget: does not block session_start. The headless
 					// dream agent runs independently; completion notifies the user.
-					const dreamModel = config.dream.model;
+					const dreamModel = resolveDefault(config, "dream", "model");
 					const dreamThinkLevel = config.dream.thinkLevel;
 					const dir = memoryDir;
 					ctx.ui.setStatus("dream", "Consolidating memory...");
@@ -64,6 +74,7 @@ export default function (pi: ExtensionAPI) {
 						memoryDir: dir,
 						modelRegistry: ctx.modelRegistry,
 						parentModel: ctx.model,
+						sessionPersistence: resolveDefault(config, "dream", "sessionPersistence"),
 					})
 						.then(async (summary) => {
 							await writeDreamMeta(dir, sessions);
@@ -103,10 +114,11 @@ export default function (pi: ExtensionAPI) {
 						injectedTopics,
 						autoSurfacing.maxFiles,
 						autoSurfacing.thinkLevel,
-						autoSurfacing.model,
+						resolveDefault(config, "autoSurfacing", "model"),
 						ctx.modelRegistry,
 						ctx.model,
 						memoryDir,
+						resolveDefault(config, "autoSurfacing", "sessionPersistence"),
 					);
 					if (selected.length > 0) {
 						const content = await injectSurfacedContent(
@@ -141,11 +153,12 @@ export default function (pi: ExtensionAPI) {
 		if (!extractConfig?.enabled) return;
 		if (!event.messages || event.messages.length === 0) return;
 		runExtract({
-			model: extractConfig.model,
+			model: resolveDefault(config, "extractMemories", "model"),
 			thinkLevel: extractConfig.thinkLevel,
 			memoryDir,
 			modelRegistry: ctx.modelRegistry,
 			parentModel: ctx.model,
+			sessionPersistence: resolveDefault(config, "extractMemories", "sessionPersistence"),
 			messages: event.messages.map((m) => ({
 				// biome-ignore lint/suspicious/noExplicitAny: pi event message union type
 				role: String((m as any).role ?? ""),
@@ -206,11 +219,12 @@ export default function (pi: ExtensionAPI) {
 			const dir = memoryDir;
 			ctx.ui.setStatus("dream", "Consolidating memory...");
 			runDream({
-				model: config.dream.model,
+				model: resolveDefault(config, "dream", "model"),
 				thinkLevel: config.dream.thinkLevel,
 				memoryDir,
 				modelRegistry: ctx.modelRegistry,
 				parentModel: ctx.model,
+				sessionPersistence: resolveDefault(config, "dream", "sessionPersistence"),
 			})
 				.then(async (summary) => {
 					const sessions = (await SessionManager.list(ctx.cwd)).length;

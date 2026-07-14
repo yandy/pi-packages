@@ -1,7 +1,7 @@
 import type { Model } from "@earendil-works/pi-ai";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { runHeadlessAgent } from "./agent-runner";
-import type { ThinkLevel } from "./config";
+import type { SessionPersistenceConfig, ThinkLevel } from "./config";
 
 export interface RunExtractOpts {
 	model?: string;
@@ -11,6 +11,7 @@ export interface RunExtractOpts {
 	maxContextTokens: number;
 	modelRegistry: ModelRegistry;
 	parentModel?: Model<any>;
+	sessionPersistence?: SessionPersistenceConfig;
 }
 
 /** Build extraction task prompt. (unchanged) */
@@ -90,6 +91,7 @@ export async function runExtract(opts: RunExtractOpts): Promise<void> {
 		thinkLevel: opts.thinkLevel,
 		maxTurns: 5,
 		timeoutMs: 120_000,
+		sessionPersistence: opts.sessionPersistence,
 	}).catch(() => {
 		/* silently ignore extract errors */
 	});

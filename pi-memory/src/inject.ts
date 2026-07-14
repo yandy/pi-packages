@@ -147,6 +147,7 @@ export async function runSideQuery(
 	modelRegistry: ModelRegistry,
 	parentModel: Model<any> | undefined,
 	memoryDir: string,
+	sessionPersistence?: import("./config").SessionPersistenceConfig,
 ): Promise<string[]> {
 	const candidates = manifest.filter((t) => !injectedTopics.has(t.filename));
 	if (candidates.length === 0) return [];
@@ -162,6 +163,7 @@ export async function runSideQuery(
 			thinkLevel,
 			maxTurns: 1,
 			timeoutMs: 30_000,
+			sessionPersistence,
 		});
 		return parseSelectedFiles(result, candidates, maxFiles);
 	} catch {

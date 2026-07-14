@@ -1,7 +1,7 @@
 import type { Model } from "@earendil-works/pi-ai";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { runHeadlessAgent } from "./agent-runner";
-import type { ThinkLevel } from "./config";
+import type { SessionPersistenceConfig, ThinkLevel } from "./config";
 
 /** Build dream consolidation task. (unchanged) */
 export function buildDreamTask(memoryDir: string, maxLines: number): string {
@@ -56,6 +56,7 @@ export interface RunDreamOpts {
 	memoryDir: string;
 	modelRegistry: ModelRegistry;
 	parentModel?: Model<any>;
+	sessionPersistence?: SessionPersistenceConfig;
 }
 
 /** Run dream consolidation via a headless agent. Fire-and-forget (caller decides await). */
@@ -70,5 +71,6 @@ export async function runDream(opts: RunDreamOpts): Promise<string> {
 		thinkLevel: opts.thinkLevel,
 		maxTurns: undefined,
 		timeoutMs: 600_000,
+		sessionPersistence: opts.sessionPersistence,
 	});
 }
