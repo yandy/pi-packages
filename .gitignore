@@ -149,5 +149,4 @@ vite.config.ts.timestamp-*
 .superpowers
 
 # superpowers plans are scratch, not committed
-docs/superpowers/plans/
-pi-memory/docs/superpowers/plans/
+**/docs/superpowers/plans/
