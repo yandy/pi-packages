@@ -13,6 +13,7 @@ export interface RunExtractOpts {
 	parentModel?: Model<any>;
 	sessionPersistence?: SessionPersistenceConfig;
 	customTools?: ToolDefinition[];
+	agentsMdBlocks?: string[];  // 新增
 }
 
 /** Build extraction task prompt using memory tools instead of raw file I/O. */
@@ -20,6 +21,7 @@ export function buildExtractTask(
 	memoryDir: string,
 	messages: Array<{ role: string; content: string }>,
 	maxTokens: number,
+	agentsMdBlocks: string[] = [],  // 新增
 ): string {
 	const fromUser = messages.find((m) => m.role === "user");
 	const fromAssistant = messages.findLast((m) => m.role === "assistant");
@@ -54,11 +56,12 @@ export function buildExtractTask(
 		"- Project conventions: architecture decisions, file organization, tech stack choices",
 		"- Discoveries: debugging workarounds, gotchas, configuration quirks, undocumented behavior",
 		"- References: external docs, APIs, or systems the user treats as important",
+		"- AGENTS.md rules that were violated in this conversation — extract for memory-level reinforcement (refer to the AGENTS.md content below)",
 		"",
 		"## What to Skip",
 		"- One-time task instructions or ephemeral details",
 		"- Code snippets or file paths derivable from the project",
-		"- Information already captured in AGENTS.md",
+		"- AGENTS.md rules that were followed without issue (refer to the AGENTS.md content below)",
 		"- Git history or recent changes",
 		"- Obvious or trivial observations",
 		"",
@@ -68,6 +71,9 @@ export function buildExtractTask(
 		"- Be concise but complete — one clear point per entry",
 		"- When in doubt, skip it",
 		"",
+		...(agentsMdBlocks.length > 0
+			? ["## AGENTS.md Rules", ...agentsMdBlocks, ""]
+			: []),
 		"=== Conversation ===",
 		`User: ${truncatedUser}`,
 		`Assistant: ${truncatedAssistant}`,
@@ -77,7 +83,7 @@ export function buildExtractTask(
 /** Fire-and-forget memory extraction. Does not await the headless agent. */
 export async function runExtract(opts: RunExtractOpts): Promise<void> {
 	if (opts.messages.length === 0) return;
-	const task = buildExtractTask(opts.memoryDir, opts.messages, opts.maxContextTokens);
+	const task = buildExtractTask(opts.memoryDir, opts.messages, opts.maxContextTokens, opts.agentsMdBlocks ?? []);
 	// fire-and-forget: runner disposes internally via finally
 	runHeadlessAgent({
 		task,
