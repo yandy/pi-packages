@@ -60,25 +60,7 @@ export async function scanTopics(memoryDir: string): Promise<TopicManifest[]> {
 	return manifests.sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
 
-function buildSurfacingPrompt(manifest: TopicManifest[], userPrompt: string): string {
-	const lines = manifest.map((t) => {
-		return `[${t.type}] ${t.filename} — ${t.description.slice(0, 80)}`;
-	});
 
-	return [
-		"You are a memory relevance selector. Below is a list of memory topic files and a user message.",
-		"Select up to N topic files that are relevant to the user's current query.",
-		"Response format: JSON with a 'selected_files' array of filenames.",
-		"",
-		"=== Topic Files ===",
-		...lines,
-		"",
-		"=== User Message ===",
-		userPrompt,
-		"",
-		'Return: {"selected_files": ["a.md", "b.md"]}',
-	].join("\n");
-}
 
 export async function injectSurfacedContent(
 	memoryDir: string,
@@ -107,18 +89,27 @@ export async function injectSurfacedContent(
 	return `<relevant_memories>\n${blocks.join("\n\n")}\n</relevant_memories>`;
 }
 
-/** Build the side-query task prompt. Extracted for testability. */
-export function buildSideQueryTask(prompt: string, maxFiles: number): string {
+/** Build the side-query task prompt. */
+export function buildSideQueryTask(
+	manifest: TopicManifest[],
+	userPrompt: string,
+	maxFiles: number,
+): string {
+	const lines = manifest.map((t) =>
+		`[${t.type}] ${t.filename} — ${t.description.slice(0, 80)}`,
+	);
+
 	return [
-		"Respond with ONLY a JSON object.",
+		`You are a memory relevance selector. Select up to ${maxFiles} topic files most relevant to the user query.`,
+		"If nothing matches, select none.",
 		"",
-		"Below is a list of memory topic files and a user query.",
-		`Select up to ${maxFiles} topic files MOST relevant to the user's current query.`,
-		'If nothing is relevant, return {"selected_files": []}.',
+		"=== Topic Files ===",
+		...lines,
 		"",
-		prompt,
+		"=== User Query ===",
+		userPrompt,
 		"",
-		'Respond with EXACTLY: {"selected_files": [...]}',
+		'Respond with ONLY a JSON object: {"selected_files": ["filename.md", ...]}',
 	].join("\n");
 }
 
@@ -151,8 +142,7 @@ export async function runSideQuery(
 ): Promise<string[]> {
 	const candidates = manifest.filter((t) => !injectedTopics.has(t.filename));
 	if (candidates.length === 0) return [];
-	const surfacingPrompt = buildSurfacingPrompt(candidates, userPrompt);
-	const task = buildSideQueryTask(surfacingPrompt, maxFiles);
+	const task = buildSideQueryTask(candidates, userPrompt, maxFiles);
 	try {
 		const result = await runHeadlessAgent({
 			task,
