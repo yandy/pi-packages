@@ -8,16 +8,21 @@ import { loadCustomAgents } from "../../src/config/custom-agents";
 describe("loadCustomAgents", () => {
 	let tmpDir: string;
 	let originalHome: string | undefined;
+	let originalAgentDir: string | undefined;
 
 	beforeEach(() => {
 		tmpDir = mkdtempSync(join(tmpdir(), "pi-test-"));
 		originalHome = process.env.HOME;
+		originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 		process.env.HOME = tmpDir;
+		delete process.env.PI_CODING_AGENT_DIR;
 	});
 
 	afterEach(() => {
 		if (originalHome == null) delete process.env.HOME;
 		else process.env.HOME = originalHome;
+		if (originalAgentDir == null) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
 		rmSync(tmpDir, { recursive: true, force: true });
 	});
 
