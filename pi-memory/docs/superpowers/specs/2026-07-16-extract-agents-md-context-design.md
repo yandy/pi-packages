@@ -61,7 +61,7 @@ AGENTS.md 放在 Remember/Skip 规则之后、conversation 之前：
 "What to Remember" 中 AGENTS.md 规则改为引用式：
 
 ```
-- AGENTS.md rules that were violated — extract for memory-level reinforcement (refer to the AGENTS.md content below for what rules exist)
+- AGENTS.md rules that were violated — extract for memory-level reinforcement (refer to the AGENTS.md content below)
 ```
 
 "What to Skip" 中类似：
