@@ -20,8 +20,7 @@ import { searchSessions } from "./src/session-search";
 function extractAgentsMdBlocks(systemPrompt: string): string[] {
 	const blocks: string[] = [];
 	const re = /<project_instructions\s+path="([^"]+)">\n([\s\S]*?)<\/project_instructions>/g;
-	let match: RegExpExecArray | null;
-	while ((match = re.exec(systemPrompt)) !== null) {
+	for (const match of systemPrompt.matchAll(re)) {
 		blocks.push(match[0]);
 	}
 	return blocks;

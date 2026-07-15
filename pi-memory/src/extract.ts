@@ -56,7 +56,7 @@ export function buildExtractTask(
 		"- Project conventions: architecture decisions, file organization, tech stack choices",
 		"- Discoveries: debugging workarounds, gotchas, configuration quirks, undocumented behavior",
 		"- References: external docs, APIs, or systems the user treats as important",
-		"- AGENTS.md rules that were violated — extract for memory-level reinforcement (refer to the AGENTS.md content below)",
+		"- AGENTS.md rules that were violated in this conversation — extract for memory-level reinforcement (refer to the AGENTS.md content below)",
 		"",
 		"## What to Skip",
 		"- One-time task instructions or ephemeral details",
