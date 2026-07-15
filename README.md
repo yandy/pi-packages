@@ -20,6 +20,10 @@ Monorepo for @yandy pi packages. Uses npm workspaces.
 | [pi-vision-tools](./pi-vision-tools) | `describe_image` tool — delegate image analysis to a vision model | `@yandy0725/pi-vision-tools` |
 | [pi-web-tools](./pi-web-tools) | websearch + webfetch tools | `@yandy0725/pi-web-tools` |
 
+## Related
+
+- [picode](https://github.com/yandy/picode) — Pre-configured config collection optimized for coding scenarios with pi. Includes curated settings, model configurations, agent definitions, skills, keybindings, and memory management.
+
 ## Development
 
 ```bash
