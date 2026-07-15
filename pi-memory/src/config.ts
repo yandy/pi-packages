@@ -40,8 +40,14 @@ export interface MemoryConfig {
 	/** Shared defaults for model and sessionPersistence. Per-task configs override. */
 	defaults?: DefaultsConfig;
 	memoryDir: string;
+	/** Write capacity: max entries in MEMORY.md index. */
 	memIndexMaxLines: number;
+	/** Write capacity: max bytes of serialized MEMORY.md index. */
 	memIndexMaxBytes: number;
+	/** Injection truncation: max lines of MEMORY.md injected into system prompt. */
+	memIndexInjectMaxLines: number;
+	/** Injection truncation: max bytes of MEMORY.md injected into system prompt. */
+	memIndexInjectMaxBytes: number;
 	dream: {
 		nudgeAfterSessions: number;
 		nudgeAfterHours: number;
@@ -63,14 +69,16 @@ export const DEFAULT_CONFIG: MemoryConfig = {
 	memoryDir: join(homedir(), CONFIG_DIR_NAME, "memory"),
 	memIndexMaxLines: 200,
 	memIndexMaxBytes: 25600,
+	memIndexInjectMaxLines: 20,
+	memIndexInjectMaxBytes: 3072,
 	dream: { nudgeAfterSessions: 5, nudgeAfterHours: 24, thinkLevel: "high" },
 	sessionSearch: { maxSessions: 10, maxMatches: 5 },
 	autoSurfacing: {
 		enabled: true,
 		thinkLevel: "off",
-		maxFiles: 5,
-		maxTopicBytes: 4096,
-		maxInjectionBytes: 20480,
+		maxFiles: 3,
+		maxTopicBytes: 3072,
+		maxInjectionBytes: 10240,
 	},
 	extractMemories: {
 		enabled: true,
