@@ -58,7 +58,7 @@ export function buildExtractTask(
 		"## What to Skip",
 		"- One-time task instructions or ephemeral details",
 		"- Code snippets or file paths derivable from the project",
-		"- Information already captured in AGENTS.md",
+		"- AGENTS.md rules that were followed — skip; AGENTS.md rules that were violated in this conversation — extract (they need memory-level reinforcement)",
 		"- Git history or recent changes",
 		"- Obvious or trivial observations",
 		"",
