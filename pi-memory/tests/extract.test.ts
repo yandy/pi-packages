@@ -27,6 +27,50 @@ describe("buildExtractTask", () => {
 		expect(task.length).toBeLessThan(5000);
 	});
 
+	it("inserts AGENTS.md blocks between Memory Entry Guidelines and Conversation", () => {
+		const messages = [
+			{ role: "user", content: "how to debug SSH?" },
+			{ role: "assistant", content: "Use ssh -vvv user@host" },
+		];
+		const blocks = [
+			'<project_instructions path="/home/user/.pi/agent-code/AGENTS.md">\n- global rule: use Chinese\n</project_instructions>',
+			'<project_instructions path="/project/AGENTS.md">\n- project rule: never skip tests\n</project_instructions>',
+		];
+		const task = buildExtractTask("/tmp/mem", messages, 2000, blocks);
+
+		expect(task).toContain("## AGENTS.md Rules");
+		expect(task).toContain("global rule: use Chinese");
+		expect(task).toContain("project rule: never skip tests");
+
+		const guidelinesIdx = task.indexOf("## Memory Entry Guidelines");
+		const agentsIdx = task.indexOf("## AGENTS.md Rules");
+		const conversationIdx = task.indexOf("=== Conversation ===");
+		expect(guidelinesIdx).toBeLessThan(agentsIdx);
+		expect(agentsIdx).toBeLessThan(conversationIdx);
+	});
+
+	it("omits AGENTS.md section when blocks array is empty", () => {
+		const messages = [
+			{ role: "user", content: "hello" },
+			{ role: "assistant", content: "hi" },
+		];
+		const task = buildExtractTask("/tmp/mem", messages, 2000, []);
+		expect(task).not.toContain("## AGENTS.md Rules");
+	});
+
+	it("references AGENTS.md content below in Remember and Skip rules", () => {
+		const messages = [
+			{ role: "user", content: "hi" },
+			{ role: "assistant", content: "hello" },
+		];
+		const task = buildExtractTask("/tmp/mem", messages, 2000, ['<project_instructions path="/x">\nrule\n</project_instructions>']);
+		expect(task).toContain("refer to the AGENTS.md content below");
+		// Appears in both Remember and Skip
+		const firstRef = task.indexOf("refer to the AGENTS.md content below");
+		const lastRef = task.lastIndexOf("refer to the AGENTS.md content below");
+		expect(firstRef).not.toBe(lastRef);
+	});
+
 	it("buildExtractTask instructs LLM to use ls/read + memory tools not write/edit", () => {
 		const messages = [
 			{ role: "user", content: "help" },
