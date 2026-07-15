@@ -27,10 +27,11 @@ const { MOCK_BASE, mockConfigValue } = vi.hoisted(() => {
 	return { MOCK_BASE: `/tmp/pi-memory-wiring-${process.pid}`, mockConfigValue: cfg };
 });
 
-const { scanTopicsMock, runSideQueryMock, injectSurfacedContentMock } = vi.hoisted(() => ({
+const { scanTopicsMock, runSideQueryMock, injectSurfacedContentMock, runExtractMock } = vi.hoisted(() => ({
 	scanTopicsMock: vi.fn(),
 	runSideQueryMock: vi.fn(),
 	injectSurfacedContentMock: vi.fn(),
+	runExtractMock: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../src/config", () => ({
@@ -61,6 +62,11 @@ vi.mock("../src/dream", () => ({
 	runDream: vi.fn().mockResolvedValue("done"),
 	buildDreamTask: vi.fn().mockReturnValue("dream task"),
 }));
+
+vi.mock("../src/extract", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../src/extract")>();
+	return { ...actual, runExtract: runExtractMock };
+});
 
 vi.mock("../src/inject", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../src/inject")>();
@@ -303,6 +309,84 @@ describe("index wiring (integration)", () => {
 		// Clean up
 		delete mockConfigValue.defaults;
 		delete (mockConfigValue.autoSurfacing as any).sessionPersistence;
+	});
+
+	it("agent_end passes extracted AGENTS.md blocks to runExtract", async () => {
+		runExtractMock.mockClear();
+		mockConfigValue.extractMemories.enabled = true;
+
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		const fakeCtx = {
+			cwd: tmpDir, hasUI: false,
+			isProjectTrusted: () => true,
+			modelRegistry: {}, model: undefined,
+		};
+		await handlers["session_start"][0]({}, fakeCtx);
+
+		const sysPrompt = [
+			"pi base...",
+			'<project_instructions path="/home/user/.pi/agent-code/AGENTS.md">',
+			"global: use Chinese",
+			"</project_instructions>",
+			'<project_instructions path="/project/AGENTS.md">',
+			"project: never skip tests",
+			"</project_instructions>",
+		].join("\n");
+
+		await handlers["before_agent_start"][0](
+			{ systemPrompt: sysPrompt, systemPromptOptions: { cwd: tmpDir, selectedTools: [] } },
+			fakeCtx as any,
+		);
+
+		await handlers["agent_end"]?.[0]?.(
+			{
+				messages: [
+					{ role: "user", content: "hello" },
+					{ role: "assistant", content: "hi" },
+				],
+			},
+			fakeCtx as any,
+		);
+
+		expect(runExtractMock).toHaveBeenCalledTimes(1);
+		const callArgs = runExtractMock.mock.calls[0][0];
+		expect(callArgs.agentsMdBlocks.length).toBe(2);
+		expect(callArgs.agentsMdBlocks[0]).toContain("global: use Chinese");
+		expect(callArgs.agentsMdBlocks[1]).toContain("project: never skip tests");
+
+		mockConfigValue.extractMemories.enabled = false;
+	});
+
+	it("extractAgentsMdBlocks returns empty array when no project_instructions in prompt", async () => {
+		runExtractMock.mockClear();
+		mockConfigValue.extractMemories.enabled = true;
+
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		const fakeCtx = {
+			cwd: tmpDir, hasUI: false,
+			isProjectTrusted: () => true,
+			modelRegistry: {}, model: undefined,
+		};
+		await handlers["session_start"][0]({}, fakeCtx);
+
+		await handlers["before_agent_start"][0](
+			{ systemPrompt: "no AGENTS.md here", systemPromptOptions: { cwd: tmpDir, selectedTools: [] } },
+			fakeCtx as any,
+		);
+
+		await handlers["agent_end"]?.[0]?.(
+			{ messages: [{ role: "user", content: "hello" }] },
+			fakeCtx as any,
+		);
+
+		expect(runExtractMock).toHaveBeenCalledTimes(1);
+		expect(runExtractMock.mock.calls[0][0].agentsMdBlocks).toEqual([]);
+
+		mockConfigValue.extractMemories.enabled = false;
 	});
 
 	it("tool execute throws when config.enabled is false", async () => {

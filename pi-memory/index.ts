@@ -17,6 +17,16 @@ import { readDreamMeta, shouldNudge, writeDreamMeta } from "./src/nudge";
 import { resolveMemoryDir } from "./src/paths";
 import { searchSessions } from "./src/session-search";
 
+function extractAgentsMdBlocks(systemPrompt: string): string[] {
+	const blocks: string[] = [];
+	const re = /<project_instructions\s+path="([^"]+)">\n([\s\S]*?)<\/project_instructions>/g;
+	let match: RegExpExecArray | null;
+	while ((match = re.exec(systemPrompt)) !== null) {
+		blocks.push(match[0]);
+	}
+	return blocks;
+}
+
 function resolveDefault(cfg: MemoryConfig, task: "dream" | "autoSurfacing" | "extractMemories", key: "model"): string | undefined;
 function resolveDefault(cfg: MemoryConfig, task: "dream" | "autoSurfacing" | "extractMemories", key: "sessionPersistence"): SessionPersistenceConfig | undefined;
 function resolveDefault(cfg: MemoryConfig, task: "dream" | "autoSurfacing" | "extractMemories", key: "model" | "sessionPersistence"): string | SessionPersistenceConfig | undefined {
@@ -31,6 +41,7 @@ export default function (pi: ExtensionAPI) {
 	let indexSnapshot = "";
 	let toolRegistered = false;
 	const injectedTopics = new Set<string>();
+	let lastSystemPrompt = "";
 
 	pi.on("session_start", async (_event, ctx) => {
 		config = await loadConfig(ctx);
@@ -91,6 +102,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
+		lastSystemPrompt = event.systemPrompt;
 		if (!config?.enabled || !indexSnapshot || !memoryDir) return;
 
 		const autoSurfacing = config.autoSurfacing;
@@ -151,6 +163,7 @@ export default function (pi: ExtensionAPI) {
 		if (!extractConfig?.enabled) return;
 		if (!event.messages || event.messages.length === 0) return;
 		runExtract({
+			agentsMdBlocks: extractAgentsMdBlocks(lastSystemPrompt),
 			model: resolveDefault(config, "extractMemories", "model"),
 			thinkLevel: extractConfig.thinkLevel,
 			memoryDir,
