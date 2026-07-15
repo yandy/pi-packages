@@ -9,6 +9,8 @@ describe("DEFAULT_CONFIG", () => {
 		expect(DEFAULT_CONFIG.enabled).toBe(true);
 		expect(DEFAULT_CONFIG.memIndexMaxLines).toBe(200);
 		expect(DEFAULT_CONFIG.memIndexMaxBytes).toBe(25600);
+		expect(DEFAULT_CONFIG.memIndexInjectMaxLines).toBe(20);
+		expect(DEFAULT_CONFIG.memIndexInjectMaxBytes).toBe(3072);
 		expect(DEFAULT_CONFIG.dream.model).toBeUndefined();
 		expect(DEFAULT_CONFIG.sessionSearch.maxSessions).toBe(10);
 	});
@@ -79,9 +81,9 @@ describe("loadConfig", () => {
 		expect(cfg.autoSurfacing).toEqual({
 			enabled: true,
 			thinkLevel: "off",
-			maxFiles: 5,
-			maxTopicBytes: 4096,
-			maxInjectionBytes: 20480,
+			maxFiles: 3,
+			maxTopicBytes: 3072,
+			maxInjectionBytes: 10240,
 		});
 	});
 

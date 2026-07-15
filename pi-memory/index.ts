@@ -46,7 +46,7 @@ export default function (pi: ExtensionAPI) {
 		config = await loadConfig(ctx);
 		if (!config.enabled) return;
 		memoryDir = await resolveMemoryDir(config, ctx.cwd);
-		indexSnapshot = await loadIndexSnapshot(memoryDir, config.memIndexMaxLines, config.memIndexMaxBytes);
+		indexSnapshot = await loadIndexSnapshot(memoryDir, config.memIndexInjectMaxLines, config.memIndexInjectMaxBytes);
 
 		// register memory tool once
 		if (!toolRegistered) {
