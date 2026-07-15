@@ -32,19 +32,19 @@ before_agent_start                     agent_end
                                                                 ─► 拼入 task prompt
 ```
 
-### 注入位置：conversation 之前
+### 注入位置：conversation 之前，Remember/Skip 之后
 
 ```
-[system prompt]       ← pi 内置
-[task 指令]            ← buildExtractTask 固定文本
-[AGENTS.md blocks]     ← 新增，可被 LLM prefix cache 命中
-[conversation]         ← 每次变化，cache 断点
+[system prompt]          ← pi 内置
+[task 指令]               ← 含 ## What to Remember / ## What to Skip
+[AGENTS.md blocks]        ← 新增，可被 LLM prefix cache 命中
+[conversation]            ← 每次变化，cache 断点
 ```
 
-放在 conversation 之前而非之后：
+AGENTS.md 放在 Remember/Skip 规则之后、conversation 之前：
+- 模型先读到判定规则，再读到 AGENTS.md 参考内容，最后读 conversation 做判断——流程自然
 - extract context 短（~1000 token conversation），位置对注意力影响可忽略
-- AGENTS.md 内容稳定，放前面可享受 prefix cache 收益
-- 每次 extract 只重算 conversation 段
+- AGENTS.md 内容稳定，放 conversation 之前可享受 prefix cache 收益
 
 ### 提取逻辑
 
@@ -61,13 +61,13 @@ before_agent_start                     agent_end
 "What to Remember" 中 AGENTS.md 规则改为引用式：
 
 ```
-- AGENTS.md rules that were violated — extract for memory-level reinforcement (refer to the AGENTS.md content above for what rules exist)
+- AGENTS.md rules that were violated — extract for memory-level reinforcement (refer to the AGENTS.md content below for what rules exist)
 ```
 
 "What to Skip" 中类似：
 
 ```
-- AGENTS.md rules that were followed without issue (refer to the AGENTS.md content above)
+- AGENTS.md rules that were followed without issue (refer to the AGENTS.md content below)
 ```
 
 ## 改动文件
