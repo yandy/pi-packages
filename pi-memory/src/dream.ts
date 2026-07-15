@@ -3,7 +3,7 @@ import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { runHeadlessAgent } from "./agent-runner";
 import type { SessionPersistenceConfig, ThinkLevel } from "./config";
 
-/** Build dream consolidation task. (unchanged) */
+/** Build dream consolidation task. */
 export function buildDreamTask(memoryDir: string, maxLines: number): string {
 	return `You are a memory consolidation agent. Your job is to read all memory files
 and consolidate them into a clean, deduplicated memory store.
@@ -33,6 +33,8 @@ Phase 4 — Prune & Index:
   description: specific summary that helps LLM match queries (be specific!)
   type: one of user, feedback, project, reference
   updated: today's date
+- Ensure entry titles are self-contained and descriptive
+  (only titles appear in future sessions' index, not the entry body)
 - Generate a compact hook (~150 chars) for each topic summarizing its entries
 - Rebuild MEMORY.md with one line per topic file (max ${maxLines} lines):
   - [Name](file.md) — hook
@@ -47,7 +49,13 @@ CRITICAL for hooks and descriptions:
 - Good: "SSH port 2222 on staging; MySQL 30s timeout; Redis auth fix"
 - Each topic file's \`## Entry Title\` blocks contain the actual memory entries.
   The MEMORY.md line is just a pointer — only ONE line per topic file.
-- When done, output a concise summary of changes (merged N, removed N, moved N, updated N).`;
+
+IMPORTANT — Do not prune process rules:
+- "Always do X" / "Never do Y" rules and workflow discipline entries are
+  as valuable as technical facts. Do not delete them as "obsolete"
+  just because they look like meta-instructions.
+
+When done, output a concise summary of changes (merged N, removed N, moved N, updated N).`;
 }
 
 export interface RunDreamOpts {
