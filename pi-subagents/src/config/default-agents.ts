@@ -30,7 +30,7 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 			displayName: "Explore",
 			description: "Fast codebase exploration agent (read-only)",
 			builtinToolNames: READ_ONLY_TOOLS,
-			model: "anthropic/claude-haiku-4-5-20251001",
+			model: "deepseek/deepseek-v4-flash",
 			systemPrompt: `# CRITICAL: READ-ONLY MODE - NO FILE MODIFICATIONS
 You are a file search specialist. You excel at thoroughly navigating and exploring codebases.
 Your role is EXCLUSIVELY to search and analyze existing code. You do NOT have access to file editing tools.
