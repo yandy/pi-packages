@@ -74,16 +74,96 @@ AGENTS.md 放在 Remember/Skip 规则之后、conversation 之前：
 
 ### `index.ts`
 
-1. 新增模块变量 `let lastSystemPrompt = ""`
-2. `before_agent_start` handler 中，捕获 `event.systemPrompt` **原始值**（在 `buildInjection` 追加 MEMORY.md 索引之前），存入 `lastSystemPrompt`
-3. `agent_end` handler 中，提取 `<project_instructions>` 块，传入 `runExtract`
+**1. 新增模块变量：**
+
+```ts
+let lastSystemPrompt = "";
+```
+
+**2. `before_agent_start` handler：** 在 `buildInjection(...)` 调用之前捕获原始 system prompt：
+
+```ts
+lastSystemPrompt = event.systemPrompt;
+```
+
+注意：必须在 `buildInjection` 之前获取，因为 `buildInjection` 会在尾部追加 MEMORY.md 索引，破坏干净的 `<project_instructions>` 提取。
+
+**3. `agent_end` handler：** 新增辅助函数 `extractAgentsMdBlocks`，从 system prompt 中提取所有 `<project_instructions>` 块，传入 `runExtract`：
+
+```ts
+function extractAgentsMdBlocks(systemPrompt: string): string[] {
+  const blocks: string[] = [];
+  const re = /<project_instructions\s+path="([^"]+)">\n([\s\S]*?)<\/project_instructions>/g;
+  let match;
+  while ((match = re.exec(systemPrompt)) !== null) {
+    // match[0] 是整个标签块，包含 path 信息
+    blocks.push(match[0]);
+  }
+  return blocks;
+}
+```
+
+调用处：
+```ts
+runExtract({
+  ...
+  agentsMdBlocks: extractAgentsMdBlocks(lastSystemPrompt),
+});
+```
 
 ### `extract.ts`
 
-1. `RunExtractOpts` 新增 `agentsMdBlocks?: string[]`
-2. `buildExtractTask` 新增参数 `agentsMdBlocks: string[]`
-3. 在 task prompt 的 conversation 段之前插入 AGENTS.md 块
-4. 更新 "What to Remember/Skip" 中 AGENTS.md 规则的措辞
+**1. `RunExtractOpts` 新增字段：**
+
+```ts
+// 新增
+agentsMdBlocks?: string[];
+```
+
+**2. `buildExtractTask` 签名变更 + 参数传递：**
+
+```ts
+// before
+export function buildExtractTask(
+  memoryDir: string,
+  messages: Array<{ role: string; content: string }>,
+  maxTokens: number,
+): string
+
+// after
+export function buildExtractTask(
+  memoryDir: string,
+  messages: Array<{ role: string; content: string }>,
+  maxTokens: number,
+  agentsMdBlocks: string[],  // 新增
+): string
+```
+
+**3. `runExtract` 调用处传入 `opts.agentsMdBlocks ?? []`**
+
+**4. Task prompt 中插入 AGENTS.md 块**，位于 `"## Memory Entry Guidelines"` 之后、`"=== Conversation ==="` 之前：
+
+```ts
+// 在 "=== Conversation ===" 之前插入
+...(agentsMdBlocks.length > 0
+  ? ["", "## AGENTS.md Rules", ...agentsMdBlocks]
+  : []),
+"=== Conversation ===",
+```
+
+每个 `agentsMdBlocks[i]` 是单个 `<project_instructions path="...">\n...\n</project_instructions>` 的完整内容，保留原始 path 信息。
+
+**5. 提示词措辞更新：**
+
+```
+// Remember
+- before: "AGENTS.md rules that were violated in this conversation — extract for memory-level reinforcement"
+- after:  "AGENTS.md rules that were violated — extract for memory-level reinforcement (refer to the AGENTS.md content below)"
+
+// Skip
+- before: "AGENTS.md rules that were followed without issue"
+- after:  "AGENTS.md rules that were followed without issue (refer to the AGENTS.md content below)"
+```
 
 ### 测试
 
