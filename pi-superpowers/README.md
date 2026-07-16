@@ -5,26 +5,26 @@ Superpowers skills for pi — structured development workflows for building soft
 ## Installation
 
 ```bash
-npm install @yandy0725/pi-superpowers
+pi install npm:@yandy0725/pi-superpowers
 ```
 
 ## Skills
 
-This package bundles the following skills from [Superpowers](https://github.com/obra/superpowers), each prefixed with `superpowers-`:
+This package bundles the following skills from [Superpowers](https://github.com/obra/superpowers), each prefixed with `supo-`:
 
 | Skill | Description |
 |-------|-------------|
-| `/skill:superpowers-brainstorming` | Explore user intent, requirements and design before implementation |
-| `/skill:superpowers-systematic-debugging` | Systematic debugging process for finding root causes |
-| `/skill:superpowers-writing-plans` | Write comprehensive implementation plans from specs |
-| `/skill:superpowers-test-driven-development` | Test-first development workflow |
-| `/skill:superpowers-using-git-worktrees` | Isolated workspace creation via git worktrees |
-| `/skill:superpowers-verification-before-completion` | Verify work before claiming completion |
+| `/skill:supo-brainstorming` | Explore user intent, requirements and design before implementation |
+| `/skill:supo-systematic-debugging` | Systematic debugging process for finding root causes |
+| `/skill:supo-writing-plans` | Write comprehensive implementation plans from specs |
+| `/skill:supo-test-driven-development` | Test-first development workflow |
+| `/skill:supo-using-git-worktrees` | Isolated workspace creation via git worktrees |
+| `/skill:supo-verification-before-completion` | Verify work before claiming completion |
 | ... | and more |
 
 ## Slash Commands
 
-- `/superpowers <task>` — Dispatch to the appropriate Superpowers workflow
+- `/supo <task>` — Dispatch to the appropriate Superpowers workflow
 
 ## Development
 
@@ -34,7 +34,7 @@ To update skills from upstream:
 npm run download-skills
 ```
 
-This clones the [obra/superpowers](https://github.com/obra/superpowers) repo, copies skill directories with `superpowers-` prefix, and updates SKILL.md frontmatter and cross-references.
+This clones the [obra/superpowers](https://github.com/obra/superpowers) repo, copies skill directories with `supo-` prefix, and updates SKILL.md frontmatter and cross-references.
 
 ## License
 

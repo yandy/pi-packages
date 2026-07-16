@@ -28,7 +28,7 @@ function cloneOrPull(repo, ref) {
 
 function transformSkill(name, cacheSkillsDir) {
   const src = resolve(cacheSkillsDir, name);
-  const dest = resolve(ROOT, "skills", `superpowers-${name}`);
+  const dest = resolve(ROOT, "skills", `supo-${name}`);
 
   // Copy entire directory
   rmSync(dest, { recursive: true, force: true });
@@ -51,16 +51,16 @@ function transformSkill(name, cacheSkillsDir) {
 
     if (relPath === 'SKILL.md') {
       // Replace frontmatter name only in SKILL.md
-      content = content.replace(/^name:\s*(.+)$/m, `name: superpowers-${name}`);
+      content = content.replace(/^name:\s*(.+)$/m, `name: supo-${name}`);
     }
 
-    // Replace cross-references in body: superpowers:<any-skill> → superpowers-<any-skill>
-    content = content.replace(/superpowers:([a-z][a-z0-9-]*)/g, "superpowers-$1");
+    // Replace cross-references in body: superpowers:<any-skill> → supo-<any-skill>
+    content = content.replace(/superpowers:([a-z][a-z0-9-]*)/g, "supo-$1");
 
     writeFileSync(mdPath, content, "utf-8");
   }
 
-  console.log(`[done] ${name} → superpowers-${name}`);
+  console.log(`[done] ${name} → supo-${name}`);
 }
 
 function cleanStale(configSkills) {
@@ -71,9 +71,9 @@ function cleanStale(configSkills) {
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const dirName = entry.name;
-    if (!dirName.startsWith("superpowers-")) continue;
+    if (!dirName.startsWith("supo-")) continue;
 
-    const originalName = dirName.slice("superpowers-".length);
+    const originalName = dirName.slice("supo-".length);
     if (!configSkills.includes(originalName)) {
       console.log(`[clean] Removing stale skill: ${dirName}`);
       rmSync(resolve(skillsDir, dirName), { recursive: true, force: true });
