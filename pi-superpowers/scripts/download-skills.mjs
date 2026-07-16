@@ -51,7 +51,12 @@ function transformSkill(name, cacheSkillsDir) {
 
     if (relPath === 'SKILL.md') {
       // Replace frontmatter name only in SKILL.md
-      content = content.replace(/^name:\s*(.+)$/m, `name: supo-${name}`);
+      // Parse frontmatter delimited by ---, only replace name within it
+      const parts = content.split('---');
+      if (parts.length >= 3) {
+        parts[1] = parts[1].replace(/^name:\s*(.+)$/m, `name: supo-${name}`);
+        content = parts.join('---');
+      }
     }
 
     // Replace cross-references in body: superpowers:<any-skill> → supo-<any-skill>

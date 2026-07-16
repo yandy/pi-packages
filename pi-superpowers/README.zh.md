@@ -8,6 +8,15 @@ Superpowers 技能包 — 为 pi 提供结构化的开发工作流技能。
 pi install npm:@yandy0725/pi-superpowers
 ```
 
+## 配套包
+
+Superpowers 工作流可能会分派子代理或跟踪任务。如需完整功能，请安装：
+
+```bash
+pi install npm:@yandy0725/pi-subagents
+pi install npm:@yandy0725/pi-todo
+```
+
 ## 技能
 
 本包从 [Superpowers](https://github.com/obra/superpowers) 搬运以下技能，均以 `supo-` 为前缀：
