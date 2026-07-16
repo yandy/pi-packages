@@ -38,3 +38,12 @@ Determine the task type and follow the matching workflow. Do NOT skip phases.
 - Each phase completes and gets user approval before the next starts
 - Never skip phases, even for "simple" tasks
 - If unsure about task type, default to the New Feature workflow
+
+## Pi Tool Mapping
+
+Skills speak in actions ("dispatch a subagent", "create a todo", "read a file"). On Pi these resolve to the tools below.
+
+| Action skills request | Pi equivalent |
+| --- | --- |
+| Dispatch a subagent (`Subagent (general-purpose):` template) | Use an installed subagent tool such as `subagent` from `pi-subagents` if available |
+| Task tracking ("create a todo", "mark complete") | Use an installed todo/task tool if available, otherwise track tasks in the plan or `TODO.md` |
