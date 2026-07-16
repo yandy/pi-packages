@@ -34,4 +34,4 @@ npm test                  # 运行所有测试
 
 ## 发布
 
-参见各包目录下的 `RELEASE.md`。
+参见 [docs/guides/release.md](docs/guides/release.md)。
