@@ -5,7 +5,9 @@ argument-hint: "<task description>"
 
 Assess the task below and follow the corresponding Superpowers workflow.
 
-**Task:** $ARGUMENTS
+<TASK>
+$ARGUMENTS
+</TASK>
 
 ## Workflow Selection
 
