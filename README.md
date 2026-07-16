@@ -36,4 +36,4 @@ npm test                  # Run all tests
 
 ## Release
 
-See `RELEASE.md` in each package directory.
+See [docs/guides/release.md](docs/guides/release.md).
