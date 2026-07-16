@@ -8,6 +8,15 @@ Superpowers skills for pi — structured development workflows for building soft
 pi install npm:@yandy0725/pi-superpowers
 ```
 
+## Companion Packages
+
+Superpowers workflows may dispatch subagents or track tasks. For full functionality, install:
+
+```bash
+pi install npm:@yandy0725/pi-subagents
+pi install npm:@yandy0725/pi-todo
+```
+
 ## Skills
 
 This package bundles the following skills from [Superpowers](https://github.com/obra/superpowers), each prefixed with `supo-`:
