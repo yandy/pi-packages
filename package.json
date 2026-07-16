@@ -12,7 +12,8 @@
 		"pi-lark",
 		"pi-dingtalk",
 		"pi-permission-system",
-		"pi-subagents"
+		"pi-subagents",
+		"pi-superpowers"
 	],
 	"scripts": {
 		"test": "npm run test --workspaces --if-present",
