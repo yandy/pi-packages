@@ -41,15 +41,25 @@ function transformSkill(name, cacheSkillsDir) {
     return;
   }
 
-  let content = readFileSync(skillMdPath, "utf-8");
+  // Transform all .md files in the skill directory
+  const mdFiles = readdirSync(dest, { recursive: true })
+    .filter(f => f.endsWith('.md'));
 
-  // Replace frontmatter name
-  content = content.replace(/^name:\s*(.+)$/m, `name: superpowers-${name}`);
+  for (const relPath of mdFiles) {
+    const mdPath = resolve(dest, relPath);
+    let content = readFileSync(mdPath, "utf-8");
 
-  // Replace cross-references in body: superpowers:<any-skill> → superpowers-<any-skill>
-  content = content.replace(/superpowers:([a-z][a-z0-9-]*)/g, "superpowers-$1");
+    if (relPath === 'SKILL.md') {
+      // Replace frontmatter name only in SKILL.md
+      content = content.replace(/^name:\s*(.+)$/m, `name: superpowers-${name}`);
+    }
 
-  writeFileSync(skillMdPath, content, "utf-8");
+    // Replace cross-references in body: superpowers:<any-skill> → superpowers-<any-skill>
+    content = content.replace(/superpowers:([a-z][a-z0-9-]*)/g, "superpowers-$1");
+
+    writeFileSync(mdPath, content, "utf-8");
+  }
+
   console.log(`[done] ${name} → superpowers-${name}`);
 }
 
