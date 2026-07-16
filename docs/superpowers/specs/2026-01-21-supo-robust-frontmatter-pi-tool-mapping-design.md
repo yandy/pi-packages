@@ -1,4 +1,4 @@
-# Design: Robust Frontmatter Parsing & Pi Tool Mapping
+# Design: Robust Frontmatter Parsing & Peer Dependencies
 
 ## 1. Robust Frontmatter `name` Replacement
 
@@ -32,43 +32,33 @@ if (parts.length >= 3) {
 
 ### Edge Cases
 
-- **No frontmatter:** `parts.length < 3` → skip replacement silently (shouldn't happen for SKILL.md files but safe)
-- **`---` in body text:** Only the first two `---` are consumed; any further `---` in body are preserved in `parts[2..]`
+- **No frontmatter:** `parts.length < 3` → skip replacement silently
+- **`---` in body text:** Only the first two `---` are consumed; further `---` preserved
 - **Frontmatter with no `name:` line:** Regex simply won't match, content unchanged
 
-## 2. Pi Tool Mapping Section in `supo.md`
+## 2. Peer Dependencies
 
 ### Problem
 
-The Superpowers prompt references Claude Code-specific concepts (e.g., `Skill` tool, `Task`, `TodoWrite`) that don't exist in Pi. Agents need guidance on how to map Superpowers instructions to Pi-native tools.
+Superpowers workflows reference subagent and todo/task tracking capabilities. Pi provides these via separate packages (`pi-subagents`, `pi-todo`). Declaring them as peer dependencies signals to consumers that these packages are expected to be available for full Superpowers functionality.
 
 ### Solution
 
-Append a `## Pi tool mapping` section to `prompts/supo.md` explaining:
+Add `peerDependencies` to `pi-superpowers/package.json`:
 
-- Skills: use `read` to load SKILL.md, or let human invoke `/skill:name`
-- Coding tools: `read`, `write`, `edit`, `bash`, plus optional `grep`, `find`, `ls`
-- Subagents: use `subagent` from `pi-subagents` if available, otherwise explain the gap
-- Task tracking: use installed todo/task tool if available, otherwise use plan files or `TODO.md`
-
-### Content
-
+```json
+"peerDependencies": {
+  "@yandy0725/pi-subagents": "*",
+  "@yandy0725/pi-todo": "*"
+}
 ```
-## Pi tool mapping
 
-Pi has native skills but does not expose Claude Code's `Skill` tool. When a Superpowers instruction says to invoke a skill, use Pi's native skill system instead: load the relevant `SKILL.md` with `read` when the skill applies, or let a human invoke `/skill:name` explicitly.
-
-Pi's built-in coding tools are lowercase: `read`, `write`, `edit`, `bash`, plus optional `grep`, `find`, and `ls`. Use those for the corresponding actions: read a file, create or edit files, run shell commands, search file contents, find files by name, and list directories.
-
-Pi does not ship a standard subagent tool. If a subagent tool such as `subagent` from `pi-subagents` is available, use it for Superpowers subagent workflows. If no subagent tool is available, do the work in this session or explain the missing capability instead of inventing `Task` calls.
-
-Pi does not ship a standard task-list tool. If an installed todo/task tool is available, use it. Otherwise track work in plan files or a repo-local `TODO.md` when task tracking is needed. Treat older `TodoWrite` references as this task-tracking action.
-```
+`"*"` version range means any version is accepted — these are optional companion packages and version coupling is not required.
 
 ## Scope
 
 Two files changed:
 - `pi-superpowers/scripts/download-skills.mjs`: one line replaced with a small block
-- `pi-superpowers/prompts/supo.md`: one section appended at end
+- `pi-superpowers/package.json`: add `peerDependencies` field
 
-No dependencies, no tests affected.
+No code dependencies, no tests affected.
