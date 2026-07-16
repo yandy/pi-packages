@@ -36,7 +36,28 @@ if (parts.length >= 3) {
 - **`---` in body text:** Only the first two `---` are consumed; further `---` preserved
 - **Frontmatter with no `name:` line:** Regex simply won't match, content unchanged
 
-## 2. Companion Package Install Instructions
+## 2. Pi Tool Mapping in `supo.md`
+
+### Problem
+
+Superpowers instructions reference Claude Code-specific concepts (e.g., `Skill` tool, `Task`, `TodoWrite`) that don't exist in Pi. Agents need guidance on how to map Superpowers actions to Pi-native tools.
+
+### Solution
+
+Append a `## Pi Tool Mapping` section to `prompts/supo.md`:
+
+```markdown
+## Pi Tool Mapping
+
+Skills speak in actions ("dispatch a subagent", "create a todo", "read a file"). On Pi these resolve to the tools below.
+
+| Action skills request | Pi equivalent |
+| --- | --- |
+| Dispatch a subagent (`Subagent (general-purpose):` template) | Use an installed subagent tool such as `subagent` from `pi-subagents` if available |
+| Task tracking ("create a todo", "mark complete") | Use an installed todo/task tool if available, otherwise track tasks in the plan or `TODO.md` |
+```
+
+## 3. Companion Package Install Instructions
 
 ### Problem
 
@@ -72,8 +93,9 @@ pi install npm:@yandy0725/pi-todo
 
 ## Scope
 
-Three files changed:
+Four files changed:
 - `pi-superpowers/scripts/download-skills.mjs`: one line replaced with a small block
+- `pi-superpowers/prompts/supo.md`: append Pi Tool Mapping section
 - `pi-superpowers/README.md`: add Companion Packages section
 - `pi-superpowers/README.zh.md`: add 配套包 section
 
