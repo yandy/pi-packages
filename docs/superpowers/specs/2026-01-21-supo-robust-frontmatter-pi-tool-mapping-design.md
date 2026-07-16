@@ -1,4 +1,4 @@
-# Design: Robust Frontmatter Parsing & Peer Dependencies
+# Design: Robust Frontmatter Parsing & Companion Package Docs
 
 ## 1. Robust Frontmatter `name` Replacement
 
@@ -36,29 +36,45 @@ if (parts.length >= 3) {
 - **`---` in body text:** Only the first two `---` are consumed; further `---` preserved
 - **Frontmatter with no `name:` line:** Regex simply won't match, content unchanged
 
-## 2. Peer Dependencies
+## 2. Companion Package Install Instructions
 
 ### Problem
 
-Superpowers workflows reference subagent and todo/task tracking capabilities. Pi provides these via separate packages (`pi-subagents`, `pi-todo`). Declaring them as peer dependencies signals to consumers that these packages are expected to be available for full Superpowers functionality.
+Superpowers workflows dispatch subagents (`pi-subagents`) and track tasks (`pi-todo`), but users may not know these companion packages are needed for full functionality.
 
 ### Solution
 
-Add `peerDependencies` to `pi-superpowers/package.json`:
+Add a "Companion Packages" section to both README files, after the Installation section:
 
-```json
-"peerDependencies": {
-  "@yandy0725/pi-subagents": "*",
-  "@yandy0725/pi-todo": "*"
-}
+**README.md:**
+```markdown
+## Companion Packages
+
+Superpowers workflows may dispatch subagents or track tasks. For full functionality, install:
+
+```bash
+pi install npm:@yandy0725/pi-subagents
+pi install npm:@yandy0725/pi-todo
+```
 ```
 
-`"*"` version range means any version is accepted — these are optional companion packages and version coupling is not required.
+**README.zh.md:**
+```markdown
+## 配套包
+
+Superpowers 工作流可能会分派子代理或跟踪任务。如需完整功能，请安装：
+
+```bash
+pi install npm:@yandy0725/pi-subagents
+pi install npm:@yandy0725/pi-todo
+```
+```
 
 ## Scope
 
-Two files changed:
+Three files changed:
 - `pi-superpowers/scripts/download-skills.mjs`: one line replaced with a small block
-- `pi-superpowers/package.json`: add `peerDependencies` field
+- `pi-superpowers/README.md`: add Companion Packages section
+- `pi-superpowers/README.zh.md`: add 配套包 section
 
-No code dependencies, no tests affected.
+No dependencies, no tests affected.
