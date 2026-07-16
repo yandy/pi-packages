@@ -5,8 +5,8 @@
 `pi-superpowers` is a Pure Skills pi package that bundles [Superpowers](https://github.com/obra/superpowers) skills for use with pi. It provides:
 
 1. A maintainer script to download skills from upstream
-2. Skills with `superpowers-` name prefix (colons not valid per pi skill name rules)
-3. A `/superpowers` prompt-template that forces structured workflow execution
+2. Skills with `supo-` name prefix (colons not valid per pi skill name rules)
+3. A `/supo` prompt-template that forces structured workflow execution
 
 ## Package Type
 
@@ -24,15 +24,15 @@ pi-superpowers/
 ├── scripts/
 │   └── download-skills.mjs         # Download script (maintainer tool)
 ├── prompts/
-│   └── superpowers.md              # /superpowers slash command
+│   └── supo.md              # /supo slash command
 └── skills/
-    ├── superpowers-brainstorming/
-    │   ├── SKILL.md                # name: superpowers-brainstorming
+    ├── supo-brainstorming/
+    │   ├── SKILL.md                # name: supo-brainstorming
     │   ├── visual-companion.md
     │   └── scripts/
     │       └── ...
-    ├── superpowers-systematic-debugging/
-    │   ├── SKILL.md                # name: superpowers-systematic-debugging
+    ├── supo-systematic-debugging/
+    │   ├── SKILL.md                # name: supo-systematic-debugging
     │   ├── root-cause-tracing.md
     │   └── ...
     └── ...                         # One dir per skill in config
@@ -86,11 +86,11 @@ Maintainer-only script. Run via `npm run download-skills`.
    - If not: `git clone --branch <ref> <repo> /tmp/pi-superpowers-cache`
 2. **Read config**: Parse `skills.config.json` for `skills` list.
 3. **Copy skills**: For each skill name in the list:
-   - Copy entire directory (`<cache>/skills/<name>/`) to `skills/superpowers-<name>/`
-   - In `skills/superpowers-<name>/SKILL.md` YAML frontmatter: `name:` → `name: superpowers-<name>`
-   - In `skills/superpowers-<name>/SKILL.md` body text: global regex replace `superpowers:([a-z-]+)` → `superpowers-$1` across all cross-references (upstream uses colon, pi requires hyphen)
+   - Copy entire directory (`<cache>/skills/<name>/`) to `skills/supo-<name>/`
+   - In `skills/supo-<name>/SKILL.md` YAML frontmatter: `name:` → `name: supo-<name>`
+   - In `skills/supo-<name>/SKILL.md` body text: global regex replace `superpowers:([a-z-]+)` → `supo-$1` across all cross-references (upstream uses colon, pi requires hyphen)
    - Preserve all other files as-is (scripts/, references/, markdown docs, etc.)
-4. **Clean stale**: Remove any `skills/superpowers-<name>/` directories not in the config.
+4. **Clean stale**: Remove any `skills/supo-<name>/` directories not in the config.
 
 #### Notes
 
@@ -98,13 +98,13 @@ Maintainer-only script. Run via `npm run download-skills`.
 - Running the script overwrites local skills with upstream versions. No overlay/patch system.
 - The cache directory persists between runs to save bandwidth.
 
-### 3. prompts/superpowers.md
+### 3. prompts/supo.md
 
-A prompt-template accessible via `/superpowers <task description>` slash command.
+A prompt-template accessible via `/supo <task description>` slash command.
 
 #### Content Design
 
-A static file that acts as a **workflow entry point**. When the user runs `/superpowers <task>`, the template expands with the task and instructs the LLM to assess the task type and follow the appropriate Superpowers workflow:
+A static file that acts as a **workflow entry point**. When the user runs `/supo <task>`, the template expands with the task and instructs the LLM to assess the task type and follow the appropriate Superpowers workflow:
 
 | Task Type | Workflow |
 |-----------|----------|
@@ -133,23 +133,23 @@ Determine the task type and follow the matching workflow. Do NOT skip phases.
 
 ### New Feature / Creative Work
 
-1. Load `/skill:superpowers-using-git-worktrees` — create or verify isolated workspace
-2. Load `/skill:superpowers-brainstorming` — explore requirements, propose design, get approval
-3. Load `/skill:superpowers-writing-plans` — create implementation plan, get approval
-4. Load `/skill:superpowers-subagent-driven-development` (or `/skill:superpowers-executing-plans`) — execute plan task-by-task
-5. Load `/skill:superpowers-finishing-a-development-branch` — merge, PR, or clean up
+1. Load `/skill:supo-using-git-worktrees` — create or verify isolated workspace
+2. Load `/skill:supo-brainstorming` — explore requirements, propose design, get approval
+3. Load `/skill:supo-writing-plans` — create implementation plan, get approval
+4. Load `/skill:supo-subagent-driven-development` (or `/skill:supo-executing-plans`) — execute plan task-by-task
+5. Load `/skill:supo-finishing-a-development-branch` — merge, PR, or clean up
 
 ### Bug Fix
 
-1. Load `/skill:superpowers-using-git-worktrees` — create or verify isolated workspace
-2. Load `/skill:superpowers-systematic-debugging` — find root cause, propose fix
-3. Load `/skill:superpowers-test-driven-development` — write failing test, implement fix
-4. Load `/skill:superpowers-verification-before-completion` — verify fix works
-5. Load `/skill:superpowers-finishing-a-development-branch` — merge, PR, or clean up
+1. Load `/skill:supo-using-git-worktrees` — create or verify isolated workspace
+2. Load `/skill:supo-systematic-debugging` — find root cause, propose fix
+3. Load `/skill:supo-test-driven-development` — write failing test, implement fix
+4. Load `/skill:supo-verification-before-completion` — verify fix works
+5. Load `/skill:supo-finishing-a-development-branch` — merge, PR, or clean up
 
 ### Code Review
 
-1. Load `/skill:superpowers-receiving-code-review` — process review feedback
+1. Load `/skill:supo-receiving-code-review` — process review feedback
 
 ## Rules
 
@@ -190,33 +190,33 @@ Key points:
 - No `extensions` field
 - `files` includes `skills/` and `prompts/` but NOT `scripts/` or `skills.config.json`
 - `pi.skills` and `pi.prompts` both declared
-- Skill names and directories both use `superpowers-` prefix (hyphen), per pi's name rules (only lowercase letters, numbers, hyphens)
+- Skill names and directories both use `supo-` prefix (hyphen), per pi's name rules (only lowercase letters, numbers, hyphens)
 
 ## Design Decisions
 
 | Decision | Rationale |
 |----------|-----------|
 | Pure Skills (no code) | No runtime logic needed; only skills + prompt-template |
-| `superpowers-` prefix on skill names and directory names | Consistency: dir name matches skill name; `/skill:superpowers-brainstorming`
+| `supo-` prefix on skill names and directory names | Consistency: dir name matches skill name; `/skill:supo-brainstorming`
 | Clone entire skill directory | Skills have supporting files (scripts, references, docs) that must travel together |
 | Git clone + cache | Saves bandwidth on repeated runs; `ref` pinning ensures reproducibility |
 | Manual script (not postinstall) | Script is a maintainer tool; skills are committed and shipped in the package |
-| Static prompt-template | `/superpowers <task>` is a fixed workflow entry point, not a generated catalog |
+| Static prompt-template | `/supo <task>` is a fixed workflow entry point, not a generated catalog |
 | `repo` + `ref` in config | Enables pinning to specific upstream versions for reproducible builds |
 
 ## CI/CD Registration
 
 As a Pure Skills package:
 
-- `.github/workflows/publish.yml`: add `pi-superpowers-v*` case
+- `.github/workflows/publish.yml`: add `pi-supo-v*` case
 - `.github/workflows/test.yml`: add `pi-superpowers` to `paths-filter`
 - No `vitest.config.ts` entry needed (no tests)
 - Root `package.json` `workspaces` array: add `"pi-superpowers"`
 
 ## Acceptance Criteria
 
-1. `npm run download-skills` clones upstream, copies skills with `superpowers-` prefix
+1. `npm run download-skills` clones upstream, copies skills with `supo-` prefix
 2. `skills/` contains one directory per skill in config
-3. Each SKILL.md has `name: superpowers-<original-name>` in frontmatter
-4. `/superpowers <task>` accepts task description and instructs LLM to classify task type and follow the appropriate workflow (New Feature, Bug Fix, or Code Review)
+3. Each SKILL.md has `name: supo-<original-name>` in frontmatter
+4. `/supo <task>` accepts task description and instructs LLM to classify task type and follow the appropriate workflow (New Feature, Bug Fix, or Code Review)
 5. `npm publish` (dry-run) includes `skills/` and `prompts/` in tarball

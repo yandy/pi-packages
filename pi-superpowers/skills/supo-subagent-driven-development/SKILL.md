@@ -1,5 +1,5 @@
 ---
-name: superpowers-subagent-driven-development
+name: supo-subagent-driven-development
 description: Use when executing implementation plans with independent tasks in the current session
 ---
 
@@ -63,7 +63,7 @@ digraph process {
     "Read plan, note context and global constraints, create todos" [shape=box];
     "More tasks remain?" [shape=diamond];
     "Dispatch final code reviewer subagent (../requesting-code-review/code-reviewer.md)" [shape=box];
-    "Use superpowers-finishing-a-development-branch" [shape=box style=filled fillcolor=lightgreen];
+    "Use supo-finishing-a-development-branch" [shape=box style=filled fillcolor=lightgreen];
 
     "Read plan, note context and global constraints, create todos" -> "Dispatch implementer subagent (./implementer-prompt.md)";
     "Dispatch implementer subagent (./implementer-prompt.md)" -> "Implementer subagent asks questions?";
@@ -78,7 +78,7 @@ digraph process {
     "Mark task complete in todo list and progress ledger" -> "More tasks remain?";
     "More tasks remain?" -> "Dispatch implementer subagent (./implementer-prompt.md)" [label="yes"];
     "More tasks remain?" -> "Dispatch final code reviewer subagent (../requesting-code-review/code-reviewer.md)" [label="no"];
-    "Dispatch final code reviewer subagent (../requesting-code-review/code-reviewer.md)" -> "Use superpowers-finishing-a-development-branch";
+    "Dispatch final code reviewer subagent (../requesting-code-review/code-reviewer.md)" -> "Use supo-finishing-a-development-branch";
 }
 ```
 
@@ -267,7 +267,7 @@ a ledger file, not only in todos.
 
 - [implementer-prompt.md](implementer-prompt.md) - Dispatch implementer subagent
 - [task-reviewer-prompt.md](task-reviewer-prompt.md) - Dispatch task reviewer subagent (spec compliance + code quality)
-- Final whole-branch review: use superpowers-requesting-code-review's [code-reviewer.md](../requesting-code-review/code-reviewer.md)
+- Final whole-branch review: use supo-requesting-code-review's [code-reviewer.md](../requesting-code-review/code-reviewer.md)
 
 ## Example Workflow
 
@@ -406,13 +406,13 @@ Done!
 ## Integration
 
 **Required workflow skills:**
-- **superpowers-using-git-worktrees** - Ensures isolated workspace (creates one or verifies existing)
-- **superpowers-writing-plans** - Creates the plan this skill executes
-- **superpowers-requesting-code-review** - Code review template for the final whole-branch review
-- **superpowers-finishing-a-development-branch** - Complete development after all tasks
+- **supo-using-git-worktrees** - Ensures isolated workspace (creates one or verifies existing)
+- **supo-writing-plans** - Creates the plan this skill executes
+- **supo-requesting-code-review** - Code review template for the final whole-branch review
+- **supo-finishing-a-development-branch** - Complete development after all tasks
 
 **Subagents should use:**
-- **superpowers-test-driven-development** - Subagents follow TDD for each task
+- **supo-test-driven-development** - Subagents follow TDD for each task
 
 **Alternative workflow:**
-- **superpowers-executing-plans** - Use for parallel session instead of same-session execution
+- **supo-executing-plans** - Use for parallel session instead of same-session execution
