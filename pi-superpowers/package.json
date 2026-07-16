@@ -1,0 +1,22 @@
+{
+  "name": "@yandy0725/pi-superpowers",
+  "version": "0.1.0",
+  "description": "Superpowers skills for pi — structured development workflows",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yandy/pi-packages",
+    "directory": "pi-superpowers"
+  },
+  "type": "module",
+  "keywords": ["pi-package", "superpowers", "skills"],
+  "publishConfig": { "access": "public" },
+  "files": ["skills/", "prompts/"],
+  "scripts": {
+    "download-skills": "node scripts/download-skills.mjs"
+  },
+  "pi": {
+    "skills": ["./skills"],
+    "prompts": ["./prompts"]
+  }
+}
