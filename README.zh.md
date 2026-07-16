@@ -14,6 +14,7 @@
 | [pi-memory](./pi-memory/README.zh.md) | 基于文件系统的持久化记忆层，为 pi 编程代理提供跨会话记忆 | `@yandy0725/pi-memory` |
 | [pi-permission-system](./pi-permission-system/README.zh.md) | 工具访问控制的权限系统 | `@yandy0725/pi-permission-system` |
 | [pi-subagents](./pi-subagents/README.zh.md) | 进程内子代理核心，支持后台执行和类型化 API | `@yandy0725/pi-subagents` |
+| [pi-superpowers](./pi-superpowers/README.zh.md) | Superpowers 结构化开发工作流（brainstorming、TDD、调试等） | `@yandy0725/pi-superpowers` |
 | [pi-todo](./pi-todo/README.zh.md) | 极简 todo 工具，带编辑器嵌入式小组件 | `@yandy0725/pi-todo` |
 | [pi-vision-tools](./pi-vision-tools/README.zh.md) | `describe_image` 工具——将图像分析委托给视觉模型 | `@yandy0725/pi-vision-tools` |
 | [pi-web-tools](./pi-web-tools/README.zh.md) | websearch + webfetch 工具 | `@yandy0725/pi-web-tools` |

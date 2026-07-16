@@ -16,6 +16,7 @@ Monorepo for @yandy pi packages. Uses npm workspaces.
 | [pi-memory](./pi-memory) | File-system driven persistent memory layer for pi coding agent | `@yandy0725/pi-memory` |
 | [pi-permission-system](./pi-permission-system) | Permission system for tool access control | `@yandy0725/pi-permission-system` |
 | [pi-subagents](./pi-subagents) | In-process sub-agent core with background execution and typed API | `@yandy0725/pi-subagents` |
+| [pi-superpowers](./pi-superpowers) | Superpowers structured development workflows (brainstorming, TDD, debugging, etc.) | `@yandy0725/pi-superpowers` |
 | [pi-todo](./pi-todo) | Minimal todo tool with editor-overhead widget | `@yandy0725/pi-todo` |
 | [pi-vision-tools](./pi-vision-tools) | `describe_image` tool — delegate image analysis to a vision model | `@yandy0725/pi-vision-tools` |
 | [pi-web-tools](./pi-web-tools) | websearch + webfetch tools | `@yandy0725/pi-web-tools` |
