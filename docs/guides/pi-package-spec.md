@@ -232,6 +232,8 @@ export default function (pi: ExtensionAPI) {
 
 - 文件放在 `tests/`，命名为 `<module>.test.ts`
 - 框架为 `vitest`
+- 配置文件和 vitest.config.ts 等基础设施约定见 [测试规范](testing.md)
+- **环境隔离规范**（文件系统、环境变量、`getAgentDir` 等）统一维护在 [测试规范](testing.md)，所有测试必须遵循
 
 ### Skills（可选）
 
