@@ -1,31 +1,38 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { resolve as resolvePath } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve as resolvePath } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const TEST_CONFIG_DIR = ".test-cfg";
 
-// Mock getAgentDir to a writable /tmp path for global + project merge testing
+// Hoisted mutable ref so the vi.mock factory (which runs before imports) can
+// return a path that we set in beforeEach via mkdtempSync.
+const { agentDirRef, workDirRef } = vi.hoisted(() => ({
+	agentDirRef: { current: "" },
+	workDirRef: { current: "" },
+}));
+
 vi.mock("@earendil-works/pi-coding-agent", () => ({
-	getAgentDir: () => "/tmp/pi-test-global-agent",
+	getAgentDir: () => agentDirRef.current,
 	CONFIG_DIR_NAME: ".test-cfg",
 }));
 
 import { loadSbxConfig } from "../src/config";
 
-const globalAgentDir = "/tmp/pi-test-global-agent";
-const testWorkDir = "/tmp/pi-test-global-work";
-
 describe("global + project config: array fields should merge, not overwrite", () => {
+	let globalAgentDir: string;
+	let testWorkDir: string;
+
 	beforeEach(() => {
-		if (existsSync(globalAgentDir)) rmSync(globalAgentDir, { recursive: true });
-		if (existsSync(testWorkDir)) rmSync(testWorkDir, { recursive: true });
-		mkdirSync(globalAgentDir, { recursive: true });
-		mkdirSync(testWorkDir, { recursive: true });
+		globalAgentDir = mkdtempSync(join(tmpdir(), "pi-sbx-global-"));
+		testWorkDir = mkdtempSync(join(tmpdir(), "pi-sbx-work-"));
+		agentDirRef.current = globalAgentDir;
+		workDirRef.current = testWorkDir;
 	});
 
 	afterEach(() => {
-		if (existsSync(globalAgentDir)) rmSync(globalAgentDir, { recursive: true });
-		if (existsSync(testWorkDir)) rmSync(testWorkDir, { recursive: true });
+		rmSync(globalAgentDir, { recursive: true, force: true });
+		rmSync(testWorkDir, { recursive: true, force: true });
 	});
 
 	it("concatenates mounts from global and project configs instead of overwriting", () => {
