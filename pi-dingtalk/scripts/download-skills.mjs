@@ -16,7 +16,6 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_DIR = resolve(SCRIPT_DIR, "..");
 const SKILLS_DIR = resolve(PACKAGE_DIR, "skills");
 
-const VALID_MODES = ["mono", "multi"];
 
 /** 解析命令行参数，返回 mode。冲突/未知参数时报错退出。 */
 function parseArgs(argv) {
@@ -42,18 +41,12 @@ function parseArgs(argv) {
 }
 
 const mode = parseArgs(process.argv.slice(2));
-if (!VALID_MODES.includes(mode)) {
-	console.error(`错误：无效模式: ${mode}`);
-	process.exit(1);
-}
 
 const tmpDir = mkdtempSync(join(tmpdir(), "dws-skills-"));
 try {
 	// 1. npm pack dingtalk-workspace-cli → tarball 落在临时目录
-	const tarballName = execSync("npm pack dingtalk-workspace-cli", {
-		cwd: tmpDir,
-		encoding: "utf8",
-	}).trim();
+	const out = execSync("npm pack dingtalk-workspace-cli", { cwd: tmpDir, encoding: "utf8" });
+	const tarballName = out.trim().split(/\r?\n/).filter(Boolean).pop().trim();
 	const tarballPath = join(tmpDir, tarballName);
 	if (!existsSync(tarballPath)) {
 		throw new Error(`npm pack 未生成 tarball: ${tarballPath}`);
@@ -61,7 +54,7 @@ try {
 
 	// 2. 从 tarball 只解压出 skills.zip
 	const zipInTarball = "package/assets/dws-skills.zip";
-	execSync(`tar -xzf "${tarballPath}" ${zipInTarball}`, {
+	execSync(`tar -xzf "${tarballPath}" "${zipInTarball}"`, {
 		cwd: tmpDir,
 		stdio: "inherit",
 	});
@@ -73,7 +66,7 @@ try {
 	// 3. 解压 zip 到临时目录的 extract/ 子目录
 	const extractDir = join(tmpDir, "extract");
 	mkdirSync(extractDir, { recursive: true });
-	execSync(`unzip -o "${zipPath}" -d "${extractDir}"`, {
+	execSync(`unzip -oq "${zipPath}" -d "${extractDir}"`, {
 		stdio: "inherit",
 	});
 
@@ -103,6 +96,9 @@ try {
 			execSync(`cp -r "${src}" "${SKILLS_DIR}/"`, { stdio: "inherit" });
 		}
 	}
+} catch (e) {
+	console.error("错误：" + e.message);
+	process.exit(1);
 } finally {
 	rmSync(tmpDir, { recursive: true, force: true });
 }
