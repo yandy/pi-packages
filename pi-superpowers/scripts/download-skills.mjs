@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
 const CACHE_DIR = "/tmp/pi-superpowers-cache";
+const SKILLS_REF_FILE = resolve(ROOT, ".skills-ref");
 
 function readConfig() {
   const raw = readFileSync(resolve(ROOT, "skills.config.json"), "utf-8");
@@ -17,12 +18,51 @@ function readConfig() {
 }
 
 function cloneOrPull(repo, ref) {
+  // Validate existing cache: must have .git directory
   if (existsSync(CACHE_DIR)) {
-    console.log(`[cache] Pulling latest in ${CACHE_DIR}...`);
-    execSync(`cd ${CACHE_DIR} && git fetch && git checkout ${ref} && git pull`, { stdio: "inherit" });
-  } else {
+    if (!existsSync(resolve(CACHE_DIR, ".git"))) {
+      console.log(`[cache] Corrupted cache (no .git), removing and re-cloning...`);
+      rmSync(CACHE_DIR, { recursive: true, force: true });
+    }
+  }
+
+  if (!existsSync(CACHE_DIR)) {
     console.log(`[cache] Cloning ${repo} (ref: ${ref})...`);
     execSync(`git clone --branch ${ref} ${repo} ${CACHE_DIR}`, { stdio: "inherit" });
+    return;
+  }
+
+  // Cache exists — fetch updates and check if already at target
+  console.log(`[cache] Fetching updates...`);
+  execSync(`cd ${CACHE_DIR} && git fetch origin --tags`, { stdio: "inherit" });
+
+  // Resolve target ref to commit hash (handle both tag and branch)
+  const isTag = execSync(`cd ${CACHE_DIR} && git tag -l "${ref}"`, { encoding: "utf-8" }).trim();
+  let targetHash;
+  try {
+    targetHash = isTag
+      ? execSync(`cd ${CACHE_DIR} && git rev-parse "refs/tags/${ref}^{}"`, { encoding: "utf-8" }).trim()
+      : execSync(`cd ${CACHE_DIR} && git rev-parse "origin/${ref}"`, { encoding: "utf-8" }).trim();
+  } catch {
+    console.error(`[error] Cannot resolve ref "${ref}" (tag=${!!isTag}). Is the ref valid?`);
+    throw new Error(`Unresolvable ref: ${ref}`);
+  }
+
+  const currentHash = execSync(`cd ${CACHE_DIR} && git rev-parse HEAD`, { encoding: "utf-8" }).trim();
+
+  if (currentHash === targetHash) {
+    console.log(`[cache] Already at ${ref} (${targetHash.slice(0, 7)}), up to date.`);
+    return;
+  }
+
+  // Need to switch refs — clean any local dirty state first
+  console.log(`[cache] Switching to ${ref} (${targetHash.slice(0, 7)})...`);
+  execSync(`cd ${CACHE_DIR} && git reset --hard HEAD && git clean -fd`, { stdio: "inherit" });
+
+  if (isTag) {
+    execSync(`cd ${CACHE_DIR} && git checkout ${ref}`, { stdio: "inherit" });
+  } else {
+    execSync(`cd ${CACHE_DIR} && git checkout ${ref} && git pull --ff-only`, { stdio: "inherit" });
   }
 }
 
@@ -94,8 +134,24 @@ function main() {
   mkdirSync(resolve(ROOT, "skills"), { recursive: true });
   mkdirSync(resolve(ROOT, "prompts"), { recursive: true });
 
-  // Clone or pull
+  // Clone or pull (skips git operations if already at target ref)
   cloneOrPull(repo, ref);
+
+  // Check if skills are already up to date for this ref
+  if (existsSync(SKILLS_REF_FILE)) {
+    const cachedRef = readFileSync(SKILLS_REF_FILE, "utf-8").trim();
+    if (cachedRef === ref) {
+      const allExist = skills.every(name =>
+        existsSync(resolve(ROOT, "skills", `supo-${name}`, "SKILL.md"))
+      );
+      if (allExist) {
+        console.log(`[skills] Already up to date for ref ${ref}, skipping transform.`);
+        cleanStale(skills);
+        console.log(`\nDone! ${skills.length} skills (no changes needed).`);
+        return;
+      }
+    }
+  }
 
   // Copy and transform each skill
   const cacheSkillsDir = resolve(CACHE_DIR, "skills");
@@ -107,6 +163,9 @@ function main() {
     }
     transformSkill(name, cacheSkillsDir);
   }
+
+  // Record successful ref for next run
+  writeFileSync(SKILLS_REF_FILE, ref + "\n", "utf-8");
 
   // Clean stale
   cleanStale(skills);
