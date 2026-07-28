@@ -1,4 +1,4 @@
-import { createMessageConnection, StreamMessageReader, StreamMessageWriter } from "vscode-jsonrpc";
+import { createMessageConnection, StreamMessageReader, StreamMessageWriter } from "vscode-jsonrpc/node";
 
 const conn = createMessageConnection(new StreamMessageReader(process.stdin), new StreamMessageWriter(process.stdout));
 
