@@ -3,7 +3,6 @@ import { basename, dirname, extname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { expandPath } from "./paths";
-import type { SizeTier } from "./tiers";
 
 export interface MountConfig {
 	source: string;
@@ -18,7 +17,6 @@ export interface ImageConfig {
 
 export interface RuntimeConfig {
 	name: string | null;
-	tier: SizeTier;
 	network: boolean;
 	persist: boolean;
 	memory: string | null;
@@ -43,7 +41,7 @@ export interface SbxConfig {
 export const DEFAULT_SBX_CONFIG: SbxConfig = {
 	image: { name: "pi-container-sandbox", tag: "latest" },
 	runtime: {
-		name: null, tier: "medium", network: true, persist: false,
+		name: null, network: true, persist: false,
 		memory: null, cpus: null, swap: null, pidsLimit: null,
 		cache: null, mounts: [], env: [],
 	},

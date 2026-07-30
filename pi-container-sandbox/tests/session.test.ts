@@ -14,7 +14,7 @@ const mockSession: SbxSession = {
 	config: {
 		image: { name: "pi-sandbox", tag: "latest" },
 		runtime: {
-			name: null, tier: "medium", network: true, persist: false,
+			name: null, network: true, persist: false,
 			memory: null, cpus: null, swap: null, pidsLimit: null,
 			cache: null, mounts: [],
 		},

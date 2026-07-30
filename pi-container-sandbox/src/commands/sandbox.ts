@@ -12,7 +12,6 @@ import {
 import { execCapture } from "../ops";
 import { DockerRuntime } from "../runtime";
 import { clearSbx, getSbx } from "../session";
-import { type SizeTier, TIER_SPECS } from "../tiers";
 
 export function createSandboxCommandHandlers(
 	localCwd: string,
@@ -228,7 +227,6 @@ export function createSandboxCommandHandlers(
 			const lines: string[] = [
 				"Sandbox project config (.pi/agent/sandbox.json):",
 				`  Image:   ${ref}`,
-				`  Tier:    ${cfg.runtime.tier}`,
 				`  Name:    ${cfg.runtime.name ?? "(auto)"}`,
 				`  Persist: ${cfg.runtime.persist ? "yes" : "no"}`,
 				`  Cache:   ${cfg.runtime.cache ?? "(none)"}`,
@@ -296,31 +294,6 @@ export function createSandboxCommandHandlers(
 			);
 		},
 
-		tiers: async (args: string, ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }) => {
-			const parts = args.trim().split(/\s+/);
-			if (parts[0] === "set" && parts[1]) {
-				const tier = parts[1] as SizeTier;
-				if (!(tier in TIER_SPECS)) {
-					ctx.ui.notify(`Unknown tier: ${tier}. Use: small, medium, large`, "warning");
-					return;
-				}
-				const sbx = getSbx();
-				const hostCwd = sbx?.hostCwd ?? localCwd;
-				const cfg = loadSbxConfig(hostCwd);
-				cfg.runtime.tier = tier;
-				saveSbxConfig(hostCwd, cfg);
-				ctx.ui.notify(
-					`Tier set to ${tier} (mem=${TIER_SPECS[tier].memory}, cpu=${TIER_SPECS[tier].cpus}). Restart pi to apply.`,
-					"info",
-				);
-				return;
-			}
-			const lines = ["Available tiers:", ""];
-			for (const [name, spec] of Object.entries(TIER_SPECS)) {
-				lines.push(`  ${name}: mem=${spec.memory}, cpu=${spec.cpus}, swap=${spec.swap}`);
-			}
-			lines.push("", "Use /sandbox tiers set <name> to switch.");
-			ctx.ui.notify(lines.join("\n"), "info");
-		},
+
 	};
 }

@@ -47,14 +47,14 @@ describe("loadSbxConfig", () => {
 		mkdirSync(configDir, { recursive: true });
 		writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify({
 			image: { name: "my-img", tag: "v2" },
-			runtime: { tier: "large", network: false },
+			runtime: { memory: "8g", network: false },
 			host: { commands: ["git"] },
 		}));
 
 		const cfg = loadSbxConfig(testDir);
 		expect(cfg.image.name).toBe("my-img");
 		expect(cfg.image.tag).toBe("v2");
-		expect(cfg.runtime.tier).toBe("large");
+		expect(cfg.runtime.memory).toBe("8g");
 		expect(cfg.runtime.network).toBe(false);
 		expect(cfg.runtime.name).toBe(DEFAULT_SBX_CONFIG.runtime.name);
 		expect(cfg.runtime.persist).toBe(DEFAULT_SBX_CONFIG.runtime.persist);
@@ -73,10 +73,10 @@ describe("loadSbxConfig", () => {
 		const configDir = resolvePath(testDir, TEST_CONFIG_DIR);
 		mkdirSync(configDir, { recursive: true });
 		writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify({
-			runtime: { tier: "small" },
+			runtime: { memory: "2g" },
 		}));
 		const cfg = loadSbxConfig(testDir);
-		expect(cfg.runtime.tier).toBe("small");
+		expect(cfg.runtime.memory).toBe("2g");
 		expect(cfg.runtime.network).toBe(DEFAULT_SBX_CONFIG.runtime.network);
 		expect(cfg.runtime.persist).toBe(DEFAULT_SBX_CONFIG.runtime.persist);
 		expect(cfg.image).toEqual(DEFAULT_SBX_CONFIG.image);
@@ -88,13 +88,12 @@ describe("saveSbxConfig", () => {
 		const cfg = {
 			...DEFAULT_SBX_CONFIG,
 			image: { name: "x", tag: "y" },
-			runtime: { ...DEFAULT_SBX_CONFIG.runtime, name: "z", tier: "small" as const, persist: true, cache: "v" },
+			runtime: { ...DEFAULT_SBX_CONFIG.runtime, name: "z", persist: true, cache: "v" },
 		};
 		saveSbxConfig(testDir, cfg);
 		const loaded = loadSbxConfig(testDir);
 		expect(loaded.image).toEqual({ name: "x", tag: "y" });
 		expect(loaded.runtime.name).toBe("z");
-		expect(loaded.runtime.tier).toBe("small");
 		expect(loaded.runtime.persist).toBe(true);
 		expect(loaded.runtime.cache).toBe(resolvePath(testDir, "v"));
 	});
@@ -102,7 +101,7 @@ describe("saveSbxConfig", () => {
 	it("round-trips: save then load returns same values", () => {
 		const input = {
 			...DEFAULT_SBX_CONFIG,
-			runtime: { ...DEFAULT_SBX_CONFIG.runtime, tier: "large" as const, name: "my-container" },
+			runtime: { ...DEFAULT_SBX_CONFIG.runtime, name: "my-container" },
 		};
 		saveSbxConfig(testDir, input);
 		const output = loadSbxConfig(testDir);
