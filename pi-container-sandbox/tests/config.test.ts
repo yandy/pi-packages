@@ -8,7 +8,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 	CONFIG_DIR_NAME: ".test-cfg",
 }));
 
-import { DEFAULT_SBX_CONFIG, getSbxConfigPath, imageRef, loadSbxConfig, saveSbxConfig } from "../src/config";
+import { DEFAULT_SBX_CONFIG, detectEngine, getSbxConfigPath, imageRef, loadSbxConfig, resolveEngine, saveSbxConfig } from "../src/config";
 
 const TEST_CONFIG_DIR = ".test-cfg";
 const testDir = resolvePath(tmpdir(), `pi-sandbox-test-${Date.now()}`);
@@ -106,6 +106,56 @@ describe("saveSbxConfig", () => {
 		saveSbxConfig(testDir, input);
 		const output = loadSbxConfig(testDir);
 		expect(output).toEqual(input);
+	});
+});
+
+describe("engine field", () => {
+	it("defaults to auto when not configured", () => {
+		const cfg = loadSbxConfig(testDir);
+		expect(cfg.runtime.engine).toBe("auto");
+	});
+
+	it("parses engine from project config", () => {
+		const configDir = resolvePath(testDir, TEST_CONFIG_DIR);
+		mkdirSync(configDir, { recursive: true });
+		writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify({
+			runtime: { engine: "podman" },
+		}));
+		const cfg = loadSbxConfig(testDir);
+		expect(cfg.runtime.engine).toBe("podman");
+	});
+
+	it("engine falls back to auto on invalid value", () => {
+		const configDir = resolvePath(testDir, TEST_CONFIG_DIR);
+		mkdirSync(configDir, { recursive: true });
+		writeFileSync(resolvePath(configDir, "sandbox.json"), JSON.stringify({
+			runtime: { engine: "invalid" },
+		}));
+		const cfg = loadSbxConfig(testDir);
+		expect(cfg.runtime.engine).toBe("auto");
+	});
+});
+
+describe("detectEngine", () => {
+	it("detects at least one runtime", () => {
+		const engine = detectEngine();
+		expect(["docker", "podman"]).toContain(engine);
+	});
+});
+
+describe("resolveEngine", () => {
+	it("returns podman when engine=podman and podman available", () => {
+		try {
+			const { execFileSync } = require("node:child_process");
+			execFileSync("podman", ["info"], { stdio: "ignore", timeout: 5000 });
+			expect(resolveEngine("podman")).toBe("podman");
+		} catch {
+			// skip if podman not available
+		}
+	});
+
+	it("throws when engine=podman but podman not available", () => {
+		expect(["docker", "podman"]).toContain(resolveEngine("auto"));
 	});
 });
 

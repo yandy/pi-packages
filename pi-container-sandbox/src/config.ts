@@ -3,6 +3,7 @@ import { basename, dirname, extname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { expandPath } from "./paths";
+import { container } from "./container-cli";
 
 export interface MountConfig {
 	source: string;
@@ -16,6 +17,7 @@ export interface ImageConfig {
 }
 
 export interface RuntimeConfig {
+	engine: "docker" | "podman" | "auto";
 	name: string | null;
 	network: boolean;
 	persist: boolean;
@@ -41,6 +43,7 @@ export interface SbxConfig {
 export const DEFAULT_SBX_CONFIG: SbxConfig = {
 	image: { name: "pi-container-sandbox", tag: "latest" },
 	runtime: {
+		engine: "auto",
 		name: null, network: true, persist: false,
 		memory: null, cpus: null, swap: null, pidsLimit: null,
 		cache: null, mounts: [], env: [],
@@ -116,6 +119,11 @@ export function loadSbxConfig(hostCwd: string): SbxConfig {
 		...(projectHost.commands ?? []),
 	];
 
+	// Sanitize engine field: anything other than docker/podman/auto defaults to auto
+	if (!["docker", "podman", "auto"].includes(config.runtime.engine)) {
+		config.runtime.engine = "auto";
+	}
+
 	// Expand ~ and resolve relative paths in mount source and cache
 	config.runtime.mounts = config.runtime.mounts.map((m) => ({
 		...m,
@@ -143,6 +151,25 @@ export function saveSbxConfig(hostCwd: string, config: SbxConfig): void {
 
 export function imageRef(im: ImageConfig): string {
 	return `${im.name}:${im.tag}`;
+}
+
+/** 检测可用的容器引擎，优先 podman。抛错如果一个都没有。 */
+export function detectEngine(): "docker" | "podman" {
+	try { container("podman", ["info"]); return "podman"; } catch {}
+	try { container("docker", ["info"]); return "docker"; } catch {}
+	throw new Error("No container runtime available. Install podman or docker.");
+}
+
+/** 根据配置解析最终使用的引擎 */
+export function resolveEngine(engine: "docker" | "podman" | "auto"): "docker" | "podman" {
+	if (engine === "auto") return detectEngine();
+	// 显式指定：验证可用性
+	try {
+		container(engine, ["info"]);
+		return engine;
+	} catch (err) {
+		throw new Error(`Container runtime "${engine}" is not available: ${err instanceof Error ? err.message : String(err)}`);
+	}
 }
 
 export function discoverDockerfiles(): string[] {
