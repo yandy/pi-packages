@@ -127,13 +127,18 @@ Configuration is read from two locations. Project config overrides global config
 
 ### Resource Limits
 
-Resources are configured directly via `runtime.memory`, `runtime.cpus`, and `runtime.swap` fields.
+Resources are configured directly via `runtime.memory`, `runtime.cpus`, `runtime.swap`, and `runtime.pidsLimit` fields.
 
-| Resource | Default |
+**By default, no resource limits are applied.** Set these fields explicitly to enable them.
+
+Example configuration:
+
+| Resource | Example |
 |----------|---------|
-| memory | 4g |
-| cpus | 2 |
-| swap | 2g |
+| memory | `"4g"` |
+| cpus | `"2"` |
+| swap | `"2g"` |
+| pidsLimit | `512` |
 
 ### CLI Flags
 
@@ -173,11 +178,13 @@ operations are affected — `write`, `edit`'s write operations, and `bash` are
   operations or when the tool needs to operate on external paths inside the
   container.
 
-## Resource limits (defaults)
+## Resource limits
 
-- Memory: 4 GiB
-- CPUs: 2
-- PIDs: 512
+By default, no resource limits are applied. To set limits, configure `runtime.memory`, `runtime.cpus`, `runtime.swap`, or `runtime.pidsLimit` in `sandbox.json`.
+
+Example values: memory `"4g"`, cpus `"2"`, swap `"2g"`, pidsLimit `512`.
+
+Other container security defaults:
 - No caps: `--cap-drop ALL`
 - No new privileges: `--security-opt no-new-privileges`
 - User: non-root (uid 1000)

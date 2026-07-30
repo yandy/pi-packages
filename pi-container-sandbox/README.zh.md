@@ -122,13 +122,18 @@ agent skill 目录以 **只读** 方式挂载到 `/skills/`。
 
 ### 资源限制
 
-资源通过 `runtime.memory`、`runtime.cpus`、`runtime.swap` 字段直接配置。
+资源通过 `runtime.memory`、`runtime.cpus`、`runtime.swap`、`runtime.pidsLimit` 字段直接配置。
 
-| 资源 | 默认值 |
-|------|--------|
-| 内存 | 4g |
-| CPU | 2 |
-| swap | 2g |
+**默认情况下不应用任何资源限制。** 如需启用，请显式设置这些字段。
+
+示例配置：
+
+| 资源 | 示例 |
+|------|------|
+| 内存 | `"4g"` |
+| CPU | `"2"` |
+| swap | `"2g"` |
+| pidsLimit | `512` |
 
 ### CLI 参数
 
@@ -158,11 +163,13 @@ agent skill 目录以 **只读** 方式挂载到 `/skills/`。
 - **allow**：轻量级只读宿主机访问。路径按前缀匹配（例如授权 `/etc` 即可读取 `/etc` 下的所有文件）。
 - **mount**：将宿主机目录 bind-mount 到容器内相同路径，在容器内拥有完整读写权限。用于写入操作，或需要让工具在容器内操作外部路径的场景。
 
-## 资源限制（默认值）
+## 资源限制
 
-- 内存：4 GiB
-- CPU：2 核
-- PID 数量：512
+默认情况下不应用任何资源限制。如需设置限制，请在 `sandbox.json` 中配置 `runtime.memory`、`runtime.cpus`、`runtime.swap` 或 `runtime.pidsLimit`。
+
+示例值：内存 `"4g"`、CPU `"2"`、swap `"2g"`、pidsLimit `512`。
+
+其他容器安全默认值：
 - 无 Linux capabilities：`--cap-drop ALL`
 - 禁止权限提升：`--security-opt no-new-privileges`
 - 用户：非 root（uid 1000）

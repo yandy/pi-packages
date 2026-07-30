@@ -407,7 +407,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerCommand("sandbox", {
 		description:
-			"Sandbox management. Subcommands: status, start, build, stop, keep, exec, doctor, config, allow, paths, tiers",
+			"Sandbox management. Subcommands: status, start, build, stop, keep, exec, doctor, config, allow, paths",
 		handler: async (args, ctx) => {
 			const parts = args.trim().split(/\s+/);
 			const sub = parts[0]?.toLowerCase() || "status";

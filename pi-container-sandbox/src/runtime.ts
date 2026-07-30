@@ -226,58 +226,64 @@ export class DockerRuntime implements Runtime {
 			try { container("docker", ["rm", "-f", name]); } catch {}
 		}
 
-		// 3. Build docker run args
-		const memory = resources?.memory ?? "4g";
-		const cpus = resources?.cpus ?? "2";
-		const pidsLimit = resources?.pidsLimit ?? 512;
-
-		const args: string[] = [
+		// 3. Build base args (without resource limits)
+		const baseArgs: string[] = [
 			"run", "-d",
 			"--name", name,
 			"--user", "1000:1000",
 			"-w", this.workRoot,
 			"-v", `${hostCwd}:${this.workRoot}`,
-			"--memory", memory,
-			"--cpus", cpus,
-			"--pids-limit", String(pidsLimit),
 			"--network", allowNetwork ? "bridge" : "none",
 			"--cap-drop", "ALL",
 			"--security-opt", "no-new-privileges",
 		];
 
-		// Extra mounts
-		if (extraMounts) {
-			for (const m of extraMounts) {
-				const mode = m.mode === "rw" ? "rw" : "ro";
-				args.push("-v", `${m.source}:${m.target}:${mode}`);
-			}
-		}
-		if (cacheVolume) {
-			args.push("-v", `${cacheVolume}:/cache`);
-		}
+		// 4. Resource args (only when explicitly configured)
+		const resourceArgs: string[] = [];
+		const mem = resources?.memory;
+		const cpus = resources?.cpus;
+		const pids = resources?.pidsLimit;
+
+		if (mem) { resourceArgs.push("--memory", mem); }
+		if (cpus) { resourceArgs.push("--cpus", cpus); }
+		if (pids !== undefined && pids !== null) { resourceArgs.push("--pids-limit", String(pids)); }
 
 		// Swap
 		if (resources?.swap !== undefined) {
 			const swapVal = resources.swap;
 			if (swapVal === "0") {
-				args.push("--memory-swap", memory);
-			} else {
-				const memBytes = this._parseBytes(memory);
+				resourceArgs.push("--memory-swap", mem || "0");
+			} else if (mem) {
+				const memBytes = this._parseBytes(mem);
 				const swapBytes = memBytes + this._parseBytes(swapVal);
-				args.push("--memory-swap", String(swapBytes));
+				resourceArgs.push("--memory-swap", String(swapBytes));
 			}
 		}
 
-		// Environment variables
-		const dockerEnv = ["DEBIAN_FRONTEND=noninteractive", ...this._expandEnv(env ?? [])];
-		for (const e of dockerEnv) {
-			args.push("-e", e);
+		// Mount args
+		const mountArgs: string[] = [];
+		if (extraMounts) {
+			for (const m of extraMounts) {
+				const mode = m.mode === "rw" ? "rw" : "ro";
+				mountArgs.push("-v", `${m.source}:${m.target}:${mode}`);
+			}
+		}
+		if (cacheVolume) {
+			mountArgs.push("-v", `${cacheVolume}:/cache`);
 		}
 
-		args.push(image, "sleep", "infinity");
+		// Env args
+		const dockerEnv = ["DEBIAN_FRONTEND=noninteractive", ...this._expandEnv(env ?? [])];
+		const envArgs: string[] = [];
+		for (const e of dockerEnv) {
+			envArgs.push("-e", e);
+		}
 
-		// 4. Start container
-		container("docker", args, { timeout: 60_000 });
+		const imageAndCmd = [image, "sleep", "infinity"];
+
+		// 5. Start container
+		const fullArgs = [...baseArgs, ...resourceArgs, ...mountArgs, ...envArgs, ...imageAndCmd];
+		container("docker", fullArgs, { timeout: 60_000 });
 		const inspectInfo = JSON.parse(container("docker", ["container", "inspect", name]));
 		this.state = { kind: "ready", id: inspectInfo[0].Id };
 	}
