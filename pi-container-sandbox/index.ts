@@ -8,7 +8,7 @@ import {
 	type ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
 import { createSandboxCommandHandlers } from "./src/commands/sandbox";
-import { discoverDockerfiles, imageRef, loadSbxConfig, PACKAGE_DOCKER_DIR } from "./src/config";
+import { discoverDockerfiles, imageRef, loadSbxConfig, PACKAGE_DOCKER_DIR, resolveEngine } from "./src/config";
 import {
 	createEditOps,
 	createHostBashOps,
@@ -25,10 +25,14 @@ import {
 	PathApprovalStore,
 	CONTAINER_ROOT,
 } from "./src/paths";
-import { DockerRuntime, deriveContainerName, type MountSpec } from "./src/runtime";
+import { DockerRuntime, PodmanRuntime, deriveContainerName, type MountSpec, type Runtime, type SandboxOptions } from "./src/runtime";
 import { clearSbx, getSbx, type SbxSession, setSbx } from "./src/session";
 import { fixSkillLocations, parseAvailableSkills, skillsToMountSpecs } from "./src/skills";
-import { TIER_SPECS } from "./src/tiers";
+
+function createRuntime(engine: "docker" | "podman", opts: SandboxOptions): Runtime {
+	if (engine === "podman") return new PodmanRuntime(opts);
+	return new DockerRuntime(opts);
+}
 
 export default function (pi: ExtensionAPI) {
 	pi.registerFlag("container", {
@@ -169,7 +173,7 @@ export default function (pi: ExtensionAPI) {
 			systemPrompt: fixedPrompt.replace(
 				/Current working directory:\s*\S+/,
 				[
-					`Current working directory: ${CONTAINER_ROOT} (sandboxed in docker container ${sbx.name}, host cwd ${localCwd} mounted read-write)`,
+					`Current working directory: ${CONTAINER_ROOT} (sandboxed in ${sbx.engine} container ${sbx.name}, host cwd ${localCwd} mounted read-write)`,
 					[skillInfo, userInfo].filter(Boolean).join("\n"),
 					hostCmdHint,
 				]
@@ -186,8 +190,7 @@ export default function (pi: ExtensionAPI) {
 		try {
 			const cfg = loadSbxConfig(localCwd);
 			const rt = cfg.runtime;
-			const sizeTier = rt.tier;
-			const tierSpec = TIER_SPECS[sizeTier];
+			const engine = resolveEngine(cfg.runtime.engine);
 			const image = imageRef(cfg.image);
 			const allowNetwork = rt.network;
 			const keep = rt.persist;
@@ -234,17 +237,13 @@ export default function (pi: ExtensionAPI) {
 
 			const allowedExternalPrefixes: string[] = [];
 
-			const resources: { memory: string; cpus: string; swap: string; pidsLimit?: number } = {
-				memory: tierSpec.memory,
-				cpus: tierSpec.cpus,
-				swap: tierSpec.swap,
-			};
+			const resources: { memory?: string; cpus?: string; swap?: string; pidsLimit?: number } = {};
 			if (rt.memory) resources.memory = rt.memory;
 			if (rt.cpus) resources.cpus = rt.cpus;
 			if (rt.pidsLimit !== null) resources.pidsLimit = rt.pidsLimit;
 			if (rt.swap !== null) resources.swap = rt.swap;
 
-			const runtime = new DockerRuntime({
+			const runtime = createRuntime(engine, {
 				image,
 				hostCwd: localCwd,
 				name: sandboxName,
@@ -311,6 +310,7 @@ export default function (pi: ExtensionAPI) {
 
 			setSbx({
 				runtime,
+				engine,
 				name: sandboxName,
 				hostCwd: localCwd,
 				keep,
@@ -355,12 +355,10 @@ export default function (pi: ExtensionAPI) {
 			if (!sbx) throw new Error("sandbox not initialized");
 			const ok = (await execCapture({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }, "id -un && pwd", 10000)).toString().trim();
 
-			const resParts: string[] = [
-				`size=${sizeTier}`,
-				`mem=${resources.memory}`,
-				`cpu=${resources.cpus}`,
-				`swap=${resources.swap}`,
-			];
+			const resParts: string[] = [];
+			if (resources.memory) resParts.push(`mem=${resources.memory}`);
+			if (resources.cpus) resParts.push(`cpu=${resources.cpus}`);
+			if (resources.swap) resParts.push(`swap=${resources.swap}`);
 			if (resources.pidsLimit !== undefined) resParts.push(`pids=${resources.pidsLimit}`);
 			const resStr = ` (${resParts.join(", ")})`;
 
@@ -375,7 +373,7 @@ export default function (pi: ExtensionAPI) {
 			);
 			ctx.ui.notify(
 				[
-					`${statusPrefix}: docker ${actualName}${resStr}${isReusable ? " [re-usable]" : ""}`,
+					`${statusPrefix}: ${engine} ${actualName}${resStr}${isReusable ? " [re-usable]" : ""}`,
 					ok,
 					skillMounts.length ? `Skills mounted: ${skillMounts.map((m) => m.target).join(", ")}` : "",
 					userMounts.length
