@@ -5,6 +5,7 @@ const mockSession: SbxSession = {
 	runtime: { exec: async () => ({ exitCode: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }) } as any,
 	name: "test-container",
 	hostCwd: "/tmp/test",
+	engine: "docker",
 	keep: false,
 	skillMounts: [],
 	userMounts: [],

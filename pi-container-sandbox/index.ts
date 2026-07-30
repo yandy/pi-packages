@@ -438,13 +438,11 @@ export default function (pi: ExtensionAPI) {
 					return handlers.allow(rest, ctx);
 				case "paths":
 					return handlers.paths(rest, ctx);
-				case "tiers":
-					return handlers.tiers(rest, ctx);
 				default:
 					ctx.ui.notify(
 						[
 							`Unknown subcommand: ${sub}`,
-							"Available: status, start, build, stop, keep, exec, doctor, config, allow, paths, tiers",
+							"Available: status, start, build, stop, keep, exec, doctor, config, allow, paths",
 						].join("\n"),
 						"info",
 					);
