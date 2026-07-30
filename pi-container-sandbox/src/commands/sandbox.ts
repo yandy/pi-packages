@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { expandPath } from "../paths";
 import {
+	detectEngine,
 	discoverDockerfiles,
 	getSbxConfigPath,
 	imageRef,
@@ -10,8 +11,13 @@ import {
 	saveSbxConfig,
 } from "../config";
 import { execCapture } from "../ops";
-import { DockerRuntime } from "../runtime";
+import { DockerRuntime, PodmanRuntime, type Runtime } from "../runtime";
 import { clearSbx, getSbx } from "../session";
+import type { SandboxOptions } from "../runtime";
+
+function createRuntime(engine: "docker" | "podman", opts: SandboxOptions): Runtime {
+	return engine === "podman" ? new PodmanRuntime(opts) : new DockerRuntime(opts);
+}
 
 export function createSandboxCommandHandlers(
 	localCwd: string,
@@ -44,9 +50,10 @@ export function createSandboxCommandHandlers(
 			if (sbx.resources?.pidsLimit !== undefined) resParts.push(`pids-limit: ${sbx.resources.pidsLimit}`);
 			const resStr = resParts.length ? `\nresources: ${resParts.join(", ")}` : "";
 			const reusableStr = sbx.isReusable ? ` [re-usable${sbx.isReattached ? ", reattached" : ""}]` : "";
+			const engineName = sbx.engine;
 			ctx.ui.notify(
 				[
-					`Sandbox: docker container ${sbx.name}${reusableStr}`,
+					`Sandbox: ${engineName} container ${sbx.name}${reusableStr}`,
 					`host cwd: ${sbx.hostCwd}`,
 					`image: ${sbx.imageRef}`,
 					resStr.trim(),
@@ -98,7 +105,7 @@ export function createSandboxCommandHandlers(
 
 			const selected = await ctx.ui.select("选择 Dockerfile 构建镜像", options);
 			if (!selected || selected === skipLabel) {
-				ctx.ui.notify("构建已跳过。请手动执行 docker build 构建镜像。", "info");
+				ctx.ui.notify("构建已跳过。请手动执行容器构建镜像。", "info");
 				return;
 			}
 
@@ -113,12 +120,14 @@ export function createSandboxCommandHandlers(
 						onProgress: (msg: string) => ctx.ui.setStatus("sandbox", `[build] ${msg}`),
 					});
 				} else {
-					const runtime = new DockerRuntime({
+					// 无 session 时，检测可用引擎来构建镜像
+					const engine = detectEngine();
+					const runtime = createRuntime(engine, {
 						image,
 						hostCwd: localCwd,
 						name: "pi-sbx-build",
 						allowNetwork: true,
-						resources: { memory: "4g", cpus: "2" },
+						resources: {},
 						onProgress: (msg: string) => ctx.ui.setStatus("sandbox", `[build] ${msg}`),
 					});
 					await runtime.init();
