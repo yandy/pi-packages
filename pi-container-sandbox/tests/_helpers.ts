@@ -38,6 +38,7 @@ export function createTestSession(overrides?: Partial<SbxSession>): SbxSession {
 		runtime: mockRuntime(),
 		name: "test-box",
 		hostCwd: "/tmp",
+		engine: "docker",
 		keep: false,
 		skillMounts: [],
 		userMounts: [],
