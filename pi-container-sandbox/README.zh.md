@@ -4,8 +4,8 @@
 
 ## 快速开始
 
-需要 Docker（任意较新版本）运行中且当前用户可访问
-（需要对 `/var/run/docker.sock` 或 Docker Desktop 有读写权限）。
+需要 Docker 或 Podman（任意较新版本）运行中且当前用户可访问
+（需要对 `/var/run/docker.sock` 或 Docker Desktop 有读写权限，或已安装 Podman）。
 
 ```bash
 # 从 npm 安装
@@ -65,7 +65,6 @@ agent skill 目录以 **只读** 方式挂载到 `/skills/`。
 | `/sandbox config` | 显示 `.pi/agent/sandbox.json` 内容 |
 | `/sandbox allow <path>` | 授权读取宿主机外部路径 |
 | `/sandbox paths [revoke <path>]` | 列出或撤销已持久化的路径授权 |
-| `/sandbox tiers [set <tier>]` | 列出或切换资源规格 |
 
 ## 配置
 
@@ -77,7 +76,7 @@ agent skill 目录以 **只读** 方式挂载到 `/skills/`。
 
 ```json
 {
-  "runtime": { "tier": "medium" }
+  "runtime": { "engine": "auto" }
 }
 ```
 
@@ -87,7 +86,7 @@ agent skill 目录以 **只读** 方式挂载到 `/skills/`。
 {
   "image": { "name": "pi-container-sandbox", "tag": "latest" },
   "runtime": {
-    "name": null, "tier": "medium", "network": true, "persist": false,
+    "engine": "auto", "name": null, "network": true, "persist": false,
     "memory": null, "cpus": null, "swap": null, "pidsLimit": null,
     "cache": null, "mounts": []
   },
@@ -105,7 +104,7 @@ agent skill 目录以 **只读** 方式挂载到 `/skills/`。
 | 字段 | 类型 | 默认值 | 示例 | 说明 |
 |------|------|--------|------|------|
 | `name` | string \| null | `null` | `"my-dev-box"` | 容器复用名 |
-| `tier` | `"small"` \| `"medium"` \| `"large"` | `"medium"` | `"large"` | 资源规格 |
+| `engine` | `"auto"` \| `"docker"` \| `"podman"` | `"auto"` | `"podman"` | 容器引擎，auto 自动检测 |
 | `network` | boolean | `true` | `false` | 容器网络 |
 | `persist` | boolean | `false` | `true` | 退出后保留容器 |
 | `memory` | string \| null | `null` | `"8g"` | 内存覆盖 |
@@ -121,15 +120,15 @@ agent skill 目录以 **只读** 方式挂载到 `/skills/`。
 |------|------|--------|------|------|
 | `commands` | string[] | `[]` | `["git", "npm", "docker"]` | 宿主机命令白名单 |
 
-### 资源规格
+### 资源限制
 
-| 规格 | 内存 | CPU | swap |
-|------|------|-----|------|
-| small | 1g | 1 | 512m |
-| medium | 4g | 2 | 2g |
-| large | 8g | 4 | 4g |
+资源通过 `runtime.memory`、`runtime.cpus`、`runtime.swap` 字段直接配置。
 
-使用 `--container-size` 参数或 `/sandbox tiers set` 切换。
+| 资源 | 默认值 |
+|------|--------|
+| 内存 | 4g |
+| CPU | 2 |
+| swap | 2g |
 
 ### CLI 参数
 
@@ -161,7 +160,7 @@ agent skill 目录以 **只读** 方式挂载到 `/skills/`。
 
 ## 资源限制（默认值）
 
-- 内存：4 GiB（medium 规格）
+- 内存：4 GiB
 - CPU：2 核
 - PID 数量：512
 - 无 Linux capabilities：`--cap-drop ALL`
@@ -170,17 +169,49 @@ agent skill 目录以 **只读** 方式挂载到 `/skills/`。
 - 网络：默认（容器可访问互联网）
 - 容器内无 Docker socket
 
+## Podman 注意事项
+
+`pi-container-sandbox` 支持使用 Podman 作为容器引擎。
+
+### 引擎选择
+
+通过配置中的 `runtime.engine` 字段选择引擎：
+- `"auto"`（默认）：自动检测，优先使用 Podman
+- `"docker"`：强制使用 Docker
+- `"podman"`：强制使用 Podman
+
+### Rootless 模式与 cgroups v2
+
+Podman 默认以 rootless 模式运行。在 rootless 模式下，资源限制（`--memory`、`--cpus`）需要 cgroups v2 支持。
+如果系统未启用 cgroups v2，容器会忽略资源限制参数并发出警告。
+
+大多数现代 Linux 发行版（Ubuntu 21.10+、Fedora 31+、Debian 11+）默认使用 cgroups v2。
+在 cgroups v1 系统上，资源限制仅在 rootful Podman 模式下生效。
+
 ## 故障排查
 
 ### `Sandbox not ready: Docker not available`
 
-确保 Docker 正在运行：
+确保 Docker 或 Podman 正在运行：
 
 ```bash
 docker ps
+# 或
+podman info
 ```
 
 如果 Docker 已运行但扩展无法连接，可能当前用户对 `/var/run/docker.sock` 没有权限。在 Linux 上，可将自己加入 `docker` 组。
+
+### Podman 容器启动成功但资源限制未生效
+
+Podman rootless 模式需要 cgroups v2 才能应用内存和 CPU 限制。检查 cgroups 版本：
+
+```bash
+stat -fc %T /sys/fs/cgroup/
+```
+
+输出 `cgroup2fs` 表示 cgroups v2。如果是 `tmpfs`，则为 cgroups v1。
+在 cgroups v1 系统上，使用 rootful Podman 或切换至 Docker。
 
 ### 镜像构建失败
 
@@ -192,15 +223,17 @@ npm run build-image
 
 ### agent 的编辑没有反映到宿主机
 
-bind mount 位于容器内的 `/workspace`，映射到宿主机的项目 cwd。检查 `docker inspect <container-name> | grep -A 5 Mounts`。
+bind mount 位于容器内的 `/workspace`，映射到宿主机的项目 cwd。运行 `/sandbox status` 检查挂载状态。
 
 ### 想进入容器内部
 
 ```bash
 docker exec -it <container-name> bash
+# 或
+podman exec -it <container-name> bash
 ```
 
-通过 `/sandbox status` 或 `docker ps --filter name=pi-sbx-` 查找容器名称。
+通过 `/sandbox status` 或 `docker ps --filter name=pi-sbx-`（或 `podman ps --filter name=pi-sbx-`）查找容器名称。
 
 ## 开发
 
@@ -220,11 +253,12 @@ bash tests/e2e.sh        # 运行 E2E 测试（需要 Docker + pi CLI）
 `pi-container-sandbox:latest` 存在（如需要则从内置的 `docker/Dockerfile` 构建），
 然后启动一个长生命周期的容器，将项目 cwd bind-mount 到 `/workspace`。
 它替换 pi 的编程工具（`bash`、`read`、`write`、`edit`），使这些工具的 I/O
-通过 dockerode 的 Docker Engine API 调用路由到容器内。用户的 `!` bash
+通过引擎适配器（通过 Docker 或 Podman CLI）路由到容器内。用户的 `!` bash
 通过 `user_bash` 事件使用相同的适配器。
 
 容器在 `session_shutdown` / SIGINT / 进程退出时销毁（除非设置了 `keep`）。
-如果 Docker 不可达，扩展会优雅降级到 pi 的默认宿主机工具并发出通知。
+扩展支持 Docker 和 Podman 两种容器引擎，通过 `runtime.engine` 配置选择
+或自动检测。如果容器运行时不可达，扩展会优雅降级到 pi 的默认宿主机工具并发出通知。
 
 ## 许可证
 
