@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
-import { docker, dockerSpawn } from "./docker-cli";
+import { container, containerSpawn } from "./container-cli";
 import { PACKAGE_DOCKER_DIR } from "./config";
 
 const BUILD_TIMEOUT_MS = parseInt(process.env.SBX_BUILD_TIMEOUT || "600000", 10);
@@ -112,7 +112,7 @@ export class DockerRuntime implements Runtime {
 
 	async init(): Promise<void> {
 		try {
-			docker(["info"]);
+			container("docker", ["info"]);
 			this.state = { kind: "uninit", initialized: true };
 		} catch (err) {
 			this.state = {
@@ -136,7 +136,7 @@ export class DockerRuntime implements Runtime {
 
 	async imageExists(): Promise<boolean> {
 		try {
-			docker(["image", "inspect", this.opts.image]);
+			container("docker", ["image", "inspect", this.opts.image]);
 			return true;
 		} catch {
 			return false;
@@ -168,7 +168,7 @@ export class DockerRuntime implements Runtime {
 		args.push(buildContext);
 
 		let pending = "";
-		const result = await dockerSpawn(args, {
+		const result = await containerSpawn("docker", args, {
 			timeoutMs: BUILD_TIMEOUT_MS,
 			onStdout: (chunk: Buffer) => {
 				const text = chunk.toString("utf-8");
@@ -210,7 +210,7 @@ export class DockerRuntime implements Runtime {
 		// 1. Check for existing container
 		let existingId: string | null = null;
 		try {
-			const info = JSON.parse(docker(["container", "inspect", name]));
+			const info = JSON.parse(container("docker", ["container", "inspect", name]));
 			if (info?.[0]) {
 				const state = info[0].State;
 				if (state?.Running) {
@@ -223,7 +223,7 @@ export class DockerRuntime implements Runtime {
 
 		// 2. Clean up existing container if present but not running
 		if (existingId) {
-			try { docker(["rm", "-f", name]); } catch {}
+			try { container("docker", ["rm", "-f", name]); } catch {}
 		}
 
 		// 3. Build docker run args
@@ -277,15 +277,15 @@ export class DockerRuntime implements Runtime {
 		args.push(image, "sleep", "infinity");
 
 		// 4. Start container
-		docker(args, { timeout: 60_000 });
-		const inspectInfo = JSON.parse(docker(["container", "inspect", name]));
+		container("docker", args, { timeout: 60_000 });
+		const inspectInfo = JSON.parse(container("docker", ["container", "inspect", name]));
 		this.state = { kind: "ready", id: inspectInfo[0].Id };
 	}
 
 	async withReady(): Promise<void> {
 		if (this.state.kind === "ready") {
 			try {
-				docker(["container", "inspect", this.opts.name]);
+				container("docker", ["container", "inspect", this.opts.name]);
 				return;
 			} catch {
 				this.state = { kind: "uninit", initialized: true };
@@ -304,8 +304,8 @@ export class DockerRuntime implements Runtime {
 	async shutdown(): Promise<void> {
 		if (this.state.kind !== "ready") return;
 		const name = this.opts.name;
-		try { docker(["stop", "-t", "5", name]); } catch {}
-		try { docker(["rm", "-f", name]); } catch {}
+		try { container("docker", ["stop", "-t", "5", name]); } catch {}
+		try { container("docker", ["rm", "-f", name]); } catch {}
 		this.state = { kind: "uninit", initialized: false };
 	}
 
@@ -331,7 +331,7 @@ export class DockerRuntime implements Runtime {
 		}
 
 		try {
-			const { exitCode, stdout, stderr } = await dockerSpawn(args, {
+			const { exitCode, stdout, stderr } = await containerSpawn("docker", args, {
 				timeoutMs: opts.timeoutMs,
 				signal: controller.signal,
 				stdin: opts.stdin,
