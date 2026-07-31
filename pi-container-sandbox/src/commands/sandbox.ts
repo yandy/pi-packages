@@ -11,7 +11,7 @@ resolveEngine,
 	saveSbxConfig,
 } from "../config";
 import { execCapture } from "../ops";
-import { createRuntime, type Runtime } from "../runtime";
+import { createRuntime } from "../runtime";
 import { clearSbx, getSbx } from "../session";
 
 export function createSandboxCommandHandlers(
