@@ -676,3 +676,8 @@ export class PodmanRuntime implements Runtime {
 		return Math.round(val * (multipliers[unit] ?? 1));
 	}
 }
+
+export function createRuntime(engine: "docker" | "podman", opts: SandboxOptions): Runtime {
+	if (engine === "podman") return new PodmanRuntime(opts);
+	return new DockerRuntime(opts);
+}

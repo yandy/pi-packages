@@ -25,14 +25,9 @@ import {
 	PathApprovalStore,
 	CONTAINER_ROOT,
 } from "./src/paths";
-import { DockerRuntime, PodmanRuntime, deriveContainerName, type MountSpec, type Runtime, type SandboxOptions } from "./src/runtime";
+import { createRuntime, deriveContainerName, type MountSpec } from "./src/runtime";
 import { clearSbx, getSbx, type SbxSession, setSbx } from "./src/session";
 import { fixSkillLocations, parseAvailableSkills, skillsToMountSpecs } from "./src/skills";
-
-function createRuntime(engine: "docker" | "podman", opts: SandboxOptions): Runtime {
-	if (engine === "podman") return new PodmanRuntime(opts);
-	return new DockerRuntime(opts);
-}
 
 export default function (pi: ExtensionAPI) {
 	pi.registerFlag("container", {

@@ -11,13 +11,8 @@ import {
 	saveSbxConfig,
 } from "../config";
 import { execCapture } from "../ops";
-import { DockerRuntime, PodmanRuntime, type Runtime } from "../runtime";
+import { createRuntime, type Runtime } from "../runtime";
 import { clearSbx, getSbx } from "../session";
-import type { SandboxOptions } from "../runtime";
-
-function createRuntime(engine: "docker" | "podman", opts: SandboxOptions): Runtime {
-	return engine === "podman" ? new PodmanRuntime(opts) : new DockerRuntime(opts);
-}
 
 export function createSandboxCommandHandlers(
 	localCwd: string,
