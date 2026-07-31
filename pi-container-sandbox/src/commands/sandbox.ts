@@ -2,12 +2,12 @@ import { existsSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { expandPath } from "../paths";
 import {
-	detectEngine,
 	discoverDockerfiles,
-	getSbxConfigPath,
-	imageRef,
-	loadSbxConfig,
-	PACKAGE_DOCKER_DIR,
+getSbxConfigPath,
+imageRef,
+loadSbxConfig,
+PACKAGE_DOCKER_DIR,
+resolveEngine,
 	saveSbxConfig,
 } from "../config";
 import { execCapture } from "../ops";
@@ -116,7 +116,8 @@ export function createSandboxCommandHandlers(
 					});
 				} else {
 					// 无 session 时，检测可用引擎来构建镜像
-					const engine = detectEngine();
+				const cfg = loadSbxConfig(localCwd);
+					const engine = resolveEngine(cfg.runtime.engine);
 					const runtime = createRuntime(engine, {
 						image,
 						hostCwd: localCwd,
