@@ -154,7 +154,7 @@ export function imageRef(im: ImageConfig): string {
 }
 
 /** 检测可用的容器引擎，优先 podman。抛错如果一个都没有。 */
-export function detectEngine(): "docker" | "podman" {
+function detectEngine(): "docker" | "podman" {
 	try { container("podman", ["info"]); return "podman"; } catch {}
 	try { container("docker", ["info"]); return "docker"; } catch {}
 	throw new Error("No container runtime available. Install podman or docker.");

@@ -8,7 +8,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 	CONFIG_DIR_NAME: ".test-cfg",
 }));
 
-import { DEFAULT_SBX_CONFIG, detectEngine, getSbxConfigPath, imageRef, loadSbxConfig, resolveEngine, saveSbxConfig } from "../src/config";
+import { DEFAULT_SBX_CONFIG, getSbxConfigPath, imageRef, loadSbxConfig, resolveEngine, saveSbxConfig } from "../src/config";
 
 const TEST_CONFIG_DIR = ".test-cfg";
 const testDir = resolvePath(tmpdir(), `pi-sandbox-test-${Date.now()}`);
@@ -137,8 +137,8 @@ describe("engine field", () => {
 });
 
 describe("detectEngine", () => {
-	it("detects at least one runtime", () => {
-		const engine = detectEngine();
+	it("detects at least one runtime via resolveEngine(auto)", () => {
+		const engine = resolveEngine("auto");
 		expect(["docker", "podman"]).toContain(engine);
 	});
 });
