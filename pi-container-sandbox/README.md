@@ -6,8 +6,8 @@ per-session Docker container, so coding side effects are sandboxed.
 
 ## Quick start
 
-Requires Docker (any recent version) running and accessible to your user
-(you need read/write on `/var/run/docker.sock` or Docker Desktop).
+Requires Docker or Podman (any recent version) running and accessible to your user
+(you need read/write on `/var/run/docker.sock`, Docker Desktop, or a working Podman installation).
 
 ```bash
 # Install from npm
@@ -70,7 +70,6 @@ The sandbox container is removed when pi exits, unless you set
 | `/sandbox config` | Show `.pi/agent/sandbox.json` contents |
 | `/sandbox allow <path>` | Grant read access to an external host path |
 | `/sandbox paths [revoke <path>]` | List or revoke persisted path approvals |
-| `/sandbox tiers [set <tier>]` | List or switch resource tiers |
 
 ## Configuration
 
@@ -82,7 +81,7 @@ Configuration is read from two locations. Project config overrides global config
 
 ```json
 {
-  "runtime": { "tier": "medium" }
+  "runtime": { "engine": "auto" }
 }
 ```
 
@@ -92,7 +91,7 @@ Configuration is read from two locations. Project config overrides global config
 {
   "image": { "name": "pi-container-sandbox", "tag": "latest" },
   "runtime": {
-    "name": null, "tier": "medium", "network": true, "persist": false,
+    "engine": "auto", "name": null, "network": true, "persist": false,
     "memory": null, "cpus": null, "swap": null, "pidsLimit": null,
     "cache": null, "mounts": []
   },
@@ -110,7 +109,7 @@ Configuration is read from two locations. Project config overrides global config
 | Field | Type | Default | Example | Description |
 |-------|------|---------|---------|-------------|
 | `name` | string \| null | `null` | `"my-dev-box"` | Container reuse name |
-| `tier` | `"small"` \| `"medium"` \| `"large"` | `"medium"` | `"large"` | Resource tier |
+| `engine` | `"auto"` \| `"docker"` \| `"podman"` | `"auto"` | `"podman"` | Container engine, auto-detect if not set |
 | `network` | boolean | `true` | `false` | Container networking |
 | `persist` | boolean | `false` | `true` | Keep container after exit |
 | `memory` | string \| null | `null` | `"8g"` | Memory override |
@@ -126,15 +125,20 @@ Configuration is read from two locations. Project config overrides global config
 |-------|------|---------|---------|-------------|
 | `commands` | string[] | `[]` | `["git", "npm", "docker"]` | Host command allowlist |
 
-### Resource Tiers
+### Resource Limits
 
-| tier | memory | cpus | swap |
-|------|--------|------|------|
-| small | 1g | 1 | 512m |
-| medium | 4g | 2 | 2g |
-| large | 8g | 4 | 4g |
+Resources are configured directly via `runtime.memory`, `runtime.cpus`, `runtime.swap`, and `runtime.pidsLimit` fields.
 
-Use `--container-size` flag or `/sandbox tiers set` to switch.
+**By default, no resource limits are applied.** Set these fields explicitly to enable them.
+
+Example configuration:
+
+| Resource | Example |
+|----------|---------|
+| memory | `"4g"` |
+| cpus | `"2"` |
+| swap | `"2g"` |
+| pidsLimit | `512` |
 
 ### CLI Flags
 
@@ -174,30 +178,67 @@ operations are affected — `write`, `edit`'s write operations, and `bash` are
   operations or when the tool needs to operate on external paths inside the
   container.
 
-## Resource limits (defaults)
+## Resource limits
 
-- Memory: 4 GiB (medium tier)
-- CPUs: 2
-- PIDs: 512
+By default, no resource limits are applied. To set limits, configure `runtime.memory`, `runtime.cpus`, `runtime.swap`, or `runtime.pidsLimit` in `sandbox.json`.
+
+Example values: memory `"4g"`, cpus `"2"`, swap `"2g"`, pidsLimit `512`.
+
+Other container security defaults:
 - No caps: `--cap-drop ALL`
 - No new privileges: `--security-opt no-new-privileges`
 - User: non-root (uid 1000)
 - Network: default (container can reach the internet)
 - No Docker socket inside the container
 
+## Podman notes
+
+`pi-container-sandbox` supports Podman as a container engine.
+
+### Engine selection
+
+Set the engine via the `runtime.engine` config field:
+- `"auto"` (default): auto-detect, prefer Podman
+- `"docker"`: force Docker
+- `"podman"`: force Podman
+
+### Rootless mode and cgroups v2
+
+Podman runs rootless by default. In rootless mode, resource limits
+(`--memory`, `--cpus`) require cgroups v2. If your system lacks cgroups v2,
+the container starts without resource limits and logs a warning.
+
+Most modern Linux distros (Ubuntu 21.10+, Fedora 31+, Debian 11+) use
+cgroups v2 by default. On cgroups v1 systems, resource limits only work
+with rootful Podman.
+
 ## Troubleshooting
 
 ### `Sandbox not ready: Docker not available`
 
-Make sure Docker is running:
+Make sure Docker or Podman is running:
 
 ```bash
 docker ps
+# or
+podman info
 ```
 
 If Docker is running but the extension can't reach it, your user may not
 have permission on `/var/run/docker.sock`. On Linux, add yourself to the
 `docker` group.
+
+### Podman starts without resource limits
+
+Podman rootless mode requires cgroups v2 to apply memory and CPU limits.
+Check your cgroups version:
+
+```bash
+stat -fc %T /sys/fs/cgroup/
+```
+
+Output `cgroup2fs` means cgroups v2. If it says `tmpfs`, you are on
+cgroups v1 — use rootful Podman or switch to Docker for resource limits.
 
 ### Image build fails
 
@@ -212,15 +253,17 @@ npm run build-image
 ### Agent edits don't show up on the host
 
 The bind mount is at `/workspace` in the container, mapped to your project
-cwd on the host. Check `docker inspect <container-name> | grep -A 5 Mounts`.
+cwd on the host. Run `/sandbox status` to verify mount status.
 
 ### I want to drop into the container
 
 ```bash
 docker exec -it <container-name> bash
+# or
+podman exec -it <container-name> bash
 ```
 
-Find the container name from `/sandbox status` or `docker ps --filter name=pi-sbx-`.
+Find the container name from `/sandbox status` or `docker ps --filter name=pi-sbx-` (or `podman ps --filter name=pi-sbx-`).
 
 ## Development
 
@@ -244,12 +287,14 @@ bash tests/e2e.sh         # Run E2E tests (requires Docker + pi CLI)
 `docker/Dockerfile` if needed), then starts a long-lived container with
 the project cwd bind-mounted at `/workspace`. It replaces pi's coding
 tools (`bash`, `read`, `write`, `edit`) with versions whose I/O routes
-through dockerode Docker Engine API calls into the container. The user's
+into the container through an engine adapter (Docker or Podman CLI). The user's
 `!` bash uses the same adapter via the `user_bash` event.
 
 The container is torn down on `session_shutdown` / SIGINT / process exit
-(unless `keep` is set). If Docker is unreachable, the extension gracefully
-degrades to pi's default host tools with a notification.
+(unless `keep` is set). The extension supports Docker and Podman via the
+`runtime.engine` config field or auto-detection. If no container runtime is
+available, the extension gracefully degrades to pi's default host tools with
+a notification.
 
 ## License
 

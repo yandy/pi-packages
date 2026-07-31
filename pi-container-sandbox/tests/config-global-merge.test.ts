@@ -73,7 +73,7 @@ describe("global + project config: array fields should merge, not overwrite", ()
 		expect(cfg.host.commands).toEqual(["git", "docker"]);
 
 		// Scalar fields still work as before (project overrides global)
-		expect(cfg.runtime.tier).toBe("medium");
+		expect(cfg.runtime.network).toBe(true);
 	});
 
 	it("project-only works when global has no runtime section", () => {

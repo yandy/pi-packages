@@ -5,6 +5,7 @@ const mockSession: SbxSession = {
 	runtime: { exec: async () => ({ exitCode: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }) } as any,
 	name: "test-container",
 	hostCwd: "/tmp/test",
+	engine: "docker",
 	keep: false,
 	skillMounts: [],
 	userMounts: [],
@@ -14,7 +15,7 @@ const mockSession: SbxSession = {
 	config: {
 		image: { name: "pi-sandbox", tag: "latest" },
 		runtime: {
-			name: null, tier: "medium", network: true, persist: false,
+			name: null, network: true, persist: false,
 			memory: null, cpus: null, swap: null, pidsLimit: null,
 			cache: null, mounts: [],
 		},

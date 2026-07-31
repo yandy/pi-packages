@@ -5,6 +5,7 @@ export interface SbxSession {
 	runtime: Runtime;
 	name: string;
 	hostCwd: string;
+	engine: "docker" | "podman";
 	keep: boolean;
 	/** Skill mounts auto-discovered from system prompt <available_skills> XML. Always /skills/<name>, ro. */
 	skillMounts: MountSpec[];

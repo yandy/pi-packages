@@ -5,7 +5,7 @@ import { type SbxSession, setSbx } from "../src/session";
 const DEFAULT_CONFIG: SbxConfig = {
 	image: { name: "pi-sandbox", tag: "latest" },
 	runtime: {
-		name: null, tier: "medium", network: true, persist: false,
+		name: null, network: true, persist: false,
 		memory: null, cpus: null, swap: null, pidsLimit: null,
 		cache: null, mounts: [],
 	},
@@ -38,6 +38,7 @@ export function createTestSession(overrides?: Partial<SbxSession>): SbxSession {
 		runtime: mockRuntime(),
 		name: "test-box",
 		hostCwd: "/tmp",
+		engine: "docker",
 		keep: false,
 		skillMounts: [],
 		userMounts: [],

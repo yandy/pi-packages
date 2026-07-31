@@ -1,11 +1,11 @@
 import { execFileSync, spawn, type SpawnOptions } from "node:child_process";
 
-/**
- * 同步执行 docker 命令。适用于 inspect、stop、rm 等快速操作。
- * 失败时抛出 Error。
- */
-export function docker(args: string[], opts?: { timeout?: number }): string {
-	return execFileSync("docker", args, {
+export function container(
+	binary: string,
+	args: string[],
+	opts?: { timeout?: number },
+): string {
+	return execFileSync(binary, args, {
 		encoding: "utf-8",
 		timeout: opts?.timeout ?? 30_000,
 		maxBuffer: 16 * 1024 * 1024,
@@ -13,10 +13,8 @@ export function docker(args: string[], opts?: { timeout?: number }): string {
 	}).trim();
 }
 
-/**
- * 异步 spawn docker 命令，支持流式输出、超时、AbortSignal、stdin。
- */
-export function dockerSpawn(
+export function containerSpawn(
+	binary: string,
 	args: string[],
 	opts: {
 		timeoutMs?: number;
@@ -27,17 +25,14 @@ export function dockerSpawn(
 	},
 ): Promise<{ stdout: Buffer; stderr: Buffer; exitCode: number | null; error?: string }> {
 	return new Promise((resolve) => {
-		const spawnOpts: SpawnOptions = {
-			stdio: ["pipe", "pipe", "pipe"],
-		};
-		const child = spawn("docker", args, spawnOpts);
+		const spawnOpts: SpawnOptions = { stdio: ["pipe", "pipe", "pipe"] };
+		const child = spawn(binary, args, spawnOpts);
 
 		const stdoutChunks: Buffer[] = [];
 		const stderrChunks: Buffer[] = [];
 		let timedOut = false;
 		let settled = false;
 		let spawnError: string | undefined;
-
 		let timer: NodeJS.Timeout | null = null;
 
 		const finish = (code: number | null) => {
@@ -63,12 +58,10 @@ export function dockerSpawn(
 
 		child.on("close", (code) => finish(code));
 		child.on("error", (err) => {
-			// spawn 自身的错误（如 docker 二进制找不到）
 			spawnError = err.message;
 			finish(null);
 		});
 
-		// 超时
 		if (opts.timeoutMs && opts.timeoutMs > 0) {
 			timer = setTimeout(() => {
 				timedOut = true;
@@ -77,20 +70,14 @@ export function dockerSpawn(
 			}, opts.timeoutMs);
 		}
 
-		// 外部 signal
 		if (opts.signal) {
 			if (opts.signal.aborted) {
 				child.kill("SIGKILL");
 			} else {
-				opts.signal.addEventListener(
-					"abort",
-					() => child.kill("SIGKILL"),
-					{ once: true },
-				);
+				opts.signal.addEventListener("abort", () => child.kill("SIGKILL"), { once: true });
 			}
 		}
 
-		// stdin
 		if (opts.stdin !== undefined) {
 			const buf = typeof opts.stdin === "string" ? Buffer.from(opts.stdin) : opts.stdin;
 			child.stdin?.end(buf);

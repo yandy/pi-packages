@@ -3,16 +3,16 @@ import { resolve as resolvePath } from "node:path";
 import { expandPath } from "../paths";
 import {
 	discoverDockerfiles,
-	getSbxConfigPath,
-	imageRef,
-	loadSbxConfig,
-	PACKAGE_DOCKER_DIR,
+getSbxConfigPath,
+imageRef,
+loadSbxConfig,
+PACKAGE_DOCKER_DIR,
+resolveEngine,
 	saveSbxConfig,
 } from "../config";
 import { execCapture } from "../ops";
-import { DockerRuntime } from "../runtime";
+import { createRuntime } from "../runtime";
 import { clearSbx, getSbx } from "../session";
-import { type SizeTier, TIER_SPECS } from "../tiers";
 
 export function createSandboxCommandHandlers(
 	localCwd: string,
@@ -45,9 +45,10 @@ export function createSandboxCommandHandlers(
 			if (sbx.resources?.pidsLimit !== undefined) resParts.push(`pids-limit: ${sbx.resources.pidsLimit}`);
 			const resStr = resParts.length ? `\nresources: ${resParts.join(", ")}` : "";
 			const reusableStr = sbx.isReusable ? ` [re-usable${sbx.isReattached ? ", reattached" : ""}]` : "";
+			const engineName = sbx.engine;
 			ctx.ui.notify(
 				[
-					`Sandbox: docker container ${sbx.name}${reusableStr}`,
+					`Sandbox: ${engineName} container ${sbx.name}${reusableStr}`,
 					`host cwd: ${sbx.hostCwd}`,
 					`image: ${sbx.imageRef}`,
 					resStr.trim(),
@@ -99,7 +100,7 @@ export function createSandboxCommandHandlers(
 
 			const selected = await ctx.ui.select("选择 Dockerfile 构建镜像", options);
 			if (!selected || selected === skipLabel) {
-				ctx.ui.notify("构建已跳过。请手动执行 docker build 构建镜像。", "info");
+				ctx.ui.notify("构建已跳过。请手动执行容器构建镜像。", "info");
 				return;
 			}
 
@@ -114,12 +115,15 @@ export function createSandboxCommandHandlers(
 						onProgress: (msg: string) => ctx.ui.setStatus("sandbox", `[build] ${msg}`),
 					});
 				} else {
-					const runtime = new DockerRuntime({
+					// 无 session 时，检测可用引擎来构建镜像
+				const cfg = loadSbxConfig(localCwd);
+					const engine = resolveEngine(cfg.runtime.engine);
+					const runtime = createRuntime(engine, {
 						image,
 						hostCwd: localCwd,
 						name: "pi-sbx-build",
 						allowNetwork: true,
-						resources: { memory: "4g", cpus: "2" },
+						resources: {},
 						onProgress: (msg: string) => ctx.ui.setStatus("sandbox", `[build] ${msg}`),
 					});
 					await runtime.init();
@@ -228,7 +232,6 @@ export function createSandboxCommandHandlers(
 			const lines: string[] = [
 				"Sandbox project config (.pi/agent/sandbox.json):",
 				`  Image:   ${ref}`,
-				`  Tier:    ${cfg.runtime.tier}`,
 				`  Name:    ${cfg.runtime.name ?? "(auto)"}`,
 				`  Persist: ${cfg.runtime.persist ? "yes" : "no"}`,
 				`  Cache:   ${cfg.runtime.cache ?? "(none)"}`,
@@ -296,31 +299,6 @@ export function createSandboxCommandHandlers(
 			);
 		},
 
-		tiers: async (args: string, ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }) => {
-			const parts = args.trim().split(/\s+/);
-			if (parts[0] === "set" && parts[1]) {
-				const tier = parts[1] as SizeTier;
-				if (!(tier in TIER_SPECS)) {
-					ctx.ui.notify(`Unknown tier: ${tier}. Use: small, medium, large`, "warning");
-					return;
-				}
-				const sbx = getSbx();
-				const hostCwd = sbx?.hostCwd ?? localCwd;
-				const cfg = loadSbxConfig(hostCwd);
-				cfg.runtime.tier = tier;
-				saveSbxConfig(hostCwd, cfg);
-				ctx.ui.notify(
-					`Tier set to ${tier} (mem=${TIER_SPECS[tier].memory}, cpu=${TIER_SPECS[tier].cpus}). Restart pi to apply.`,
-					"info",
-				);
-				return;
-			}
-			const lines = ["Available tiers:", ""];
-			for (const [name, spec] of Object.entries(TIER_SPECS)) {
-				lines.push(`  ${name}: mem=${spec.memory}, cpu=${spec.cpus}, swap=${spec.swap}`);
-			}
-			lines.push("", "Use /sandbox tiers set <name> to switch.");
-			ctx.ui.notify(lines.join("\n"), "info");
-		},
+
 	};
 }

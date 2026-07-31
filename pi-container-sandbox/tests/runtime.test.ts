@@ -1,11 +1,20 @@
 import { execFileSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PACKAGE_DOCKER_DIR } from "../src/config";
-import { DockerRuntime, deriveContainerName } from "../src/runtime";
+import { DockerRuntime, PodmanRuntime, deriveContainerName } from "../src/runtime";
 
 const dockerAvailable = (() => {
 	try {
 		execFileSync("docker", ["info"], { stdio: "ignore", timeout: 5000 });
+		return true;
+	} catch {
+		return false;
+	}
+})();
+
+const podmanAvailable = (() => {
+	try {
+		execFileSync("podman", ["info"], { stdio: "ignore", timeout: 5000 });
 		return true;
 	} catch {
 		return false;
@@ -278,5 +287,229 @@ describe("DockerRuntime buildImage / getImage", () => {
 describe("PACKAGE_DOCKER_DIR", () => {
 	it("resolves to a path ending with /docker", () => {
 		expect(PACKAGE_DOCKER_DIR).toMatch(/\/docker$/);
+	});
+});
+
+describe.skipIf(!podmanAvailable)("PodmanRuntime", () => {
+	let runtime: PodmanRuntime;
+
+	it("init() pings Podman and sets initialized state", async () => {
+		runtime = new PodmanRuntime({
+			image: "debian:12-slim",
+			hostCwd: "/tmp",
+			name: "pi-test-podman-init",
+			allowNetwork: false,
+			resources: {},
+		});
+		await runtime.init();
+		expect(runtime.isReady()).toBe(false);
+	});
+
+	it("returns isReady()=false when Podman is unreachable (mock)", async () => {
+		const badRuntime = new PodmanRuntime({
+			image: "debian:12-slim",
+			hostCwd: "/tmp",
+			name: "pi-test-podman-bad",
+			allowNetwork: false,
+			resources: {},
+		});
+		expect(badRuntime.isReady()).toBe(false);
+	});
+});
+
+describe.skipIf(!podmanAvailable)("PodmanRuntime lifecycle", () => {
+	const testName = `pi-test-podman-${Date.now()}`;
+
+	afterAll(() => {
+		try { execFileSync("podman", ["rm", "-f", testName], { stdio: "ignore", timeout: 30000 }); } catch {}
+	}, 30000);
+
+	it("withReady() starts container and sets ready state", async () => {
+		const runtime = new PodmanRuntime({
+			image: "debian:12-slim",
+			hostCwd: "/tmp",
+			name: testName,
+			allowNetwork: false,
+			resources: {},
+		});
+		await runtime.init();
+		expect(runtime.isReady()).toBe(false);
+		await runtime.withReady();
+		expect(runtime.isReady()).toBe(true);
+		const id = runtime.getContainerId();
+		expect(id).toBeTruthy();
+		expect(typeof id).toBe("string");
+	}, 120000);
+
+	it("second withReady() call is deduplicated", async () => {
+		const dedupName = `${testName}-dedup`;
+		const runtime = new PodmanRuntime({
+			image: "debian:12-slim",
+			hostCwd: "/tmp",
+			name: dedupName,
+			allowNetwork: false,
+			resources: {},
+		});
+		try {
+			await runtime.init();
+			await Promise.all([runtime.withReady(), runtime.withReady()]);
+			expect(runtime.isReady()).toBe(true);
+		} finally {
+			try {
+				await runtime.shutdown();
+			} catch {}
+		}
+	}, 120000);
+});
+
+describe.skipIf(!podmanAvailable)("PodmanRuntime exec", () => {
+	const testName = `pi-test-podman-exec-${Date.now()}`;
+
+	afterAll(() => {
+		["exec1", "exec2", "exec3", "exec4", "exec5"].forEach((suffix) => {
+			try { execFileSync("podman", ["rm", "-f", `${testName}-${suffix}`], { stdio: "ignore", timeout: 30000 }); } catch {}
+		});
+	}, 30000);
+
+	it("exec returns stdout and exitCode 0", async () => {
+		const runtime = new PodmanRuntime({
+			image: "debian:12-slim",
+			hostCwd: "/tmp",
+			name: `${testName}-exec1`,
+			allowNetwork: false,
+			resources: {},
+		});
+		await runtime.init();
+		await runtime.withReady();
+		const result = await runtime.exec({ cmd: ["echo", "-n", "hello"] });
+		expect(result.exitCode).toBe(0);
+		expect(result.stdout.toString()).toBe("hello");
+		expect(result.stderr.toString()).toBe("");
+		await runtime.shutdown();
+	}, 120000);
+
+	it("exec returns non-zero exitCode for failing command", async () => {
+		const runtime = new PodmanRuntime({
+			image: "debian:12-slim",
+			hostCwd: "/tmp",
+			name: `${testName}-exec2`,
+			allowNetwork: false,
+			resources: {},
+		});
+		await runtime.init();
+		await runtime.withReady();
+		const result = await runtime.exec({ cmd: ["sh", "-c", "exit 42"] });
+		expect(result.exitCode).toBe(42);
+		await runtime.shutdown();
+	}, 120000);
+
+	it("exec separates stdout and stderr (demux)", async () => {
+		const runtime = new PodmanRuntime({
+			image: "debian:12-slim",
+			hostCwd: "/tmp",
+			name: `${testName}-exec3`,
+			allowNetwork: false,
+			resources: {},
+		});
+		await runtime.init();
+		await runtime.withReady();
+		const result = await runtime.exec({
+			cmd: ["sh", "-c", "echo out; echo err >&2"],
+		});
+		expect(result.stdout.toString().trim()).toBe("out");
+		expect(result.stderr.toString().trim()).toBe("err");
+		await runtime.shutdown();
+	}, 120000);
+
+	it("exec honors timeoutMs — returns null exitCode", async () => {
+		const runtime = new PodmanRuntime({
+			image: "debian:12-slim",
+			hostCwd: "/tmp",
+			name: `${testName}-exec4`,
+			allowNetwork: false,
+			resources: {},
+		});
+		await runtime.init();
+		await runtime.withReady();
+		const result = await runtime.exec({
+			cmd: ["sleep", "10"],
+			timeoutMs: 1000,
+		});
+		expect(result.exitCode).toBe(null);
+		await runtime.shutdown();
+	}, 120000);
+
+	it("exec streams onData for stdout", async () => {
+		const runtime = new PodmanRuntime({
+			image: "debian:12-slim",
+			hostCwd: "/tmp",
+			name: `${testName}-exec5`,
+			allowNetwork: false,
+			resources: {},
+		});
+		await runtime.init();
+		await runtime.withReady();
+		const chunks: Buffer[] = [];
+		const result = await runtime.exec({
+			cmd: ["sh", "-c", "echo one; sleep 0.1; echo two"],
+			onData: (chunk) => chunks.push(chunk),
+		});
+		expect(result.exitCode).toBe(0);
+		const output = Buffer.concat(chunks).toString().trim().split("\n");
+		expect(output).toContain("one");
+		expect(output).toContain("two");
+		await runtime.shutdown();
+	}, 120000);
+});
+
+describe.skipIf(!podmanAvailable)("PodmanRuntime imageExists", () => {
+	it("returns false for non-existent image", async () => {
+		const runtime = new PodmanRuntime({
+			image: "nonexistent-image-xyz",
+			hostCwd: "/tmp",
+			name: `pi-test-podman-exists-${Date.now()}`,
+			allowNetwork: false,
+			resources: {},
+		});
+		await runtime.init();
+		const exists = await runtime.imageExists();
+		expect(exists).toBe(false);
+	}, 30000);
+
+	it("returns true for existing image", async () => {
+		const runtime = new PodmanRuntime({
+			image: "debian:12-slim",
+			hostCwd: "/tmp",
+			name: `pi-test-podman-exists2-${Date.now()}`,
+			allowNetwork: false,
+			resources: {},
+		});
+		await runtime.init();
+		const exists = await runtime.imageExists();
+		expect(exists).toBe(true);
+	}, 30000);
+});
+
+describe.skipIf(!podmanAvailable)("PodmanRuntime buildImage / getImage", () => {
+	it("has buildImage method", () => {
+		const runtime = new PodmanRuntime({
+			image: "debian:12-slim",
+			hostCwd: "/tmp",
+			name: `pi-test-podman-build-${Date.now()}`,
+			allowNetwork: false,
+			resources: {},
+		});
+		expect(typeof runtime.buildImage).toBe("function");
+	});
+
+	it("getImage returns the configured image name", () => {
+		const runtime = new PodmanRuntime({
+			image: "my-custom-image:v1",
+			hostCwd: "/tmp",
+			name: `pi-test-podman-getimg-${Date.now()}`,
+			allowNetwork: false,
+			resources: {},
+		});
+		expect(runtime.getImage()).toBe("my-custom-image:v1");
 	});
 });

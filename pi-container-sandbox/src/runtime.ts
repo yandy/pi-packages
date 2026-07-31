@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
-import { docker, dockerSpawn } from "./docker-cli";
+import { container, containerSpawn } from "./container-cli";
 import { PACKAGE_DOCKER_DIR } from "./config";
 
 const BUILD_TIMEOUT_MS = parseInt(process.env.SBX_BUILD_TIMEOUT || "600000", 10);
@@ -112,7 +112,7 @@ export class DockerRuntime implements Runtime {
 
 	async init(): Promise<void> {
 		try {
-			docker(["info"]);
+			container("docker", ["info"]);
 			this.state = { kind: "uninit", initialized: true };
 		} catch (err) {
 			this.state = {
@@ -136,7 +136,7 @@ export class DockerRuntime implements Runtime {
 
 	async imageExists(): Promise<boolean> {
 		try {
-			docker(["image", "inspect", this.opts.image]);
+			container("docker", ["image", "inspect", this.opts.image]);
 			return true;
 		} catch {
 			return false;
@@ -168,7 +168,7 @@ export class DockerRuntime implements Runtime {
 		args.push(buildContext);
 
 		let pending = "";
-		const result = await dockerSpawn(args, {
+		const result = await containerSpawn("docker", args, {
 			timeoutMs: BUILD_TIMEOUT_MS,
 			onStdout: (chunk: Buffer) => {
 				const text = chunk.toString("utf-8");
@@ -210,7 +210,7 @@ export class DockerRuntime implements Runtime {
 		// 1. Check for existing container
 		let existingId: string | null = null;
 		try {
-			const info = JSON.parse(docker(["container", "inspect", name]));
+			const info = JSON.parse(container("docker", ["container", "inspect", name]));
 			if (info?.[0]) {
 				const state = info[0].State;
 				if (state?.Running) {
@@ -223,69 +223,75 @@ export class DockerRuntime implements Runtime {
 
 		// 2. Clean up existing container if present but not running
 		if (existingId) {
-			try { docker(["rm", "-f", name]); } catch {}
+			try { container("docker", ["rm", "-f", name]); } catch {}
 		}
 
-		// 3. Build docker run args
-		const memory = resources?.memory ?? "4g";
-		const cpus = resources?.cpus ?? "2";
-		const pidsLimit = resources?.pidsLimit ?? 512;
-
-		const args: string[] = [
+		// 3. Build base args (without resource limits)
+		const baseArgs: string[] = [
 			"run", "-d",
 			"--name", name,
 			"--user", "1000:1000",
 			"-w", this.workRoot,
 			"-v", `${hostCwd}:${this.workRoot}`,
-			"--memory", memory,
-			"--cpus", cpus,
-			"--pids-limit", String(pidsLimit),
 			"--network", allowNetwork ? "bridge" : "none",
 			"--cap-drop", "ALL",
 			"--security-opt", "no-new-privileges",
 		];
 
-		// Extra mounts
-		if (extraMounts) {
-			for (const m of extraMounts) {
-				const mode = m.mode === "rw" ? "rw" : "ro";
-				args.push("-v", `${m.source}:${m.target}:${mode}`);
-			}
-		}
-		if (cacheVolume) {
-			args.push("-v", `${cacheVolume}:/cache`);
-		}
+		// 4. Resource args (only when explicitly configured)
+		const resourceArgs: string[] = [];
+		const mem = resources?.memory;
+		const cpus = resources?.cpus;
+		const pids = resources?.pidsLimit;
+
+		if (mem) { resourceArgs.push("--memory", mem); }
+		if (cpus) { resourceArgs.push("--cpus", cpus); }
+		if (pids !== undefined && pids !== null) { resourceArgs.push("--pids-limit", String(pids)); }
 
 		// Swap
 		if (resources?.swap !== undefined) {
 			const swapVal = resources.swap;
 			if (swapVal === "0") {
-				args.push("--memory-swap", memory);
-			} else {
-				const memBytes = this._parseBytes(memory);
+				resourceArgs.push("--memory-swap", mem || "0");
+			} else if (mem) {
+				const memBytes = this._parseBytes(mem);
 				const swapBytes = memBytes + this._parseBytes(swapVal);
-				args.push("--memory-swap", String(swapBytes));
+				resourceArgs.push("--memory-swap", String(swapBytes));
 			}
 		}
 
-		// Environment variables
-		const dockerEnv = ["DEBIAN_FRONTEND=noninteractive", ...this._expandEnv(env ?? [])];
-		for (const e of dockerEnv) {
-			args.push("-e", e);
+		// Mount args
+		const mountArgs: string[] = [];
+		if (extraMounts) {
+			for (const m of extraMounts) {
+				const mode = m.mode === "rw" ? "rw" : "ro";
+				mountArgs.push("-v", `${m.source}:${m.target}:${mode}`);
+			}
+		}
+		if (cacheVolume) {
+			mountArgs.push("-v", `${cacheVolume}:/cache`);
 		}
 
-		args.push(image, "sleep", "infinity");
+		// Env args
+		const dockerEnv = ["DEBIAN_FRONTEND=noninteractive", ...this._expandEnv(env ?? [])];
+		const envArgs: string[] = [];
+		for (const e of dockerEnv) {
+			envArgs.push("-e", e);
+		}
 
-		// 4. Start container
-		docker(args, { timeout: 60_000 });
-		const inspectInfo = JSON.parse(docker(["container", "inspect", name]));
+		const imageAndCmd = [image, "sleep", "infinity"];
+
+		// 5. Start container
+		const fullArgs = [...baseArgs, ...resourceArgs, ...mountArgs, ...envArgs, ...imageAndCmd];
+		container("docker", fullArgs, { timeout: 60_000 });
+		const inspectInfo = JSON.parse(container("docker", ["container", "inspect", name]));
 		this.state = { kind: "ready", id: inspectInfo[0].Id };
 	}
 
 	async withReady(): Promise<void> {
 		if (this.state.kind === "ready") {
 			try {
-				docker(["container", "inspect", this.opts.name]);
+				container("docker", ["container", "inspect", this.opts.name]);
 				return;
 			} catch {
 				this.state = { kind: "uninit", initialized: true };
@@ -304,8 +310,8 @@ export class DockerRuntime implements Runtime {
 	async shutdown(): Promise<void> {
 		if (this.state.kind !== "ready") return;
 		const name = this.opts.name;
-		try { docker(["stop", "-t", "5", name]); } catch {}
-		try { docker(["rm", "-f", name]); } catch {}
+		try { container("docker", ["stop", "-t", "5", name]); } catch {}
+		try { container("docker", ["rm", "-f", name]); } catch {}
 		this.state = { kind: "uninit", initialized: false };
 	}
 
@@ -331,7 +337,7 @@ export class DockerRuntime implements Runtime {
 		}
 
 		try {
-			const { exitCode, stdout, stderr } = await dockerSpawn(args, {
+			const { exitCode, stdout, stderr } = await containerSpawn("docker", args, {
 				timeoutMs: opts.timeoutMs,
 				signal: controller.signal,
 				stdin: opts.stdin,
@@ -375,4 +381,303 @@ export class DockerRuntime implements Runtime {
 		};
 		return Math.round(val * (multipliers[unit] ?? 1));
 	}
+}
+
+export class PodmanRuntime implements Runtime {
+	private state: State = { kind: "uninit", initialized: false };
+	private workRoot = "/workspace";
+	private _initPromise: Promise<void> | null = null;
+	private opts: SandboxOptions;
+
+	constructor(opts: SandboxOptions) {
+		this.opts = opts;
+	}
+
+	async init(): Promise<void> {
+		try {
+			container("podman", ["info"]);
+			this.state = { kind: "uninit", initialized: true };
+		} catch (err) {
+			this.state = {
+				kind: "disabled",
+				reason: err instanceof Error ? err.message : String(err),
+			};
+		}
+	}
+
+	isReady(): boolean {
+		return this.state.kind === "ready";
+	}
+
+	getWorkRoot(): string {
+		return this.workRoot;
+	}
+
+	getContainerId(): string | null {
+		return this.state.kind === "ready" ? this.state.id : null;
+	}
+
+	getImage(): string {
+		return this.opts.image;
+	}
+
+	async imageExists(): Promise<boolean> {
+		try {
+			container("podman", ["image", "inspect", this.opts.image]);
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	async buildImage(opts: BuildImageOpts): Promise<void> {
+		const image = this.opts.image;
+		const buildContext = opts.buildContext ?? PACKAGE_DOCKER_DIR;
+		const dockerfile = opts.dockerfile;
+		const onProgress = opts.onProgress ?? this.opts.onProgress;
+
+		const report = (msg: string) => onProgress?.(msg);
+		report(`Building image ${image}...`);
+
+		const args = [
+			"build",
+			"-t", image,
+			"-f", dockerfile,
+			"--progress=plain",
+		];
+
+		if (opts.buildArgs) {
+			for (const [k, v] of Object.entries(opts.buildArgs)) {
+				args.push("--build-arg", `${k}=${v}`);
+			}
+		}
+
+		args.push(buildContext);
+
+		let pending = "";
+		const result = await containerSpawn("podman", args, {
+			timeoutMs: BUILD_TIMEOUT_MS,
+			onStdout: (chunk: Buffer) => {
+				const text = chunk.toString("utf-8");
+				pending += text;
+				const lines = pending.split("\n");
+				pending = lines.pop() ?? "";
+				for (const line of lines) {
+					const trimmed = line.trim();
+					if (trimmed) report(trimmed);
+				}
+			},
+			onStderr: (chunk: Buffer) => {
+				const text = chunk.toString("utf-8").trim();
+				if (text) report(`[stderr] ${text}`);
+			},
+		});
+
+		if (pending.trim()) report(pending.trim());
+
+		if (result.exitCode !== 0) {
+			const errMsg = result.stderr.toString("utf-8").trim() || "Build failed";
+			throw new Error(`sandbox: image build failed (exit ${result.exitCode}): ${errMsg}`);
+		}
+
+		report(`Image ${image} built successfully.`);
+	}
+
+	private _expandEnv(entries: string[]): string[] {
+		return entries.map((entry) => expandEnvEntry(entry, this.opts.hostCwd));
+	}
+
+	async startContainer(): Promise<void> {
+		const { hostCwd, name, allowNetwork, extraMounts, resources, cacheVolume, image, env } = this.opts;
+
+		// 1. Check for existing container
+		let existingId: string | null = null;
+		try {
+			const info = JSON.parse(container("podman", ["container", "inspect", name]));
+			if (info?.[0]) {
+				const state = info[0].State;
+				if (state?.Running) {
+					this.state = { kind: "ready", id: info[0].Id };
+					return;
+				}
+				existingId = info[0].Id;
+			}
+		} catch {}
+
+		// 2. Clean up existing container if present but not running
+		if (existingId) {
+			try { container("podman", ["rm", "-f", name]); } catch {}
+		}
+
+		// 3. Build base args (without resource limits)
+		const baseArgs: string[] = [
+			"run", "-d",
+			"--name", name,
+			"-w", this.workRoot,
+			"-v", `${hostCwd}:${this.workRoot}`,
+			"--network", allowNetwork ? "bridge" : "none",
+			"--cap-drop", "ALL",
+			"--security-opt", "no-new-privileges",
+		];
+
+		// 4. Resource args (only when explicitly configured; podman rootless may lack cgroups v2)
+		const resourceArgs: string[] = [];
+		const mem = resources?.memory;
+		const cpus = resources?.cpus;
+		const pids = resources?.pidsLimit;
+
+		if (mem) { resourceArgs.push("--memory", mem); }
+		if (cpus) { resourceArgs.push("--cpus", cpus); }
+		if (pids !== undefined && pids !== null) { resourceArgs.push("--pids-limit", String(pids)); }
+
+		// Swap
+		if (resources?.swap !== undefined) {
+			const swapVal = resources.swap;
+			if (swapVal === "0") {
+				resourceArgs.push("--memory-swap", mem || "0");
+			} else if (mem) {
+				const memBytes = this._parseBytes(mem);
+				const swapBytes = memBytes + this._parseBytes(swapVal);
+				resourceArgs.push("--memory-swap", String(swapBytes));
+			}
+		}
+
+		// Mount args
+		const mountArgs: string[] = [];
+		if (extraMounts) {
+			for (const m of extraMounts) {
+				const mode = m.mode === "rw" ? "rw" : "ro";
+				mountArgs.push("-v", `${m.source}:${m.target}:${mode}`);
+			}
+		}
+		if (cacheVolume) {
+			mountArgs.push("-v", `${cacheVolume}:/cache`);
+		}
+
+		// Env args
+		const podmanEnv = ["DEBIAN_FRONTEND=noninteractive", ...this._expandEnv(env ?? [])];
+		const envArgs: string[] = [];
+		for (const e of podmanEnv) {
+			envArgs.push("-e", e);
+		}
+
+		const imageAndCmd = [image, "sleep", "infinity"];
+
+		// 5. Try full args first, fallback on cgroups failure
+		const fullArgs = [...baseArgs, ...resourceArgs, ...mountArgs, ...envArgs, ...imageAndCmd];
+		try {
+			container("podman", fullArgs, { timeout: 60_000 });
+		} catch (err) {
+			const errMsg = err instanceof Error ? err.message : String(err);
+			if (resourceArgs.length > 0 && /cgroup|cgroups|cg\b/i.test(errMsg)) {
+				const fallbackArgs = [...baseArgs, ...mountArgs, ...envArgs, ...imageAndCmd];
+				container("podman", fallbackArgs, { timeout: 60_000 });
+				console.warn("sandbox: resource limits not applied (cgroups v2 required). Container started without --memory/--cpus.");
+			} else {
+				throw err;
+			}
+		}
+
+		const inspectInfo = JSON.parse(container("podman", ["container", "inspect", name]));
+		this.state = { kind: "ready", id: inspectInfo[0].Id };
+	}
+
+	async withReady(): Promise<void> {
+		if (this.state.kind === "ready") {
+			try {
+				container("podman", ["container", "inspect", this.opts.name]);
+				return;
+			} catch {
+				this.state = { kind: "uninit", initialized: true };
+			}
+		}
+		if (this.state.kind === "disabled" || this.state.kind === "broken") return;
+		if (this._initPromise) return this._initPromise;
+		this._initPromise = this._doInit();
+		try {
+			await this._initPromise;
+		} finally {
+			this._initPromise = null;
+		}
+	}
+
+	async shutdown(): Promise<void> {
+		if (this.state.kind !== "ready") return;
+		const name = this.opts.name;
+		try { container("podman", ["stop", "-t", "5", name]); } catch {}
+		try { container("podman", ["rm", "-f", name]); } catch {}
+		this.state = { kind: "uninit", initialized: false };
+	}
+
+	async exec(opts: ExecOpts): Promise<ExecResult> {
+		if (this.state.kind === "broken") throw new Error(this.state.reason);
+		if (this.state.kind !== "ready") throw new Error("Sandbox not ready");
+
+		const args = ["exec", "-i"];
+		if (opts.workDir) args.push("-w", opts.workDir);
+		if (opts.env) {
+			for (const e of opts.env) args.push("-e", e);
+		}
+		args.push(this.opts.name, ...opts.cmd);
+
+		const controller = new AbortController();
+		let abortHandler: (() => void) | undefined;
+		if (opts.signal) {
+			if (opts.signal.aborted) {
+				return { exitCode: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+			}
+			abortHandler = () => controller.abort(opts.signal?.reason);
+			opts.signal.addEventListener("abort", abortHandler, { once: true });
+		}
+
+		try {
+			const { exitCode, stdout, stderr } = await containerSpawn("podman", args, {
+				timeoutMs: opts.timeoutMs,
+				signal: controller.signal,
+				stdin: opts.stdin,
+				onStdout: opts.onData,
+				onStderr: opts.onData,
+			});
+			return { exitCode, stdout, stderr };
+		} finally {
+			if (opts.signal && abortHandler) {
+				opts.signal.removeEventListener("abort", abortHandler);
+			}
+		}
+	}
+
+	private async _doInit(): Promise<void> {
+		if (this.state.kind === "uninit" && !this.state.initialized) {
+			await this.init();
+		}
+		if (this.state.kind !== "uninit" || !this.state.initialized) return;
+		try {
+			await this.startContainer();
+		} catch (err) {
+			this.state = {
+				kind: "broken",
+				reason: `Container start failed: ${err instanceof Error ? err.message : String(err)}`,
+			};
+		}
+	}
+
+	private _parseBytes(s: string): number {
+		const match = s.match(/^(\d+(?:\.\d+)?)\s*(b|k|m|g|t)?$/i);
+		if (!match) throw new Error(`sandbox: invalid memory size "${s}" — expected format like "4g" or "512m"`);
+		const val = parseFloat(match[1]);
+		const unit = (match[2] ?? "b").toLowerCase();
+		const multipliers: Record<string, number> = {
+			b: 1,
+			k: 1024,
+			m: 1024 ** 2,
+			g: 1024 ** 3,
+			t: 1024 ** 4,
+		};
+		return Math.round(val * (multipliers[unit] ?? 1));
+	}
+}
+
+export function createRuntime(engine: "docker" | "podman", opts: SandboxOptions): Runtime {
+	if (engine === "podman") return new PodmanRuntime(opts);
+	return new DockerRuntime(opts);
 }

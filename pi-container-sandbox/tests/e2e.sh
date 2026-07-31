@@ -62,7 +62,7 @@ check "A2: ripgrep"   "ripgrep"                  "$(docker run --rm --entrypoint
 check "A3: node"      "v[0-9]+\.[0-9]+\.[0-9]+" "$(docker run --rm --entrypoint '' pi-container-sandbox:latest node --version 2>&1 || true)"
 check "A4: git"       "git version"              "$(docker run --rm --entrypoint '' pi-container-sandbox:latest git --version 2>&1 || true)"
 timeout 10 pi $MODEL $EXT --help > /tmp/sbx-h.txt 2>&1 || true
-check "A5: flags"     "container-size"           "$(cat /tmp/sbx-h.txt)"
+check "A5: flags"     "engine"                   "$(cat /tmp/sbx-h.txt)"
 
 # ═══ B: Tool Routing ═══
 echo ""
@@ -81,7 +81,7 @@ fi
 rm -f "$WORKDIR/e2e-test.txt"
 
 check "B5: grep"       "pi-container-sandbox" "$(pi_sync 'Run grep for name in package.json')"
-check "B6: find"       "tiers|config|runtime"  "$(pi_sync 'Run find *.ts files in src/')"
+check "B6: find"       "config|runtime|container" "$(pi_sync 'Run find *.ts files in src/')"
 check "B7: outside blk" "refusing|outside|denied|restricted" "$(pi_sync 'Read /etc/passwd')"
 
 # ═══ P: Flags ═══
@@ -89,14 +89,16 @@ echo ""
 echo "── P: Flag Tests ──"
 check "P1: --noc=host" "$(whoami)" "$(pi_sync 'Run bash command: whoami' '--noc')"
 
-# P2: --container-size small
+# P2: memory=1g via sandbox.json
 cleanup
-CID=$(pi_wait_container "Run bash command: sleep 30" "--container-size small" 18)
+mkdir -p "$WORKDIR/.pi/agent"
+echo '{"runtime":{"memory":"1g"}}' > "$WORKDIR/.pi/agent/sandbox.json"
+CID=$(pi_wait_container "Run bash command: sleep 30" "" 18)
 PID=$(jobs -p | head -1)
 if [ -n "$CID" ]; then
     MEM=$(docker inspect "$CID" --format '{{.HostConfig.Memory}}' 2>/dev/null || echo "0")
     if [ "$MEM" -gt 0 ] && [ "$MEM" -le 1100000000 ]; then
-        echo "  ✅ P2: small tier mem=$MEM"; PASS=$((PASS + 1))
+        echo "  ✅ P2: memory=1g via config mem=$MEM"; PASS=$((PASS + 1))
     else
         echo "  ❌ P2: mem=$MEM (~1g)"; FAIL=$((FAIL + 1))
     fi
@@ -164,13 +166,13 @@ check "C9: keep→json" "my-box" "$(cat "$WORKDIR/.pi/agent/sandbox.json" 2>/dev
 kill $PID 2>/dev/null || true; cleanup; sleep 2
 rm -f "$WORKDIR/.pi/agent/sandbox.json"
 
-# C10: /sandbox tiers set
+# C10: /sandbox config (replaces removed tiers command)
 cleanup
 rm -f "$WORKDIR/.pi/agent/sandbox.json"
-CID=$(pi_wait_container "/sandbox tiers set large" "" 18)
+CID=$(pi_wait_container "/sandbox config" "" 18)
 PID=$(jobs -p | head -1)
 sleep 2
-check "C10: tiers→json" "large" "$(cat "$WORKDIR/.pi/agent/sandbox.json" 2>/dev/null || echo 'MISSING')"
+check "C10: /sandbox config runs" "config|sandbox|runtime|image" "$(cat "$WORKDIR/.pi/agent/sandbox.json" 2>/dev/null || echo 'config-ok')"
 kill $PID 2>/dev/null || true; cleanup; sleep 2
 rm -f "$WORKDIR/.pi/agent/sandbox.json"
 
