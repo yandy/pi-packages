@@ -488,8 +488,9 @@ describe.skipIf(!podmanAvailable)("PodmanRuntime mount ownership", () => {
 				cmd: ["stat", "-c", "%u:%g", "/workspace/test.txt"],
 			});
 			expect(result.exitCode).toBe(0);
-			// Host user UID:GID should be 1000:1000
-			expect(result.stdout.toString().trim()).toBe("1000:1000");
+			// Files should be owned by the host user, not root
+			const expectedOwner = `${process.getuid()}:${process.getgid()}`;
+			expect(result.stdout.toString().trim()).toBe(expectedOwner);
 			await runtime.shutdown();
 		} finally {
 			rmSync(tmpDir, { recursive: true, force: true });
