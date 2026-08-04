@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PACKAGE_DOCKER_DIR } from "../src/config";
 import { DockerRuntime, PodmanRuntime, deriveContainerName } from "../src/runtime";
@@ -459,6 +460,41 @@ describe.skipIf(!podmanAvailable)("PodmanRuntime exec", () => {
 		expect(output).toContain("one");
 		expect(output).toContain("two");
 		await runtime.shutdown();
+	}, 120000);
+});
+
+describe.skipIf(!podmanAvailable)("PodmanRuntime mount ownership", () => {
+	const testName = `pi-test-podman-mount-${Date.now()}`;
+
+	afterAll(() => {
+		try { execFileSync("podman", ["rm", "-f", testName], { stdio: "ignore", timeout: 30000 }); } catch {}
+	}, 30000);
+
+	it("mounted host directory files are owned by host user (not root)", async () => {
+		const tmpDir = mkdtempSync("/tmp/pi-test-mount-");
+		writeFileSync(`${tmpDir}/test.txt`, "owned-by-user");
+
+		try {
+			const runtime = new PodmanRuntime({
+				image: "debian:12-slim",
+				hostCwd: tmpDir,
+				name: testName,
+				allowNetwork: false,
+				resources: {},
+			});
+			await runtime.init();
+			await runtime.withReady();
+			const result = await runtime.exec({
+				cmd: ["stat", "-c", "%u:%g", "/workspace/test.txt"],
+			});
+			expect(result.exitCode).toBe(0);
+			// Files should be owned by the host user, not root
+			const expectedOwner = `${process.getuid()}:${process.getgid()}`;
+			expect(result.stdout.toString().trim()).toBe(expectedOwner);
+			await runtime.shutdown();
+		} finally {
+			rmSync(tmpDir, { recursive: true, force: true });
+		}
 	}, 120000);
 });
 

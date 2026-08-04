@@ -513,6 +513,7 @@ export class PodmanRuntime implements Runtime {
 		const baseArgs: string[] = [
 			"run", "-d",
 			"--name", name,
+			"--userns", "keep-id",
 			"-w", this.workRoot,
 			"-v", `${hostCwd}:${this.workRoot}`,
 			"--network", allowNetwork ? "bridge" : "none",
