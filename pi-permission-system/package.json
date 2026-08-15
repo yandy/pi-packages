@@ -42,8 +42,8 @@
 		"web-tree-sitter": "^0.26.12"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.5.5",
-		"@types/node": "^26.1.2",
+		"@biomejs/biome": "^2.5.8",
+		"@types/node": "^26.2.0",
 		"typescript": "~7.0.2",
 		"vitest": "^3.0.0"
 	}
