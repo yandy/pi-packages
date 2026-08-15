@@ -27,6 +27,7 @@ import {
 } from "./src/paths";
 import { createRuntime, deriveContainerName, type MountSpec } from "./src/runtime";
 import { clearSbx, getSbx, type SbxSession, setSbx } from "./src/session";
+import { translateHostToolCall } from "./src/path-translation";
 import { fixSkillLocations, parseAvailableSkills, skillsToMountSpecs } from "./src/skills";
 
 export default function (pi: ExtensionAPI) {
@@ -125,6 +126,12 @@ export default function (pi: ExtensionAPI) {
 			const tool = createBashTool(localCwd, { operations: createContainerBashOps({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }) });
 			return tool.execute(id, params, signal, onUpdate);
 		},
+	});
+
+	pi.on("tool_call", (event) => {
+		const sbx = getSbx();
+		if (!sbx) return;
+		translateHostToolCall(event, sbx.hostCwd);
 	});
 
 	pi.on("user_bash", () => {
