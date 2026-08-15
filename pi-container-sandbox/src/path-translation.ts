@@ -11,12 +11,17 @@ export const SANDBOX_ROUTED_TOOLS: ReadonlySet<string> = new Set(["bash", "read"
  * Maps a `/workspace` container path back to the host path it points to:
  *   /workspace     → hostCwd
  *   /workspace/a/b → hostCwd/a/b
+ *   /workspace/../x escaping hostCwd → unchanged (traversal guard)
  *   anything else  → unchanged (relative paths, host absolute paths, free text, /skills, user mounts)
  */
 export function workspacePathToHost(path: string, hostCwd: string): string {
 	if (path === CONTAINER_ROOT) return hostCwd;
 	if (path.startsWith(`${CONTAINER_ROOT}/`)) {
-		return resolvePath(hostCwd, path.slice(CONTAINER_ROOT.length + 1));
+		const resolved = resolvePath(hostCwd, path.slice(CONTAINER_ROOT.length + 1));
+		if (resolved !== hostCwd && !resolved.startsWith(`${hostCwd}/`)) {
+			return path;
+		}
+		return resolved;
 	}
 	return path;
 }

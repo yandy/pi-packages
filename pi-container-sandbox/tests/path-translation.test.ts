@@ -31,6 +31,9 @@ describe("workspacePathToHost", () => {
 	it("leaves /skills unchanged (scope is /workspace only)", () => {
 		expect(workspacePathToHost("/skills/foo/SKILL.md", HOST_CWD)).toBe("/skills/foo/SKILL.md");
 	});
+	it("refuses /workspace traversal that escapes hostCwd", () => {
+		expect(workspacePathToHost("/workspace/../etc/passwd", HOST_CWD)).toBe("/workspace/../etc/passwd");
+	});
 });
 
 describe("translateToolCallPaths", () => {
