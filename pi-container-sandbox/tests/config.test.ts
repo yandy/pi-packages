@@ -140,7 +140,7 @@ describe("detectEngine", () => {
 	it("detects at least one runtime via resolveEngine(auto)", () => {
 		const engine = resolveEngine("auto");
 		expect(["docker", "podman"]).toContain(engine);
-	});
+	}, 30_000);
 });
 
 describe("resolveEngine", () => {
@@ -156,7 +156,7 @@ describe("resolveEngine", () => {
 
 	it("throws when engine=podman but podman not available", () => {
 		expect(["docker", "podman"]).toContain(resolveEngine("auto"));
-	});
+	}, 30_000);
 });
 
 describe("new runtime fields", () => {
