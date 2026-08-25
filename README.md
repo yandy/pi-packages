@@ -1,3 +1,5 @@
+
+
 # pi-packages
 
 English | [中文](./README.zh.md)
@@ -9,7 +11,7 @@ Monorepo for @yandy pi packages. Uses npm workspaces.
 | Package | Description | npm |
 |---|---|---|
 | [pi-ask-user](./pi-ask-user) | Interactive ask_user tool with searchable split-pane UI, multi-select, and freeform | `@yandy0725/pi-ask-user` |
-| [pi-coding-tools](./pi-coding-tools) | AST/LSP code-intel tools (ast_grep_search/lsp_symbols/lsp_hover/lsp_navigate) + ls/find/grep | `@yandy0725/pi-coding-tools` |
+| [pi-coding-tools](./pi-coding-tools) | AST/LSP code-intel tools (ast_grep_search/ast_grep_replace/lsp_symbols/lsp_hover/lsp_navigate) + ls/find/grep | `@yandy0725/pi-coding-tools` |
 | [pi-container-sandbox](./pi-container-sandbox) | Docker sandbox extension | `@yandy0725/pi-container-sandbox` |
 | [pi-dingtalk](./pi-dingtalk) | DingTalk integration (AI table, calendar, approval, docs, etc.) | `@yandy0725/pi-dingtalk` |
 | [pi-lark](./pi-lark) | Lark/Feishu integration | `@yandy0725/pi-lark` |
