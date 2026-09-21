@@ -30,6 +30,7 @@ This package bundles the following skills from [Superpowers](https://github.com/
 | `/skill:supo-using-git-worktrees` | Isolated workspace creation via git worktrees |
 | `/skill:supo-verification-before-completion` | Verify work before claiming completion |
 | `/skill:supo-diagnosing-superpowers` | Investigate what went wrong in a session and report it with evidence |
+| `/skill:supo-writing-skills` | Author, edit, and pressure-test skills before deployment |
 | ... | and more |
 
 ## Slash Commands

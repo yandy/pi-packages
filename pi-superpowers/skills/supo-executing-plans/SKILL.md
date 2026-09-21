@@ -47,7 +47,7 @@ those, stop and ask.
 - You have a plan from supo-writing-plans and your human partner
   chose inline execution at the handoff.
 - Your harness has no subagent tool (see the per-platform references in
-  `../using-superpowers/references/`). Never fabricate a dispatch; run
+  `../supo-using-superpowers/references/`). Never fabricate a dispatch; run
   the plan here.
 - Tasks are mostly independent — the same precondition as
   supo-subagent-driven-development.
@@ -123,7 +123,7 @@ The workspace and ledger are shared with supo-subagent-driven-development
 and the new one resumes from the same ledger.
 
 - Each plan owns a workspace: at skill start, run
-  `../subagent-driven-development/scripts/sdd-workspace PLAN_FILE` — it
+  `../supo-subagent-driven-development/scripts/sdd-workspace PLAN_FILE` — it
   prints the plan's git-ignored directory
   (`<repo-root>/.superpowers/sdd/<plan-basename>/`), home to every
   artifact for THIS plan: ledger, briefs, review packages. Another plan's
@@ -233,14 +233,14 @@ mark the todo complete and take the next task.
 
 ## Final Review
 
-Run `../subagent-driven-development/scripts/review-package PLAN_FILE MERGE_BASE HEAD`
+Run `../supo-subagent-driven-development/scripts/review-package PLAN_FILE MERGE_BASE HEAD`
 (MERGE_BASE = the commit the branch started from, e.g.
 `git merge-base main HEAD`) and review from the file it prints.
 
 **With a subagent tool:** dispatch the reviewer on the most capable
 available model — the whole-branch review is a judgment task — using
 supo-requesting-code-review's
-[code-reviewer.md](../requesting-code-review/code-reviewer.md), with the
+[code-reviewer.md](../supo-requesting-code-review/code-reviewer.md), with the
 package path, the plan and spec paths, the plan's Review Focus section
 verbatim if it has one (the input classes and failure modes the plan's
 tests do not exercise — the reviewer checks each deliberately), and a

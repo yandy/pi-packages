@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process";
-import { readFileSync, writeFileSync, rmSync, cpSync, existsSync, mkdirSync, readdirSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { readFileSync, writeFileSync, rmSync, cpSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { resolve, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -66,7 +66,21 @@ function cloneOrPull(repo, ref) {
   }
 }
 
-function transformSkill(name, cacheSkillsDir) {
+// Text files that may hold cross-skill references ("" = extensionless scripts)
+const TEXT_FILE_EXTENSIONS = new Set(["", ".md", ".js", ".cjs", ".ts", ".sh", ".dot", ".html"]);
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Matches cross-skill relative paths pointing at a tracked skill dir:
+// ../<skill> and ../<skill>/... but not longer names (../<skill>-extra)
+function relativeSkillPathPattern(skillNames) {
+  const alternation = skillNames.map(escapeRegExp).join("|");
+  return new RegExp(`(\\.\\./)(${alternation})(?![a-zA-Z0-9._-])`, "g");
+}
+
+function transformSkill(name, cacheSkillsDir, allSkills) {
   const src = resolve(cacheSkillsDir, name);
   const dest = resolve(ROOT, "skills", `supo-${name}`);
 
@@ -81,28 +95,34 @@ function transformSkill(name, cacheSkillsDir) {
     return;
   }
 
-  // Transform all .md files in the skill directory
-  const mdFiles = readdirSync(dest, { recursive: true })
-    .filter(f => f.endsWith('.md'));
+  // Transform every text file in the skill directory
+  const textFiles = readdirSync(dest, { recursive: true })
+    .filter(f => TEXT_FILE_EXTENSIONS.has(extname(f)) && statSync(resolve(dest, f)).isFile());
+  const relativeSkillPath = relativeSkillPathPattern(allSkills);
 
-  for (const relPath of mdFiles) {
-    const mdPath = resolve(dest, relPath);
-    let content = readFileSync(mdPath, "utf-8");
+  for (const relPath of textFiles) {
+    const filePath = resolve(dest, relPath);
+    let content = readFileSync(filePath, "utf-8");
 
-    if (relPath === 'SKILL.md') {
-      // Replace frontmatter name only in SKILL.md
-      // Parse frontmatter delimited by ---, only replace name within it
-      const parts = content.split('---');
-      if (parts.length >= 3) {
-        parts[1] = parts[1].replace(/^name:\s*(.+)$/m, `name: supo-${name}`);
-        content = parts.join('---');
+    if (relPath.endsWith(".md")) {
+      if (relPath === 'SKILL.md') {
+        // Replace frontmatter name only in SKILL.md
+        // Parse frontmatter delimited by ---, only replace name within it
+        const parts = content.split('---');
+        if (parts.length >= 3) {
+          parts[1] = parts[1].replace(/^name:\s*(.+)$/m, `name: supo-${name}`);
+          content = parts.join('---');
+        }
       }
+
+      // Replace cross-references in body: superpowers:<any-skill> → supo-<any-skill>
+      content = content.replace(/superpowers:([a-z][a-z0-9-]*)/g, "supo-$1");
     }
 
-    // Replace cross-references in body: superpowers:<any-skill> → supo-<any-skill>
-    content = content.replace(/superpowers:([a-z][a-z0-9-]*)/g, "supo-$1");
+    // Cross-skill relative paths must follow the prefixed dir: ../<skill> → ../supo-<skill>
+    content = content.replace(relativeSkillPath, "$1supo-$2");
 
-    writeFileSync(mdPath, content, "utf-8");
+    writeFileSync(filePath, content, "utf-8");
   }
 
   console.log(`[done] ${name} → supo-${name}`);
@@ -161,7 +181,7 @@ function main() {
       console.warn(`[warn] Skill "${name}" not found in upstream, skipping`);
       continue;
     }
-    transformSkill(name, cacheSkillsDir);
+    transformSkill(name, cacheSkillsDir, skills);
   }
 
   // Record successful ref for next run

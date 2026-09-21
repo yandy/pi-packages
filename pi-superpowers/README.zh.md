@@ -30,6 +30,7 @@ pi install npm:@yandy0725/pi-todo
 | `/skill:supo-using-git-worktrees` | 通过 git worktree 创建隔离工作区 |
 | `/skill:supo-verification-before-completion` | 完成前验证工作正确性 |
 | `/skill:supo-diagnosing-superpowers` | 复盘出错的会话，以证据为依据生成诊断报告 |
+| `/skill:supo-writing-skills` | 编写、修改并用子代理压测技能 |
 | ... | 以及其他 |
 
 ## 斜杠命令
