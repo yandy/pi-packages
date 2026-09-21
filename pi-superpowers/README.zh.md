@@ -29,6 +29,7 @@ pi install npm:@yandy0725/pi-todo
 | `/skill:supo-test-driven-development` | 测试驱动开发工作流 |
 | `/skill:supo-using-git-worktrees` | 通过 git worktree 创建隔离工作区 |
 | `/skill:supo-verification-before-completion` | 完成前验证工作正确性 |
+| `/skill:supo-diagnosing-superpowers` | 复盘出错的会话，以证据为依据生成诊断报告 |
 | ... | 以及其他 |
 
 ## 斜杠命令
