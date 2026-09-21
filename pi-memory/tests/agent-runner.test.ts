@@ -15,9 +15,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
 	createAgentSession: mocks.createAgentSessionMock,
-	DefaultResourceLoader: vi.fn().mockImplementation(() => ({
-		reload: vi.fn().mockResolvedValue(undefined),
-	})),
+	DefaultResourceLoader: vi.fn().mockImplementation(function () {
+		return { reload: vi.fn().mockResolvedValue(undefined) };
+	}),
 	SessionManager: {
 		inMemory: mocks.inMemoryMock,
 		create: mocks.createSessionMock,
