@@ -62,6 +62,7 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
+      - run: npm run check:dev-deps
       - run: npm run typecheck && npm run lint && npm test
 
   test-packages:
@@ -78,6 +79,7 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
+      - run: npm run check:dev-deps
       - run: |
           npm run typecheck -w "${{ matrix.package }}" --if-present
           npm run lint -w "${{ matrix.package }}" --if-present

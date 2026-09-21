@@ -376,7 +376,7 @@ Pure Skills 类型虽无测试脚本，仍需添加 filters 条目，否则 PR �
 
 ### devDependencies
 
-所有 Extension 包统一使用以下 devDependencies（版本锁定见根 `package.json`）：
+所有 Extension 包统一使用以下 devDependencies（**版本锁定见根 `package.json`**）：
 
 - `@biomejs/biome`：格式化 + lint
 - `typescript`：类型检查
@@ -384,6 +384,8 @@ Pure Skills 类型虽无测试脚本，仍需添加 filters 条目，否则 PR �
 - `vitest`：测试框架
 
 Pure Skills 无需 devDependencies。
+
+一致性由 `npm run check:dev-deps` 校验（CI 中执行）：Extension 包必须声明上述 4 项且版本串与根 `package.json` 完全一致，Pure Skills 不得声明。升级依赖时先改根 `package.json`，再同步各包版本串。
 
 ---
 
@@ -443,6 +445,7 @@ Pure Skills 无需 devDependencies。
 - [ ] `.github/workflows/publish.yml` 是否涵盖所有 package
 - [ ] `.github/workflows/test.yml` 的 `paths-filter` 是否涵盖所有 package
 - [ ] `npm run typecheck && npm run lint && npm test` 全部通过
+- [ ] `npm run check:dev-deps` 通过（devDependencies 与根 `package.json` 一致）
 
 ### 常见重构项
 
@@ -450,7 +453,7 @@ Pure Skills 无需 devDependencies。
 |------|------|
 | 统一 tsconfig | 确认所有 Extension 包的 `tsconfig.json` 内容一致 |
 | 统一 vitest.config | 确认所有 Extension 包的配置一致 |
-| 批量升级依赖 | 修改根 `package.json` 的 devDependencies 版本，`npm install` 全仓更新 |
+| 批量升级依赖 | 修改根 `package.json` 的 devDependencies 版本，同步各 Extension 包版本串，`npm install` 全仓更新，`npm run check:dev-deps` 校验一致 |
 | 新增 workspace | 根 `package.json` + CI + vitest 三处注册 |
 | 移除 package | 反向操作，同步清理上述四处注册 |
 | 修改 peerDependencies 版本下限 | 逐一修改各 package 的 `package.json` |
