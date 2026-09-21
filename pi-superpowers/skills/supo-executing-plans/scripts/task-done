@@ -18,7 +18,7 @@ plan=$1
 n=$2
 base=$3
 shift 4
-sdd="$(cd "$(dirname "$0")/../../subagent-driven-development/scripts" && pwd)"
+sdd="$(cd "$(dirname "$0")/../../supo-subagent-driven-development/scripts" && pwd)"
 
 git rev-parse --verify --quiet "$base" >/dev/null || { echo "bad BASE: $base" >&2; exit 2; }
 
