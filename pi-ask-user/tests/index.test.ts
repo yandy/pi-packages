@@ -212,7 +212,7 @@ type RegisteredTool = {
 };
 
 async function setupTool(): Promise<RegisteredTool> {
-	const { default: askUserExtension } = await import("./index");
+	const { default: askUserExtension } = await import("../index");
 	let registeredTool: RegisteredTool | undefined;
 	emittedEvents = [];
 	const pi = {
