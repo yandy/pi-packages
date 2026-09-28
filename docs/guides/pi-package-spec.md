@@ -387,6 +387,8 @@ Pure Skills 无需 devDependencies。
 
 一致性由 `npm run check:dev-deps` 校验（CI 中执行）：Extension 包必须声明上述 4 项且版本串与根 `package.json` 完全一致，Pure Skills 不得声明。升级依赖时先改根 `package.json`，再同步各包版本串。
 
+`package-lock.json` 与各 `package.json` 的一致性由 CI 的 `lockfile-sync` job 校验：`npm install --package-lock-only` 后 lockfile 不得出现 diff。本地修改依赖后务必执行 `npm install` 并提交 lockfile 变更。
+
 ---
 
 ## 发布流程

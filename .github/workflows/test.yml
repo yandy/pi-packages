@@ -51,6 +51,18 @@ jobs:
       - id: filter-packages
         run: echo "packages=$(echo '${{ steps.filter.outputs.changes }}' | jq -c 'map(select(. != "root"))')" >> "$GITHUB_OUTPUT"
 
+  lockfile-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Verify package-lock.json is in sync
+        run: |
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          git diff --exit-code -- package-lock.json
+
   test-full:
     needs: changes
     if: needs.changes.outputs.has_root == 'true'
