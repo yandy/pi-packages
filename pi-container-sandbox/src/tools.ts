@@ -9,7 +9,7 @@ import {
 	type WriteOperations,
 } from "@earendil-works/pi-coding-agent";
 import { createSandboxBashOps, type SpawnFn } from "./bash-ops";
-import type { SandboxConfig } from "./config-v2";
+import type { SandboxConfig } from "./config";
 import { approveEscalation, sandboxPermissionsDescription, validateEscalationArgs } from "./escalation";
 import { assertWriteAllowed, type FencePolicy } from "./fence";
 import type { PermissionState } from "./permission";

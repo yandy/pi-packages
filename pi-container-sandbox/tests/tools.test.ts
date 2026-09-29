@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSandboxTools, resolveCallMode } from "../src/tools";
 import { createPermissionState } from "../src/permission";
-import { DEFAULT_SANDBOX_CONFIG } from "../src/config-v2";
+import { DEFAULT_SANDBOX_CONFIG } from "../src/config";
 
 let dir: string;
 let ws: string;
