@@ -1,10 +1,17 @@
-import { resolve as resolvePath } from "node:path";
-import { Type } from "typebox";
-import { createBashTool, createEditTool, createWriteTool } from "@earendil-works/pi-coding-agent";
+import { access as fsAccess, constants, mkdir as fsMkdir, readFile as fsReadFile, writeFile as fsWriteFile } from "node:fs/promises";
+import { Type, type TSchema } from "typebox";
+import {
+	createBashToolDefinition,
+	createEditToolDefinition,
+	createWriteToolDefinition,
+	type EditOperations,
+	type ExtensionContext,
+	type WriteOperations,
+} from "@earendil-works/pi-coding-agent";
 import { createSandboxBashOps, type SpawnFn } from "./bash-ops";
 import type { SandboxConfig } from "./config-v2";
 import { approveEscalation, sandboxPermissionsDescription, validateEscalationArgs } from "./escalation";
-import { assertWriteAllowed } from "./fence";
+import { assertWriteAllowed, type FencePolicy } from "./fence";
 import type { PermissionState } from "./permission";
 import { resolveEffectiveMode, type SandboxMode } from "./policy";
 import { selectRunner, type RunnerHooks } from "./runners";
@@ -62,8 +69,10 @@ export async function resolveCallMode(
 	);
 }
 
-function extendParams(base: { properties: Record<string, unknown> }) {
-	return Type.Object({ ...base.properties, ...ESCALATION_PROPS });
+/** Ruling 15：对象 spread 保留 base schema 的自有 options（如 editSchema 的 additionalProperties:false）。 */
+function extendParams(base: TSchema): TSchema {
+	const b = base as unknown as { properties: Record<string, unknown> };
+	return { ...base, properties: { ...b.properties, ...ESCALATION_PROPS } } as TSchema;
 }
 
 function escalationDescription(base: string, subject: "command" | "operation"): string {
@@ -84,38 +93,53 @@ function stripEscalation(params: Record<string, unknown>) {
 	return rest;
 }
 
-/**
- * pi 的 AgentTool 类型声明中 execute 只收 4 参且无 promptGuidelines 字段；
- * 运行时第 5 参 ctx 会透传、字段也可能存在。仅做类型收敛
- *（controller 事实 5：as never 收敛一次，不得放宽运行时校验）。
- */
-interface LooseTool {
-	promptGuidelines?: string[];
-	execute(toolCallId: string, params: unknown, signal: unknown, onUpdate: unknown, ctx: unknown): unknown;
+/** fence 移到 ops 层（Ruling 14）：pi execute 用 resolveToCwd 解析后把 absolutePath 传给 ops，
+ *  围栏检查的就是将被写入的同一字符串——与落盘构造性一致，杜绝 ~/、@/、file:// 解析分歧绕过。
+ *  readFile/access 是读操作，不设围栏（所有模式读全放行）。 */
+function createFencedWriteOps(policy: FencePolicy): WriteOperations {
+	return {
+		writeFile: async (path, content) => {
+			assertWriteAllowed(path, policy);
+			await fsWriteFile(path, content, "utf-8");
+		},
+		mkdir: async (dir) => {
+			assertWriteAllowed(dir, policy);
+			await fsMkdir(dir, { recursive: true });
+		},
+	};
 }
 
-function loose(tool: unknown): LooseTool {
-	return tool as LooseTool;
+function createFencedEditOps(policy: FencePolicy): EditOperations {
+	return {
+		readFile: (path) => fsReadFile(path),
+		access: (path) => fsAccess(path, constants.R_OK | constants.W_OK),
+		writeFile: async (path, content) => {
+			assertWriteAllowed(path, policy);
+			await fsWriteFile(path, content, "utf-8");
+		},
+	};
 }
 
 export function createSandboxTools(deps: SandboxToolDeps) {
-	const baseBash = createBashTool(deps.cwd);
-	const baseWrite = createWriteTool(deps.cwd);
-	const baseEdit = createEditTool(deps.cwd);
+	// Ruling 15：以 definition 工厂为 base——自带 promptSnippet/promptGuidelines，
+	// execute 第 5 参 ctx 类型正确（ExtensionContext），spread 后注册不丢系统提示元数据。
+	const baseBash = createBashToolDefinition(deps.cwd);
+	const baseWrite = createWriteToolDefinition(deps.cwd);
+	const baseEdit = createEditToolDefinition(deps.cwd);
 
 	const bash = {
 		...baseBash,
 		label: `${baseBash.label} (sandboxed)`,
 		description: escalationDescription(baseBash.description, "command"),
-		promptGuidelines: [...(loose(baseBash).promptGuidelines ?? []), ESCALATION_GUIDELINE],
-		parameters: extendParams(baseBash.parameters as { properties: Record<string, unknown> }),
-		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ToolCtxLike & Record<string, unknown>) {
+		promptGuidelines: [...(baseBash.promptGuidelines ?? []), ESCALATION_GUIDELINE],
+		parameters: extendParams(baseBash.parameters),
+		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
 			const mode = await resolveCallMode(params as EscalationParams, ctx, deps, "command", () => String(params.command ?? ""));
 			const config = deps.getConfig();
 			const selected = mode === "danger-full-access"
 				? undefined
 				: (deps.selected ?? selectRunner(config.probeTimeoutMs, deps.hooks));
-			const tool = createBashTool(deps.cwd, {
+			const tool = createBashToolDefinition(deps.cwd, {
 				operations: createSandboxBashOps({
 					mode,
 					workspaceRoot: deps.workspaceRoot,
@@ -127,34 +151,37 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 					spawnFn: deps.spawnFn,
 				}),
 			});
-			return loose(tool).execute(toolCallId, stripEscalation(params), signal, onUpdate, ctx);
+			return tool.execute(toolCallId, stripEscalation(params) as never, signal, onUpdate as never, ctx);
 		},
 	};
 
-	function fencedFileTool(base: typeof baseWrite | typeof baseEdit) {
-		return {
-			...base,
-			label: `${base.label} (sandboxed)`,
-			description: escalationDescription(base.description, "operation"),
-			promptGuidelines: [...(loose(base).promptGuidelines ?? []), ESCALATION_GUIDELINE],
-			parameters: extendParams(base.parameters as { properties: Record<string, unknown> }),
-			async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ToolCtxLike & Record<string, unknown>) {
-				const mode = await resolveCallMode(params as EscalationParams, ctx, deps, "operation", () => String(params.path ?? ""));
-				const abs = resolvePath(deps.cwd, String(params.path ?? ""));
-				// fence 拒绝不捕获：直接 throw 上抛，pi 的 agent 循环会转成 error result
-				// （err.message 携带双行标记）——与 pi 自带 write 工具失败即 throw 的行为一致
-				//（dist/core/tools/write.js 已核实），也与 1.x guardExternalRead 同路径。
-				// Ruling 8 前提：abs 只用于 fence 检查；委托 base 时传原始 params，base 内部
-				// resolveToCwd(path, cwd) 以同一 cwd 做同样解析——检查与落点同一字符串。
-				assertWriteAllowed(abs, { mode, workspaceRoot: deps.workspaceRoot });
-				return loose(base).execute(toolCallId, stripEscalation(params), signal, onUpdate, ctx);
-			},
-		};
-	}
-
-	return {
-		bash,
-		write: fencedFileTool(baseWrite),
-		edit: fencedFileTool(baseEdit),
+	const write = {
+		...baseWrite,
+		label: `${baseWrite.label} (sandboxed)`,
+		description: escalationDescription(baseWrite.description, "operation"),
+		promptGuidelines: [...(baseWrite.promptGuidelines ?? []), ESCALATION_GUIDELINE],
+		parameters: extendParams(baseWrite.parameters),
+		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
+			const mode = await resolveCallMode(params as EscalationParams, ctx, deps, "operation", () => String(params.path ?? ""));
+			// fence 拒绝不捕获：FenceDenialError 从 ops 抛出、经 pi execute 原样上抛
+			//（withFileMutationQueue 不吞错）——pi 的 agent 循环会转成 error result。
+			const tool = createWriteToolDefinition(deps.cwd, { operations: createFencedWriteOps({ mode, workspaceRoot: deps.workspaceRoot }) });
+			return tool.execute(toolCallId, stripEscalation(params) as never, signal, onUpdate as never, ctx);
+		},
 	};
+
+	const edit = {
+		...baseEdit,
+		label: `${baseEdit.label} (sandboxed)`,
+		description: escalationDescription(baseEdit.description, "operation"),
+		promptGuidelines: [...(baseEdit.promptGuidelines ?? []), ESCALATION_GUIDELINE],
+		parameters: extendParams(baseEdit.parameters),
+		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
+			const mode = await resolveCallMode(params as EscalationParams, ctx, deps, "operation", () => String(params.path ?? ""));
+			const tool = createEditToolDefinition(deps.cwd, { operations: createFencedEditOps({ mode, workspaceRoot: deps.workspaceRoot }) });
+			return tool.execute(toolCallId, stripEscalation(params) as never, signal, onUpdate as never, ctx);
+		},
+	};
+
+	return { bash, write, edit };
 }

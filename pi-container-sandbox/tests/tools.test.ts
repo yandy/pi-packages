@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { homedir, tmpdir } from "node:os";
@@ -63,6 +63,18 @@ describe("createSandboxTools schemas", () => {
 		expect(write.description).toContain("sandbox_permissions");
 		expect((write.promptGuidelines ?? []).join(" ")).toContain("sandbox_permissions");
 	});
+	it("keeps base promptSnippet/promptGuidelines and schema options (Ruling 15)", () => {
+		const { deps } = makeDeps();
+		const { bash, write, edit } = createSandboxTools(deps);
+		expect(bash.promptSnippet).toBe("Execute bash commands (ls, grep, find, etc.)");
+		expect(write.promptGuidelines).toContain("Use write only for new files or complete rewrites.");
+		expect(write.promptGuidelines?.[write.promptGuidelines.length - 1]).toContain("sandbox_permissions");
+		// pi 0.80.2 dist 事实：editSchema 自带 additionalProperties:false，writeSchema 无该字段。
+		// spread 版 extendParams 如实保留 base options——edit 钉 false（Type.Object 重建即丢），
+		// write 钉 base 原样（undefined）；裁决原文假设 write 也为 false，与 dist 不符，按事实钉住。
+		expect((write.parameters as { additionalProperties?: boolean }).additionalProperties).toBeUndefined();
+		expect((edit.parameters as { additionalProperties?: boolean }).additionalProperties).toBe(false);
+	});
 });
 
 describe("resolveCallMode", () => {
@@ -119,7 +131,7 @@ describe("write tool fence + escalation wiring", () => {
 		const { deps } = makeDeps();
 		const { write } = createSandboxTools(deps);
 		// 同上：dir/out 不是真·围栏外；用 homedir（围栏外且本进程可写）验证提权后真实落盘。
-		const outside = join(homedir(), `.sbx-tools-test-${process.pid}.txt`);
+		const outside = join(homedir(), `.sbx-tools-test-${process.pid}-${Date.now()}.txt`);
 		try {
 			await write.execute("call-3", {
 				path: outside, content: "ok",
@@ -138,6 +150,38 @@ describe("write tool fence + escalation wiring", () => {
 			path: outside, content: "x",
 			sandbox_permissions: "danger-full-access", justification: "reason",
 		}, undefined, undefined, toolCtx(true, "Deny"))).rejects.toThrow(/stop and explain instead of working around it/);
+	});
+	it("fence sees pi-resolved paths: ~-form path escaping the workspace is denied (Ruling 14)", async () => {
+		const { deps } = makeDeps();
+		const { write } = createSandboxTools(deps);
+		const name = `sbx-tilde-${process.pid}-${Date.now()}.txt`;
+		await expect(write.execute("call-6", { path: `~/${name}`, content: "x" }, undefined, undefined, toolCtx()))
+			.rejects.toThrow(/file access denied under workspace-write mode/);
+		expect(existsSync(join(homedir(), name))).toBe(false);
+	});
+});
+
+describe("edit tool fence", () => {
+	it("edit inside workspace applies the replacement", async () => {
+		const { deps } = makeDeps();
+		const { edit } = createSandboxTools(deps);
+		const target = join(ws, "edit-me.txt");
+		writeFileSync(target, "hello world");
+		await edit.execute("call-7", { path: target, edits: [{ oldText: "hello", newText: "goodbye" }] }, undefined, undefined, toolCtx());
+		const { readFile } = await import("node:fs/promises");
+		expect(await readFile(target, "utf-8")).toBe("goodbye world");
+	});
+	it("edit outside workspace is denied", async () => {
+		const { deps } = makeDeps();
+		const { edit } = createSandboxTools(deps);
+		const outside = join(homedir(), `.sbx-edit-test-${process.pid}-${Date.now()}.txt`);
+		writeFileSync(outside, "x");
+		try {
+			await expect(edit.execute("call-8", { path: outside, edits: [{ oldText: "x", newText: "y" }] }, undefined, undefined, toolCtx()))
+				.rejects.toThrow(/file access denied under workspace-write mode/);
+		} finally {
+			rmSync(outside, { force: true });
+		}
 	});
 });
 
