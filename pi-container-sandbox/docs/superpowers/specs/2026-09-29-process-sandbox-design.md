@@ -43,7 +43,7 @@ interface ConfinedArgv {
 工具集成（pi `registerTool`，TypeBox schema 已验证可扩展）：
 
 - **bash**：注册 wrapper ops。`BashOperations.exec(command, cwd, opts)` 构造 `['bash','-c',command]`，按当次调用解析 policy → confine → **本地 spawn** 包装后 argv（cwd 用宿主路径原样），流式 onData / timeout / AbortSignal 语义保持 pi 现有接口。`danger-full-access` 直接 spawn 原始 argv。
-  - **子进程 env = 继承进程 env + 强制 `LC_MESSAGES=C`**：把消息翻译钉死为英文，保证 glibc strerror / bash / coreutils / gettext 系程序的报错可被 §6 的 denialSignatures 匹配（zh_CN 等 locale 下否则变成"只读文件系统"）。只钉消息翻译，不动 `LANG`/`LC_CTYPE`：UTF-8 编码、排序、日期等行为不变（不用 `LC_ALL=C`，那会把文本处理降级为字节语义、改变用户命令行为）。这是对 deepseek 的显式改进：其 `scrubbedParentEnv` 原样继承 locale，denial 分类在非英文桌面环境下同样会漏判。
+  - **子进程 env = 继承进程 env + 强制 `LC_MESSAGES=C`**：把消息翻译钉死为英文，保证 glibc strerror / bash / coreutils / gettext 系程序的报错可被 §6 的 denialSignatures 匹配（zh_CN 等 locale 下否则变成"只读文件系统"）。只钉消息翻译，不动 `LANG`/`LC_CTYPE`：UTF-8 编码、排序、日期等行为不变（不用 `LC_ALL=C`，那会把文本处理降级为字节语义、改变用户命令行为）。用户已设 `LC_ALL` 时从子进程 env 中**移除**它：POSIX 中 `LC_ALL` 优先于 `LC_MESSAGES`，保留会使钉定静默失效；移除后 `LANG`/`LC_CTYPE` 照常生效，行为不变。这是对 deepseek 的显式改进：其 `scrubbedParentEnv` 原样继承 locale，denial 分类在非英文桌面环境下同样会漏判。
 - **write / edit**：注册 wrapper，执行前做**进程内写围栏**（fs fence）：写路径 canonical 化后必须落在 `writableRoots` 内，否则拒绝（错误附拒绝标记+提权提示，见 §7）。通过后委托 pi 本地工具执行。
   - **不存在路径的 containment**（写目标常常尚不存在，deepseek `dsh-fs-sandbox` 同款语义）：先词法快路径比较 canonical 拼写；拼写不一致时沿**最近存在的祖先目录**向上走、比较文件系统身份（dev+ino）判定是否落在授予根下——既容忍 missing 后缀，又防祖先 symlink 换绑逃逸
 - **read**：**不再注册覆盖**——所有模式读都放行，用 pi 默认本地 read 工具。
@@ -144,7 +144,7 @@ bwrap/landlock 保持 deepseek 的自有拼写（bwrap 只加 `--tmpfs /tmp`，l
 
 **locale 鲁棒性**（配合 §2 的 `LC_MESSAGES=C` 钉死）：
 - runnerFailureRules 的签名来自 runner 二进制自身（bwrap / landlock-run / sandbox-exec 均无条件英文输出），locale 无关
-- denialSignatures 的文本来自用户命令经 glibc strerror 的输出，依赖 `LC_MESSAGES=C` 钉死后才可靠
+- denialSignatures 的文本来自用户命令经 glibc strerror 的输出，依赖 `LC_MESSAGES=C` 钉死后才可靠（用户已设 `LC_ALL` 时从子进程 env 移除它，否则 POSIX 优先级使钉定失效）
 - **残余风险与兑底**：用户命令内部自行覆盖 locale（如 `LC_ALL=zh_CN cmd`）时分类仍可能漏判；漏判只损失"决策点的即时提示标记"，提权路径本身不断——`sandbox_permissions` 参数与提权规则常驻工具 schema / promptGuidelines（§7），模型不依赖 marker 也能发起提权
 
 ## 7. 提权审批（escalation，LLM 发起式）
@@ -245,7 +245,7 @@ pi-container-sandbox/
 - writableRoots：canonical 化、去重、read-only 为空、与 seatbelt/fs 围栏 parity
 - config：合并优先级、非法 mode 回落、runnerCommand/signatures 配对校验、probeTimeoutMs 正数校验、旧 schema 忽略+warn
 - escalation 校验矩阵：同模式免审批 / 严格更宽需审批 / 更窄拒绝 / 缺 justification / hasUI=false fail-closed / 拒绝/取消文案
-- 失败分类：runner failure（exit 门控、informationalLines 剔除、fatal 匹配）与 denial 分类的顺序与方言隔离；受限子进程 env 含 `LC_MESSAGES=C`（且不覆盖用户已有 LANG/LC_CTYPE）
+- 失败分类：runner failure（exit 门控、informationalLines 剔除、fatal 匹配）与 denial 分类的顺序与方言隔离；受限子进程 env 含 `LC_MESSAGES=C`（不覆盖用户已有 LANG/LC_CTYPE，并移除会覆盖钉定的 `LC_ALL`）
 - fs 围栏：workspace 内放行、/tmp 放行、外部拒绝（附标记）、read-only 全拒、danger-full-access 关闭围栏
 - effective mode 解析优先级：escalation > /permission 覆盖 > config
 - runner 链选择：linux 双候选探测顺序、darwin 免探测、未知平台 unavailable
