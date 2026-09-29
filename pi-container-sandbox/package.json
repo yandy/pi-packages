@@ -40,5 +40,8 @@
 		"typescript": "~7.0.2",
 		"vitest": "^5.0.1"
 	},
-	"dependencies": {}
+	"dependencies": {
+		"@deepseek-ai/node-addon-system": "^0.1.2",
+		"typebox": "^1.1.38"
+	}
 }
