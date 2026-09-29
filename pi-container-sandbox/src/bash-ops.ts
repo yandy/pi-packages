@@ -37,8 +37,10 @@ export function createSandboxBashOps(opts: SandboxBashOpts): BashOperations {
 					return;
 				}
 				const rawArgv = ["bash", "-c", command];
-				// Review Focus #3：只钉消息翻译（LC_MESSAGES），不动 LANG/LC_CTYPE/LC_ALL
+				// Review Focus #3 + Ruling 10：钉消息翻译（LC_MESSAGES）；移除 LC_ALL（POSIX 中它覆盖 LC_MESSAGES，
+				// 保留会使中文环境下 denial 签名全 miss）；不动 LANG/LC_CTYPE（编码/排序行为不变）
 				const env: NodeJS.ProcessEnv = { ...process.env, ...execOpts.env, LC_MESSAGES: "C" };
+				delete env.LC_ALL;
 
 				let argv: readonly string[];
 				let confined: ConfinedArgv | undefined;

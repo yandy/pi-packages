@@ -54,8 +54,9 @@ describe("createSandboxBashOps", () => {
 		await expect(ops.exec("true", "/ws", { onData: () => {} })).rejects.toThrow(/SANDBOX_UNAVAILABLE/);
 		expect(spawnFn).not.toHaveBeenCalled();
 	});
-	it("env pins LC_MESSAGES=C and preserves the user's LANG (Review Focus #3)", async () => {
+	it("env pins LC_MESSAGES=C, preserves LANG, removes LC_ALL (Review Focus #3 + Ruling 10)", async () => {
 		vi.stubEnv("LANG", "zh_CN.UTF-8");
+		vi.stubEnv("LC_ALL", "zh_CN.UTF-8");
 		const child = fakeChild();
 		const spawnFn = vi.fn(() => child) as never;
 		const ops = createSandboxBashOps({ mode: "workspace-write", workspaceRoot: "/ws", spawnFn, ...bwrapSelected });
@@ -65,7 +66,7 @@ describe("createSandboxBashOps", () => {
 		const options = (spawnFn.mock.calls[0] as [string, string[], { env: NodeJS.ProcessEnv }])[2];
 		expect(options.env.LC_MESSAGES).toBe("C");
 		expect(options.env.LANG).toBe("zh_CN.UTF-8");
-		expect(options.env.LC_ALL).toBeUndefined();
+		expect(options.env.LC_ALL).toBeUndefined(); // LC_ALL 覆盖 LC_MESSAGES，必须被移除
 	});
 	it("streams stdout and stderr to onData", async () => {
 		const child = fakeChild();
