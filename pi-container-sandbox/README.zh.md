@@ -1,272 +1,77 @@
 # pi-container-sandbox
 
-一个 [pi](https://pi.dev/docs/latest/extensions) 扩展，将 agent 的 `bash`、`read`、`write`、`edit` 工具以及用户的 `!` bash 运行在每会话独立的 Docker 容器中，从而隔离编程操作的副作用。
+pi coding-agent 扩展：用**进程级沙箱**约束 AI agent 的文件效果——默认**工作目录可写、其余宿主文件可读**（deepseek harness `workspace-write` 语义）。2.0 起不再使用容器。
 
-## 快速开始
+## 工作原理
 
-需要 Docker 或 Podman（任意较新版本）运行中且当前用户可访问
-（需要对 `/var/run/docker.sock` 或 Docker Desktop 有读写权限，或已安装 Podman）。
+bash 命令被包装进平台沙箱 runner 后在本地 spawn（**路径透明**：宿主路径原样有效）；write/edit 工具在执行前做进程内写围栏；read 不受限。
 
-```bash
-# 从 npm 安装
-pi install npm:@yandy0725/pi-container-sandbox
+| 平台 | Runner | 机制 |
+|---|---|---|
+| Linux | `bwrap`（首选） | `--ro-bind / /` 全盘只读 + 工作区 rw bind + `--tmpfs /tmp` |
+| Linux | `landlock-run`（回退，随包分发预编译二进制） | Landlock LSM 允许清单：`/` 只读，工作区 + `/tmp` 可写 |
+| macOS | `sandbox-exec`（系统内置） | Seatbelt SBPL：`deny file-write*` + 工作区/临时区例外 |
+| 其他 | 无 | **fail-closed**：受约束命令一律拒绝执行，绝不静默裸跑 |
 
-# 或从本地仓库安装
-pi install .
+## 三档权限模式
 
-# 或直接运行
-npm install && npm run build-image
-pi -e ./index.ts
-```
-
-首次使用时，扩展会自动使用本地 `docker/Dockerfile` 构建内置的 sandbox 镜像
-（`pi-container-sandbox:latest`）。后续运行会复用该镜像。
-
-```bash
-# 在任意项目中使用
-pi
-# /sandbox         # 查看容器信息
-# !pwd             # 在容器内执行，输出 /workspace
-# !ls              # 列出容器内的项目根目录
-```
-
-## 各工具运行在哪里
-
-| 工具 / 命令 | 运行位置 |
+| 模式 | 文件效果 |
 |---|---|
-| `bash`（agent）   | 容器内，工作目录为 `/workspace` |
-| `read`           | 容器内（通过 `allow` 授权的外部路径直接从宿主机读取） |
-| `write`          | 容器内 |
-| `edit`           | 容器内（读取操作：同 `read`；写入操作：容器内） |
-| `!` 用户 bash    | 容器内 |
-| `bash`（白名单） | 宿主机直接执行（参见配置中的 `hostCommands`） |
-| `find`、`grep`、`ls` | pi 的宿主机默认行为（使用 `bash` 工具调用可在容器内执行） |
+| `read-only` | 仅 `/dev/null` 可写 |
+| `workspace-write`（默认） | 工作目录 + `/tmp` + `os.tmpdir()` 可写，其余只读 |
+| `danger-full-access` | 完全绕过沙箱（显式逃生门） |
 
-项目的 cwd 以 **读写** 方式 bind-mount 到容器内的 `/workspace`。
-agent 的编辑操作会同时反映在宿主机和容器中。
-agent skill 目录以 **只读** 方式挂载到 `/skills/`。
+网络始终放行（不做网络隔离）。
 
-> **注意：** `/sandbox allow` 和 `--container-allow-paths` 仅影响
-> `read` 工具（以及 `edit` 的读取操作）。要向项目 cwd 之外的路径
-> 写入文件，请使用 `--container-mount-paths` 将其 bind-mount 到容器中。
+## /permission 命令
 
-容器默认在 pi 退出时删除，除非设置了 `--sandbox-persist` 或 `--container-keep`。
+- `/permission` —— 显示当前状态（模式及来源、选中 runner 与 enforcement、工作区）
+- `/permission <read-only|workspace-write|danger-full-access>` —— 切换模式，**进程级**生效：父会话与所有 subagent 子会话的下一次工具调用立即采用
 
-## 命令
+## 提权审批（模型发起）
 
-| 命令 | 描述 |
-|---|---|
-| `/sandbox` / `/sandbox status` | 显示容器 ID、资源配置、宿主机工作目录 |
-| `/sandbox start` | 手动启动 sandbox 容器 |
-| `/sandbox stop` | 停止并移除容器（若 keep/persist 启用则阻止） |
-| `/sandbox keep [name]` | 保存容器名称用于下次会话复用 |
-| `/sandbox exec <cmd>` | 在容器内执行命令 |
-| `/sandbox doctor` | 验证容器内核心工具是否可用 |
-| `/sandbox config` | 显示 `.pi/agent/sandbox.json` 内容 |
-| `/sandbox allow <path>` | 授权读取宿主机外部路径 |
-| `/sandbox paths [revoke <path>]` | 列出或撤销已持久化的路径授权 |
+bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write` 或 `danger-full-access`）+ `justification`（一句话理由）。操作被沙箱拒绝后，模型可带这两个参数原样重试一次，会弹出审批（Allow once / Deny）；批准只对那一次调用生效。无 UI 通道（headless、后台 subagent）时提权一律拒绝（fail-closed）。
 
 ## 配置
 
-配置从两个位置读取，项目配置覆盖全局配置。
-
-### 全局配置
-
-`~/.pi/agent/sandbox.json`：
+`~/.pi/agent/sandbox.json`（全局）与 `<项目>/.pi/sandbox.json`（项目），逐字段 项目 > 全局 > 默认：
 
 ```json
 {
-  "runtime": { "engine": "auto" }
+  "mode": "workspace-write",
+  "runnerCommand": null,
+  "runnerFailureSignatures": null,
+  "probeTimeoutMs": 5000
 }
 ```
 
-### `.pi/sandbox.json`（项目级）
+| 字段 | 默认 | 说明 |
+|---|---|---|
+| `mode` | `workspace-write` | 默认权限模式；非法值回落默认并告警 |
+| `runnerCommand` | `null` | 自定义 bwrap 兼容 runner argv（须与下一项成对） |
+| `runnerFailureSignatures` | `null` | 自定义 runner 的失败诊断签名（非空单行） |
+| `probeTimeoutMs` | `5000` | runner 功能探测超时（正数） |
 
-```json
-{
-  "image": { "name": "pi-container-sandbox", "tag": "latest" },
-  "runtime": {
-    "engine": "auto", "name": null, "network": true, "persist": false,
-    "memory": null, "cpus": null, "swap": null, "pidsLimit": null,
-    "cache": null, "mounts": []
-  },
-  "host": { "commands": [] }
-}
-```
+## 安全说明
 
-#### image 组
-| 字段 | 类型 | 默认值 | 示例 | 说明 |
-|------|------|--------|------|------|
-| `name` | string | `"pi-container-sandbox"` | `"pi-sandbox"` | 镜像名 |
-| `tag` | string | `"latest"` | `"v1.0"` | 镜像标签 |
+- 受约束进程可**读取**宿主上你有权读的一切（包括 `~/.ssh` 等）——这是本沙箱的设计语义（与 deepseek harness 一致）；root 专属文件受文件权限保护
+- 受限子进程强制 `LC_MESSAGES=C`（保证拒绝诊断可分类），不改动你的 `LANG`/`LC_CTYPE`
+- landlock 回退在旧内核 ABI 上为 partial enforcement（状态里会标注）
 
-#### runtime 组
-| 字段 | 类型 | 默认值 | 示例 | 说明 |
-|------|------|--------|------|------|
-| `name` | string \| null | `null` | `"my-dev-box"` | 容器复用名 |
-| `engine` | `"auto"` \| `"docker"` \| `"podman"` | `"auto"` | `"podman"` | 容器引擎，auto 自动检测 |
-| `network` | boolean | `true` | `false` | 容器网络 |
-| `persist` | boolean | `false` | `true` | 退出后保留容器 |
-| `memory` | string \| null | `null` | `"8g"` | 内存覆盖 |
-| `cpus` | string \| null | `null` | `"4"` | CPU 覆盖 |
-| `swap` | string \| null | `null` | `"0"` | swap 覆盖 |
-| `pidsLimit` | number \| null | `null` | `1024` | PID 限制 |
-| `cache` | string \| null | `null` | `"sbx-cache"` | 缓存卷名 |
-| `mounts` | MountConfig[] | `[]` | `[{ "source": "/data/projects", "target": "/projects" }]` | 宿主机→容器路径映射，可选 ro/rw 模式 |
-| `env` | `string[]` | `[]` | `["TOKEN=$(cat /path/to/file)"]` | 注入容器的环境变量，格式 `"KEY=VALUE"`。值支持 shell 命令替换（如 `"TOKEN=$(cat /path/to/file)"`），在宿主机上展开后传入容器。展开失败时降级为原始字面值 |
+## 从 1.x 迁移
 
-#### host 组
-| 字段 | 类型 | 默认值 | 示例 | 说明 |
-|------|------|--------|------|------|
-| `commands` | string[] | `[]` | `["git", "npm", "docker"]` | 宿主机命令白名单 |
-
-### 资源限制
-
-资源通过 `runtime.memory`、`runtime.cpus`、`runtime.swap`、`runtime.pidsLimit` 字段直接配置。
-
-**默认情况下不应用任何资源限制。** 如需启用，请显式设置这些字段。
-
-示例配置：
-
-| 资源 | 示例 |
-|------|------|
-| 内存 | `"4g"` |
-| CPU | `"2"` |
-| swap | `"2g"` |
-| pidsLimit | `512` |
-
-### CLI 参数
-
-| 参数 | 默认值 | 描述 |
-|------|--------|------|
-| `--container` | `true` | 启用 sandbox |
-| `--no-container` / `--noc` | `false` | 禁用 sandbox |
-
-其他所有配置项均通过 `sandbox.json` 配置。
-
-## 外部文件读取
-
-当 agent 尝试**读取**项目 cwd 之外的文件（如系统配置文件）时，sandbox 会弹出交互式授权提示。可以通过 `--container-allow-paths` 参数或 `/sandbox allow` 命令预先授权。已授权的路径会持久化到 `.pi/agent/path-approvals.json`。
-
-路径授权后，`read` 工具会直接从**宿主机文件系统**读取（绕过容器）。只有 `read` 工具和 `edit` 的读取操作受影响 —— `write`、`edit` 的写入操作以及 `bash` **不受**影响，始终在容器内运行。
-
-### 授权机制对比
-
-| 工具 | 外部读取 | 外部写入 |
-|------|---------|---------|
-| `read` | `--container-allow-paths` / `/sandbox allow` | — |
-| `edit`（读操作） | `--container-allow-paths` / `/sandbox allow` | — |
-| `edit`（写操作） | — | `--container-mount-paths` |
-| `write` | — | `--container-mount-paths` |
-| `bash` | — | `--container-mount-paths` |
-
-- **allow**：轻量级只读宿主机访问。路径按前缀匹配（例如授权 `/etc` 即可读取 `/etc` 下的所有文件）。
-- **mount**：将宿主机目录 bind-mount 到容器内相同路径，在容器内拥有完整读写权限。用于写入操作，或需要让工具在容器内操作外部路径的场景。
-
-## 资源限制
-
-默认情况下不应用任何资源限制。如需设置限制，请在 `sandbox.json` 中配置 `runtime.memory`、`runtime.cpus`、`runtime.swap` 或 `runtime.pidsLimit`。
-
-示例值：内存 `"4g"`、CPU `"2"`、swap `"2g"`、pidsLimit `512`。
-
-其他容器安全默认值：
-- 无 Linux capabilities：`--cap-drop ALL`
-- 禁止权限提升：`--security-opt no-new-privileges`
-- 用户：非 root（uid 1000）
-- 网络：默认（容器可访问互联网）
-- 容器内无 Docker socket
-
-## Podman 注意事项
-
-`pi-container-sandbox` 支持使用 Podman 作为容器引擎。
-
-### 引擎选择
-
-通过配置中的 `runtime.engine` 字段选择引擎：
-- `"auto"`（默认）：自动检测，优先使用 Podman
-- `"docker"`：强制使用 Docker
-- `"podman"`：强制使用 Podman
-
-### Rootless 模式与 cgroups v2
-
-Podman 默认以 rootless 模式运行。在 rootless 模式下，资源限制（`--memory`、`--cpus`）需要 cgroups v2 支持。
-如果系统未启用 cgroups v2，容器会忽略资源限制参数并发出警告。
-
-大多数现代 Linux 发行版（Ubuntu 21.10+、Fedora 31+、Debian 11+）默认使用 cgroups v2。
-在 cgroups v1 系统上，资源限制仅在 rootful Podman 模式下生效。
-
-## 故障排查
-
-### `Sandbox not ready: Docker not available`
-
-确保 Docker 或 Podman 正在运行：
-
-```bash
-docker ps
-# 或
-podman info
-```
-
-如果 Docker 已运行但扩展无法连接，可能当前用户对 `/var/run/docker.sock` 没有权限。在 Linux 上，可将自己加入 `docker` 组。
-
-### Podman 容器启动成功但资源限制未生效
-
-Podman rootless 模式需要 cgroups v2 才能应用内存和 CPU 限制。检查 cgroups 版本：
-
-```bash
-stat -fc %T /sys/fs/cgroup/
-```
-
-输出 `cgroup2fs` 表示 cgroups v2。如果是 `tmpfs`，则为 cgroups v1。
-在 cgroups v1 系统上，使用 rootful Podman 或切换至 Docker。
-
-### 镜像构建失败
-
-自动构建会下载多种工具（rg、fd、bat、node、uv、bun 等）并校验 SHA-256。如果某个下载失败（例如在公司代理后），构建也会失败。可手动预构建：
-
-```bash
-npm run build-image
-```
-
-### agent 的编辑没有反映到宿主机
-
-bind mount 位于容器内的 `/workspace`，映射到宿主机的项目 cwd。运行 `/sandbox status` 检查挂载状态。
-
-### 想进入容器内部
-
-```bash
-docker exec -it <container-name> bash
-# 或
-podman exec -it <container-name> bash
-```
-
-通过 `/sandbox status` 或 `docker ps --filter name=pi-sbx-`（或 `podman ps --filter name=pi-sbx-`）查找容器名称。
+- 容器运行时（docker/podman）、镜像构建、`runtime.mounts`/`image`/`host` 配置组、`/sandbox` 命令、`--container*` flags、外部路径审批流全部移除
+- 旧 `sandbox.json` 的 `image`/`runtime`/`host` 段会被忽略并告警；按需改写上表新字段
+- 需要容器级强隔离（独立文件系统/网络命名空间）请停留在 1.x
 
 ## 开发
 
 ```bash
-npm install              # 安装依赖
-npm run typecheck        # tsc --noEmit
-npm run lint             # biome lint
-npm test                 # vitest 运行
-npm run build-image      # 构建 sandbox 镜像
-pi -e ./index.ts         # 本地运行扩展
-bash tests/e2e.sh        # 运行 E2E 测试（需要 Docker + pi CLI）
+npm test              # 单元 + 集成（无 runner 环境集成自动 skip）
+npm run typecheck
+./tests/e2e.sh
 ```
 
-## 工作原理
-
-`pi-container-sandbox` 是一个 pi 扩展。在 `session_start` 时，它确保
-`pi-container-sandbox:latest` 存在（如需要则从内置的 `docker/Dockerfile` 构建），
-然后启动一个长生命周期的容器，将项目 cwd bind-mount 到 `/workspace`。
-它替换 pi 的编程工具（`bash`、`read`、`write`、`edit`），使这些工具的 I/O
-通过引擎适配器（通过 Docker 或 Podman CLI）路由到容器内。用户的 `!` bash
-通过 `user_bash` 事件使用相同的适配器。
-
-容器在 `session_shutdown` / SIGINT / 进程退出时销毁（除非设置了 `keep`）。
-扩展支持 Docker 和 Podman 两种容器引擎，通过 `runtime.engine` 配置选择
-或自动检测。如果容器运行时不可达，扩展会优雅降级到 pi 的默认宿主机工具并发出通知。
-
-## 许可证
+## License
 
 MIT

@@ -1,300 +1,76 @@
 # pi-container-sandbox
 
-A [pi](https://pi.dev/docs/latest/extensions) extension that runs the agent's
-`bash`, `read`, `write`, `edit` tools and the user's `!` bash inside a
-per-session Docker container, so coding side effects are sandboxed.
+pi coding-agent extension: confine agent file effects with a process-level sandbox — workspace writable, everything else readable (deepseek harness workspace-write semantics). No containers since 2.0.
 
-## Quick start
+## How it works
 
-Requires Docker or Podman (any recent version) running and accessible to your user
-(you need read/write on `/var/run/docker.sock`, Docker Desktop, or a working Podman installation).
+bash commands are wrapped in a platform sandbox runner and spawned locally (**path transparent**: host paths work as-is); the write/edit tools run an in-process write fence before execution; read is unrestricted.
 
-```bash
-# Install from npm
-pi install npm:@yandy0725/pi-container-sandbox
+| Platform | Runner | Mechanism |
+|---|---|---|
+| Linux | `bwrap` (preferred) | `--ro-bind / /` whole filesystem read-only + workspace rw bind + `--tmpfs /tmp` |
+| Linux | `landlock-run` (fallback, precompiled binary shipped with the package) | Landlock LSM allow list: `/` read-only, workspace + `/tmp` writable |
+| macOS | `sandbox-exec` (built in) | Seatbelt SBPL: `deny file-write*` + workspace/temp exceptions |
+| Other | none | **fail-closed**: confined commands are always refused, never silently run bare |
 
-# Or install from a local checkout
-pi install .
+## Three permission modes
 
-# Or run directly
-npm install && npm run build-image
-pi -e ./index.ts
-```
-
-On first use the extension auto-builds the bundled sandbox image
-(`pi-container-sandbox:latest`) using the local `docker/Dockerfile`. Subsequent
-runs reuse the image.
-
-```bash
-# In any project
-pi
-# /sandbox         # show container info
-# !pwd             # runs inside the container, prints /workspace
-# !ls              # lists the project root inside the container
-```
-
-## What runs where
-
-| Tool / command | Where it runs |
+| Mode | File effects |
 |---|---|
-| `bash` (agent)   | inside the container, cwd `/workspace` |
-| `read`           | inside the container (external paths granted via `allow` are read from host directly) |
-| `write`          | inside the container |
-| `edit`           | inside the container (read ops: same as `read`; write ops: inside container) |
-| `!` user bash    | inside the container |
-| `bash` (whitelisted) | on the host (see `hostCommands` in config) |
-| `find`, `grep`, `ls` | pi's host defaults (use `bash` tool to call inside container) |
+| `read-only` | only `/dev/null` writable |
+| `workspace-write` (default) | working directory + `/tmp` + `os.tmpdir()` writable, everything else read-only |
+| `danger-full-access` | sandbox bypassed entirely (explicit escape hatch) |
 
-The project cwd is bind-mounted **read-write** at `/workspace` inside the
-container. Edits the agent makes are visible on the host and vice versa.
-Agent skill directories are mounted **read-only** at `/skills/`.
+Network is always allowed (no network isolation).
 
-> **Note:** `/sandbox allow` and `--container-allow-paths` only affect the
-> `read` tool (and `edit`'s read operations). To write to paths outside the
-> project cwd, use `--container-mount-paths` to bind-mount them into the
-> container.
+## /permission command
 
-The sandbox container is removed when pi exits, unless you set
-`--sandbox-persist` or `--container-keep`.
+- `/permission` — show the current status (mode and source, selected runner and enforcement, workspace)
+- `/permission <read-only|workspace-write|danger-full-access>` — switch mode, **process-wide**: the next tool call in the parent session and in every subagent child session adopts it immediately
 
-## Commands
+## Escalation approval (model-initiated)
 
-| Command | Description |
-|---|---|
-| `/sandbox` / `/sandbox status` | Show container id, resources, host cwd |
-| `/sandbox start` | Manually start a sandbox container |
-| `/sandbox stop` | Stop and remove the container (blocked if keep/persist is active) |
-| `/sandbox keep [name]` | Save container name for reuse across sessions |
-| `/sandbox exec <cmd>` | Execute a command inside the container |
-| `/sandbox doctor` | Verify core tools available in the container |
-| `/sandbox config` | Show `.pi/agent/sandbox.json` contents |
-| `/sandbox allow <path>` | Grant read access to an external host path |
-| `/sandbox paths [revoke <path>]` | List or revoke persisted path approvals |
+bash/write/edit take two optional parameters: `sandbox_permissions` (`workspace-write` or `danger-full-access`) + `justification` (a one-sentence reason). After an operation is denied by the sandbox, the model may retry the exact same call once with these two parameters, which opens an approval prompt (Allow once / Deny); approval applies to that one call only. With no UI channel (headless, background subagent), escalation is always refused (fail-closed).
 
 ## Configuration
 
-Configuration is read from two locations. Project config overrides global config.
-
-### Global config
-
-`~/.pi/agent/sandbox.json`:
+`~/.pi/agent/sandbox.json` (global) and `<project>/.pi/sandbox.json` (project), merged field by field: project > global > defaults:
 
 ```json
 {
-  "runtime": { "engine": "auto" }
+  "mode": "workspace-write",
+  "runnerCommand": null,
+  "runnerFailureSignatures": null,
+  "probeTimeoutMs": 5000
 }
 ```
 
-### `.pi/sandbox.json` (project-level)
+| Field | Default | Notes |
+|---|---|---|
+| `mode` | `workspace-write` | default permission mode; invalid values fall back to the default with a warning |
+| `runnerCommand` | `null` | custom bwrap-compatible runner argv (must be paired with the next field) |
+| `runnerFailureSignatures` | `null` | fatal diagnostic signatures for the custom runner (non-empty single lines) |
+| `probeTimeoutMs` | `5000` | runner capability probe timeout (positive) |
 
-```json
-{
-  "image": { "name": "pi-container-sandbox", "tag": "latest" },
-  "runtime": {
-    "engine": "auto", "name": null, "network": true, "persist": false,
-    "memory": null, "cpus": null, "swap": null, "pidsLimit": null,
-    "cache": null, "mounts": []
-  },
-  "host": { "commands": [] }
-}
-```
+## Security notes
 
-#### image group
-| Field | Type | Default | Example | Description |
-|-------|------|---------|---------|-------------|
-| `name` | string | `"pi-container-sandbox"` | `"pi-sandbox"` | Image name |
-| `tag` | string | `"latest"` | `"v1.0"` | Image tag |
+- Confined processes can **read** everything you can read on the host (including `~/.ssh` and the like) — that is this sandbox's design semantics (same as the deepseek harness); root-only files stay protected by file permissions
+- Confined child processes force `LC_MESSAGES=C` (so denial diagnostics stay classifiable) and do not touch your `LANG`/`LC_CTYPE`
+- The landlock fallback is partial enforcement on older kernel ABIs (the status output says so)
 
-#### runtime group
-| Field | Type | Default | Example | Description |
-|-------|------|---------|---------|-------------|
-| `name` | string \| null | `null` | `"my-dev-box"` | Container reuse name |
-| `engine` | `"auto"` \| `"docker"` \| `"podman"` | `"auto"` | `"podman"` | Container engine, auto-detect if not set |
-| `network` | boolean | `true` | `false` | Container networking |
-| `persist` | boolean | `false` | `true` | Keep container after exit |
-| `memory` | string \| null | `null` | `"8g"` | Memory override |
-| `cpus` | string \| null | `null` | `"4"` | CPU override |
-| `swap` | string \| null | `null` | `"0"` | Swap override |
-| `pidsLimit` | number \| null | `null` | `1024` | PID limit |
-| `cache` | string \| null | `null` | `"sbx-cache"` | Cache volume name |
-| `mounts` | MountConfig[] | `[]` | `[{ "source": "/data/projects", "target": "/projects" }]` | Host→container path mappings with optional ro/rw mode |
-| `env` | `string[]` | `[]` | `["TOKEN=$(cat /path/to/file)"]` | Environment variables injected into the container in `"KEY=VALUE"` format. Values support shell command substitution (e.g. `"TOKEN=$(cat /path/to/file)"`), expanded on the host before passing to Docker. Falls back to literal value on expansion failure |
+## Migrating from 1.x
 
-#### host group
-| Field | Type | Default | Example | Description |
-|-------|------|---------|---------|-------------|
-| `commands` | string[] | `[]` | `["git", "npm", "docker"]` | Host command allowlist |
-
-### Resource Limits
-
-Resources are configured directly via `runtime.memory`, `runtime.cpus`, `runtime.swap`, and `runtime.pidsLimit` fields.
-
-**By default, no resource limits are applied.** Set these fields explicitly to enable them.
-
-Example configuration:
-
-| Resource | Example |
-|----------|---------|
-| memory | `"4g"` |
-| cpus | `"2"` |
-| swap | `"2g"` |
-| pidsLimit | `512` |
-
-### CLI Flags
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--container` | `true` | Enable sandbox |
-| `--no-container` / `--noc` | `false` | Disable sandbox |
-
-All other configuration is managed through `sandbox.json`.
-
-## External File Read
-
-When the agent tries to **read** a file outside the project cwd (e.g. system
-config files), the sandbox prompts for interactive approval. Paths can be
-pre-approved via `--container-allow-paths` flag or `/sandbox allow` command.
-Approved paths are persisted in `.pi/agent/path-approvals.json`.
-
-Once a path is allowed, the `read` tool reads it directly from the **host
-filesystem** (bypassing the container). Only the `read` tool and `edit`'s read
-operations are affected — `write`, `edit`'s write operations, and `bash` are
-**not** affected and always run inside the container.
-
-### Mechanism distinction
-
-| Tool | External read | External write |
-|------|--------------|----------------|
-| `read` | `--container-allow-paths` / `/sandbox allow` | — |
-| `edit` (read ops) | `--container-allow-paths` / `/sandbox allow` | — |
-| `edit` (write ops) | — | `--container-mount-paths` |
-| `write` | — | `--container-mount-paths` |
-| `bash` | — | `--container-mount-paths` |
-
-- **allow**: Lightweight read-only access from host. Paths are matched by
-  prefix (e.g., allowing `/etc` permits reading any file under `/etc`).
-- **mount**: Bind-mounts a host directory into the container at the same path,
-  granting full read/write access inside the container. Use for write
-  operations or when the tool needs to operate on external paths inside the
-  container.
-
-## Resource limits
-
-By default, no resource limits are applied. To set limits, configure `runtime.memory`, `runtime.cpus`, `runtime.swap`, or `runtime.pidsLimit` in `sandbox.json`.
-
-Example values: memory `"4g"`, cpus `"2"`, swap `"2g"`, pidsLimit `512`.
-
-Other container security defaults:
-- No caps: `--cap-drop ALL`
-- No new privileges: `--security-opt no-new-privileges`
-- User: non-root (uid 1000)
-- Network: default (container can reach the internet)
-- No Docker socket inside the container
-
-## Podman notes
-
-`pi-container-sandbox` supports Podman as a container engine.
-
-### Engine selection
-
-Set the engine via the `runtime.engine` config field:
-- `"auto"` (default): auto-detect, prefer Podman
-- `"docker"`: force Docker
-- `"podman"`: force Podman
-
-### Rootless mode and cgroups v2
-
-Podman runs rootless by default. In rootless mode, resource limits
-(`--memory`, `--cpus`) require cgroups v2. If your system lacks cgroups v2,
-the container starts without resource limits and logs a warning.
-
-Most modern Linux distros (Ubuntu 21.10+, Fedora 31+, Debian 11+) use
-cgroups v2 by default. On cgroups v1 systems, resource limits only work
-with rootful Podman.
-
-## Troubleshooting
-
-### `Sandbox not ready: Docker not available`
-
-Make sure Docker or Podman is running:
-
-```bash
-docker ps
-# or
-podman info
-```
-
-If Docker is running but the extension can't reach it, your user may not
-have permission on `/var/run/docker.sock`. On Linux, add yourself to the
-`docker` group.
-
-### Podman starts without resource limits
-
-Podman rootless mode requires cgroups v2 to apply memory and CPU limits.
-Check your cgroups version:
-
-```bash
-stat -fc %T /sys/fs/cgroup/
-```
-
-Output `cgroup2fs` means cgroups v2. If it says `tmpfs`, you are on
-cgroups v1 — use rootful Podman or switch to Docker for resource limits.
-
-### Image build fails
-
-The auto-build pulls down several tools (rg, fd, bat, node, uv, bun, etc.)
-and verifies them by SHA-256. If one of those downloads fails (e.g. behind
-a corporate proxy), the build will fail. Pre-build manually:
-
-```bash
-npm run build-image
-```
-
-### Agent edits don't show up on the host
-
-The bind mount is at `/workspace` in the container, mapped to your project
-cwd on the host. Run `/sandbox status` to verify mount status.
-
-### I want to drop into the container
-
-```bash
-docker exec -it <container-name> bash
-# or
-podman exec -it <container-name> bash
-```
-
-Find the container name from `/sandbox status` or `docker ps --filter name=pi-sbx-` (or `podman ps --filter name=pi-sbx-`).
+- The container runtime (docker/podman), image builds, the `runtime.mounts`/`image`/`host` config groups, the `/sandbox` command, `--container*` flags, and the external-path approval flow are all removed
+- Legacy `image`/`runtime`/`host` sections in `sandbox.json` are ignored with a warning; rewrite them as the new fields above as needed
+- If you need container-grade isolation (separate filesystem/network namespaces), stay on 1.x
 
 ## Development
 
 ```bash
-# From repo root:
-npm ci                    # Install all dependencies
-npm run typecheck         # Type-check all packages
-npm run lint              # Biome lint
-npm test                  # Run all tests
-
-# Package-specific:
-npm run build-image --workspace=pi-container-sandbox
-pi -e ./index.ts          # Run the extension locally (from this dir)
-bash tests/e2e.sh         # Run E2E tests (requires Docker + pi CLI)
+npm test              # unit + integration (integration auto-skips without a runner)
+npm run typecheck
+./tests/e2e.sh
 ```
-
-## How it works
-
-`pi-container-sandbox` is a pi extension. On `session_start` it ensures
-`pi-container-sandbox:latest` exists (building it from the bundled
-`docker/Dockerfile` if needed), then starts a long-lived container with
-the project cwd bind-mounted at `/workspace`. It replaces pi's coding
-tools (`bash`, `read`, `write`, `edit`) with versions whose I/O routes
-into the container through an engine adapter (Docker or Podman CLI). The user's
-`!` bash uses the same adapter via the `user_bash` event.
-
-The container is torn down on `session_shutdown` / SIGINT / process exit
-(unless `keep` is set). The extension supports Docker and Podman via the
-`runtime.engine` config field or auto-detection. If no container runtime is
-available, the extension gracefully degrades to pi's default host tools with
-a notification.
 
 ## License
 
