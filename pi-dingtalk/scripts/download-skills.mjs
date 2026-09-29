@@ -25,19 +25,19 @@ function parseArgs(argv) {
 			flags.add(arg);
 		} else {
 			console.error(`错误：未知参数: ${arg}`);
-			console.error(`用法：node scripts/download-skills.mjs [--mono | --multi]`);
+			console.error(`用法：node scripts/download-skills.mjs [--multi | --mono]`);
 			process.exit(1);
 		}
 	}
 
 	if (flags.has("--mono") && flags.has("--multi")) {
 		console.error("错误：不能同时指定 --mono 和 --multi");
-		console.error("用法：node scripts/download-skills.mjs [--mono | --multi]");
+		console.error(`用法：node scripts/download-skills.mjs [--multi | --mono]`);
 		process.exit(1);
 	}
 
-	if (flags.has("--multi")) return "multi";
-	return "mono"; // 默认 mono
+	if (flags.has("--mono")) return "mono";
+	return "multi"; // 默认 multi
 }
 
 const mode = parseArgs(process.argv.slice(2));
