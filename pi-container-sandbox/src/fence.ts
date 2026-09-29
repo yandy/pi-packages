@@ -1,5 +1,5 @@
-import { realpathSync, statSync, type Stats } from "node:fs";
 import { basename, dirname, join, resolve as resolvePath } from "node:path";
+import { lstatSync, readlinkSync, realpathSync, statSync, type Stats } from "node:fs";
 import { escalationHintMarker, sandboxDenialMarker } from "./escalation";
 import { writableRoots, type SandboxMode } from "./policy";
 
@@ -15,15 +15,31 @@ export class FenceDenialError extends Error {
  * 写目标的 canonical 化：解析**最深已存在祖先**的 symlink，保留不存在的尾部拼写。
  * 直接 realpath 整条路径会对尚不存在的写目标失败；不解析祖先则会被
  * ws/link → /etc 式 symlink 逃逸（词法前缀命中 ws/ 但实际落在围栏外）。
+ * Ruling 7：realpath 失败处先 lstat 区分"悬空 symlink"与"真缺失"——悬空 symlink
+ * 必须继续跟随（readlink，相对目标对 dirname 解析），否则停留词法拼写会放行
+ * ws/dangling → 围栏外目标，内核写入时跟随 symlink 即逃逸；ELOOP 守卫 40 次后
+ * 回退词法拼写（此时内核写入同样 ELOOP，检查与落点无分歧）。
  */
 export function canonicalizeTarget(path: string): string {
 	let current = resolvePath(path);
 	const tail: string[] = [];
+	let symlinkGuard = 0;
 	for (;;) {
 		try {
 			const real = realpathSync.native(current);
 			return tail.length === 0 ? real : join(real, ...tail.reverse());
 		} catch {
+			let lst: Stats | undefined;
+			try {
+				lst = lstatSync(current);
+			} catch {
+				lst = undefined;
+			}
+			if (lst?.isSymbolicLink()) {
+				if (++symlinkGuard > 40) return resolvePath(path); // symlink 环：保守回词法拼写
+				current = resolvePath(dirname(current), readlinkSync(current));
+				continue;
+			}
 			const parent = dirname(current);
 			if (parent === current) return resolvePath(path); // 连根都不可解析：保留词法拼写（保守，匹配不到任何授予根以外的东西）
 			tail.push(basename(current));

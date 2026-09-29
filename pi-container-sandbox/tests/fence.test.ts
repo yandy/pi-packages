@@ -28,6 +28,10 @@ describe("canonicalizeTarget", () => {
 	it("keeps an entirely missing path's resolved spelling", () => {
 		expect(canonicalizeTarget(join(ws, "a", "b"))).toBe(join(ws, "a", "b"));
 	});
+	it("follows a dangling symlink to its target spelling (Ruling 7)", () => {
+		symlinkSync(join(realpathSync.native("/etc"), "sbx-probe-x"), join(ws, "d2"));
+		expect(canonicalizeTarget(join(ws, "d2"))).toBe(join(realpathSync.native("/etc"), "sbx-probe-x"));
+	});
 	it("collapses .. lexically against the real ancestor", () => {
 		expect(canonicalizeTarget(join(ws, "sub", "..", "f"))).toBe(join(ws, "f"));
 	});
@@ -68,6 +72,14 @@ describe("assertWriteAllowed", () => {
 		const msg = (err as Error).message;
 		expect(msg).toContain("[sandbox: file access denied under workspace-write mode]");
 		expect(msg).toContain("[sandbox: escalation available — retry this exact operation once");
+	});
+	it("denies a dangling final-component symlink pointing outside (Ruling 7: P1 escape)", () => {
+		symlinkSync(join(realpathSync.native("/etc"), `sbx-dangling-probe-${process.pid}`), join(ws, "dangling"));
+		expect(() => assertWriteAllowed(join(ws, "dangling"), wsWrite)).toThrow(FenceDenialError);
+	});
+	it("allows a dangling final-component symlink pointing inside the workspace", () => {
+		symlinkSync(join(ws, "future.txt"), join(ws, "dangling-in"));
+		expect(() => assertWriteAllowed(join(ws, "dangling-in"), wsWrite)).not.toThrow();
 	});
 	it("read-only denies everything, even inside the workspace", () => {
 		expect(() => assertWriteAllowed(join(ws, "f"), { mode: "read-only", workspaceRoot: ws })).toThrow(FenceDenialError);
