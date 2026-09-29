@@ -42,6 +42,6 @@
 	},
 	"dependencies": {
 		"@deepseek-ai/node-addon-system": "^0.1.2",
-		"typebox": "^1.1.38"
+		"typebox": "1.1.38"
 	}
 }
