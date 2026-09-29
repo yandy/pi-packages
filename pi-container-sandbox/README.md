@@ -2,6 +2,16 @@
 
 pi coding-agent extension: confine agent file effects with a process-level sandbox — workspace writable, everything else readable (deepseek harness workspace-write semantics). No containers since 2.0.
 
+## Install
+
+```bash
+# From npm
+pi install npm:@yandy0725/pi-container-sandbox
+
+# Or from a local checkout
+pi install .
+```
+
 ## How it works
 
 bash commands are wrapped in a platform sandbox runner and spawned locally (**path transparent**: host paths work as-is); the write/edit tools run an in-process write fence before execution; read is unrestricted.

@@ -2,6 +2,16 @@
 
 pi coding-agent 扩展：用**进程级沙箱**约束 AI agent 的文件效果——默认**工作目录可写、其余宿主文件可读**（deepseek harness `workspace-write` 语义）。2.0 起不再使用容器。
 
+## 安装
+
+```bash
+# 从 npm 安装
+pi install npm:@yandy0725/pi-container-sandbox
+
+# 或从本地仓库安装
+pi install .
+```
+
 ## 工作原理
 
 bash 命令被包装进平台沙箱 runner 后在本地 spawn（**路径透明**：宿主路径原样有效）；write/edit 工具在执行前做进程内写围栏；read 不受限。
