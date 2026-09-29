@@ -28,7 +28,10 @@ export function getSandboxConfigPath(hostCwd: string): string {
 
 function readJsonFile(path: string): Record<string, unknown> | null {
 	try {
-		return JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
+		const parsed: unknown = JSON.parse(readFileSync(path, "utf-8"));
+		// I2：非 null 对象的 JSON（数组/数字/字符串/布尔）一律按 corrupt 处理
+		if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+		return parsed as Record<string, unknown>;
 	} catch {
 		return null;
 	}
@@ -97,4 +100,25 @@ export function loadSandboxConfig(hostCwd: string): SandboxConfig {
 		if (value !== undefined) merged[key] = value;
 	}
 	return validateSandboxConfig(merged, "sandbox.json");
+}
+
+const configCache = new Map<string, SandboxConfig>();
+
+/** 安全加载（fail-safe，I2）：任何加载/校验错误回落默认配置（仍是受约束的 workspace-write），按 cwd 缓存。 */
+export function getSandboxConfig(hostCwd: string): SandboxConfig {
+	let cached = configCache.get(hostCwd);
+	if (!cached) {
+		try {
+			cached = loadSandboxConfig(hostCwd);
+		} catch (err) {
+			console.warn(`sandbox: failed to load config, falling back to defaults (mode "${DEFAULT_SANDBOX_CONFIG.mode}"): ${err instanceof Error ? err.message : String(err)}`);
+			cached = DEFAULT_SANDBOX_CONFIG;
+		}
+		configCache.set(hostCwd, cached);
+	}
+	return cached;
+}
+
+export function resetSandboxConfigCache(): void {
+	configCache.clear();
 }

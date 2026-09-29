@@ -13,6 +13,17 @@ import type { ConfinedSandboxMode, SandboxMode } from "./policy";
 
 export type SpawnFn = (program: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
 
+/** I3：杀整个进程组（detached spawn → 子进程是组长）；失败（无 pid/组不存在）回退杀直接子进程。 */
+function killTree(child: ChildProcess, signal: NodeJS.Signals): void {
+	if (child.pid !== undefined) {
+		try {
+			process.kill(-child.pid, signal);
+			return;
+		} catch {}
+	}
+	child.kill(signal);
+}
+
 export interface SandboxBashOpts extends ConfineOptions {
 	mode: SandboxMode;
 	workspaceRoot: string;
@@ -32,8 +43,8 @@ export function createSandboxBashOps(opts: SandboxBashOpts): BashOperations {
 		exec: (command, cwd, execOpts) =>
 			new Promise<{ exitCode: number | null }>((resolve, reject) => {
 				if (execOpts.signal?.aborted) {
-					// 已中止的信号：不 spawn，按取消语义 resolve（abort→SIGTERM→null 一致）
-					resolve({ exitCode: null });
+					// Ruling 9 + I1：已中止的信号——不 spawn，按 pi 本地 ops 契约 reject "aborted"
+					reject(new Error("aborted"));
 					return;
 				}
 				const rawArgv = ["bash", "-c", command];
@@ -61,6 +72,7 @@ export function createSandboxBashOps(opts: SandboxBashOpts): BashOperations {
 					cwd,
 					env,
 					stdio: ["ignore", "pipe", "pipe"],
+					detached: true, // I3：独立进程组，使 killTree 能连带孙进程一起杀
 				});
 
 				let stderrTail = "";
@@ -71,10 +83,14 @@ export function createSandboxBashOps(opts: SandboxBashOpts): BashOperations {
 				});
 
 				let timer: NodeJS.Timeout | undefined;
+				let timedOut = false;
 				if (execOpts.timeout !== undefined) {
-					timer = setTimeout(() => child.kill("SIGKILL"), execOpts.timeout * 1000);
+					timer = setTimeout(() => {
+						timedOut = true;
+						killTree(child, "SIGKILL");
+					}, execOpts.timeout * 1000);
 				}
-				const onAbort = () => child.kill("SIGTERM");
+				const onAbort = () => killTree(child, "SIGTERM");
 				execOpts.signal?.addEventListener("abort", onAbort, { once: true });
 
 				const cleanup = () => {
@@ -98,7 +114,19 @@ export function createSandboxBashOps(opts: SandboxBashOpts): BashOperations {
 							execOpts.onData(Buffer.from(`\n${sandboxDenialMarker(opts.mode)}\n${escalationHintMarker("command")}\n`));
 						}
 					}
-					resolve({ exitCode: code });
+					// I1：对齐 pi 本地 ops 契约（dist bash.js：throw Error("aborted") / throw Error(`timeout:${timeout}`)）——
+					// 否则 pi 把 null 当成功分支，超时/中止命令以“正常完成+截断输出”返回模型。
+					if (code === null) {
+						if (timedOut) {
+							reject(new Error(`timeout:${execOpts.timeout}`));
+							return;
+						}
+						if (execOpts.signal?.aborted) {
+							reject(new Error("aborted"));
+							return;
+						}
+					}
+					resolve({ exitCode: code }); // 外部杀（无 timer 无 abort）：保留 null 语义
 				});
 			}),
 	};

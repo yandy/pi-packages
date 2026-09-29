@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_SANDBOX_CONFIG, loadSandboxConfig, validateSandboxConfig } from "../src/config";
+import { DEFAULT_SANDBOX_CONFIG, getSandboxConfig, loadSandboxConfig, resetSandboxConfigCache, validateSandboxConfig } from "../src/config";
 
 let dir: string;
 let agentDir: string;
@@ -59,6 +59,39 @@ describe("loadSandboxConfig", () => {
 		mkdirSync(join(projectDir, ".pi"), { recursive: true });
 		writeFileSync(join(projectDir, ".pi", "sandbox.json"), "{broken");
 		expect(loadSandboxConfig(projectDir)).toEqual(DEFAULT_SANDBOX_CONFIG);
+	});
+	it("non-object JSON (array/number/string/boolean) counts as corrupt (I2)", () => {
+		mkdirSync(join(projectDir, ".pi"), { recursive: true });
+		const path = join(projectDir, ".pi", "sandbox.json");
+		for (const content of ["5", "[1,2]", '"workspace-write"', "true", "null"]) {
+			writeFileSync(path, content);
+			expect(loadSandboxConfig(projectDir), content).toEqual(DEFAULT_SANDBOX_CONFIG); // 不抛
+		}
+	});
+});
+
+describe("getSandboxConfig (fail-safe + cache)", () => {
+	afterEach(() => { resetSandboxConfigCache(); });
+	it("pairing-violation config falls back to DEFAULT with a warn, never throws (I2)", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			writeProject({ runnerCommand: ["myrunner"] }); // 缺 runnerFailureSignatures → validate throw
+			expect(getSandboxConfig(projectDir)).toEqual(DEFAULT_SANDBOX_CONFIG);
+			expect(warn.mock.calls.flat().join(" ")).toMatch(/falling back to defaults/u);
+		} finally {
+			warn.mockRestore();
+		}
+	});
+	it("caches per cwd: second call does not re-warn", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			writeProject({ probeTimeoutMs: 0 }); // 非法 → throw → fail-safe
+			expect(getSandboxConfig(projectDir)).toEqual(DEFAULT_SANDBOX_CONFIG);
+			expect(getSandboxConfig(projectDir)).toEqual(DEFAULT_SANDBOX_CONFIG);
+			expect(warn).toHaveBeenCalledTimes(1);
+		} finally {
+			warn.mockRestore();
+		}
 	});
 });
 

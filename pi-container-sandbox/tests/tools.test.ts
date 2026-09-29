@@ -25,7 +25,6 @@ function makeDeps(overrides: Partial<Parameters<typeof createSandboxTools>[0]> =
 	return {
 		deps: {
 			cwd: ws,
-			workspaceRoot: ws,
 			getConfig: () => DEFAULT_SANDBOX_CONFIG,
 			permission: createPermissionState(),
 			spawnFn,
@@ -158,6 +157,21 @@ describe("write tool fence + escalation wiring", () => {
 		await expect(write.execute("call-6", { path: `~/${name}`, content: "x" }, undefined, undefined, toolCtx()))
 			.rejects.toThrow(/file access denied under workspace-write mode/);
 		expect(existsSync(join(homedir(), name))).toBe(false);
+	});
+	it("derives the fence root per call from ctx.cwd (C2)", async () => {
+		const { deps } = makeDeps();
+		const { write } = createSandboxTools(deps);
+		const other = mkdtempSync(join(homedir(), ".sbx-c2-")); // tmp 根之外
+		try {
+			const ctx = { ...(toolCtx() as object), cwd: other } as never;
+			await write.execute("c-9", { path: join(other, "f.txt"), content: "x" }, undefined, undefined, ctx);
+			expect(existsSync(join(other, "f.txt"))).toBe(true); // 旧行为（冻结 ws）下此写会被拒
+			const escape = join(homedir(), `.sbx-c2-escape-${process.pid}-${Date.now()}.txt`);
+			await expect(write.execute("c-10", { path: escape, content: "x" }, undefined, undefined, ctx))
+				.rejects.toThrow(/file access denied under workspace-write mode/);
+		} finally {
+			rmSync(other, { recursive: true, force: true });
+		}
 	});
 });
 

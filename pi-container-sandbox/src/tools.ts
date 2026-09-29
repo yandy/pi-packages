@@ -9,22 +9,40 @@ import {
 	type WriteOperations,
 } from "@earendil-works/pi-coding-agent";
 import { createSandboxBashOps, type SpawnFn } from "./bash-ops";
-import type { SandboxConfig } from "./config";
+import { getSandboxConfig, type SandboxConfig } from "./config";
 import { approveEscalation, sandboxPermissionsDescription, validateEscalationArgs } from "./escalation";
 import { assertWriteAllowed, type FencePolicy } from "./fence";
 import type { PermissionState } from "./permission";
-import { resolveEffectiveMode, type SandboxMode } from "./policy";
+import { canonicalPath, resolveEffectiveMode, type SandboxMode } from "./policy";
 import { selectRunner, type RunnerHooks } from "./runners";
 
 export interface SandboxToolDeps {
 	cwd: string;
-	workspaceRoot: string;
-	getConfig(): SandboxConfig;
+	/** 测试注入用；生产缺省逐调用 getSandboxConfig(ctx.cwd)（C2）。 */
+	getConfig?(): SandboxConfig;
 	permission: PermissionState;
 	hooks?: RunnerHooks;
 	spawnFn?: SpawnFn;
 	/** 测试注入的预解析 runner；生产缺省走 selectRunner 缓存。 */
 	selected?: ReturnType<typeof selectRunner>;
+}
+
+const workspaceRootCache = new Map<string, string>();
+
+/** C2（spec §9）：pi 从不 chdir，会话 cwd 只经 execute 的 ctx.cwd 可达——
+ *  围栏根逐调用从它派生（模块级缓存，进程内共享），不再冻结在 activate 时的 process.cwd()。 */
+function workspaceRootFor(rawCwd: string): string {
+	let root = workspaceRootCache.get(rawCwd);
+	if (root === undefined) {
+		root = canonicalPath(rawCwd);
+		workspaceRootCache.set(rawCwd, root);
+	}
+	return root;
+}
+
+/** 逐调用配置（C2）：测试注入优先，否则按会话 cwd 惰性加载（getSandboxConfig 自带缓存）。 */
+function configForCall(deps: SandboxToolDeps, sessionCwd: string): SandboxConfig {
+	return deps.getConfig?.() ?? getSandboxConfig(sessionCwd);
 }
 
 /** 提权参数对（三个工具共用）。 */
@@ -40,6 +58,7 @@ interface EscalationParams {
 
 interface ToolCtxLike {
 	hasUI: boolean;
+	cwd?: string;
 	ui: { select(title: string, options: string[]): Promise<string | undefined> };
 }
 
@@ -55,7 +74,8 @@ export async function resolveCallMode(
 	summary: () => string,
 ): Promise<SandboxMode> {
 	validateEscalationArgs(params.sandbox_permissions, params.justification);
-	const effective = resolveEffectiveMode(deps.permission.override, deps.getConfig().mode);
+	const config = configForCall(deps, ctx.cwd ?? deps.cwd);
+	const effective = resolveEffectiveMode(deps.permission.override, config.mode);
 	if (params.sandbox_permissions === undefined) return effective;
 	return approveEscalation(
 		{
@@ -134,15 +154,18 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 		promptGuidelines: [...(baseBash.promptGuidelines ?? []), ESCALATION_GUIDELINE],
 		parameters: extendParams(baseBash.parameters),
 		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
+			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;
+			const workspaceRoot = workspaceRootFor(sessionCwd);
+			const config = configForCall(deps, sessionCwd);
 			const mode = await resolveCallMode(params as EscalationParams, ctx, deps, "command", () => String(params.command ?? ""));
-			const config = deps.getConfig();
-			const selected = mode === "danger-full-access"
+			// M3：配置了自定义 runnerCommand 时跳过链探测（confine 直接用 runnerCommand）。
+			const selected = mode === "danger-full-access" || (config.runnerCommand?.length ?? 0) > 0
 				? undefined
 				: (deps.selected ?? selectRunner(config.probeTimeoutMs, deps.hooks));
-			const tool = createBashToolDefinition(deps.cwd, {
+			const tool = createBashToolDefinition(sessionCwd, {
 				operations: createSandboxBashOps({
 					mode,
-					workspaceRoot: deps.workspaceRoot,
+					workspaceRoot,
 					selected,
 					runnerCommand: config.runnerCommand,
 					runnerFailureSignatures: config.runnerFailureSignatures,
@@ -162,10 +185,12 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 		promptGuidelines: [...(baseWrite.promptGuidelines ?? []), ESCALATION_GUIDELINE],
 		parameters: extendParams(baseWrite.parameters),
 		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
+			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;
+			const workspaceRoot = workspaceRootFor(sessionCwd);
 			const mode = await resolveCallMode(params as EscalationParams, ctx, deps, "operation", () => String(params.path ?? ""));
 			// fence 拒绝不捕获：FenceDenialError 从 ops 抛出、经 pi execute 原样上抛
 			//（withFileMutationQueue 不吞错）——pi 的 agent 循环会转成 error result。
-			const tool = createWriteToolDefinition(deps.cwd, { operations: createFencedWriteOps({ mode, workspaceRoot: deps.workspaceRoot }) });
+			const tool = createWriteToolDefinition(sessionCwd, { operations: createFencedWriteOps({ mode, workspaceRoot }) });
 			return tool.execute(toolCallId, stripEscalation(params) as never, signal, onUpdate as never, ctx);
 		},
 	};
@@ -177,8 +202,10 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 		promptGuidelines: [...(baseEdit.promptGuidelines ?? []), ESCALATION_GUIDELINE],
 		parameters: extendParams(baseEdit.parameters),
 		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
+			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;
+			const workspaceRoot = workspaceRootFor(sessionCwd);
 			const mode = await resolveCallMode(params as EscalationParams, ctx, deps, "operation", () => String(params.path ?? ""));
-			const tool = createEditToolDefinition(deps.cwd, { operations: createFencedEditOps({ mode, workspaceRoot: deps.workspaceRoot }) });
+			const tool = createEditToolDefinition(sessionCwd, { operations: createFencedEditOps({ mode, workspaceRoot }) });
 			return tool.execute(toolCallId, stripEscalation(params) as never, signal, onUpdate as never, ctx);
 		},
 	};

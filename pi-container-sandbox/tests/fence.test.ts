@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { assertWriteAllowed, canonicalizeTarget, FenceDenialError, isWithinRoots } from "../src/fence";
 
@@ -76,6 +76,12 @@ describe("assertWriteAllowed", () => {
 	it("denies a dangling final-component symlink pointing outside (Ruling 7: P1 escape)", () => {
 		symlinkSync(join(realpathSync.native("/etc"), `sbx-dangling-probe-${process.pid}`), join(ws, "dangling"));
 		expect(() => assertWriteAllowed(join(ws, "dangling"), wsWrite)).toThrow(FenceDenialError);
+	});
+	it("resolves a relative dangling symlink against the link's directory and denies escape (M5)", () => {
+		const etcTarget = join(realpathSync.native("/etc"), `sbx-rel-probe-${process.pid}`);
+		symlinkSync(relative(ws, etcTarget), join(ws, "rel-dangling"));
+		expect(canonicalizeTarget(join(ws, "rel-dangling"))).toBe(etcTarget);
+		expect(() => assertWriteAllowed(join(ws, "rel-dangling"), wsWrite)).toThrow(FenceDenialError);
 	});
 	it("allows a dangling final-component symlink pointing inside the workspace", () => {
 		symlinkSync(join(ws, "future.txt"), join(ws, "dangling-in"));

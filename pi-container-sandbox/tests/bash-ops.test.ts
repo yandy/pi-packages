@@ -107,32 +107,49 @@ describe("createSandboxBashOps", () => {
 		settle(child, 125);
 		await expect(p).rejects.toThrow(/SANDBOX_UNAVAILABLE/);
 	});
-	it("timeout (seconds) kills the child with SIGKILL → exitCode null", async () => {
+	it("timeout (seconds) kills the tree with SIGKILL and rejects timeout:N (I1: pi ops contract)", async () => {
 		const child = fakeChild();
 		const spawnFn = vi.fn(() => child) as never;
 		const ops = createSandboxBashOps({ mode: "danger-full-access", workspaceRoot: "/ws", spawnFn });
-		const result = await ops.exec("sleep 100", "/ws", { onData: () => {}, timeout: 0.01 });
-		expect(result.exitCode).toBeNull();
+		// fake child 无 pid → killTree 回退 child.kill，SIGKILL 断言不破
+		await expect(ops.exec("sleep 100", "/ws", { onData: () => {}, timeout: 0.01 })).rejects.toThrow(/timeout:/);
 		expect(child.kill).toHaveBeenCalledWith("SIGKILL");
 	});
-	it("abort signal kills the child with SIGTERM → exitCode null", async () => {
+	it("abort signal kills the tree with SIGTERM and rejects \"aborted\" (I1: pi ops contract)", async () => {
 		const child = fakeChild();
 		const spawnFn = vi.fn(() => child) as never;
 		const ops = createSandboxBashOps({ mode: "danger-full-access", workspaceRoot: "/ws", spawnFn });
 		const ac = new AbortController();
 		const p = ops.exec("sleep 100", "/ws", { onData: () => {}, signal: ac.signal });
 		ac.abort();
-		const result = await p;
-		expect(result.exitCode).toBeNull();
+		await expect(p).rejects.toThrow(/aborted/);
 		expect(child.kill).toHaveBeenCalledWith("SIGTERM");
 	});
-	it("already-aborted signal resolves {exitCode: null} without spawning (Ruling 9)", async () => {
+	it("already-aborted signal rejects \"aborted\" without spawning (Ruling 9 + I1)", async () => {
 		const spawnFn = vi.fn(() => fakeChild()) as never;
 		const ops = createSandboxBashOps({ mode: "danger-full-access", workspaceRoot: "/ws", spawnFn });
 		const ac = new AbortController();
 		ac.abort();
-		const result = await ops.exec("true", "/ws", { onData: () => {}, signal: ac.signal });
-		expect(result.exitCode).toBeNull();
+		await expect(ops.exec("true", "/ws", { onData: () => {}, signal: ac.signal })).rejects.toThrow(/aborted/);
 		expect(spawnFn).not.toHaveBeenCalled();
+	});
+	it("external kill (no timer, no abort) still resolves {exitCode: null}", async () => {
+		const child = fakeChild();
+		const spawnFn = vi.fn(() => child) as never;
+		const ops = createSandboxBashOps({ mode: "danger-full-access", workspaceRoot: "/ws", spawnFn });
+		const p = ops.exec("sleep 100", "/ws", { onData: () => {} });
+		settle(child, null); // 直接触发 close(null)：既非超时也非 abort
+		const result = await p;
+		expect(result.exitCode).toBeNull();
+	});
+	it("spawns detached so the process group is killable (I3)", async () => {
+		const child = fakeChild();
+		const spawnFn = vi.fn(() => child) as never;
+		const ops = createSandboxBashOps({ mode: "danger-full-access", workspaceRoot: "/ws", spawnFn });
+		const p = ops.exec("true", "/ws", { onData: () => {} });
+		settle(child, 0);
+		await p;
+		const options = (spawnFn.mock.calls[0] as [string, string[], { detached?: boolean }])[2];
+		expect(options.detached).toBe(true);
 	});
 });
