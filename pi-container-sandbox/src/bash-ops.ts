@@ -31,6 +31,11 @@ export function createSandboxBashOps(opts: SandboxBashOpts): BashOperations {
 	return {
 		exec: (command, cwd, execOpts) =>
 			new Promise<{ exitCode: number | null }>((resolve, reject) => {
+				if (execOpts.signal?.aborted) {
+					// 已中止的信号：不 spawn，按取消语义 resolve（abort→SIGTERM→null 一致）
+					resolve({ exitCode: null });
+					return;
+				}
 				const rawArgv = ["bash", "-c", command];
 				// Review Focus #3：只钉消息翻译（LC_MESSAGES），不动 LANG/LC_CTYPE/LC_ALL
 				const env: NodeJS.ProcessEnv = { ...process.env, ...execOpts.env, LC_MESSAGES: "C" };

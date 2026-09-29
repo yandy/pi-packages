@@ -125,4 +125,13 @@ describe("createSandboxBashOps", () => {
 		expect(result.exitCode).toBeNull();
 		expect(child.kill).toHaveBeenCalledWith("SIGTERM");
 	});
+	it("already-aborted signal resolves {exitCode: null} without spawning (Ruling 9)", async () => {
+		const spawnFn = vi.fn(() => fakeChild()) as never;
+		const ops = createSandboxBashOps({ mode: "danger-full-access", workspaceRoot: "/ws", spawnFn });
+		const ac = new AbortController();
+		ac.abort();
+		const result = await ops.exec("true", "/ws", { onData: () => {}, signal: ac.signal });
+		expect(result.exitCode).toBeNull();
+		expect(spawnFn).not.toHaveBeenCalled();
+	});
 });
