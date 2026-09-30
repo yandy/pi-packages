@@ -246,7 +246,7 @@ Directory names are derived as follows:
 - git repos whose remote is http(s), ssh (including scp-style `git@host:owner/repo`) or `git://` → `git/<host>__<owner>__<repo>`; port, credentials, trailing `/` and `.git` are stripped and the host is lowercased
 - everything else — non-git directories, git repos without a remote, `file://` or local-path remotes → `local/<absolute-path>` (git repos use the repository root)
 - `/` becomes `__`; characters that are not portable in file names (`<>:"|?*`, control characters) become `_XX` hex escapes
-- names longer than 120 characters are truncated to 100 characters plus a `__<hash8>` suffix
+- names longer than 120 UTF-8 bytes are truncated to 100 bytes on a code-point boundary plus a `__<hash8>` suffix
 
 The mapping is not injective: underscores are kept as-is, so `/home/a__b` and `/home/a/b` both map to `home__a__b` (and share one memory directory). Changing or renaming a remote — or moving a local directory — changes the memory directory, orphaning the old one.
 

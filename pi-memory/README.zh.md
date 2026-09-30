@@ -244,7 +244,7 @@ memory(action: "add" | "remove" | "search",
 - remote 为 http(s)、ssh（含 scp 式 `git@host:owner/repo`）或 `git://` 的 git 仓库 → `git/<host>__<owner>__<repo>`；端口、认证信息、尾部 `/` 与 `.git` 均被剥离，host 转小写
 - 其余情况 —— 非 git 目录、无 remote 的 git 仓库、`file://` 或本地路径 remote → `local/<绝对路径>`（git 仓库取仓库根目录）
 - `/` 转为 `__`；文件名不安全的字符（`<>:"|?*`、控制字符）转为 `_XX` 十六进制转义
-- 目录名超过 120 字符时截取前 100 字符并追加 `__<hash8>` 后缀
+- 目录名超过 120 UTF-8 字节时按码点截取前 100 字节并追加 `__<hash8>` 后缀
 
 该映射不是单射：下划线保持原样，因此 `/home/a__b` 与 `/home/a/b` 都会映射为 `home__a__b`（共享同一记忆目录）。修改或重命名 remote、移动本地目录都会改变记忆目录，旧目录将成为孤儿。
 
