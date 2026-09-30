@@ -1,8 +1,39 @@
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, rm, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { projectDirName, projectHash, resolveMemoryDir, safeTopicPath } from "../src/paths";
+import {
+	normalizeRemoteUrl,
+	projectDirName,
+	projectHash,
+	projectIdentity,
+	resolveMemoryDir,
+	safeTopicPath,
+} from "../src/paths";
+
+const execFileP = promisify(execFile);
+
+let dir: string;
+
+beforeEach(async () => {
+	dir = await mkdtemp(join(tmpdir(), "pi-memory-paths-"));
+});
+
+afterEach(async () => {
+	await rm(dir, { recursive: true, force: true });
+});
+
+async function git(args: string[], cwd: string): Promise<string> {
+	const { stdout } = await execFileP("git", args, { cwd });
+	return stdout.trim();
+}
+
+async function initRepo(cwd: string, remote?: string): Promise<void> {
+	await git(["init", "-q"], cwd);
+	if (remote) await git(["remote", "add", "origin", remote], cwd);
+}
 
 describe("projectHash", () => {
 	it("returns 12 hex chars", async () => {
@@ -83,5 +114,111 @@ describe("projectDirName", () => {
 		const b = `github.com/x/${"a".repeat(119)}b`;
 		expect(projectDirName(a)).toBe(projectDirName(a));
 		expect(projectDirName(a)).not.toBe(projectDirName(b));
+	});
+});
+
+describe("normalizeRemoteUrl", () => {
+	it("normalizes https URLs", () => {
+		expect(normalizeRemoteUrl("https://github.com/yandy/pi-packages.git")).toBe("github.com/yandy/pi-packages");
+	});
+	it("normalizes http URLs", () => {
+		expect(normalizeRemoteUrl("http://example.com/team/repo.git")).toBe("example.com/team/repo");
+	});
+	it("normalizes scp-style ssh URLs to the same key as https", () => {
+		expect(normalizeRemoteUrl("git@github.com:yandy/pi-packages.git")).toBe("github.com/yandy/pi-packages");
+	});
+	it("normalizes git:// URLs to the same key as https", () => {
+		expect(normalizeRemoteUrl("git://github.com/yandy/pi-packages.git")).toBe("github.com/yandy/pi-packages");
+	});
+	it("strips port, credentials and trailing separators", () => {
+		expect(normalizeRemoteUrl("ssh://git@gitlab.com:2222/grp/sub/repo.git")).toBe("gitlab.com/grp/sub/repo");
+		expect(normalizeRemoteUrl("https://user:pass@github.com/o/r.git")).toBe("github.com/o/r");
+		expect(normalizeRemoteUrl("https://github.com/yandy/pi-packages.git/")).toBe("github.com/yandy/pi-packages");
+	});
+	it("lowercases the host and strips a case-insensitive .git suffix", () => {
+		expect(normalizeRemoteUrl("https://GitHub.com/Owner/Repo.GIT")).toBe("github.com/Owner/Repo");
+	});
+	it("strips the git:// port", () => {
+		expect(normalizeRemoteUrl("git://github.com:9418/yandy/pi-packages.git")).toBe("github.com/yandy/pi-packages");
+	});
+	it("rejects non-git protocols and local paths", () => {
+		expect(normalizeRemoteUrl("file:///srv/repos/foo.git")).toBeNull();
+		expect(normalizeRemoteUrl("/srv/repos/bar")).toBeNull();
+		expect(normalizeRemoteUrl("../repo")).toBeNull();
+		expect(normalizeRemoteUrl("")).toBeNull();
+	});
+	it("rejects URLs without a repository path", () => {
+		expect(normalizeRemoteUrl("https://github.com/")).toBeNull();
+		expect(normalizeRemoteUrl("https://github.com")).toBeNull();
+	});
+});
+
+describe("projectIdentity", () => {
+	it("classifies a non-git directory as local with its absolute path", async () => {
+		expect(await projectIdentity(dir)).toEqual({ kind: "local", key: resolve(dir) });
+	});
+
+	it("classifies a deleted working directory as local", async () => {
+		const gone = join(dir, "deleted");
+		expect(await projectIdentity(gone)).toEqual({ kind: "local", key: resolve(gone) });
+	});
+
+	it("normalizes an https remote to host/owner/repo", async () => {
+		await initRepo(dir, "https://github.com/yandy/pi-packages.git");
+		expect(await projectIdentity(dir)).toEqual({ kind: "git", key: "github.com/yandy/pi-packages" });
+	});
+
+	it("normalizes scp-style ssh and git:// remotes to the https key", async () => {
+		await initRepo(dir, "git@github.com:yandy/pi-packages.git");
+		expect(await projectIdentity(dir)).toEqual({ kind: "git", key: "github.com/yandy/pi-packages" });
+		await git(["remote", "set-url", "origin", "git://github.com/yandy/pi-packages.git"], dir);
+		expect(await projectIdentity(dir)).toEqual({ kind: "git", key: "github.com/yandy/pi-packages" });
+	});
+
+	it("keeps subgroup paths and strips port and userinfo", async () => {
+		await initRepo(dir, "ssh://git@gitlab.com:2222/grp/sub/repo.git");
+		expect(await projectIdentity(dir)).toEqual({ kind: "git", key: "gitlab.com/grp/sub/repo" });
+	});
+
+	it("prefers origin over other remotes", async () => {
+		await initRepo(dir);
+		await git(["remote", "add", "aaa", "https://example.com/aaa/repo.git"], dir);
+		await git(["remote", "add", "origin", "https://example.com/origin/repo.git"], dir);
+		expect(await projectIdentity(dir)).toEqual({ kind: "git", key: "example.com/origin/repo" });
+	});
+
+	it("uses the alphabetically first remote when origin is missing", async () => {
+		await initRepo(dir);
+		await git(["remote", "add", "zeta", "https://example.com/zeta/repo.git"], dir);
+		await git(["remote", "add", "alpha", "https://example.com/alpha/repo.git"], dir);
+		expect(await projectIdentity(dir)).toEqual({ kind: "git", key: "example.com/alpha/repo" });
+	});
+
+	it("falls back to local when no remote exists", async () => {
+		await initRepo(dir);
+		const toplevel = await git(["rev-parse", "--show-toplevel"], dir);
+		expect(await projectIdentity(dir)).toEqual({ kind: "local", key: resolve(toplevel) });
+	});
+
+	it("falls back to local for file:// and local-path remotes", async () => {
+		await initRepo(dir, "file:///srv/repos/foo.git");
+		const toplevel = await git(["rev-parse", "--show-toplevel"], dir);
+		expect(await projectIdentity(dir)).toEqual({ kind: "local", key: resolve(toplevel) });
+
+		await git(["remote", "set-url", "origin", "/srv/repos/bar"], dir);
+		expect(await projectIdentity(dir)).toEqual({ kind: "local", key: resolve(toplevel) });
+	});
+
+	it("falls back to local for a remote without a repository path", async () => {
+		await initRepo(dir, "https://github.com/");
+		const toplevel = await git(["rev-parse", "--show-toplevel"], dir);
+		expect(await projectIdentity(dir)).toEqual({ kind: "local", key: resolve(toplevel) });
+	});
+
+	it("resolves the same identity from a subdirectory", async () => {
+		await initRepo(dir, "https://github.com/yandy/pi-packages.git");
+		const sub = join(dir, "packages", "inner");
+		await mkdir(sub, { recursive: true });
+		expect(await projectIdentity(sub)).toEqual({ kind: "git", key: "github.com/yandy/pi-packages" });
 	});
 });
