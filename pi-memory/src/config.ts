@@ -9,7 +9,7 @@ export type ThinkLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh"
 export interface SessionPersistenceConfig {
 	/** Enable disk persistence (default: false = in-memory). */
 	enabled: boolean;
-	/** Custom session directory. Defaults to memoryDir/sessions/. */
+	/** Custom session directory. Defaults to `<project memory dir>/sessions/` (the resolved per-project directory under `memoryDir`). */
 	sessionDir?: string;
 }
 
