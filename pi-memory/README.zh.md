@@ -17,7 +17,7 @@
 - **梦醒提醒**：经过 N 个会话或 N 小时后，温和通知建议运行 `/dream`
 - **`/memory` 命令**：查看状态、开关记忆、检查索引和主题文件
 - **会话搜索**：`memory search scope=sessions` 操作可检索过往对话历史
-- **可读且分叉安全**：有 http(s)/ssh/git remote 的仓库记忆存放在 `~/.pi/memory/git/<host__owner__repo>/`，其余项目存放在 `~/.pi/memory/local/<绝对路径>/` — 同一仓库的 clone、fork、worktree 共享记忆
+- **可读且 clone 安全**：有 http(s)/ssh/git remote（含 scp 式与 `git+ssh`/`git+https`）的仓库记忆存放在 `~/.pi/memory/git/<host__owner__repo>/`，其余项目存放在 `~/.pi/memory/local/<绝对路径>/` — 同一仓库的 clone、worktree 共享记忆（fork 有自己的 remote，因此拥有独立目录）
 - **路径穿越防护**：主题文件路径会验证是否逃逸记忆目录
 
 ## 安装
@@ -86,13 +86,13 @@ pi install npm:@yandy0725/pi-memory
 | `memIndexMaxBytes` | `25600` | `MEMORY.md` 最大字节数 |
 | `defaults.model` | — | 所有子任务共享的模型回退值。per-task `model` 会覆盖 |
 | `defaults.sessionPersistence.enabled` | `false` | 共享的 session 持久化回退（默认不持久化）。per-task 可覆盖 |
-| `defaults.sessionPersistence.sessionDir` | `memoryDir/sessions/` | 自定义持久化目录 |
+| `defaults.sessionPersistence.sessionDir` | `<项目目录>/sessions/` | 自定义持久化目录 |
 | `dream.nudgeAfterSessions` | `5` | 触发提醒需经过的会话数 |
 | `dream.nudgeAfterHours` | `24` | 触发提醒需经过的小时数 |
 | `dream.model` | — | 整理使用的模型（`"provider/id"`）。回退链：per-task → `defaults.model` → 父模型 |
 | `dream.thinkLevel` | `"high"` | 整理子 agent 的思考深度：`"off"` / `"minimal"` / `"low"` / `"medium"` / `"high"` / `"xhigh"` |
 | `dream.sessionPersistence.enabled` | `false` | 持久化 dream agent 的 session 到磁盘（调试/审计）。回退到 `defaults.sessionPersistence.enabled` |
-| `dream.sessionPersistence.sessionDir` | `memoryDir/sessions/` | dream session 自定义目录 |
+| `dream.sessionPersistence.sessionDir` | `<项目目录>/sessions/` | dream session 自定义目录 |
 | `sessionSearch.maxSessions` | `10` | 搜索历史时最多扫描的会话数 |
 | `sessionSearch.maxMatches` | `5` | 历史搜索最多返回的匹配数 |
 | `autoSurfacing.enabled` | `true` | ⭐ 启用 per-turn topic 文件自动注入 |
@@ -241,10 +241,12 @@ memory(action: "add" | "remove" | "search",
 
 目录名的派生规则：
 
-- remote 为 http(s)、ssh（含 scp 式 `git@host:owner/repo`）或 `git://` 的 git 仓库 → `git/<host>__<owner>__<repo>`；端口、认证信息、尾部 `/` 与 `.git` 均被剥离，host 转小写
+- remote 为 http(s)、ssh（含 scp 式 `[user@]host:owner/repo`，user 可省略）或 `git://`，以及 `git+ssh://` / `git+https://` 别名的 git 仓库 → `git/<host>__<owner>__<repo>`；端口、认证信息、尾部 `/` 与 `.git` 均被剥离，host 转小写
+- remote URL 读取自原始 git 配置（`remote.<name>.url`；`origin` 优先，其余按字母序，取首个可归一化者），因此 `url.*.insteadOf` 重写不会改变映射结果
 - 其余情况 —— 非 git 目录、无 remote 的 git 仓库、`file://` 或本地路径 remote → `local/<绝对路径>`（git 仓库取仓库根目录）
 - `/` 转为 `__`；文件名不安全的字符（`<>:"|?*`、控制字符）转为 `_XX` 十六进制转义
 - 目录名超过 120 UTF-8 字节时按码点截取前 100 字节并追加 `__<hash8>` 后缀
+- 命名面向 POSIX 文件系统：反斜杠视为普通字符，不做 Windows 设备名或结尾点/空格处理
 
 该映射不是单射：下划线保持原样，因此 `/home/a__b` 与 `/home/a/b` 都会映射为 `home__a__b`（共享同一记忆目录）。修改或重命名 remote、移动本地目录都会改变记忆目录，旧目录将成为孤儿。
 

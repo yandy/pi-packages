@@ -64,14 +64,15 @@ export async function projectIdentity(cwd: string): Promise<ProjectIdentity>;
 1. `git rev-parse --show-toplevel`（3s 超时，失败/超时/git 不存在 → 视为非 git）
 2. 非 git → `{ kind: "local", key: resolve(cwd) }`
 3. 是 git → 读取 remote URL：
-   - 优先 `git remote get-url origin`
-   - 失败则 `git remote` 列出全部 remote，按字母序取第一个，再 `git remote get-url <name>`
-   - 仍失败（无 remote）→ `{ kind: "local", key: toplevel }`
+   - 一次 `git config --get-regexp '^remote\..*\.url$'` 读取**原始配置**（每个 remote 取第一个 URL，与 git fetch 语义一致；`pushurl` 不匹配该 pattern）
+   - 顺序：`origin` 优先，其余按名字字母序；依次归一化，**取首个可用者**
+   - 无 remote 或全部不可归一化 → `{ kind: "local", key: toplevel }`
+   - 用原始配置而非 `git remote get-url`，因此全局 `url.*.insteadOf` 重写不影响身份判定；同时也只需一次 git 调用
 4. URL 判定与归一化 `normalizeRemoteUrl(url)`：
-   - 带 scheme 且 scheme ∈ {`http`, `https`, `ssh`, `git`}：去掉 `scheme://`、userinfo（`user@` / `user:pass@`）、端口，保留 `host` + 路径
-   - scp 式（`^[^@/]+@[^:/]+:`）：保留 `host` + `:` 后路径
-   - 其他（`file://`、本地路径、其他 scheme）→ 视为不可用 → `{ kind: "local", key: toplevel }`
-   - 余下路径去掉尾部 `/` 与尾部的 `.git`（大小写不敏感）
+   - 含 `://` 的 scheme 形式用 WHATWG `URL` 解析（userinfo 按**最后一个** `@` 切分、host 转小写、端口由 `.hostname` 天然剔除、`.`/`..` 段被归一化）；scheme ∈ {`http`, `https`, `ssh`, `git`}，并接受 `git+ssh` / `git+https` 别名（先剥离 `git+` 前缀）
+   - scp 式 `[user@]host:path`（user 可省略）：手工切分（git 私有伪 URL，无标准库解析器）——`:` 之前不得含 `/`，userinfo 同样按最后一个 `@` 切分
+   - 其他（`file://`、`git+file://`、本地路径、其他 scheme）→ 视为不可用 → `{ kind: "local", key: toplevel }`
+   - 余下路径去掉首尾 `/` 与尾部的 `.git`（大小写不敏感）
    - 路径为空（如 `https://github.com/`）→ 视为不可用 → `local` + toplevel
    - 归一化结果：`{ kind: "git", key: "host/owner/.../repo" }`，保留 owner 之后的全部子路径（GitLab subgroup 等）
 
@@ -79,16 +80,15 @@ export async function projectIdentity(cwd: string): Promise<ProjectIdentity>;
 
 ### 2. 目录名 `projectDirName(key)`
 
-1. Windows 兼容：先把 `\` 统一替换为 `/`
-2. 按 `/` 分段
-3. 丢弃空段（含 local 绝对路径的前导 `/`）与 `.` / `..` 段
-4. 段内非法字符 → 小写十六进制转义 `_XX`：
+1. 按 `/` 分段（命名面向 POSIX 文件系统：`\` 视为普通字符；不做 Windows 设备名或结尾点/空格处理）
+2. 丢弃空段（含 local 绝对路径的前导 `/`）与 `.` / `..` 段
+3. 段内非法字符 → 小写十六进制转义 `_XX`：
    - 控制字符（`\x00-\x1f`）、`<` `>` `:` `"` `|` `?` `*`
    - `_` **不转义**（已确认取舍，见「已知限制」）
-5. 用 `__` 连接各段
-6. 长度（UTF-8 字节数）> 120 → 按码点取前 100 字节（不切断多字节字符）+ `__` + `sha256(key)` 前 8 位
+4. 用 `__` 连接各段
+5. 长度（UTF-8 字节数）> 120 → 按码点取前 100 字节（不切断多字节字符）+ `__` + `sha256(key)` 前 8 位
    - 实现注记（2026-09-30 复审后）：初版按「字符数」计数，CJK 路径可产出 284 字节的目录名（突破文件系统 255 字节上限）且可能截断出孤立代理项。数值 120/100 不变，单位改为字节。
-7. 所有段都被丢弃（如 key 为 `/`）→ 目录名 `root`
+6. 所有段都被丢弃（如 key 为 `/`）→ 目录名 `root`
 
 示例：
 
@@ -154,7 +154,7 @@ return join(config.memoryDir, kind, projectDirName(key));
 | `projectIdentity` — 多 remote | 有 origin 用 origin；无 origin 用字母序第一个 |
 | `projectIdentity` — 降级 | 无 remote、`file://`、本地路径 remote → local + toplevel |
 | `projectIdentity` — 常规 | 子目录启动与仓库根目录得到相同身份 |
-| `projectDirName` | 层级拼接、非法字符 `_XX`、`.`/`..` 丢弃、Windows 分隔符归一、空 key → `root` |
+| `projectDirName` | 层级拼接、非法字符 `_XX`、`.`/`..` 丢弃、反斜杠视为普通字符、空 key → `root` |
 | `projectDirName` — 截断 | >120 时 ≤110 且以 `__<8 hex>` 结尾、确定性、不同长 key 不同名 |
 | `resolveMemoryDir` | git / local 两类的完整组合断言（`join(memoryDir, kind, name)`） |
 | `safeTopicPath` | 保留现有 4 个安全用例 |

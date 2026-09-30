@@ -17,7 +17,7 @@ Aligned with Claude Code's auto memory mechanism: per-topic MEMORY.md index, aut
 - **Dream nudge**: after N sessions or N hours, a gentle notification suggests running `/dream`
 - **`/memory` command**: show status, toggle on/off, inspect index and topic files
 - **Session search**: the `memory search scope=sessions` action queries past conversation history
-- **Readable, fork-safe layout**: memory lives under `~/.pi/memory/git/<host__owner__repo>/` for git repos with an http(s)/ssh/git remote, and `~/.pi/memory/local/<absolute-path>/` otherwise — clones, forks, and worktrees of the same repo share memory
+- **Readable, clone-safe layout**: memory lives under `~/.pi/memory/git/<host__owner__repo>/` for git repos with an http(s)/ssh/git remote (including scp-style and `git+ssh`/`git+https`), and `~/.pi/memory/local/<absolute-path>/` otherwise — clones and worktrees of the same repo share memory (a fork has its own remote, so it gets its own directory)
 - **Path traversal protection**: topic files are validated against escaping the memory directory
 
 ## Install
@@ -86,13 +86,13 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
 | `memIndexMaxBytes` | `25600` | Max bytes in `MEMORY.md` before capacity errors |
 | `defaults.model` | — | Shared model fallback for all sub-tasks. Per-task `model` overrides |
 | `defaults.sessionPersistence.enabled` | `false` | Shared session persistence fallback (default: in-memory). Per-task overrides |
-| `defaults.sessionPersistence.sessionDir` | `memoryDir/sessions/` | Custom session directory for persisted headless agent sessions |
+| `defaults.sessionPersistence.sessionDir` | `<project dir>/sessions/` | Custom session directory for persisted headless agent sessions |
 | `dream.nudgeAfterSessions` | `5` | Sessions since last dream before nudge is shown |
 | `dream.nudgeAfterHours` | `24` | Hours since last dream before nudge is shown |
 | `dream.model` | — | Model for dream consolidation (`"provider/id"`). Falls back to `defaults.model` → parent model |
 | `dream.thinkLevel` | `"high"` | Thinking effort for dream subagent: `"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"` |
 | `dream.sessionPersistence.enabled` | `false` | Persist dream agent sessions to disk (debug/audit). Falls back to `defaults.sessionPersistence.enabled` |
-| `dream.sessionPersistence.sessionDir` | `memoryDir/sessions/` | Custom session directory for dream sessions |
+| `dream.sessionPersistence.sessionDir` | `<project dir>/sessions/` | Custom session directory for dream sessions |
 | `sessionSearch.maxSessions` | `10` | Max sessions to scan when searching history |
 | `sessionSearch.maxMatches` | `5` | Max matches to return from history search |
 | `autoSurfacing.enabled` | `true` | ⭐ Enable per-turn topic file auto-injection |
@@ -243,10 +243,12 @@ A confirmation dialog is shown before the consolidation begins. The result summa
 
 Directory names are derived as follows:
 
-- git repos whose remote is http(s), ssh (including scp-style `git@host:owner/repo`) or `git://` → `git/<host>__<owner>__<repo>`; port, credentials, trailing `/` and `.git` are stripped and the host is lowercased
+- git repos whose remote is http(s), ssh (including scp-style `[user@]host:owner/repo`, where the user is optional) or `git://`, plus the `git+ssh://` / `git+https://` aliases → `git/<host>__<owner>__<repo>`; port, credentials, trailing `/` and `.git` are stripped and the host is lowercased
+- remote URLs are read from the raw git config (`remote.<name>.url`; `origin` first, then alphabetical, first usable URL wins), so `url.*.insteadOf` rewrites do not change the mapping
 - everything else — non-git directories, git repos without a remote, `file://` or local-path remotes → `local/<absolute-path>` (git repos use the repository root)
 - `/` becomes `__`; characters that are not portable in file names (`<>:"|?*`, control characters) become `_XX` hex escapes
 - names longer than 120 UTF-8 bytes are truncated to 100 bytes on a code-point boundary plus a `__<hash8>` suffix
+- names target POSIX filesystems: a backslash is an ordinary character, and no Windows device-name or trailing-dot handling is applied
 
 The mapping is not injective: underscores are kept as-is, so `/home/a__b` and `/home/a/b` both map to `home__a__b` (and share one memory directory). Changing or renaming a remote — or moving a local directory — changes the memory directory, orphaning the old one.
 
