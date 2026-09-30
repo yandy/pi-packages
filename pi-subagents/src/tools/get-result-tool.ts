@@ -1,5 +1,5 @@
 import { defineTool } from "@earendil-works/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { AgentConfigLookup } from "../config/agent-types";
 import { formatLifetimeTokens, textResult } from "../tools/helpers";
 import type { Subagent } from "../types";

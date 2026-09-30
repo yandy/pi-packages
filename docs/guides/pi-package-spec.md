@@ -142,7 +142,7 @@ pi-<name>/
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.80.2"
-    // 视需要追加：@earendil-works/pi-tui、@earendil-works/pi-ai、@sinclair/typebox
+    // 视需要追加：@earendil-works/pi-tui、@earendil-works/pi-ai、typebox
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.2",
@@ -399,7 +399,9 @@ Pure Skills 类型虽无测试脚本，仍需添加 filters 条目，否则 PR �
 | `@earendil-works/pi-coding-agent` | ExtensionAPI、registerTool / hooks 等核心 API |
 | `@earendil-works/pi-tui` | TUI 组件（Container、Text、Markdown、Editor 等） |
 | `@earendil-works/pi-ai` | AI 相关工具（Type.Unsafe 等） |
-| `typebox` / `@sinclair/typebox` | 工具参数的 JSON Schema 定义（`"*"`，宿主提供；子路径 `typebox/compile`、`typebox/value` 同样由宿主映射） |
+| `typebox` | 工具参数的 JSON Schema 定义（`"*"`，宿主提供；子路径 `typebox/compile`、`typebox/value` 同样由宿主映射） |
+
+**统一使用 `typebox`**（当前 1.x 主线，与宿主自身依赖和官方示例一致）。`@sinclair/typebox`（0.x LTS）宿主也能识别，但它会被宿主映射到自己的 1.x 实现，而本地安装的是 0.34.x，形成「类型按 0.34 检查、运行时是 1.x」的 skew；新代码不要再用，存量代码建议迁移。
 
 ### devDependencies
 
