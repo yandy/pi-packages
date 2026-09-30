@@ -43,9 +43,29 @@ describe("resolveMemoryDir", () => {
 	});
 
 	it("joins memoryDir with the local kind and readable dir name", async () => {
-		expect(await resolveMemoryDir({ memoryDir: "/mem" }, dir)).toBe(
-			join("/mem", "local", projectDirName(resolve(dir))),
-		);
+		const expected = `/mem/local/${resolve(dir).slice(1).split("/").join("__")}`;
+		expect(await resolveMemoryDir({ memoryDir: "/mem" }, dir)).toBe(expected);
+	});
+
+	it("maps two clones of the same remote to one memory directory", async () => {
+		const cloneA = join(dir, "clone-a");
+		const cloneB = join(dir, "clone-b");
+		await mkdir(cloneA, { recursive: true });
+		await mkdir(cloneB, { recursive: true });
+		await initRepo(cloneA, "https://github.com/yandy/pi-packages.git");
+		await initRepo(cloneB, "git@github.com:yandy/pi-packages.git");
+		expect(await resolveMemoryDir({ memoryDir: "/mem" }, cloneA)).toBe("/mem/git/github.com__yandy__pi-packages");
+		expect(await resolveMemoryDir({ memoryDir: "/mem" }, cloneB)).toBe("/mem/git/github.com__yandy__pi-packages");
+	});
+
+	it("maps a linked worktree to the same memory directory as the main checkout", async () => {
+		await initRepo(dir, "https://github.com/yandy/pi-packages.git");
+		await git(["config", "user.email", "test@example.com"], dir);
+		await git(["config", "user.name", "Test"], dir);
+		await git(["commit", "--allow-empty", "-q", "-m", "init"], dir);
+		const worktree = join(dir, "wt");
+		await git(["worktree", "add", "-q", "-b", "wt-branch", worktree], dir);
+		expect(await resolveMemoryDir({ memoryDir: "/mem" }, worktree)).toBe("/mem/git/github.com__yandy__pi-packages");
 	});
 
 	it("honours a custom memoryDir root", async () => {
