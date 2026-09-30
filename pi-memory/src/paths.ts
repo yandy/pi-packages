@@ -126,14 +126,9 @@ export async function projectIdentity(cwd: string): Promise<ProjectIdentity> {
 	return { kind: "local", key: resolve(toplevel) };
 }
 
-export async function projectHash(cwd: string): Promise<string> {
-	const key = (await gitToplevel(cwd)) ?? resolve(cwd);
-	return createHash("sha256").update(key).digest("hex").slice(0, 12);
-}
-
 export async function resolveMemoryDir(config: { memoryDir: string }, cwd: string): Promise<string> {
-	const hash = await projectHash(cwd);
-	return join(config.memoryDir, hash);
+	const { kind, key } = await projectIdentity(cwd);
+	return join(config.memoryDir, kind, projectDirName(key));
 }
 
 export function safeTopicPath(memoryDir: string, topic: string): string {

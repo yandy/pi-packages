@@ -7,7 +7,6 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
 	normalizeRemoteUrl,
 	projectDirName,
-	projectHash,
 	projectIdentity,
 	resolveMemoryDir,
 	safeTopicPath,
@@ -35,24 +34,25 @@ async function initRepo(cwd: string, remote?: string): Promise<void> {
 	if (remote) await git(["remote", "add", "origin", remote], cwd);
 }
 
-describe("projectHash", () => {
-	it("returns 12 hex chars", async () => {
-		const h = await projectHash("/tmp/some-nonexistent-cwd-xyz");
-		expect(h).toMatch(/^[0-9a-f]{12}$/);
-	});
-	it("is deterministic for the same cwd", async () => {
-		expect(await projectHash("/tmp/some-nonexistent-cwd-xyz")).toBe(await projectHash("/tmp/some-nonexistent-cwd-xyz"));
-	});
-	it("differs for different cwd", async () => {
-		expect(await projectHash("/tmp/a")).not.toBe(await projectHash("/tmp/b"));
-	});
-});
-
 describe("resolveMemoryDir", () => {
-	it("joins memoryDir with projectHash", async () => {
-		const dir = await resolveMemoryDir({ memoryDir: "/tmp/mem" }, "/tmp/proj");
-		const h = await projectHash("/tmp/proj");
-		expect(dir).toBe(join("/tmp/mem", h));
+	it("joins memoryDir with the git kind and readable dir name", async () => {
+		await initRepo(dir, "https://github.com/yandy/pi-packages.git");
+		expect(await resolveMemoryDir({ memoryDir: "/mem" }, dir)).toBe(
+			join("/mem", "git", "github.com__yandy__pi-packages"),
+		);
+	});
+
+	it("joins memoryDir with the local kind and readable dir name", async () => {
+		expect(await resolveMemoryDir({ memoryDir: "/mem" }, dir)).toBe(
+			join("/mem", "local", projectDirName(resolve(dir))),
+		);
+	});
+
+	it("honours a custom memoryDir root", async () => {
+		await initRepo(dir, "git@github.com:yandy/pi-packages.git");
+		expect(await resolveMemoryDir({ memoryDir: "/custom/root" }, dir)).toBe(
+			join("/custom/root", "git", "github.com__yandy__pi-packages"),
+		);
 	});
 });
 

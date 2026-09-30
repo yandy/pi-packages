@@ -45,7 +45,6 @@ vi.mock("../src/config", () => ({
 vi.mock("../src/paths", () => ({
 	resolveMemoryDir: vi.fn().mockResolvedValue(MOCK_BASE),
 	safeTopicPath: vi.fn((_dir: string, topic: string) => `${_dir}/${topic}`),
-	projectHash: vi.fn().mockResolvedValue("deadbeef"),
 }));
 
 vi.mock("../src/nudge", () => ({
