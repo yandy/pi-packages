@@ -127,7 +127,7 @@ vi.mock("@earendil-works/pi-tui", () => {
 	};
 });
 
-vi.mock("@sinclair/typebox", () => ({
+vi.mock("typebox", () => ({
 	Type: {
 		Object: (value: unknown) => value,
 		String: (value?: unknown) => value,

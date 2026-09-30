@@ -32,7 +32,7 @@ import {
 	truncateToWidth,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { type TUnsafe, Type } from "@sinclair/typebox";
+import { type TUnsafe, Type } from "typebox";
 import { type QuestionOption, renderSingleSelectRows } from "./src/single-select-layout.js";
 
 const _require = createRequire(import.meta.url);
