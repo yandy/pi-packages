@@ -141,12 +141,21 @@ describe("normalizeRemoteUrl", () => {
 	it("normalizes scp-style ssh URLs to the same key as https", () => {
 		expect(normalizeRemoteUrl("git@github.com:yandy/pi-packages.git")).toBe("github.com/yandy/pi-packages");
 	});
+	it("accepts scp-style URLs without a user", () => {
+		expect(normalizeRemoteUrl("github.com:yandy/pi-packages.git")).toBe("github.com/yandy/pi-packages");
+	});
+	it("accepts git+ scheme aliases", () => {
+		expect(normalizeRemoteUrl("git+ssh://git@github.com/yandy/pi-packages.git")).toBe("github.com/yandy/pi-packages");
+		expect(normalizeRemoteUrl("git+https://github.com/yandy/pi-packages.git")).toBe("github.com/yandy/pi-packages");
+		expect(normalizeRemoteUrl("git+file:///srv/repos/foo.git")).toBeNull();
+	});
 	it("normalizes git:// URLs to the same key as https", () => {
 		expect(normalizeRemoteUrl("git://github.com/yandy/pi-packages.git")).toBe("github.com/yandy/pi-packages");
 	});
 	it("strips port, credentials and trailing separators", () => {
 		expect(normalizeRemoteUrl("ssh://git@gitlab.com:2222/grp/sub/repo.git")).toBe("gitlab.com/grp/sub/repo");
 		expect(normalizeRemoteUrl("https://user:pass@github.com/o/r.git")).toBe("github.com/o/r");
+		expect(normalizeRemoteUrl("https://user:pa@ss@github.com/o/r.git")).toBe("github.com/o/r");
 		expect(normalizeRemoteUrl("https://github.com/yandy/pi-packages.git/")).toBe("github.com/yandy/pi-packages");
 	});
 	it("lowercases the host and strips a case-insensitive .git suffix", () => {
@@ -164,6 +173,7 @@ describe("normalizeRemoteUrl", () => {
 	it("rejects URLs without a repository path", () => {
 		expect(normalizeRemoteUrl("https://github.com/")).toBeNull();
 		expect(normalizeRemoteUrl("https://github.com")).toBeNull();
+		expect(normalizeRemoteUrl("github.com:")).toBeNull();
 	});
 });
 

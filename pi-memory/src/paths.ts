@@ -64,9 +64,11 @@ export interface ProjectIdentity {
 }
 
 const GIT_PROTOCOLS = new Set(["http", "https", "ssh", "git"]);
+const SCHEME_URL = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
 
 /**
  * Normalize an http(s)/ssh/git remote URL to `host/path`.
+ * Accepts `[user@]host:path` scp syntax and `git+ssh` / `git+https` aliases.
  * Returns null for file:// URLs, local paths and URLs without a repository path.
  */
 export function normalizeRemoteUrl(url: string): string | null {
@@ -75,23 +77,30 @@ export function normalizeRemoteUrl(url: string): string | null {
 
 	let host: string;
 	let path: string;
-	const schemeMatch = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\//.exec(raw);
-	if (schemeMatch) {
-		const scheme = schemeMatch[1].toLowerCase();
+	if (SCHEME_URL.test(raw)) {
+		let parsed: URL;
+		try {
+			parsed = new URL(raw);
+		} catch {
+			return null;
+		}
+		const scheme = parsed.protocol.slice(0, -1).toLowerCase().replace(/^git\+/, "");
 		if (!GIT_PROTOCOLS.has(scheme)) return null;
-		const rest = raw.slice(schemeMatch[0].length).replace(/^[^/@]*@/, "");
-		const slash = rest.indexOf("/");
-		host = (slash === -1 ? rest : rest.slice(0, slash)).replace(/:\d+$/, "");
-		path = slash === -1 ? "" : rest.slice(slash + 1);
+		host = parsed.hostname;
+		path = parsed.pathname;
 	} else {
-		const scp = /^[^@/]+@([^:/]+):(.*)$/.exec(raw);
-		if (!scp) return null;
-		host = scp[1];
-		path = scp[2];
+		// scp-style `[user@]host:path` — git-specific syntax, no stdlib parser.
+		const colon = raw.indexOf(":");
+		if (colon === -1) return null;
+		const authority = raw.slice(0, colon);
+		if (!authority || authority.includes("/")) return null;
+		const at = authority.lastIndexOf("@");
+		host = at === -1 ? authority : authority.slice(at + 1);
+		path = raw.slice(colon + 1);
 	}
 
 	if (!host) return null;
-	path = path.replace(/\/+$/, "").replace(/\.git$/i, "");
+	path = path.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\.git$/i, "");
 	if (!path) return null;
 	return `${host.toLowerCase()}/${path}`;
 }
