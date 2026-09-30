@@ -39,10 +39,11 @@ function truncateToBytes(input: string, maxBytes: number): string {
 /**
  * Encode a project key into a single, human-readable directory name.
  * `host/repo/path` → `host__repo__path`; `/abs/path` → `abs__path`.
+ * Naming targets POSIX filesystems: `\` is an ordinary character, without
+ * Windows device-name or trailing-dot handling.
  */
 export function projectDirName(key: string): string {
 	const segments = key
-		.replace(/\\/g, "/")
 		.split("/")
 		.filter((segment) => segment !== "" && segment !== "." && segment !== "..")
 		.map(escapeSegment);
