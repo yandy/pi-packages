@@ -88,6 +88,8 @@ export function isWithinRoots(target: string, roots: readonly string[]): boolean
 export interface FencePolicy {
 	mode: SandboxMode;
 	workspaceRoot: string;
+	/** 测试注入（testing.md「参数注入」）：替换缺省的 "/tmp" + os.tmpdir() tmp 根；生产不传。 */
+	_tmpRoots?: readonly string[];
 }
 
 /**
@@ -97,7 +99,7 @@ export interface FencePolicy {
  */
 export function assertWriteAllowed(absPath: string, policy: FencePolicy): void {
 	if (policy.mode === "danger-full-access") return;
-	const roots = writableRoots(policy.mode, policy.workspaceRoot);
+	const roots = writableRoots(policy.mode, policy.workspaceRoot, policy._tmpRoots);
 	const target = canonicalizeTarget(absPath);
 	if (!isWithinRoots(target, roots)) throw new FenceDenialError(resolvePath(absPath), policy.mode);
 }

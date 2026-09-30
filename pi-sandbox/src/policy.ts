@@ -26,12 +26,17 @@ export function canonicalPath(path: string): string {
 }
 
 /**
- * workspace-write = workspace + /tmp + os.tmpdir()（canonical、去重）；read-only 为空。
- * seatbelt profile 与 fs 围栏共用此推导，防止语义漂移（spec §4）。
+ * workspace-write = workspace + tmp 根（缺省 "/tmp" + os.tmpdir()）（canonical、去重）；read-only 为空。
+ * seatbelt profile 与 fs 围栏共用此推导，防止语义漂移（spec §4）——两侧都不传 tmpRoots，
+ * 缺省值即生产语义；tmpRoots 仅供测试注入（testing.md「参数注入」）。
  */
-export function writableRoots(mode: SandboxMode, workspaceRoot: string): string[] {
+export function writableRoots(
+	mode: SandboxMode,
+	workspaceRoot: string,
+	tmpRoots: readonly string[] = ["/tmp", tmpdir()],
+): string[] {
 	if (mode !== "workspace-write") return [];
-	return [...new Set([workspaceRoot, "/tmp", tmpdir()].map(canonicalPath))];
+	return [...new Set([workspaceRoot, ...tmpRoots].map(canonicalPath))];
 }
 
 /**

@@ -10,6 +10,10 @@ import { DEFAULT_SANDBOX_CONFIG } from "../src/config";
 
 let dir: string;
 let ws: string;
+/** 真·围栏外落点（既不在 workspace，也不在注入的 tmp 根内）。 */
+let outsideDir: string;
+/** 注入的 tmp 根，替换 "/tmp" + os.tmpdir()——否则整个 dir 都在 tmpdir() 里，构造不出围栏外。 */
+let fakeTmpDir: string;
 
 function fakeChild() {
 	const child = new EventEmitter() as EventEmitter & { stdout: PassThrough; stderr: PassThrough; kill: ReturnType<typeof vi.fn> };
@@ -29,6 +33,9 @@ function makeDeps(overrides: Partial<Parameters<typeof createSandboxTools>[0]> =
 			permission: createPermissionState(),
 			spawnFn,
 			selected: { runner: "bwrap" as const, enforcement: "full" as const },
+			// 测试注入（testing.md 参数注入）：把 tmp 可写根钉在测试目录内，
+			// 于是 dir/outside 成为真·围栏外——判例无需触碰真实 HOME 或 /etc。
+			_tmpRoots: [fakeTmpDir],
 			...overrides,
 		},
 		child,
@@ -42,8 +49,12 @@ function toolCtx(hasUI = true, choice: string | undefined = "Allow once") {
 
 beforeEach(() => {
 	dir = mkdtempSync(join(tmpdir(), "tools-"));
-	ws = realpathSync.native(dir);
-	mkdirSync(join(dir, "out"), { recursive: true });
+	mkdirSync(join(dir, "ws"), { recursive: true });
+	mkdirSync(join(dir, "fake-tmp"), { recursive: true });
+	mkdirSync(join(dir, "outside"), { recursive: true });
+	ws = realpathSync.native(join(dir, "ws"));
+	fakeTmpDir = realpathSync.native(join(dir, "fake-tmp"));
+	outsideDir = realpathSync.native(join(dir, "outside"));
 });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
@@ -119,32 +130,30 @@ describe("write tool fence + escalation wiring", () => {
 	it("write outside workspace: throws carrying marker + hint", async () => {
 		const { deps } = makeDeps();
 		const { write } = createSandboxTools(deps);
-		// 与 tests/fence.test.ts 同判例：os.tmpdir() 下（含 dir/out）是 workspace-write 的
-		// 合法可写根，无法触发拒绝；围栏外目标须用 /etc，尾部故意不存在——
-		// assertWriteAllowed 在任何落盘前即抛，绝不触碰 /etc。
-		const outside = join(realpathSync.native("/etc"), `sbx-tools-denied-${process.pid}.txt`);
+		// 注入 _tmpRoots 后 dir/outside 是真·围栏外；assertWriteAllowed 在任何落盘前即抛，
+		// 所以这里不会真的产生文件（尾部文件名故意不存在）。
+		const outside = join(outsideDir, `denied-${process.pid}.txt`);
 		await expect(write.execute("call-2", { path: outside, content: "x" }, undefined, undefined, toolCtx()))
 			.rejects.toThrow(/file access denied under workspace-write mode[\s\S]*escalation available/);
 	});
 	it("escalated retry with Allow once writes outside", async () => {
 		const { deps } = makeDeps();
 		const { write } = createSandboxTools(deps);
-		// 同上：dir/out 不是真·围栏外；用 homedir（围栏外且本进程可写）验证提权后真实落盘。
-		const outside = join(homedir(), `.sbx-tools-test-${process.pid}-${Date.now()}.txt`);
-		try {
-			await write.execute("call-3", {
-				path: outside, content: "ok",
-				sandbox_permissions: "danger-full-access", justification: "user-approved external write",
-			}, undefined, undefined, toolCtx(true, "Allow once"));
-			expect(await (await import("node:fs/promises")).readFile(outside, "utf-8")).toBe("ok");
-		} finally {
-			rmSync(outside, { force: true });
-		}
+		const outside = join(outsideDir, `tools-test-${process.pid}-${Date.now()}.txt`);
+		// 自证断言对：同一路径不带提权必须被拒——落点若其实在围栏内，本判例会响亮失败而非假绿。
+		await expect(write.execute("call-3-pre", { path: outside, content: "no" }, undefined, undefined, toolCtx()))
+			.rejects.toThrow(/file access denied under workspace-write mode/);
+		// 带提权（Allow once）后真实落盘。
+		await write.execute("call-3", {
+			path: outside, content: "ok",
+			sandbox_permissions: "danger-full-access", justification: "user-approved external write",
+		}, undefined, undefined, toolCtx(true, "Allow once"));
+		expect(await (await import("node:fs/promises")).readFile(outside, "utf-8")).toBe("ok");
 	});
 	it("Deny: error tells the model to stop and explain", async () => {
 		const { deps } = makeDeps();
 		const { write } = createSandboxTools(deps);
-		const outside = join(dir, "out", "denied.txt");
+		const outside = join(outsideDir, "denied.txt");
 		await expect(write.execute("call-4", {
 			path: outside, content: "x",
 			sandbox_permissions: "danger-full-access", justification: "reason",
@@ -153,6 +162,8 @@ describe("write tool fence + escalation wiring", () => {
 	it("fence sees pi-resolved paths: ~-form path escaping the workspace is denied (Ruling 14)", async () => {
 		const { deps } = makeDeps();
 		const { write } = createSandboxTools(deps);
+		// ~ 必须展开到真实 HOME（判例要的就是 ~ 形态）：注入 _tmpRoots 后 tmpdir() 不再自动可写，
+		// 故无论 HOME 落在哪都在围栏外。该写被拒，不会落盘。
 		const name = `sbx-tilde-${process.pid}-${Date.now()}.txt`;
 		await expect(write.execute("call-6", { path: `~/${name}`, content: "x" }, undefined, undefined, toolCtx()))
 			.rejects.toThrow(/file access denied under workspace-write mode/);
@@ -161,13 +172,13 @@ describe("write tool fence + escalation wiring", () => {
 	it("derives the fence root per call from ctx.cwd (C2)", async () => {
 		const { deps } = makeDeps();
 		const { write } = createSandboxTools(deps);
-		const other = mkdtempSync(join(homedir(), ".sbx-c2-")); // tmp 根之外
+		const other = mkdtempSync(join(outsideDir, "c2-")); // 真·围栏外（tmp 根之外）
 		try {
-			const ctx = { ...(toolCtx() as object), cwd: other } as never;
-			await write.execute("c-9", { path: join(other, "f.txt"), content: "x" }, undefined, undefined, ctx);
+			const otherCtx = { ...(toolCtx() as object), cwd: other } as never;
+			await write.execute("c-9", { path: join(other, "f.txt"), content: "x" }, undefined, undefined, otherCtx);
 			expect(existsSync(join(other, "f.txt"))).toBe(true); // 旧行为（冻结 ws）下此写会被拒
-			const escape = join(homedir(), `.sbx-c2-escape-${process.pid}-${Date.now()}.txt`);
-			await expect(write.execute("c-10", { path: escape, content: "x" }, undefined, undefined, ctx))
+			const escape = join(outsideDir, `c2-escape-${process.pid}-${Date.now()}.txt`);
+			await expect(write.execute("c-10", { path: escape, content: "x" }, undefined, undefined, otherCtx))
 				.rejects.toThrow(/file access denied under workspace-write mode/);
 		} finally {
 			rmSync(other, { recursive: true, force: true });
@@ -188,7 +199,7 @@ describe("edit tool fence", () => {
 	it("edit outside workspace is denied", async () => {
 		const { deps } = makeDeps();
 		const { edit } = createSandboxTools(deps);
-		const outside = join(homedir(), `.sbx-edit-test-${process.pid}-${Date.now()}.txt`);
+		const outside = join(outsideDir, `edit-test-${process.pid}-${Date.now()}.txt`);
 		writeFileSync(outside, "x");
 		try {
 			await expect(edit.execute("call-8", { path: outside, edits: [{ oldText: "x", newText: "y" }] }, undefined, undefined, toolCtx()))

@@ -25,6 +25,8 @@ export interface SandboxToolDeps {
 	spawnFn?: SpawnFn;
 	/** 测试注入的预解析 runner；生产缺省走 selectRunner 缓存。 */
 	selected?: ReturnType<typeof selectRunner>;
+	/** 测试注入（testing.md「参数注入」）：替换缺省的 "/tmp" + os.tmpdir() tmp 根；生产不传。 */
+	_tmpRoots?: readonly string[];
 }
 
 const workspaceRootCache = new Map<string, string>();
@@ -190,7 +192,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 			const mode = await resolveCallMode(params as EscalationParams, ctx, deps, "operation", () => String(params.path ?? ""));
 			// fence 拒绝不捕获：FenceDenialError 从 ops 抛出、经 pi execute 原样上抛
 			//（withFileMutationQueue 不吞错）——pi 的 agent 循环会转成 error result。
-			const tool = createWriteToolDefinition(sessionCwd, { operations: createFencedWriteOps({ mode, workspaceRoot }) });
+			const tool = createWriteToolDefinition(sessionCwd, { operations: createFencedWriteOps({ mode, workspaceRoot, _tmpRoots: deps._tmpRoots }) });
 			return tool.execute(toolCallId, stripEscalation(params) as never, signal, onUpdate as never, ctx);
 		},
 	};
@@ -205,7 +207,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;
 			const workspaceRoot = workspaceRootFor(sessionCwd);
 			const mode = await resolveCallMode(params as EscalationParams, ctx, deps, "operation", () => String(params.path ?? ""));
-			const tool = createEditToolDefinition(sessionCwd, { operations: createFencedEditOps({ mode, workspaceRoot }) });
+			const tool = createEditToolDefinition(sessionCwd, { operations: createFencedEditOps({ mode, workspaceRoot, _tmpRoots: deps._tmpRoots }) });
 			return tool.execute(toolCallId, stripEscalation(params) as never, signal, onUpdate as never, ctx);
 		},
 	};
