@@ -4,6 +4,8 @@
 状态：已与用户逐节确认
 前置研究：`.superpowers/refs/deepseek-harness/`（deepseek harness 源码，MIT/BSD-3）
 
+> **2026-09-30 落地修订**：本设计已落地为独立包 `@yandy0725/pi-sandbox@1.0.0`。§1 的两条打包决策——「保留包名 `@yandy0725/pi-container-sandbox`，发 2.0.0」与「用进程沙箱完全替换 pi-container-sandbox，不并存容器引擎」——已被推翻：`pi-container-sandbox` 恢复为容器实现（其 2.0.0 从未发布），两包并存且**互斥**（都接管 `bash`/`write`/`edit`，共用 `sandbox.json` 但 schema 不兼容）。设计本体（三档模式、runner 链、fail-closed、提权审批、写围栏）与 Ruling 编号均不变，**不得重排**：源码与测试按编号引用——`index.ts`（§9、Ruling 19）、`src/config.ts`（§5）、`src/tools.ts`（§4/§7/§9、Ruling 14/15）、`src/bash-ops.ts`（Ruling 9/10/20）、`src/fence.ts`（§7、Ruling 7）、`src/confine.ts`（§2/§6）、`src/policy.ts`（§4）、`src/runners.ts`（§3）、`src/permission.ts` 与 `src/escalation.ts`（§8/§9）。同批作废的还有 §10 目录树的包名（应为 `pi-sandbox/`）与 §12 的版本号及「容器用户停留在 1.x」措辞（改为 1.0.0、安装 `@yandy0725/pi-container-sandbox`）。落地任务的 spec 见仓库根 `docs/superpowers/specs/2026-09-30-pi-sandbox-package-split-design.md`。
+
 ## 1. 背景与目标
 
 现有 pi-container-sandbox 用 podman/docker 容器承载工具执行：工作目录挂载为 `/workspace`（rw），目录外除非配置 mounts 否则完全不可感知，外部读取靠宿主侧审批流。问题：容器依赖重（镜像构建、引擎探测）、路径不透明（需要 path-translation / skill mounts / 审批流一整套机制）、外部文件默认可见性为零。

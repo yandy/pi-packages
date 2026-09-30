@@ -26,6 +26,8 @@ jobs:
               - "biome.json"
             pi-ask-user:
               - "pi-ask-user/**"
+            pi-sandbox:
+              - "pi-sandbox/**"
             pi-container-sandbox:
               - "pi-container-sandbox/**"
             pi-web-tools:

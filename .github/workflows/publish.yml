@@ -26,6 +26,9 @@ jobs:
             pi-ask-user-v*)
               echo "dir=pi-ask-user" >> "$GITHUB_OUTPUT"
               ;;
+            pi-sandbox-v*)
+              echo "dir=pi-sandbox" >> "$GITHUB_OUTPUT"
+              ;;
             pi-container-sandbox-v*)
               echo "dir=pi-container-sandbox" >> "$GITHUB_OUTPUT"
               ;;
