@@ -158,13 +158,21 @@ describe("escalation approval forwarding wiring (spec 2026-09-30 §4.5)", () => 
 		expect(broker.resolveChannel("child-1")).toBeNull(); // 父通道已注销，子会话回到 fail-closed
 	});
 
-	it("hasUI=false 的会话不注册为审批终点", async () => {
+	it("hasUI=false 的会话不注册为审批终点（正对照：守卫被删则本判例变红）", async () => {
 		const { fakePi, hooks } = makeFakePi();
 		const activate = (await import("../index")).default;
 		activate(fakePi as never);
 		const broker = getEscalationBroker();
 		broker.linkChild("child-1", "headless-parent");
-		hooks.session_start?.({ type: "session_start" }, parentCtx("headless-parent", false));
+		const ctx = {
+			hasUI: false,
+			sessionManager: { getSessionId: () => "headless-parent" },
+			ui: { select: async () => "Allow once" },
+		};
+		hooks.session_start?.({ type: "session_start" }, ctx);
+		expect(broker.resolveChannel("child-1")).toBeNull();
+		// 正对照：若注册时无视 hasUI，现查会让通道在它翻真后浮现 → 本断言变红
+		ctx.hasUI = true;
 		expect(broker.resolveChannel("child-1")).toBeNull();
 	});
 
@@ -211,5 +219,34 @@ describe("escalation approval forwarding wiring (spec 2026-09-30 §4.5)", () => 
 		const ac = new AbortController();
 		await resolved?.select("T", ["Allow once", "Deny"], { signal: ac.signal });
 		expect(select).toHaveBeenCalledWith("T", ["Allow once", "Deny"], { signal: ac.signal });
+	});
+
+	it("ctx 失效（hasUI 取值器抛错）→ 通道失效并 fail-closed，不冒泡宿主报错", async () => {
+		const { fakePi, hooks } = makeFakePi();
+		const activate = (await import("../index")).default;
+		activate(fakePi as never);
+		let stale = false;
+		const ctx = {
+			get hasUI() {
+				if (stale) throw new Error("This extension ctx is stale after session replacement or reload.");
+				return true;
+			},
+			sessionManager: { getSessionId: () => "p" },
+			ui: { select: async () => "Allow once" },
+		};
+		hooks.session_start?.({ type: "session_start" }, ctx);
+		getEscalationBroker().linkChild("c", "p");
+		expect(getEscalationBroker().resolveChannel("c")).not.toBeNull();
+		stale = true; // 模拟会话替换 / reload 后宿主 assertActive() 抛错
+		expect(getEscalationBroker().resolveChannel("c")).toBeNull();
+	});
+
+	it("session_shutdown 退订两个事件通道（宿主 reload 复用同一 bus，不退订会累积监听器）", async () => {
+		const { fakePi, hooks, channels } = makeFakePi();
+		const activate = (await import("../index")).default;
+		activate(fakePi as never);
+		expect(Object.keys(channels)).toHaveLength(2);
+		hooks.session_shutdown?.({ type: "session_shutdown" }, parentCtx("p"));
+		expect(Object.keys(channels)).toEqual([]);
 	});
 });

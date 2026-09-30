@@ -14,6 +14,19 @@ import { createSandboxTools } from "./src/tools";
 const SUBAGENT_CHILD_SESSION_CREATED = "subagents:child:session-created";
 const SUBAGENT_CHILD_DISPOSED = "subagents:child:disposed";
 
+/**
+ * ctx 的每个成员都是取值器且先 assertActive()：会话替换 / reload 之后读取会抛
+ * "This extension ctx is stale…"。任何读取失败都按"无 UI"处理——严格 fail-closed，
+ * 绝不让宿主的内部报错冒泡成子代理工具调用的错误文本（spec §6）。
+ */
+function readHasUI(ctx: { hasUI: boolean }): boolean {
+	try {
+		return ctx.hasUI;
+	} catch {
+		return false;
+	}
+}
+
 export default function (pi: ExtensionAPI) {
 	const cwd = process.cwd();
 	// I2 fail-safe：坏配置在此 warn 并回落 DEFAULT（仍是受约束的 workspace-write），
@@ -62,8 +75,20 @@ export default function (pi: ExtensionAPI) {
 	// 捕获本次 activate 注册的会话 id：session_shutdown 的 ctx 可能已 stale（pi 会对失效 ctx 抛错），
 	// 用捕获值注销更稳；factory 每会话重调，所以这个变量天然是会话级的。
 	let registeredSessionId: string | null = null;
+	// 宿主每次 /reload 都复用同一 event bus 并重新调用本 factory：不退订就会无上限累积监听器
+	// （超过 Node 默认 maxListeners 后打印 MaxListenersExceededWarning 污染用户终端）。
+	const unsubscribeCreated = pi.events.on(SUBAGENT_CHILD_SESSION_CREATED, (data) => {
+		const event = data as { sessionId?: unknown; parentSessionId?: unknown };
+		if (typeof event.sessionId !== "string") return; // 契约漂移 → 不 link → 子会话保持 fail-closed
+		broker.linkChild(event.sessionId, typeof event.parentSessionId === "string" ? event.parentSessionId : undefined);
+	});
+	const unsubscribeDisposed = pi.events.on(SUBAGENT_CHILD_DISPOSED, (data) => {
+		const event = data as { sessionId?: unknown };
+		if (typeof event.sessionId !== "string") return;
+		broker.unlinkChild(event.sessionId);
+	});
 	pi.on("session_start", (_event, ctx) => {
-		if (!ctx.hasUI) return; // headless / 子会话：不是审批终点
+		if (!readHasUI(ctx)) return; // headless / 子会话 / ctx 已失效：都不是审批终点
 		let sessionId: string;
 		try {
 			sessionId = ctx.sessionManager.getSessionId();
@@ -73,24 +98,16 @@ export default function (pi: ExtensionAPI) {
 		registeredSessionId = sessionId;
 		broker.registerParent({
 			sessionId,
-			// hasUI 现查而非快照：注册后父会话可能因 reload / 会话替换失去 UI
-			hasUI: () => ctx.hasUI,
+			// hasUI 现查而非快照：注册后父会话可能因 reload / 会话替换失去 UI，或使 ctx 失效
+			hasUI: () => readHasUI(ctx),
 			select: (title, options, opts) => ctx.ui.select(title, options, opts),
 		});
 	});
 	pi.on("session_shutdown", () => {
+		unsubscribeCreated();
+		unsubscribeDisposed();
 		if (registeredSessionId === null) return;
 		broker.unregisterParent(registeredSessionId);
 		registeredSessionId = null;
-	});
-	pi.events.on(SUBAGENT_CHILD_SESSION_CREATED, (data) => {
-		const event = data as { sessionId?: unknown; parentSessionId?: unknown };
-		if (typeof event.sessionId !== "string") return; // 契约漂移 → 不 link → 子会话保持 fail-closed
-		broker.linkChild(event.sessionId, typeof event.parentSessionId === "string" ? event.parentSessionId : undefined);
-	});
-	pi.events.on(SUBAGENT_CHILD_DISPOSED, (data) => {
-		const event = data as { sessionId?: unknown };
-		if (typeof event.sessionId !== "string") return;
-		broker.unlinkChild(event.sessionId);
 	});
 }
