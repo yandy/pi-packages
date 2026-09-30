@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { access as fsAccess, constants } from "node:fs/promises";
 import type { BashOperations } from "@earendil-works/pi-coding-agent";
 import {
 	classifyDenial,
@@ -40,8 +41,15 @@ const STDERR_TAIL_BYTES = 8192;
  */
 export function createSandboxBashOps(opts: SandboxBashOpts): BashOperations {
 	return {
-		exec: (command, cwd, execOpts) =>
-			new Promise<{ exitCode: number | null }>((resolve, reject) => {
+		exec: async (command, cwd, execOpts) => {
+			// M4：cwd 存在性预检，逐字镜像 pi 本地 ops（dist/core/tools/bash.js:29-34）的友好报错，
+			// 且与其同序放在 abort 早退之前；三档模式一致（否则模型只见到裸 spawn ENOENT）。
+			try {
+				await fsAccess(cwd, constants.F_OK);
+			} catch {
+				throw new Error(`Working directory does not exist: ${cwd}\nCannot execute bash commands.`);
+			}
+			return new Promise<{ exitCode: number | null }>((resolve, reject) => {
 				if (execOpts.signal?.aborted) {
 					// Ruling 9 + I1：已中止的信号——不 spawn，按 pi 本地 ops 契约 reject "aborted"
 					reject(new Error("aborted"));
@@ -84,7 +92,9 @@ export function createSandboxBashOps(opts: SandboxBashOpts): BashOperations {
 
 				let timer: NodeJS.Timeout | undefined;
 				let timedOut = false;
-				if (execOpts.timeout !== undefined) {
+				// Ruling 20：对齐 pi 本地 ops 的 `timeout > 0` 守卫（dist/core/tools/bash.js:60）——
+				// timeout 为 0/负数表示无超时，不武装定时器，也不得 reject "timeout:0"。
+				if (execOpts.timeout !== undefined && execOpts.timeout > 0) {
 					timer = setTimeout(() => {
 						timedOut = true;
 						killTree(child, "SIGKILL");
@@ -128,6 +138,7 @@ export function createSandboxBashOps(opts: SandboxBashOpts): BashOperations {
 					}
 					resolve({ exitCode: code }); // 外部杀（无 timer 无 abort）：保留 null 语义
 				});
-			}),
+			});
+		},
 	};
 }

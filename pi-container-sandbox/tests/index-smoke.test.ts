@@ -92,4 +92,30 @@ describe("extension activate", () => {
 			warn.mockRestore();
 		}
 	});
+
+	it("status shows bypassed before custom runner when mode is danger-full-access (Ruling 19)", async () => {
+		const proj = mkdtempSync(join(tmpdir(), "proj-"));
+		mkdirSync(join(proj, ".pi"), { recursive: true });
+		writeFileSync(join(proj, ".pi", "sandbox.json"), JSON.stringify({
+			mode: "danger-full-access",
+			runnerCommand: ["myrunner"],
+			runnerFailureSignatures: ["myrunner: "],
+		}));
+		try {
+			const commands: Record<string, { handler: (args: string, ctx: unknown) => Promise<void> }> = {};
+			const fakePi = {
+				registerTool: () => {},
+				registerCommand: (name: string, cmd: unknown) => { commands[name] = cmd as never; },
+			};
+			const activate = (await import("../index")).default;
+			activate(fakePi as never);
+			const notify = vi.fn();
+			await commands.permission.handler("", { ui: { notify }, cwd: proj });
+			const text = notify.mock.calls[0][0] as string;
+			expect(text).toContain("bypassed");
+			expect(text).not.toContain("custom command");
+		} finally {
+			rmSync(proj, { recursive: true, force: true });
+		}
+	});
 });

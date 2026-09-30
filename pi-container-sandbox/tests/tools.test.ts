@@ -204,7 +204,10 @@ describe("bash tool wiring", () => {
 		const { deps, child, spawnFn } = makeDeps();
 		const { bash } = createSandboxTools(deps);
 		const p = bash.execute("call-5", { command: "echo hi" }, undefined, undefined, toolCtx());
-		process.nextTick(() => { child.stdout.write("hi"); child.emit("close", 0, undefined); });
+		// M4：exec 先 await cwd 预检才 spawn/挂监听——等 spawn（其后同步挂监听）再喂数据/关流。
+		await vi.waitFor(() => { expect(spawnFn).toHaveBeenCalled(); });
+		child.stdout.write("hi");
+		child.emit("close", 0, undefined);
 		await p;
 		expect(spawnFn).toHaveBeenCalledWith("bwrap", expect.arrayContaining(["--"]), expect.objectContaining({ cwd: ws }));
 	});

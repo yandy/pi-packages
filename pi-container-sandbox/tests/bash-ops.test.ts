@@ -1,6 +1,9 @@
 import { EventEmitter } from "node:events";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { createSandboxBashOps } from "../src/bash-ops";
 
 function fakeChild() {
@@ -16,11 +19,20 @@ function fakeChild() {
 	return child;
 }
 
-function settle(child: ReturnType<typeof fakeChild>, code: number | null) {
-	process.nextTick(() => child.emit("close", code, code === null ? "SIGKILL" : undefined));
+/** M4 后 exec 先 await cwd 预检才 spawn/挂监听——等到 close 监听就位再关，避免抢跑。 */
+async function settle(child: ReturnType<typeof fakeChild>, code: number | null) {
+	for (let i = 0; i < 1000 && child.listenerCount("close") === 0; i++) {
+		await new Promise((resolve) => setTimeout(resolve, 0));
+	}
+	child.emit("close", code, code === null ? "SIGKILL" : undefined);
 }
 
 const bwrapSelected = { selected: { runner: "bwrap" as const, enforcement: "full" as const } };
+
+// M4：exec 会预检 cwd 存在性——测试用的 exec cwd 必须是真实目录（workspaceRoot 仍可用虚构路径）。
+const cwd = mkdtempSync(join(tmpdir(), "bash-ops-cwd-"));
+
+afterAll(() => { rmSync(cwd, { recursive: true, force: true }); });
 
 afterEach(() => { vi.unstubAllEnvs(); });
 
@@ -29,17 +41,17 @@ describe("createSandboxBashOps", () => {
 		const child = fakeChild();
 		const spawnFn = vi.fn(() => child) as never;
 		const ops = createSandboxBashOps({ mode: "danger-full-access", workspaceRoot: "/ws", spawnFn });
-		const p = ops.exec("echo hi", "/ws", { onData: () => {} });
-		settle(child, 0);
+		const p = ops.exec("echo hi", cwd, { onData: () => {} });
+		await settle(child, 0);
 		await p;
-		expect(spawnFn).toHaveBeenCalledWith("bash", ["-c", "echo hi"], expect.objectContaining({ cwd: "/ws" }));
+		expect(spawnFn).toHaveBeenCalledWith("bash", ["-c", "echo hi"], expect.objectContaining({ cwd }));
 	});
 	it("workspace-write spawns the confined argv (bwrap profile + -- + bash)", async () => {
 		const child = fakeChild();
 		const spawnFn = vi.fn(() => child) as never;
 		const ops = createSandboxBashOps({ mode: "workspace-write", workspaceRoot: "/ws", spawnFn, ...bwrapSelected });
-		const p = ops.exec("true", "/ws", { onData: () => {} });
-		settle(child, 0);
+		const p = ops.exec("true", cwd, { onData: () => {} });
+		await settle(child, 0);
 		await p;
 		const [program, args] = spawnFn.mock.calls[0] as [string, string[]];
 		expect(program).toBe("bwrap");
@@ -51,7 +63,7 @@ describe("createSandboxBashOps", () => {
 		const ops = createSandboxBashOps({
 			mode: "read-only", workspaceRoot: "/ws", spawnFn, selected: { runner: "unavailable" },
 		});
-		await expect(ops.exec("true", "/ws", { onData: () => {} })).rejects.toThrow(/SANDBOX_UNAVAILABLE/);
+		await expect(ops.exec("true", cwd, { onData: () => {} })).rejects.toThrow(/SANDBOX_UNAVAILABLE/);
 		expect(spawnFn).not.toHaveBeenCalled();
 	});
 	it("env pins LC_MESSAGES=C, preserves LANG, removes LC_ALL (Review Focus #3 + Ruling 10)", async () => {
@@ -60,8 +72,8 @@ describe("createSandboxBashOps", () => {
 		const child = fakeChild();
 		const spawnFn = vi.fn(() => child) as never;
 		const ops = createSandboxBashOps({ mode: "workspace-write", workspaceRoot: "/ws", spawnFn, ...bwrapSelected });
-		const p = ops.exec("true", "/ws", { onData: () => {} });
-		settle(child, 0);
+		const p = ops.exec("true", cwd, { onData: () => {} });
+		await settle(child, 0);
 		await p;
 		const options = (spawnFn.mock.calls[0] as [string, string[], { env: NodeJS.ProcessEnv }])[2];
 		expect(options.env.LC_MESSAGES).toBe("C");
@@ -73,10 +85,10 @@ describe("createSandboxBashOps", () => {
 		const spawnFn = vi.fn(() => child) as never;
 		const ops = createSandboxBashOps({ mode: "danger-full-access", workspaceRoot: "/ws", spawnFn });
 		const chunks: Buffer[] = [];
-		const p = ops.exec("cmd", "/ws", { onData: (b) => chunks.push(b) });
+		const p = ops.exec("cmd", cwd, { onData: (b) => chunks.push(b) });
 		child.stdout.write("out");
 		child.stderr.write("err");
-		settle(child, 0);
+		await settle(child, 0);
 		await p;
 		expect(chunks.map((c) => c.toString()).join("")).toBe("outerr");
 	});
@@ -85,9 +97,9 @@ describe("createSandboxBashOps", () => {
 		const spawnFn = vi.fn(() => child) as never;
 		const ops = createSandboxBashOps({ mode: "workspace-write", workspaceRoot: "/ws", spawnFn, ...bwrapSelected });
 		const chunks: Buffer[] = [];
-		const p = ops.exec("touch /etc/x", "/ws", { onData: (b) => chunks.push(b) });
+		const p = ops.exec("touch /etc/x", cwd, { onData: (b) => chunks.push(b) });
 		child.stderr.write("touch: cannot touch '/etc/x': Read-only file system");
-		settle(child, 1);
+		await settle(child, 1);
 		const result = await p;
 		expect(result.exitCode).toBe(1);
 		const text = chunks.map((c) => c.toString()).join("");
@@ -102,9 +114,9 @@ describe("createSandboxBashOps", () => {
 			selected: { runner: "landlock", enforcement: "full" },
 			hooks: { launcherPath: () => "/opt/landlock-run" },
 		});
-		const p = ops.exec("true", "/ws", { onData: () => {} });
+		const p = ops.exec("true", cwd, { onData: () => {} });
 		child.stderr.write("landlock-run: ruleset creation failed");
-		settle(child, 125);
+		await settle(child, 125);
 		await expect(p).rejects.toThrow(/SANDBOX_UNAVAILABLE/);
 	});
 	it("timeout (seconds) kills the tree with SIGKILL and rejects timeout:N (I1: pi ops contract)", async () => {
@@ -112,15 +124,31 @@ describe("createSandboxBashOps", () => {
 		const spawnFn = vi.fn(() => child) as never;
 		const ops = createSandboxBashOps({ mode: "danger-full-access", workspaceRoot: "/ws", spawnFn });
 		// fake child 无 pid → killTree 回退 child.kill，SIGKILL 断言不破
-		await expect(ops.exec("sleep 100", "/ws", { onData: () => {}, timeout: 0.01 })).rejects.toThrow(/timeout:/);
+		await expect(ops.exec("sleep 100", cwd, { onData: () => {}, timeout: 0.01 })).rejects.toThrow(/timeout:/);
 		expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+	});
+	it("timeout <= 0 arms no timer (pi-local parity, Ruling 20)", async () => {
+		const child = fakeChild();
+		const spawnFn = vi.fn(() => child) as never;
+		const ops = createSandboxBashOps({ mode: "danger-full-access", workspaceRoot: "/ws", spawnFn });
+		const p = ops.exec("sleep 100", cwd, { onData: () => {}, timeout: 0 });
+		await vi.waitFor(() => { expect(spawnFn).toHaveBeenCalled(); });
+		// 守卫缺失时 0ms 定时器会在此窗口内 kill（close 走 null）→ reject timeout:0；
+		// 仅靠 settle 抢跑会先于已武装的定时器关流并被 cleanup 清掉，无法稳定检出回归。
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		await settle(child, 0);
+		const result = await p;
+		expect(result.exitCode).toBe(0);
+		expect(child.kill).not.toHaveBeenCalled();
 	});
 	it("abort signal kills the tree with SIGTERM and rejects \"aborted\" (I1: pi ops contract)", async () => {
 		const child = fakeChild();
 		const spawnFn = vi.fn(() => child) as never;
 		const ops = createSandboxBashOps({ mode: "danger-full-access", workspaceRoot: "/ws", spawnFn });
 		const ac = new AbortController();
-		const p = ops.exec("sleep 100", "/ws", { onData: () => {}, signal: ac.signal });
+		const p = ops.exec("sleep 100", cwd, { onData: () => {}, signal: ac.signal });
+		// M4 预检是 await——等 spawn（同步紧跟的 abort 监听已挂）再 abort，避免抢在监听前
+		await vi.waitFor(() => { expect(spawnFn).toHaveBeenCalled(); });
 		ac.abort();
 		await expect(p).rejects.toThrow(/aborted/);
 		expect(child.kill).toHaveBeenCalledWith("SIGTERM");
@@ -130,15 +158,15 @@ describe("createSandboxBashOps", () => {
 		const ops = createSandboxBashOps({ mode: "danger-full-access", workspaceRoot: "/ws", spawnFn });
 		const ac = new AbortController();
 		ac.abort();
-		await expect(ops.exec("true", "/ws", { onData: () => {}, signal: ac.signal })).rejects.toThrow(/aborted/);
+		await expect(ops.exec("true", cwd, { onData: () => {}, signal: ac.signal })).rejects.toThrow(/aborted/);
 		expect(spawnFn).not.toHaveBeenCalled();
 	});
 	it("external kill (no timer, no abort) still resolves {exitCode: null}", async () => {
 		const child = fakeChild();
 		const spawnFn = vi.fn(() => child) as never;
 		const ops = createSandboxBashOps({ mode: "danger-full-access", workspaceRoot: "/ws", spawnFn });
-		const p = ops.exec("sleep 100", "/ws", { onData: () => {} });
-		settle(child, null); // 直接触发 close(null)：既非超时也非 abort
+		const p = ops.exec("sleep 100", cwd, { onData: () => {} });
+		await settle(child, null); // 直接触发 close(null)：既非超时也非 abort
 		const result = await p;
 		expect(result.exitCode).toBeNull();
 	});
@@ -146,10 +174,16 @@ describe("createSandboxBashOps", () => {
 		const child = fakeChild();
 		const spawnFn = vi.fn(() => child) as never;
 		const ops = createSandboxBashOps({ mode: "danger-full-access", workspaceRoot: "/ws", spawnFn });
-		const p = ops.exec("true", "/ws", { onData: () => {} });
-		settle(child, 0);
+		const p = ops.exec("true", cwd, { onData: () => {} });
+		await settle(child, 0);
 		await p;
 		const options = (spawnFn.mock.calls[0] as [string, string[], { detached?: boolean }])[2];
 		expect(options.detached).toBe(true);
+	});
+	it("rejects with a friendly error when cwd does not exist (M4)", async () => {
+		const spawnFn = vi.fn(() => fakeChild()) as never;
+		const ops = createSandboxBashOps({ mode: "danger-full-access", workspaceRoot: "/ws", spawnFn });
+		await expect(ops.exec("true", "/nonexistent-sbx-dir-xyz", { onData: () => {} })).rejects.toThrow(/Working directory does not exist/);
+		expect(spawnFn).not.toHaveBeenCalled();
 	});
 });

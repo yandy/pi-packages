@@ -27,10 +27,12 @@ export default function (pi: ExtensionAPI) {
 			const effective = processPermissionState.override ?? cfg.mode;
 			const source = processPermissionState.override !== null ? "/permission override" : "config default";
 			let runnerText: string;
-			if (cfg.runnerCommand !== null && cfg.runnerCommand.length > 0) {
-				runnerText = `custom command (${cfg.runnerCommand.join(" ")})`;
-			} else if (effective === "danger-full-access") {
+			// Ruling 19：danger-full-access 首判——自定义 runner 已配置但模式为全放行时，
+			// runner 行必须显示 bypassed（runner 不参与该模式的执行）。
+			if (effective === "danger-full-access") {
 				runnerText = "bypassed (danger-full-access)";
+			} else if (cfg.runnerCommand !== null && cfg.runnerCommand.length > 0) {
+				runnerText = `custom command (${cfg.runnerCommand.join(" ")})`;
 			} else {
 				const selected = selectRunner(cfg.probeTimeoutMs);
 				runnerText = selected.runner === "unavailable"
