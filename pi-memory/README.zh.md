@@ -1,6 +1,6 @@
 # pi-memory
 
-基于文件系统的持久化记忆层，为 pi 编程代理提供跨会话的项目记忆。事实、偏好、调试历史等知识以纯 Markdown 文件形式存储在 `~/.pi/memory/<项目哈希>/` 下。
+基于文件系统的持久化记忆层，为 pi 编程代理提供跨会话的项目记忆。事实、偏好、调试历史等知识以纯 Markdown 文件形式存储在 `~/.pi/memory/<git|local>/<项目>/` 下。
 
 对齐 Claude Code 的 auto memory 机制：每 topic 一行的 MEMORY.md 紧凑索引、基于相关性的 topic 文件自动注入、per-turn 记忆自动提取、类型化记忆分类。
 
@@ -17,7 +17,7 @@
 - **梦醒提醒**：经过 N 个会话或 N 小时后，温和通知建议运行 `/dream`
 - **`/memory` 命令**：查看状态、开关记忆、检查索引和主题文件
 - **会话搜索**：`memory search scope=sessions` 操作可检索过往对话历史
-- **分支安全**：记忆目录以 git 根目录为键，分叉仓库自然共享记忆
+- **可读且分叉安全**：有 http(s)/ssh/git remote 的仓库记忆存放在 `~/.pi/memory/git/<host__owner__repo>/`，其余项目存放在 `~/.pi/memory/local/<绝对路径>/` — 同一仓库的 clone、fork、worktree 共享记忆
 - **路径穿越防护**：主题文件路径会验证是否逃逸记忆目录
 
 ## 安装
@@ -228,15 +228,27 @@ memory(action: "add" | "remove" | "search",
 
 ```
 ~/.pi/memory/
-  <12位sha256哈希>/
-    MEMORY.md            — 紧凑索引：每个 topic 文件一行
-    .dream-meta.json     — 上次整理的时间戳和会话计数
-    debugging.md         — topic 文件（frontmatter + ## 条目）
-    preferences.md
-    ...
+  git/
+    github.com__yandy__pi-packages/    ← https://github.com/yandy/pi-packages.git
+      MEMORY.md            — 紧凑索引：每个 topic 文件一行
+      .dream-meta.json     — 上次整理的时间戳和会话计数
+      debugging.md         — topic 文件（frontmatter + ## 条目）
+      preferences.md
+      ...
+  local/
+    home__yandy__workspace__scratch/   ← 非 git 目录 /home/yandy/workspace/scratch
 ```
 
-哈希值由项目的 git 根目录（或绝对路径）派生，每个项目拥有独立记忆命名空间。
+目录名的派生规则：
+
+- remote 为 http(s)、ssh（含 scp 式 `git@host:owner/repo`）或 `git://` 的 git 仓库 → `git/<host>__<owner>__<repo>`；端口、认证信息、尾部 `/` 与 `.git` 均被剥离，host 转小写
+- 其余情况 —— 非 git 目录、无 remote 的 git 仓库、`file://` 或本地路径 remote → `local/<绝对路径>`（git 仓库取仓库根目录）
+- `/` 转为 `__`；文件名不安全的字符（`<>:"|?*`、控制字符）转为 `_XX` 十六进制转义
+- 目录名超过 120 字符时截取前 100 字符并追加 `__<hash8>` 后缀
+
+该映射不是单射：下划线保持原样，因此 `/home/a__b` 与 `/home/a/b` 都会映射为 `home__a__b`（共享同一记忆目录）。修改或重命名 remote、移动本地目录都会改变记忆目录，旧目录将成为孤儿。
+
+**旧版布局**：早期版本把记忆存放在 `~/.pi/memory/<12位sha256>/` 下，这些目录不再被读取或写入。如需手动迁移，用 `printf '%s' "$(git rev-parse --show-toplevel)" | sha256sum | cut -c1-12` 计算旧哈希（非 git 项目改用 `$PWD`），把对应目录 `mv` 到新路径（在项目里执行 `/memory` 可查看新路径）。
 
 ## 快照语义
 

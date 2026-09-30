@@ -17,7 +17,7 @@ pi -e /path/to/pi-packages/pi-memory    # 临时加载
 记住这个项目的测试用 npm test 命令
 ```
 
-**验证**：查看 `~/.pi/memory/<hash>/MEMORY.md`，应该只有一行：
+**验证**：查看 `~/.pi/memory/local/tmp__mem-v3-test/MEMORY.md`（`/tmp/mem-v3-test` 是无 remote 的 git 仓库 → 走 `local/` + 仓库根路径），应该只有一行：
 
 ```
 - [builds](builds.md) — npm test

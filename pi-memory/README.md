@@ -1,6 +1,6 @@
 # pi-memory
 
-File-system driven persistent memory layer for pi coding agent. Stores project knowledge across sessions — facts, preferences, debugging history — in plain Markdown files under `~/.pi/memory/<project-hash>/`.
+File-system driven persistent memory layer for pi coding agent. Stores project knowledge across sessions — facts, preferences, debugging history — in plain Markdown files under `~/.pi/memory/<git|local>/<project>/`.
 
 Aligned with Claude Code's auto memory mechanism: per-topic MEMORY.md index, automatic topic file surfacing based on relevance, per-turn memory extraction, and typed memory categories.
 
@@ -17,7 +17,7 @@ Aligned with Claude Code's auto memory mechanism: per-topic MEMORY.md index, aut
 - **Dream nudge**: after N sessions or N hours, a gentle notification suggests running `/dream`
 - **`/memory` command**: show status, toggle on/off, inspect index and topic files
 - **Session search**: the `memory search scope=sessions` action queries past conversation history
-- **Branch-safe**: memory directory is keyed by the git root (or absolute path), so forks share memory naturally
+- **Readable, fork-safe layout**: memory lives under `~/.pi/memory/git/<host__owner__repo>/` for git repos with an http(s)/ssh/git remote, and `~/.pi/memory/local/<absolute-path>/` otherwise — clones, forks, and worktrees of the same repo share memory
 - **Path traversal protection**: topic files are validated against escaping the memory directory
 
 ## Install
@@ -230,15 +230,27 @@ A confirmation dialog is shown before the consolidation begins. The result summa
 
 ```
 ~/.pi/memory/
-  <12-char-sha256>/
-    MEMORY.md            — compact index: one line per topic file
-    .dream-meta.json     — last dream timestamp + session count
-    debugging.md         — topic files with frontmatter + ## entries
-    preferences.md
-    ...
+  git/
+    github.com__yandy__pi-packages/    ← https://github.com/yandy/pi-packages.git
+      MEMORY.md            — compact index: one line per topic file
+      .dream-meta.json     — last dream timestamp + session count
+      debugging.md         — topic files with frontmatter + ## entries
+      preferences.md
+      ...
+  local/
+    home__yandy__workspace__scratch/   ← non-git directory /home/yandy/workspace/scratch
 ```
 
-The hash is derived from the project's git root (or absolute path), ensuring each project gets its own memory namespace.
+Directory names are derived as follows:
+
+- git repos whose remote is http(s), ssh (including scp-style `git@host:owner/repo`) or `git://` → `git/<host>__<owner>__<repo>`; port, credentials, trailing `/` and `.git` are stripped and the host is lowercased
+- everything else — non-git directories, git repos without a remote, `file://` or local-path remotes → `local/<absolute-path>` (git repos use the repository root)
+- `/` becomes `__`; characters that are not portable in file names (`<>:"|?*`, control characters) become `_XX` hex escapes
+- names longer than 120 characters are truncated to 100 characters plus a `__<hash8>` suffix
+
+The mapping is not injective: underscores are kept as-is, so `/home/a__b` and `/home/a/b` both map to `home__a__b` (and share one memory directory). Changing or renaming a remote — or moving a local directory — changes the memory directory, orphaning the old one.
+
+**Legacy layout:** earlier versions stored memory under `~/.pi/memory/<12-char-sha256>/`; those directories are no longer read or written. To migrate a project manually, compute the old hash with `printf '%s' "$(git rev-parse --show-toplevel)" | sha256sum | cut -c1-12` (use `$PWD` outside a git repo), then `mv` that directory to the new location (run `/memory` inside the project to see the new path).
 
 ## Snapshot semantics
 
