@@ -1,9 +1,18 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getSandboxConfig } from "./src/config";
+import { getEscalationBroker } from "./src/escalation-broker";
 import { createPermissionCommand, processPermissionState } from "./src/permission";
 import { canonicalPath } from "./src/policy";
 import { selectRunner } from "./src/runners";
 import { createSandboxTools } from "./src/tools";
+
+/**
+ * pi-subagents 的子会话生命周期通道名（约定，非编译期契约；spec §4.1、§8）。
+ * 本包不 import pi-subagents——两包互不依赖，通道名在此独立声明；上游漂移的后果是
+ * link 缺失 → 子会话退回 fail-closed，失败方向安全。
+ */
+const SUBAGENT_CHILD_SESSION_CREATED = "subagents:child:session-created";
+const SUBAGENT_CHILD_DISPOSED = "subagents:child:disposed";
 
 export default function (pi: ExtensionAPI) {
 	const cwd = process.cwd();
@@ -46,4 +55,42 @@ export default function (pi: ExtensionAPI) {
 			].join("\n");
 		},
 	}));
+
+	// 提权审批转发（spec 2026-09-30 §4.5）：子会话 hasUI=false，其提权请求经 broker 路由到父会话弹窗。
+	// broker 挂 globalThis——父子是各自独立的 jiti 实例，模块单例不共享。
+	const broker = getEscalationBroker();
+	// 捕获本次 activate 注册的会话 id：session_shutdown 的 ctx 可能已 stale（pi 会对失效 ctx 抛错），
+	// 用捕获值注销更稳；factory 每会话重调，所以这个变量天然是会话级的。
+	let registeredSessionId: string | null = null;
+	pi.on("session_start", (_event, ctx) => {
+		if (!ctx.hasUI) return; // headless / 子会话：不是审批终点
+		let sessionId: string;
+		try {
+			sessionId = ctx.sessionManager.getSessionId();
+		} catch {
+			return; // 拿不到会话身份就不注册（严格 fail-closed，不猜）
+		}
+		registeredSessionId = sessionId;
+		broker.registerParent({
+			sessionId,
+			// hasUI 现查而非快照：注册后父会话可能因 reload / 会话替换失去 UI
+			hasUI: () => ctx.hasUI,
+			select: (title, options, opts) => ctx.ui.select(title, options, opts),
+		});
+	});
+	pi.on("session_shutdown", () => {
+		if (registeredSessionId === null) return;
+		broker.unregisterParent(registeredSessionId);
+		registeredSessionId = null;
+	});
+	pi.events.on(SUBAGENT_CHILD_SESSION_CREATED, (data) => {
+		const event = data as { sessionId?: unknown; parentSessionId?: unknown };
+		if (typeof event.sessionId !== "string") return; // 契约漂移 → 不 link → 子会话保持 fail-closed
+		broker.linkChild(event.sessionId, typeof event.parentSessionId === "string" ? event.parentSessionId : undefined);
+	});
+	pi.events.on(SUBAGENT_CHILD_DISPOSED, (data) => {
+		const event = data as { sessionId?: unknown };
+		if (typeof event.sessionId !== "string") return;
+		broker.unlinkChild(event.sessionId);
+	});
 }
