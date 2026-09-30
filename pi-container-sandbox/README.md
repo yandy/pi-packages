@@ -66,6 +66,7 @@ bash/write/edit take two optional parameters: `sandbox_permissions` (`workspace-
 
 - Confined processes can **read** everything you can read on the host (including `~/.ssh` and the like) — that is this sandbox's design semantics (same as the deepseek harness); root-only files stay protected by file permissions
 - Confined child processes force `LC_MESSAGES=C` (so denial diagnostics stay classifiable) and do not touch your `LANG`/`LC_CTYPE`
+- Confined bash runs in its own process group (detached): timeout/abort kills the whole group, but if pi itself is hard-killed (e.g. SIGKILL), background grandchildren spawned by the command may survive (pi's internal child-tracking API is not available to extensions)
 - The landlock fallback is partial enforcement on older kernel ABIs (the status output says so)
 
 ## Migrating from 1.x
