@@ -121,3 +121,92 @@ describe("resolveChannel（严格路由，spec §2 D3）", () => {
 		expect(broker.resolveChannel("child-1")).toBeNull();
 	});
 });
+
+describe("request（FIFO + abort，spec §4.6）", () => {
+	it("透传 title/options，返回用户选择；无 signal 时第三参为 undefined", async () => {
+		const broker = getEscalationBroker();
+		const { channel, select } = fakeChannel("parent-1");
+		await expect(broker.request(channel, "T", ["Allow once", "Deny"])).resolves.toBe("Allow once");
+		expect(select).toHaveBeenCalledWith("T", ["Allow once", "Deny"], undefined);
+	});
+
+	it("有 signal 时以 opts.signal 透传（父弹窗可被中断关闭）", async () => {
+		const broker = getEscalationBroker();
+		const ac = new AbortController();
+		let received: AbortSignal | undefined;
+		const select = vi.fn(async (_title: string, _options: string[], opts?: { signal?: AbortSignal }) => {
+			received = opts?.signal;
+			return "Deny";
+		});
+		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select };
+		await expect(broker.request(channel, "T", ["Allow once", "Deny"], ac.signal)).resolves.toBe("Deny");
+		expect(received).toBe(ac.signal);
+	});
+
+	it("FIFO：前一个 settle 前不弹第二个，结果不串（Review Focus #5）", async () => {
+		const broker = getEscalationBroker();
+		const titles: string[] = [];
+		const releases: ((value: string | undefined) => void)[] = [];
+		const select = vi.fn((title: string) => new Promise<string | undefined>((resolve) => {
+			titles.push(title);
+			releases.push(resolve);
+		}));
+		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select };
+		const first = broker.request(channel, "t1", ["Allow once", "Deny"]);
+		const second = broker.request(channel, "t2", ["Allow once", "Deny"]);
+		await vi.waitFor(() => expect(titles).toEqual(["t1"]));
+		releases[0]?.("Allow once");
+		await expect(first).resolves.toBe("Allow once");
+		await vi.waitFor(() => expect(titles).toEqual(["t1", "t2"]));
+		releases[1]?.("Deny");
+		await expect(second).resolves.toBe("Deny");
+	});
+
+	it("signal 已 abort → 不调 select，resolve undefined（Review Focus #2：不弹幽灵审批）", async () => {
+		const broker = getEscalationBroker();
+		const { channel, select } = fakeChannel("parent-1");
+		const ac = new AbortController();
+		ac.abort();
+		await expect(broker.request(channel, "T", ["Allow once"], ac.signal)).resolves.toBeUndefined();
+		expect(select).not.toHaveBeenCalled();
+	});
+
+	it("在飞时 abort → select 收到同一 signal，resolve undefined", async () => {
+		const broker = getEscalationBroker();
+		const ac = new AbortController();
+		let received: AbortSignal | undefined;
+		// 复刻 pi TUI 的真实行为：abort 时关闭弹窗并 resolve undefined
+		const select = vi.fn((_title: string, _options: string[], opts?: { signal?: AbortSignal }) =>
+			new Promise<string | undefined>((resolve) => {
+				received = opts?.signal;
+				opts?.signal?.addEventListener("abort", () => resolve(undefined), { once: true });
+			}));
+		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select };
+		const pending = broker.request(channel, "T", ["Allow once", "Deny"], ac.signal);
+		await vi.waitFor(() => expect(received).toBe(ac.signal));
+		ac.abort();
+		await expect(pending).resolves.toBeUndefined();
+	});
+
+	it("父侧 select 抛错 → resolve undefined（按取消处理，不冒泡打断子代理工具调用）", async () => {
+		const broker = getEscalationBroker();
+		const select = vi.fn(async () => {
+			throw new Error("ui exploded");
+		});
+		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select };
+		await expect(broker.request(channel, "T", ["Allow once"])).resolves.toBeUndefined();
+	});
+
+	it("前一个请求抛错不影响后续出队（Review Focus #5）", async () => {
+		const broker = getEscalationBroker();
+		let calls = 0;
+		const select = vi.fn(async () => {
+			calls += 1;
+			if (calls === 1) throw new Error("ui exploded");
+			return "Allow once";
+		});
+		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select };
+		await expect(broker.request(channel, "t1", ["Allow once"])).resolves.toBeUndefined();
+		await expect(broker.request(channel, "t2", ["Allow once"])).resolves.toBe("Allow once");
+	});
+});

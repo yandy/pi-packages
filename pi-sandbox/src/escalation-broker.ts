@@ -16,11 +16,14 @@ const BROKER_KEY = Symbol.for("@yandy0725/pi-sandbox:escalation-broker");
 /** 沿 link 向上查找祖先的深度上限：异常数据不得导致长链遍历或死循环。 */
 const MAX_ANCESTOR_DEPTH = 32;
 
+/** FIFO 链尾吞掉结算值：只为串行化，不关心结果。 */
+function noop(): void {}
+
 /**
  * 父会话注册的审批通道。
  * `hasUI` 是函数而非布尔快照：注册后父会话可能失去 UI（reload / 会话替换），每次解析都现查。
  * `opts.signal` 直通 pi 的 ExtensionUIDialogOptions.signal——子代理被中断时父弹窗被真正关闭，
- * 且已 abort 的请求根本不会弹窗（pi dist/modes/interactive/interactive-mode.js:2034-2059）。
+ * 且已 abort 的请求根本不会弹窗（宿主实现见 TUI 的 showExtensionSelector 与 RPC 模式的 createDialogPromise：二者都在 signal abort 时关闭弹窗并 resolve undefined；此处不引 dist 行号——本机 pi 0.99.1 与本仓 peer floor 0.80.2 的同一函数行号不同，行号引用跨版本即腐）。
  */
 export interface ParentApprovalChannel {
 	readonly sessionId: string;
@@ -52,6 +55,9 @@ class InProcessEscalationBroker implements EscalationBroker {
 	private readonly parents = new Map<string, ParentApprovalChannel>();
 	private readonly links = new Map<string, string>();
 
+	/** FIFO 链尾：每个请求串到它后面，保证父 TUI 一次只弹一个对话框（spec §4.6）。 */
+	private tail: Promise<unknown> = Promise.resolve();
+
 	registerParent(channel: ParentApprovalChannel): void {
 		if (!channel.sessionId) return;
 		this.parents.set(channel.sessionId, channel);
@@ -80,7 +86,7 @@ class InProcessEscalationBroker implements EscalationBroker {
 			const parentSessionId = this.links.get(current);
 			if (parentSessionId === undefined) return null; // 链路断：严格 fail-closed
 			const channel = this.parents.get(parentSessionId);
-			if (channel !== undefined && channel.hasUI()) return channel;
+			if (channel?.hasUI()) return channel;
 			current = parentSessionId; // 中间会话无通道（depth ≥ 2）：继续向上
 		}
 		return null;
@@ -92,8 +98,21 @@ class InProcessEscalationBroker implements EscalationBroker {
 		options: string[],
 		signal?: AbortSignal,
 	): Promise<string | undefined> {
-		// Task 1 只做到直通；FIFO 队列与 abort 语义由 Task 2 补齐。
-		return channel.select(title, options, signal === undefined ? undefined : { signal });
+		const run = async (): Promise<string | undefined> => {
+			// 排队期间已被中断：根本不弹窗，否则用户会看到没人接收结果的幽灵审批（Review Focus #2）。
+			if (signal?.aborted === true) return undefined;
+			try {
+				// 在飞时 abort 由 pi 的对话框自行关闭并 resolve undefined（opts.signal 已透传）。
+				return await channel.select(title, options, signal === undefined ? undefined : { signal });
+			} catch {
+				// 父侧 UI 异常按"取消"处理（fail-closed），不让异常冒泡打断子代理的工具调用。
+				return undefined;
+			}
+		};
+		// 前一个请求即使 reject 也要继续出队，否则队列会永久卡死。
+		const result = this.tail.then(run, run);
+		this.tail = result.then(noop, noop);
+		return result;
 	}
 }
 
