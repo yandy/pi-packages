@@ -167,7 +167,7 @@ bash / write / edit 各增加可选参数：
 ```
 （fs 工具的 subject 用 `operation`，bash 用 `command`。）
 
-### approveEscalation 校验顺序（执行前，全部 fail-closed）
+### approveEscalation 校验顺序（执行前；无可解析通道时全部 fail-closed）
 
 1. 配对校验：`sandbox_permissions` 与 `justification` 必须同时出现，justification 非空，否则 malformed 错误
 2. 目标 == effective mode → 免审批，按当前模式执行
@@ -216,7 +216,7 @@ bash / write / edit 各增加可选参数：
 - 逐调用派生：workspace root = canonicalPath(ctx.cwd ?? activate 时 cwd)；项目级配置按 ctx.cwd 惰性加载
 - 不再有任何模块级沙箱**会话实例**单例（1.x `session.ts` 的 `sandboxInstance` 模式废除——该禁令针对容器实例状态，不针对上述进程级覆盖/缓存单例）
 
-并行后台子会话各自 spawn 独立 bwrap/landlock/sandbox-exec 进程，无共享运行时、无容器名冲突。`sessionCreated` 事件在子会话 `bindExtensions()` 之前同步 emit，因此审批通道的 link 必然早于子会话第一次工具调用。
+并行后台子会话各自 spawn 独立 bwrap/landlock/sandbox-exec 进程，无共享运行时、无容器名冲突。`subagents:child:session-created` 事件（pi-subagents 经 `lifecycle.sessionCreated()` 发布）在子会话 `bindExtensions()` 之前同步 emit，因此审批通道的 link 必然早于子会话第一次工具调用。
 
 ## 10. 删除清单与新文件结构
 

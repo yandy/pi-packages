@@ -1,7 +1,7 @@
 # pi-sandbox：子代理提权审批转发（in-process broker）设计
 
 日期：2026-09-30
-状态：已与用户逐节确认（含追加决策 D6）；实施计划见 `../../plans/2026-09-30-escalation-approval-forwarding.md`
+状态：已与用户逐节确认（含追加决策 D6），已落地。实施计划是本仓 gitignore 的 scratch 文件（`pi-sandbox/docs/superpowers/plans/2026-09-30-escalation-approval-forwarding.md`），不入库；落地记录见 git history
 前置设计：`2026-09-29-process-sandbox-design.md`（§7 提权审批、§9 与 pi-subagents 的相容性）
 相关变更：`c62f0944`（PR #141，删除已 deprecated 的 `pi-permission-system`）
 
@@ -28,7 +28,7 @@
 | **D3** | **严格路由**：必须存在由 `subagents:child:session-created` 建立的 child→parent link，且沿 link 找到的祖先已注册通道且 `hasUI()` 为真；否则沿用现有 fail-closed 文案抛错。不做"进程内恰好只有一个交互会话就发给它"的启发式兜底 |
 | **D4** | 转发弹窗的文案**完全沿用**现有 escalation 标题与选项，**不加**任何子代理来源标识（不显示子 sessionId / agentName / cwd） |
 | **D5** | `/permission` 状态块**不加**转发通道诊断行（因此 broker 接口不含 `describe()`） |
-| **D6** | direct 与转发**两条路径都透传 `signal`**。转发路径必须透传（子代理已死时父弹窗要能自动关闭、排队中的请求不再弹出）；direct 路径的唯一可观察差异是——父 run 被**非 ESC 途径**中断（`ctx.abort()`、session 切换/reload）时弹窗自动关闭并记为 `was cancelled`（ESC 取消弹窗本来就能工作：弹窗抢焦点后 `escape` = `tui.select.cancel`）。仅在 `signal` 存在时传第三参，headless 行为逐字不变 |
+| **D6** | direct 与转发**两条路径都透传 `signal`**。转发路径必须透传（子代理已死时父弹窗要能自动关闭、排队中的请求不再弹出）；direct 路径的唯一可观察差异是——父 run 被**非 ESC 途径**中断（`ctx.abort()`、session 切换/reload）时弹窗自动关闭并记为 `was cancelled`（ESC 取消弹窗本来就能工作：弹窗抢焦点后 `escape` = `tui.select.cancel`）。第三参恒传，无 `signal` 时其值为 `undefined`（与省略在运行时不可区分：宿主签名为 `opts?`，dist 内无 `arguments.length` 判断），headless 行为逐字不变 |
 
 ## 3. 方案选择：为什么是内存 broker 而不是文件邮箱
 
@@ -147,23 +147,36 @@ interface ToolCtxLike {
 新增模块私有函数，替换 `resolveCallMode` 里现在直接读 `ctx.hasUI` / `ctx.ui.select` 的那一处（现 `:90`）。返回类型 `EscalationUI` 已由 `src/escalation.ts:50` 导出，`src/tools.ts:13` 的现有 import 追加 `type EscalationUI` 即可：
 
 ```ts
+/** 防御性读取子会话 id：缺失、非字符串或抛错都归为"无法路由"（fail-closed）。 */
+function readChildSessionId(ctx: ToolCtxLike): string | null {
+	try {
+		const sessionId = ctx.sessionManager?.getSessionId();
+		return typeof sessionId === "string" && sessionId.trim().length > 0 ? sessionId.trim() : null;
+	} catch {
+		return null;
+	}
+}
+
 /**
- * 审批通道解析：本会话有 UI 就直连；否则向 broker 要父通道（D1/D3）。
- * 解析不到时返回 `hasUI: false` 的哑通道，让 approveEscalation 抛出既有
- * fail-closed 文案——不新增错误分支，不改变校验顺序。
- * signal 两条路径都透传，使中断能关闭在飞的弹窗（D2）。
+ * 审批通道解析（spec 2026-09-30 §4.3）：本会话有 UI 就直连；否则向 broker 要父通道。
+ * 解析不到时返回 hasUI:false 的哑通道，让 approveEscalation 抛出既有 fail-closed 文案
+ * ——不新增错误分支、不改变校验顺序，escalation.ts 因此零改动。
+ * signal 两条路径都透传（D6）：中断既能关掉在飞的弹窗，也能让排队中的请求根本不弹。
  */
 function approvalChannelFor(ctx: ToolCtxLike, signal: AbortSignal | undefined): EscalationUI {
-	const opts = signal ? { signal } : undefined;
+	const opts = signal === undefined ? undefined : { signal };
 	if (ctx.hasUI) {
 		return { hasUI: true, select: (title, options) => ctx.ui.select(title, options, opts) };
 	}
-	const broker = getEscalationBroker();
-	const channel = broker.resolveChannel(ctx.sessionManager.getSessionId());
-	if (!channel) {
+	const childSessionId = readChildSessionId(ctx);
+	const channel = childSessionId === null ? null : getEscalationBroker().resolveChannel(childSessionId);
+	if (channel === null) {
 		return { hasUI: false, select: async () => undefined };
 	}
-	return { hasUI: true, select: (title, options) => broker.request(channel, title, options, signal) };
+	return {
+		hasUI: true,
+		select: (title, options) => getEscalationBroker().request(channel, title, options, signal),
+	};
 }
 ```
 
@@ -193,31 +206,67 @@ function approvalChannelFor(ctx: ToolCtxLike, signal: AbortSignal | undefined): 
 ### 4.5 `index.ts`：接线
 
 ```ts
-const broker = getEscalationBroker();
+/**
+ * pi-subagents 的子会话生命周期通道名（约定，非编译期契约；spec §4.1、§8）。
+ * 本包不 import pi-subagents——两包互不依赖，通道名在此独立声明；上游漂移的后果是
+ * link 缺失 → 子会话退回 fail-closed，失败方向安全。
+ */
+const SUBAGENT_CHILD_SESSION_CREATED = "subagents:child:session-created";
+const SUBAGENT_CHILD_DISPOSED = "subagents:child:disposed";
 
-// 父侧通道注册：只有具备对话框能力的会话才是审批终点（TUI 与 RPC 模式 hasUI 均为 true）。
+/**
+ * ctx 的每个成员都是取值器且先 assertActive()：会话替换 / reload 之后读取会抛
+ * "This extension ctx is stale…"。任何读取失败都按"无 UI"处理——严格 fail-closed，
+ * 绝不让宿主的内部报错冒泡成子代理工具调用的错误文本（spec §6）。
+ */
+function readHasUI(ctx: { hasUI: boolean }): boolean {
+	try {
+		return ctx.hasUI;
+	} catch {
+		return false;
+	}
+}
+
+// 提权审批转发（spec 2026-09-30 §4.5）：子会话 hasUI=false，其提权请求经 broker 路由到父会话弹窗。
+// broker 挂 globalThis——父子是各自独立的 jiti 实例，模块单例不共享。
+const broker = getEscalationBroker();
+// 捕获本次 activate 注册的会话 id：session_shutdown 的 ctx 可能已 stale（pi 会对失效 ctx 抛错），
+// 用捕获值注销更稳；factory 每会话重调，所以这个变量天然是会话级的。
+let registeredSessionId: string | null = null;
+// 宿主每次 /reload 都复用同一 event bus 并重新调用本 factory：不退订就会无上限累积监听器
+// （超过 Node 默认 maxListeners 后打印 MaxListenersExceededWarning 污染用户终端）。
+const unsubscribeCreated = pi.events.on(SUBAGENT_CHILD_SESSION_CREATED, (data) => {
+	const event = data as { sessionId?: unknown; parentSessionId?: unknown };
+	if (typeof event.sessionId !== "string") return; // 契约漂移 → 不 link → 子会话保持 fail-closed
+	broker.linkChild(event.sessionId, typeof event.parentSessionId === "string" ? event.parentSessionId : undefined);
+});
+const unsubscribeDisposed = pi.events.on(SUBAGENT_CHILD_DISPOSED, (data) => {
+	const event = data as { sessionId?: unknown };
+	if (typeof event.sessionId !== "string") return;
+	broker.unlinkChild(event.sessionId);
+});
 pi.on("session_start", (_event, ctx) => {
-	if (!ctx.hasUI) return;
-	const sessionId = ctx.sessionManager.getSessionId();
+	if (!readHasUI(ctx)) return; // headless / 子会话 / ctx 已失效：都不是审批终点
+	let sessionId: string;
+	try {
+		sessionId = ctx.sessionManager.getSessionId();
+	} catch {
+		return; // 拿不到会话身份就不注册（严格 fail-closed，不猜）
+	}
+	registeredSessionId = sessionId;
 	broker.registerParent({
 		sessionId,
-		hasUI: () => ctx.hasUI,
+		// hasUI 现查而非快照：注册后父会话可能因 reload / 会话替换失去 UI，或使 ctx 失效
+		hasUI: () => readHasUI(ctx),
 		select: (title, options, opts) => ctx.ui.select(title, options, opts),
 	});
 });
-pi.on("session_shutdown", (_event, ctx) => {
-	broker.unregisterParent(ctx.sessionManager.getSessionId());
-});
-
-// 通道名在本包内独立声明，不 import pi-subagents（避免运行时依赖；
-// 契约由 pi-subagents 的 tests/lifecycle/child-lifecycle.test.ts 钉住）。
-pi.events.on("subagents:child:session-created", (data) => {
-	const event = data as { sessionId: string; parentSessionId?: string };
-	broker.linkChild(event.sessionId, event.parentSessionId);
-});
-pi.events.on("subagents:child:disposed", (data) => {
-	const event = data as { sessionId: string };
-	broker.unlinkChild(event.sessionId);
+pi.on("session_shutdown", () => {
+	unsubscribeCreated();
+	unsubscribeDisposed();
+	if (registeredSessionId === null) return;
+	broker.unregisterParent(registeredSessionId);
+	registeredSessionId = null;
 });
 ```
 
@@ -296,11 +345,11 @@ abort 的两种时机：
 
 | 文件 | 改动 |
 |---|---|
-| 本文件 | 新增 |
-| `pi-sandbox/docs/superpowers/specs/2026-09-29-process-sandbox-design.md` §7 第 4 步 | 原文 "`ctx.hasUI === false` → 抛错 ... no approval channel is available" 补充：先经 broker 解析父通道，解析不到才抛该错 |
-| 同上 §9 | "子 agent 的 escalation 一律 fail-closed" 已不成立，改写为转发语义 + 保留 fail-closed 条件；"拒绝上报与解救路径"补一句转发失败时才走该路径 |
-| `pi-sandbox/README.zh.md:43` | "无 UI 通道（headless、后台 subagent）时提权一律拒绝（fail-closed）" → 改为"后台 subagent 的提权会转发到父会话弹窗（同进程 pi-subagents）；无父通道（headless、跨进程子代理）时仍一律拒绝（fail-closed）" |
-| `pi-sandbox/README.md:43` | 同上的英文版 |
+| 本文件 | 新增；落地后同步：状态行、§2 追加 D6、§4.3/§4.5 代码块改为落地代码的逐字副本、§4.5 追加"退订"段、§6 矩阵追加"父 ctx 已失效"一行、本清单 |
+| `2026-09-29-process-sandbox-design.md` §7 小节标题 | "（执行前，全部 fail-closed）" → "（执行前；无可解析通道时全部 fail-closed）"——第 4 步已改为转发语义，"全部"的无条件措辞不再成立 |
+| 同上 §7 第 4 步 | 原文 "`ctx.hasUI === false` → 抛错 ... no approval channel is available" 补充：先经 broker 严格解析父通道，解析到则转发到父会话弹窗（文案与选项完全一致、不加来源标识），解析不到才抛该错 |
+| 同上 §9（三处） | (1) "子 agent 的 escalation 一律 fail-closed" 改写为转发语义 + 保留 fail-closed 条件；(2) "拒绝上报与解救路径（无专用通道，走普通结果流）" → "（转发通道不可用时，走普通结果流）"；(3) 尾句删除对已删包 `pi-permission-system` 的引用，改为记录 `subagents:child:session-created` 的同步 emit 时序 |
+| `README.zh.md` / `README.md` 的提权审批一节 | "无 UI 通道（headless、后台 subagent）时提权一律拒绝" → "后台 subagent 的提权会转发到父会话弹窗（同进程 pi-subagents，且父会话需有 UI）；无父通道时（headless、跨进程子代理）仍一律拒绝（fail-closed），此时用 `/permission` 放宽进程档位解救"（双语语义对等） |
 | `/permission` 状态块 | **不改**（D5） |
 
 ## 11. 测试计划
