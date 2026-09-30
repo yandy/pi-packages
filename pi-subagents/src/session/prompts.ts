@@ -22,8 +22,8 @@ import type { AgentPromptConfig } from "../types";
  * - "append" with empty systemPrompt: pure parent clone.
  *
  * Both modes include an `<active_agent name="${config.name}"/>` tag so
- * downstream extensions (e.g. `@yandy0725/pi-permission-system`) can resolve
- * per-agent policy inside the child session by parsing the system prompt.
+ * downstream extensions can resolve per-agent policy inside the child session
+ * by parsing the system prompt.
  * The tag follows the cacheable parent prefix in both modes.
  *
  * @param parentSystemPrompt  The parent agent's effective system prompt.

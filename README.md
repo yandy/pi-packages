@@ -16,7 +16,6 @@ Monorepo for @yandy pi packages. Uses npm workspaces.
 | [pi-dingtalk](./pi-dingtalk) | DingTalk integration (AI table, calendar, approval, docs, etc.) | `@yandy0725/pi-dingtalk` |
 | [pi-lark](./pi-lark) | Lark/Feishu integration | `@yandy0725/pi-lark` |
 | [pi-memory](./pi-memory) | File-system driven persistent memory layer for pi coding agent | `@yandy0725/pi-memory` |
-| [pi-permission-system](./pi-permission-system) | Permission system for tool access control | `@yandy0725/pi-permission-system` |
 | [pi-sandbox](./pi-sandbox) | Process-level sandbox (bwrap/landlock/seatbelt): workspace writable, everything else readable, fail-closed | `@yandy0725/pi-sandbox` |
 | [pi-subagents](./pi-subagents) | In-process sub-agent core with background execution and typed API | `@yandy0725/pi-subagents` |
 | [pi-superpowers](./pi-superpowers) | Superpowers structured development workflows (brainstorming, TDD, debugging, etc.) | `@yandy0725/pi-superpowers` |
