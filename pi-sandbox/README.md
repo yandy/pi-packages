@@ -1,12 +1,12 @@
-# pi-container-sandbox
+# pi-sandbox
 
-pi coding-agent extension: confine agent file effects with a process-level sandbox — workspace writable, everything else readable (deepseek harness workspace-write semantics). No containers since 2.0.
+pi coding-agent extension: process-level sandbox (bwrap / landlock / seatbelt) — workspace writable, everything else readable, fail-closed.
 
 ## Install
 
 ```bash
 # From npm
-pi install npm:@yandy0725/pi-container-sandbox
+pi install npm:@yandy0725/pi-sandbox
 
 # Or from a local checkout
 pi install .
@@ -69,11 +69,11 @@ bash/write/edit take two optional parameters: `sandbox_permissions` (`workspace-
 - Confined bash runs in its own process group (detached): timeout/abort kills the whole group, but if pi itself is hard-killed (e.g. SIGKILL), background grandchildren spawned by the command may survive (pi's internal child-tracking API is not available to extensions)
 - The landlock fallback is partial enforcement on older kernel ABIs (the status output says so)
 
-## Migrating from 1.x
+## Migrating from pi-container-sandbox 1.x
 
-- The container runtime (docker/podman), image builds, the `runtime.mounts`/`image`/`host` config groups, the `/sandbox` command, `--container*` flags, and the external-path approval flow are all removed
-- Legacy `image`/`runtime`/`host` sections in `sandbox.json` are ignored with a warning; rewrite them as the new fields above as needed
-- If you need container-grade isolation (separate filesystem/network namespaces), stay on 1.x
+- Config files stay where they are (`~/.pi/agent/sandbox.json`, `<project>/.pi/sandbox.json`); legacy `image`/`runtime`/`host` sections are ignored with a warning — rewrite them as the new fields above as needed
+- The container runtime (docker/podman), image builds, `runtime.mounts`, the `/sandbox` command, `--container*` flags, and the external-path approval flow are not part of this package
+- Need container-grade isolation (separate filesystem/network namespaces)? Install `@yandy0725/pi-container-sandbox` — it keeps the container implementation
 
 ## Development
 

@@ -4,6 +4,8 @@
 状态：已与用户逐节确认
 前置研究：`.superpowers/refs/deepseek-harness/`（deepseek harness 源码，MIT/BSD-3）
 
+> **2026-09-30 落地修订**：本设计已落地为独立包 `@yandy0725/pi-sandbox@1.0.0`。§1 的两条打包决策——「保留包名 `@yandy0725/pi-container-sandbox`，发 2.0.0」与「用进程沙箱完全替换 pi-container-sandbox，不并存容器引擎」——已被推翻：`pi-container-sandbox` 恢复为容器实现（其 2.0.0 从未发布），两包并存。设计本体（三档模式、runner 链、fail-closed、提权审批、写围栏）与 Ruling 1–19 不变，编号亦不重排（`index.ts`、`src/config.ts`、`src/tools.ts` 的注释引用 spec §5 / §9 与 Ruling 10 / Ruling 19）。落地任务的 spec 见仓库根 `docs/superpowers/specs/2026-09-30-pi-sandbox-package-split-design.md`。
+
 ## 1. 背景与目标
 
 现有 pi-container-sandbox 用 podman/docker 容器承载工具执行：工作目录挂载为 `/workspace`（rw），目录外除非配置 mounts 否则完全不可感知，外部读取靠宿主侧审批流。问题：容器依赖重（镜像构建、引擎探测）、路径不透明（需要 path-translation / skill mounts / 审批流一整套机制）、外部文件默认可见性为零。

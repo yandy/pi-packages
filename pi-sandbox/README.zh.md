@@ -1,12 +1,12 @@
-# pi-container-sandbox
+# pi-sandbox
 
-pi coding-agent 扩展：用**进程级沙箱**约束 AI agent 的文件效果——默认**工作目录可写、其余宿主文件可读**（deepseek harness `workspace-write` 语义）。2.0 起不再使用容器。
+pi coding-agent 扩展：**进程级沙箱**（bwrap / landlock / seatbelt）——默认**工作目录可写、其余宿主文件可读**，fail-closed。
 
 ## 安装
 
 ```bash
 # 从 npm 安装
-pi install npm:@yandy0725/pi-container-sandbox
+pi install npm:@yandy0725/pi-sandbox
 
 # 或从本地仓库安装
 pi install .
@@ -69,11 +69,11 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 - 受限 bash 在独立进程组中运行（detached）：timeout/abort 会杀掉整个进程组；但若 pi 自身被硬杀（如 SIGKILL），命令派生的后台孙进程可能存活（pi 内部的子进程追踪 API 不对扩展开放）
 - landlock 回退在旧内核 ABI 上为 partial enforcement（状态里会标注）
 
-## 从 1.x 迁移
+## 从 pi-container-sandbox 1.x 迁移
 
-- 容器运行时（docker/podman）、镜像构建、`runtime.mounts`/`image`/`host` 配置组、`/sandbox` 命令、`--container*` flags、外部路径审批流全部移除
-- 旧 `sandbox.json` 的 `image`/`runtime`/`host` 段会被忽略并告警；按需改写上表新字段
-- 需要容器级强隔离（独立文件系统/网络命名空间）请停留在 1.x
+- 配置文件位置不变（`~/.pi/agent/sandbox.json`、`<project>/.pi/sandbox.json`）；旧 `image`/`runtime`/`host` 段会被忽略并告警，按需改写为上面的新字段
+- 容器运行时（docker/podman）、镜像构建、`runtime.mounts`、`/sandbox` 命令、`--container*` flags、外部路径审批流不属于本包
+- 需要容器级强隔离（独立文件系统/网络命名空间）请安装 `@yandy0725/pi-container-sandbox`（保留容器实现）
 
 ## 开发
 
