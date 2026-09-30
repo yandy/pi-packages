@@ -33,7 +33,8 @@
 	},
 	"peerDependencies": {
 		"@earendil-works/pi-coding-agent": ">=0.80.2",
-		"@earendil-works/pi-ai": ">=0.80.2"
+		"@earendil-works/pi-ai": ">=0.80.2",
+		"typebox": "*"
 	},
 	"dependencies": {
 		"@ast-grep/cli": "^0.45.3",
@@ -42,6 +43,7 @@
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.14",
 		"@types/node": "^26.6.2",
+		"typebox": "^1.3.34",
 		"typescript": "~7.0.2",
 		"vitest": "^5.0.1"
 	}

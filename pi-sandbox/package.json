@@ -33,16 +33,17 @@
 		]
 	},
 	"peerDependencies": {
-		"@earendil-works/pi-coding-agent": ">=0.80.2"
+		"@earendil-works/pi-coding-agent": ">=0.80.2",
+		"typebox": "*"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.14",
 		"@types/node": "^26.6.2",
+		"typebox": "^1.3.34",
 		"typescript": "~7.0.2",
 		"vitest": "^5.0.1"
 	},
 	"dependencies": {
-		"@deepseek-ai/node-addon-system": "^0.1.2",
-		"typebox": "1.1.38"
+		"@deepseek-ai/node-addon-system": "^0.1.2"
 	}
 }

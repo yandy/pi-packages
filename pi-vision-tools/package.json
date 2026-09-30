@@ -34,7 +34,8 @@
 	"peerDependencies": {
 		"@earendil-works/pi-ai": ">=0.80.2",
 		"@earendil-works/pi-coding-agent": ">=0.80.2",
-		"@earendil-works/pi-tui": ">=0.80.2"
+		"@earendil-works/pi-tui": ">=0.80.2",
+		"typebox": "*"
 	},
 	"optionalDependencies": {
 		"sharp": "^0.35.4"

@@ -365,6 +365,33 @@ Pure Skills 类型虽无测试脚本，仍需添加 filters 条目，否则 PR �
 | 外部工具库（如 `@ast-grep/cli`、`turndown`） | `dependencies` |
 | 第三方 CLI（如 `@larksuite/cli`） | `optional` peerDependencies |
 
+### 宿主提供包（host-provided packages）
+
+宿主在加载扩展时会把下列包的 import 映射到自己的副本：
+
+`@earendil-works/pi-agent-core`、`@earendil-works/pi-ai`、`@earendil-works/pi-coding-agent`、`@earendil-works/pi-tui`（以及 `@mariozechner/*` 历史别名）、`typebox`、`@sinclair/typebox`。
+
+因此这些包：
+
+- **不得写入 `dependencies`**。宿主加载扩展时会扫描扩展包 manifest，命中即告警：
+
+  ```
+  Host-provided extension packages must be declared in peerDependencies with a "*" range,
+  not dependencies: typebox. Installed copies can bypass the extension loader and create
+  duplicate runtime modules.
+  ```
+
+  安装的副本还会与宿主版本不一致（例如宿主用 1.3.x，扩展带 1.1.x），造成重复运行时模块；
+- 源码中 import 了就**必须声明在 `peerDependencies`**，由宿主提供实例；
+- 其中 `typebox` 系按宿主约定使用 `*` 范围，并在 `devDependencies` 固定具体版本供本地开发/测试（例如 `"typebox": "^1.3.34"`）；
+- pi 核心包（`@earendil-works/*`）的范围用最小宿主版本表达（当前 `>=0.80.2`），不要写成 `*`。
+
+一致性由 `npm run check:host-deps` 校验（CI 中执行）：
+
+- 任何 workspace 的 `dependencies` 含宿主提供包 → 失败；
+- 源码 import 了宿主提供包但未在 `peerDependencies` 声明 → 失败；
+- `typebox` 系的 `peerDependencies` 范围不是 `*` → 失败。
+
 ### 常用 peerDependencies
 
 | 包 | 用途 |
@@ -372,7 +399,7 @@ Pure Skills 类型虽无测试脚本，仍需添加 filters 条目，否则 PR �
 | `@earendil-works/pi-coding-agent` | ExtensionAPI、registerTool / hooks 等核心 API |
 | `@earendil-works/pi-tui` | TUI 组件（Container、Text、Markdown、Editor 等） |
 | `@earendil-works/pi-ai` | AI 相关工具（Type.Unsafe 等） |
-| `@sinclair/typebox` | 工具参数的 JSON Schema 定义 |
+| `typebox` / `@sinclair/typebox` | 工具参数的 JSON Schema 定义（`"*"`，宿主提供；子路径 `typebox/compile`、`typebox/value` 同样由宿主映射） |
 
 ### devDependencies
 
@@ -415,6 +442,7 @@ Pure Skills 无需 devDependencies。
 - [ ] `package.json` 字段完整（name、version、description、license、repository、type、files、scripts、pi、peerDependencies、devDependencies）
 - [ ] `files` 至少包含 `"index.ts"` 和 `"src/"`
 - [ ] `scripts` 包含 test / test:watch / typecheck / lint / format
+- [ ] `npm run check:dev-deps` 与 `npm run check:host-deps` 通过（依赖声明符合规范）
 - [ ] `tsconfig.json` 继承 `../tsconfig.base.json`
 - [ ] `vitest.config.ts` 已创建
 - [ ] `index.ts` 导出 `export default function(pi: ExtensionAPI)`
@@ -448,6 +476,7 @@ Pure Skills 无需 devDependencies。
 - [ ] `.github/workflows/test.yml` 的 `paths-filter` 是否涵盖所有 package
 - [ ] `npm run typecheck && npm run lint && npm test` 全部通过
 - [ ] `npm run check:dev-deps` 通过（devDependencies 与根 `package.json` 一致）
+- [ ] `npm run check:host-deps` 通过（宿主提供包未写入 `dependencies`，import 的宿主提供包已在 `peerDependencies` 声明）
 
 ### 常见重构项
 
@@ -459,4 +488,5 @@ Pure Skills 无需 devDependencies。
 | 新增 workspace | 根 `package.json` + CI + vitest 三处注册 |
 | 移除 package | 反向操作，同步清理上述四处注册 |
 | 修改 peerDependencies 版本下限 | 逐一修改各 package 的 `package.json` |
+| 新增对宿主提供包的 import | 在 `peerDependencies` 声明（`typebox` 系用 `*`），`devDependencies` 固定具体版本，`npm run check:host-deps` 校验 |
 | 统一 scripts | 确保所有 Extension 包有同样的 test / typecheck / lint / format 脚本名 |
