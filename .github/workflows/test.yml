@@ -34,8 +34,6 @@ jobs:
               - "pi-web-tools/**"
             pi-coding-tools:
               - "pi-coding-tools/**"
-            pi-permission-system:
-              - "pi-permission-system/**"
             pi-subagents:
               - "pi-subagents/**"
             pi-superpowers:

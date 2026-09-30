@@ -130,13 +130,6 @@ max_turns: 30
 | `subagents:settings_loaded` | 持久化设置已应用 |
 | `subagents:settings_changed` | 设置变更已生效 |
 
-## 权限系统集成
-
-当安装了 `@yandy0725/pi-permission-system` 时，本包自动集成：
-- 通过 YAML frontmatter 为各代理类型设置权限策略
-- Agent 启动前过滤工具
-- `ask` 状态从子代理转发到父级 UI
-
 ## 开发
 
 ```bash

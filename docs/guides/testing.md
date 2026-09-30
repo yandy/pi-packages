@@ -178,7 +178,7 @@ it("reads config from temp dir", async () => {
 |------|----------|
 | 文件系统隔离 + 路径注入 | `pi-vision-tools/tests/config.test.ts` |
 | 配置双向合并（global + project） | `pi-memory/tests/config.test.ts` |
-| 环境变量 stub + 文件系统隔离 | `pi-permission-system/tests/composition-root.test.ts` |
+| 环境变量 stub + 文件系统隔离 | `pi-sandbox/tests/index-smoke.test.ts` |
 | Mock `getAgentDir` + 完整 mock | `pi-coding-tools/tests/config.test.ts`、`pi-web-tools/tests/config.test.ts` |
 | `vi.stubEnv("PI_CODING_AGENT_DIR")` 隔离 getAgentDir + `mkdtempSync` 双目录（global/project）隔离 | `pi-sandbox/tests/config.test.ts` |
 | `vi.hoisted()` + `mkdtempSync` 解决 hoisting | `pi-container-sandbox/tests/config-global-merge.test.ts` |

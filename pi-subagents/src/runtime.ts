@@ -3,7 +3,6 @@
  *
  * Eliminates module-scope state in agent-runner.ts and closure-scoped state
  * in index.ts by consolidating them into a single, testable object.
- * Follows the same pattern as pi-permission-system's ExtensionRuntime.
  */
 
 import { buildParentSnapshot, type ParentSnapshot } from "./lifecycle/parent-snapshot";

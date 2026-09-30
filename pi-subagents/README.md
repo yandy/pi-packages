@@ -130,13 +130,6 @@ Lifecycle events emitted via `pi.events` for other extensions to consume:
 | `subagents:settings_loaded` | Persisted settings applied |
 | `subagents:settings_changed` | Settings mutation applied |
 
-## Permission System Integration
-
-When `@yandy0725/pi-permission-system` is installed, the package integrates automatically:
-- Per-agent permission policies via YAML frontmatter
-- Tool filtering before agent start
-- `ask`-state forwarding from child to parent UI
-
 ## Development
 
 ```bash
