@@ -40,7 +40,7 @@ Network is always allowed (no network isolation).
 
 ## Escalation approval (model-initiated)
 
-bash/write/edit take two optional parameters: `sandbox_permissions` (`workspace-write` or `danger-full-access`) + `justification` (a one-sentence reason). After an operation is denied by the sandbox, the model may retry the exact same call once with these two parameters, which opens an approval prompt (Allow once / Deny); approval applies to that one call only. With no UI channel (headless, background subagent), escalation is always refused (fail-closed).
+bash/write/edit take two optional parameters: `sandbox_permissions` (`workspace-write` or `danger-full-access`) + `justification` (a one-sentence reason). After an operation is denied by the sandbox, the model may retry the exact same call once with these two parameters, which opens an approval prompt (Allow once / Deny); approval applies to that one call only. A background subagent's escalation is forwarded to the parent session's prompt (in-process pi-subagents, and the parent must have UI); with no parent channel available (headless, cross-process subagents) escalation is always refused (fail-closed) — widen the process mode with `/permission` to unblock it.
 
 ## Configuration
 

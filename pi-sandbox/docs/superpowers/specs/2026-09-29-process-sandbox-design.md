@@ -174,7 +174,7 @@ bash / write / edit 各增加可选参数：
 3. 目标不在 `WIDER_MODES[effective]` 中（更窄或非法）→ 抛错 "not strictly wider than this call's current <mode> mode"
    - `WIDER_MODES = { 'read-only': ['workspace-write','danger-full-access'], 'workspace-write': ['danger-full-access'] }`
    - "严格更宽"对着**每次调用的 effective mode** 在执行期检查，不是 schema 约束（schema 是注册表全局的，effective mode 才是逐调用真相）
-4. `ctx.hasUI === false` → 抛错 "requires approval, but no approval channel is available"（**必须显式查 hasUI**：noOpUIContext.select 静默返回 undefined，不查会把"无通道"误判为"用户取消"）
+4. `ctx.hasUI === false` → 先经 escalation broker 严格解析父会话审批通道（见 `2026-09-30-escalation-approval-forwarding-design.md`）：解析到 → 转发到父会话弹窗（文案与选项完全一致，不加来源标识）；解析不到 → 抛错 "requires approval, but no approval channel is available"（**必须显式查 hasUI**：noOpUIContext.select 静默返回 undefined，不查会把"无通道"误判为"用户取消"）
 5. `ctx.ui.select`，标题含：目标模式 + justification 原文 + 命令/路径摘要；选项 `允许一次` / `拒绝`
 6. 结果：`允许一次` → 仅该次调用以更宽模式执行（不持久、不影响会话/进程状态）；`拒绝` → 抛错 "the user rejected escalating this <subject> to <mode>; it stays denied, so stop and explain instead of working around it"；select 返回 undefined → 按取消抛错
 
@@ -197,9 +197,9 @@ bash / write / edit 各增加可选参数：
 
 - 子会话**总是加载父会话全部扩展**（`bindExtensions({})`），递归守卫只剔除 subagent 派发工具 → 沙箱 wrapper 自动覆盖子 agent 的 bash/write/edit
 - 子会话可有独立 cwd → workspace root 按**各会话自己的 cwd** 派生（extension activate 闭包状态），与 deepseek "从调用会话的不可变 cwd 派生" 一致
-- `bindExtensions({})` 不传 uiContext → 子会话 `hasUI === false`、`ctx.ui.select` 为 noOp（返回 undefined）→ **子 agent 的 escalation 一律 fail-closed**（§7 第 4 步），错误文本指示模型 "stop and explain"
+- `bindExtensions({})` 不传 uiContext → 子会话 `hasUI === false`、`ctx.ui.select` 为 noOp（返回 undefined）→ 子 agent 的 escalation 经 **escalation broker** 转发到父会话弹窗（`2026-09-30-escalation-approval-forwarding-design.md`）；无父通道时（跨进程子代理、headless 父会话、link 缺失）仍 **fail-closed**（§7 第 4 步），错误文本指示模型 "stop and explain"
 
-**拒绝上报与解救路径**（无专用通道，走普通结果流）：
+**拒绝上报与解救路径**（转发通道不可用时，走普通结果流）：
 
 ```
 子会话工具被拒（含 escalation unavailable）→ error result 进入子会话历史
@@ -216,7 +216,7 @@ bash / write / edit 各增加可选参数：
 - 逐调用派生：workspace root = canonicalPath(ctx.cwd ?? activate 时 cwd)；项目级配置按 ctx.cwd 惰性加载
 - 不再有任何模块级沙箱**会话实例**单例（1.x `session.ts` 的 `sandboxInstance` 模式废除——该禁令针对容器实例状态，不针对上述进程级覆盖/缓存单例）
 
-并行后台子会话各自 spawn 独立 bwrap/landlock/sandbox-exec 进程，无共享运行时、无容器名冲突。与 pi-permission-system 无命令名冲突（对方注册 `/permission-system`），`sessionCreated` 时序不受影响。
+并行后台子会话各自 spawn 独立 bwrap/landlock/sandbox-exec 进程，无共享运行时、无容器名冲突。`sessionCreated` 事件在子会话 `bindExtensions()` 之前同步 emit，因此审批通道的 link 必然早于子会话第一次工具调用。
 
 ## 10. 删除清单与新文件结构
 

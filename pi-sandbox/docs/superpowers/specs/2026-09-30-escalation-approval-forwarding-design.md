@@ -1,7 +1,7 @@
 # pi-sandbox：子代理提权审批转发（in-process broker）设计
 
 日期：2026-09-30
-状态：待用户审阅
+状态：已与用户逐节确认（含追加决策 D6）；实施计划见 `../../plans/2026-09-30-escalation-approval-forwarding.md`
 前置设计：`2026-09-29-process-sandbox-design.md`（§7 提权审批、§9 与 pi-subagents 的相容性）
 相关变更：`c62f0944`（PR #141，删除已 deprecated 的 `pi-permission-system`）
 
@@ -28,6 +28,7 @@
 | **D3** | **严格路由**：必须存在由 `subagents:child:session-created` 建立的 child→parent link，且沿 link 找到的祖先已注册通道且 `hasUI()` 为真；否则沿用现有 fail-closed 文案抛错。不做"进程内恰好只有一个交互会话就发给它"的启发式兜底 |
 | **D4** | 转发弹窗的文案**完全沿用**现有 escalation 标题与选项，**不加**任何子代理来源标识（不显示子 sessionId / agentName / cwd） |
 | **D5** | `/permission` 状态块**不加**转发通道诊断行（因此 broker 接口不含 `describe()`） |
+| **D6** | direct 与转发**两条路径都透传 `signal`**。转发路径必须透传（子代理已死时父弹窗要能自动关闭、排队中的请求不再弹出）；direct 路径的唯一可观察差异是——父 run 被**非 ESC 途径**中断（`ctx.abort()`、session 切换/reload）时弹窗自动关闭并记为 `was cancelled`（ESC 取消弹窗本来就能工作：弹窗抢焦点后 `escape` = `tui.select.cancel`）。仅在 `signal` 存在时传第三参，headless 行为逐字不变 |
 
 ## 3. 方案选择：为什么是内存 broker 而不是文件邮箱
 
@@ -222,6 +223,8 @@ pi.events.on("subagents:child:disposed", (data) => {
 
 时序保证：事件由**父实例**的 `pi.events.emit` 发出，且在子会话 `bindExtensions()` 之前**同步** emit（`create-subagent-session.ts:219-228`），因此 link 必然早于子会话的第一次工具调用；`disposed` 在 run 的 `finally` 必发，link 不会泄漏。
 
+退订：两个 `pi.events.on` 的 disposer 存入 activate 闭包，并在 `session_shutdown` 里调用——宿主每次 `/reload` 复用同一 event bus 且重新调用扩展 factory，不退订会无上限累积监听器（超过 Node 默认 `maxListeners` 后打印 `MaxListenersExceededWarning` 污染用户终端）。
+
 ### 4.6 FIFO 与并发
 
 多个子代理（或同一子代理的多个工具调用）并发提权时，`request` 串到模块级 promise 链尾，父 TUI **一次只弹一个**对话框；前一个 settle（选择/取消/abort）后才弹下一个。
@@ -256,6 +259,7 @@ abort 的两种时机：
 | ctx 上没有 `sessionManager`（窄测试 ctx / 异常宿主） | `readChildSessionId → null` → 同上（不得抛 TypeError） |
 | 有 link 但父未注册（父 headless、父已 `session_shutdown`） | 同上 |
 | 有 link、父已注册但 `hasUI()` 现为 false | 继续向上找祖先；找不到 → 同上 |
+| 父 ctx 已失效（会话替换 / reload 后宿主 `assertActive()` 抛错） | `index.ts` 的 `readHasUI()` 捕获 → 视为无 UI → 继续向上找祖先；找不到 → 同上（绝不让宿主内部报错冒泡成子代理的工具调用错误） |
 | depth ≥ 2 | 沿 link 向上找第一个「已注册且 hasUI」的祖先 |
 | link 数据成环 | visited 集合截断 → `null` → 同上 |
 | 用户 ESC（父中断 → 子 signal abort，D2） | `request` resolve(undefined) → 抛 `was cancelled` |

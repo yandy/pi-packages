@@ -40,7 +40,7 @@ bash 命令被包装进平台沙箱 runner 后在本地 spawn（**路径透明**
 
 ## 提权审批（模型发起）
 
-bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write` 或 `danger-full-access`）+ `justification`（一句话理由）。操作被沙箱拒绝后，模型可带这两个参数原样重试一次，会弹出审批（Allow once / Deny）；批准只对那一次调用生效。无 UI 通道（headless、后台 subagent）时提权一律拒绝（fail-closed）。
+bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write` 或 `danger-full-access`）+ `justification`（一句话理由）。操作被沙箱拒绝后，模型可带这两个参数原样重试一次，会弹出审批（Allow once / Deny）；批准只对那一次调用生效。后台 subagent 的提权会转发到父会话弹窗（同进程 pi-subagents，且父会话需有 UI）；无父通道时（headless、跨进程子代理）提权一律拒绝（fail-closed），此时用 `/permission` 放宽进程档位解救。
 
 ## 配置
 
