@@ -10,7 +10,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { createSandboxBashOps, type SpawnFn } from "./bash-ops";
 import { getSandboxConfig, type SandboxConfig } from "./config";
-import { approveEscalation, sandboxPermissionsDescription, validateEscalationArgs } from "./escalation";
+import { approveEscalation, type EscalationUI, sandboxPermissionsDescription, validateEscalationArgs } from "./escalation";
+import { getEscalationBroker } from "./escalation-broker";
 import { assertWriteAllowed, type FencePolicy } from "./fence";
 import type { PermissionState } from "./permission";
 import { canonicalPath, resolveEffectiveMode, type SandboxMode } from "./policy";
@@ -61,7 +62,42 @@ interface EscalationParams {
 interface ToolCtxLike {
 	hasUI: boolean;
 	cwd?: string;
-	ui: { select(title: string, options: string[]): Promise<string | undefined> };
+	ui: { select(title: string, options: string[], opts?: { signal?: AbortSignal }): Promise<string | undefined> };
+	/** 子会话身份来源。可选：既有测试的窄 ctx 与异常宿主都可能没有它，
+	 *  缺失时按"无法路由"fail-closed，绝不得抛 TypeError（Review Focus #1）。 */
+	sessionManager?: { getSessionId(): string };
+}
+
+/** 防御性读取子会话 id：缺失、非字符串或抛错都归为"无法路由"（fail-closed）。 */
+function readChildSessionId(ctx: ToolCtxLike): string | null {
+	try {
+		const sessionId = ctx.sessionManager?.getSessionId();
+		return typeof sessionId === "string" && sessionId.trim().length > 0 ? sessionId.trim() : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * 审批通道解析（spec 2026-09-30 §4.3）：本会话有 UI 就直连；否则向 broker 要父通道。
+ * 解析不到时返回 hasUI:false 的哑通道，让 approveEscalation 抛出既有 fail-closed 文案
+ * ——不新增错误分支、不改变校验顺序，escalation.ts 因此零改动。
+ * signal 两条路径都透传（D6）：中断既能关掉在飞的弹窗，也能让排队中的请求根本不弹。
+ */
+function approvalChannelFor(ctx: ToolCtxLike, signal: AbortSignal | undefined): EscalationUI {
+	const opts = signal === undefined ? undefined : { signal };
+	if (ctx.hasUI) {
+		return { hasUI: true, select: (title, options) => ctx.ui.select(title, options, opts) };
+	}
+	const childSessionId = readChildSessionId(ctx);
+	const channel = childSessionId === null ? null : getEscalationBroker().resolveChannel(childSessionId);
+	if (channel === null) {
+		return { hasUI: false, select: async () => undefined };
+	}
+	return {
+		hasUI: true,
+		select: (title, options) => getEscalationBroker().request(channel, title, options, signal),
+	};
 }
 
 /**
@@ -74,6 +110,7 @@ export async function resolveCallMode(
 	deps: SandboxToolDeps,
 	subject: "command" | "operation",
 	summary: () => string,
+	signal?: AbortSignal,
 ): Promise<SandboxMode> {
 	validateEscalationArgs(params.sandbox_permissions, params.justification);
 	const config = configForCall(deps, ctx.cwd ?? deps.cwd);
@@ -87,7 +124,7 @@ export async function resolveCallMode(
 			subject,
 			summary: summary().slice(0, 200),
 		},
-		{ hasUI: ctx.hasUI, select: (title, options) => ctx.ui.select(title, options) },
+		approvalChannelFor(ctx, signal),
 	);
 }
 
@@ -159,7 +196,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;
 			const workspaceRoot = workspaceRootFor(sessionCwd);
 			const config = configForCall(deps, sessionCwd);
-			const mode = await resolveCallMode(params as EscalationParams, ctx, deps, "command", () => String(params.command ?? ""));
+			const mode = await resolveCallMode(params as EscalationParams, ctx, deps, "command", () => String(params.command ?? ""), signal);
 			// M3：配置了自定义 runnerCommand 时跳过链探测（confine 直接用 runnerCommand）。
 			const selected = mode === "danger-full-access" || (config.runnerCommand?.length ?? 0) > 0
 				? undefined
@@ -189,7 +226,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
 			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;
 			const workspaceRoot = workspaceRootFor(sessionCwd);
-			const mode = await resolveCallMode(params as EscalationParams, ctx, deps, "operation", () => String(params.path ?? ""));
+			const mode = await resolveCallMode(params as EscalationParams, ctx, deps, "operation", () => String(params.path ?? ""), signal);
 			// fence 拒绝不捕获：FenceDenialError 从 ops 抛出、经 pi execute 原样上抛
 			//（withFileMutationQueue 不吞错）——pi 的 agent 循环会转成 error result。
 			const tool = createWriteToolDefinition(sessionCwd, { operations: createFencedWriteOps({ mode, workspaceRoot, _tmpRoots: deps._tmpRoots }) });
@@ -206,7 +243,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
 			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;
 			const workspaceRoot = workspaceRootFor(sessionCwd);
-			const mode = await resolveCallMode(params as EscalationParams, ctx, deps, "operation", () => String(params.path ?? ""));
+			const mode = await resolveCallMode(params as EscalationParams, ctx, deps, "operation", () => String(params.path ?? ""), signal);
 			const tool = createEditToolDefinition(sessionCwd, { operations: createFencedEditOps({ mode, workspaceRoot, _tmpRoots: deps._tmpRoots }) });
 			return tool.execute(toolCallId, stripEscalation(params) as never, signal, onUpdate as never, ctx);
 		},

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSandboxTools, resolveCallMode } from "../src/tools";
 import { createPermissionState } from "../src/permission";
 import { DEFAULT_SANDBOX_CONFIG } from "../src/config";
+import { getEscalationBroker, resetEscalationBrokerForTests } from "../src/escalation-broker";
 
 let dir: string;
 let ws: string;
@@ -56,7 +57,7 @@ beforeEach(() => {
 	fakeTmpDir = realpathSync.native(join(dir, "fake-tmp"));
 	outsideDir = realpathSync.native(join(dir, "outside"));
 });
-afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => { resetEscalationBrokerForTests(); rmSync(dir, { recursive: true, force: true }); });
 
 describe("createSandboxTools schemas", () => {
 	it("bash keeps command/timeout and gains the escalation pair", () => {
@@ -221,5 +222,116 @@ describe("bash tool wiring", () => {
 		child.emit("close", 0, undefined);
 		await p;
 		expect(spawnFn).toHaveBeenCalledWith("bwrap", expect.arrayContaining(["--"]), expect.objectContaining({ cwd: ws }));
+	});
+});
+
+describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
+	/** 子会话 ctx：hasUI=false，select 一旦被本地调用就响亮失败（审批必须走父通道）。 */
+	function subagentCtx(sessionId: string) {
+		return {
+			hasUI: false,
+			sessionManager: { getSessionId: () => sessionId },
+			ui: {
+				select: vi.fn(async () => {
+					throw new Error("child session must not prompt locally");
+				}),
+			},
+		} as never;
+	}
+
+	function registerParent(sessionId: string, choice: string | undefined = "Allow once") {
+		const select = vi.fn(async () => choice);
+		getEscalationBroker().registerParent({ sessionId, hasUI: () => true, select });
+		return select;
+	}
+
+	it("子会话 + 已注册父通道 → 走父 select，返回批准的 mode 且不动进程档位", async () => {
+		const { deps } = makeDeps();
+		const parentSelect = registerParent("parent-1");
+		getEscalationBroker().linkChild("child-1", "parent-1");
+		const mode = await resolveCallMode(
+			{ sandbox_permissions: "danger-full-access", justification: "need /etc write" },
+			subagentCtx("child-1"),
+			deps, "command", () => "cat /etc/shadow",
+		);
+		expect(mode).toBe("danger-full-access");
+		expect(parentSelect).toHaveBeenCalledTimes(1);
+		expect(parentSelect.mock.calls[0][1]).toEqual(["Allow once", "Deny"]);
+		// D4：标题文案与 direct 路径完全一致（含 justification 与摘要），不含任何子代理标识
+		const title = parentSelect.mock.calls[0][0] as string;
+		expect(title).toContain("need /etc write");
+		expect(title).toContain("cat /etc/shadow");
+		expect(title).not.toContain("child-1");
+		expect(deps.permission.override).toBeNull();
+	});
+
+	it("子会话父侧 Deny → 沿用既有拒绝文案", async () => {
+		const { deps } = makeDeps();
+		registerParent("parent-2", "Deny");
+		getEscalationBroker().linkChild("child-2", "parent-2");
+		await expect(resolveCallMode(
+			{ sandbox_permissions: "danger-full-access", justification: "j" },
+			subagentCtx("child-2"),
+			deps, "command", () => "x",
+		)).rejects.toThrow(/rejected escalating this command to "danger-full-access".*stop and explain/s);
+	});
+
+	it("无 link 的子会话 → fail-closed（Review Focus #4）", async () => {
+		const { deps } = makeDeps();
+		registerParent("parent-3");
+		await expect(resolveCallMode(
+			{ sandbox_permissions: "danger-full-access", justification: "j" },
+			subagentCtx("orphan"),
+			deps, "command", () => "x",
+		)).rejects.toThrow(/no approval channel is available/);
+	});
+
+	it("ctx 无 sessionManager → fail-closed，不抛 TypeError（Review Focus #1）", async () => {
+		const { deps } = makeDeps();
+		registerParent("parent-4");
+		getEscalationBroker().linkChild("child-4", "parent-4");
+		// toolCtx(false) 是既有判例用的窄 ctx：没有 sessionManager
+		await expect(resolveCallMode(
+			{ sandbox_permissions: "danger-full-access", justification: "j" },
+			toolCtx(false),
+			deps, "command", () => "x",
+		)).rejects.toThrow(/no approval channel is available/);
+	});
+
+	it("子会话 signal 已 abort → 不弹窗，按取消抛错（Review Focus #2）", async () => {
+		const { deps } = makeDeps();
+		const parentSelect = registerParent("parent-5");
+		getEscalationBroker().linkChild("child-5", "parent-5");
+		const ac = new AbortController();
+		ac.abort();
+		await expect(resolveCallMode(
+			{ sandbox_permissions: "danger-full-access", justification: "j" },
+			subagentCtx("child-5"),
+			deps, "command", () => "x", ac.signal,
+		)).rejects.toThrow(/cancelled/);
+		expect(parentSelect).not.toHaveBeenCalled();
+	});
+
+	it("direct 路径透传 signal（D6）", async () => {
+		const { deps } = makeDeps();
+		const ctx = toolCtx(true, "Allow once") as { ui: { select: ReturnType<typeof vi.fn> } };
+		const ac = new AbortController();
+		await resolveCallMode(
+			{ sandbox_permissions: "danger-full-access", justification: "j" },
+			ctx as never,
+			deps, "command", () => "x", ac.signal,
+		);
+		expect(ctx.ui.select.mock.calls[0][2]).toEqual({ signal: ac.signal });
+	});
+
+	it("direct 路径无 signal → 第三参为 undefined（headless 行为逐字不变，D6）", async () => {
+		const { deps } = makeDeps();
+		const ctx = toolCtx(true, "Allow once") as { ui: { select: ReturnType<typeof vi.fn> } };
+		await resolveCallMode(
+			{ sandbox_permissions: "danger-full-access", justification: "j" },
+			ctx as never,
+			deps, "command", () => "x",
+		);
+		expect(ctx.ui.select.mock.calls[0][2]).toBeUndefined();
 	});
 });
