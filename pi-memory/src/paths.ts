@@ -18,6 +18,7 @@ async function gitToplevel(cwd: string): Promise<string | null> {
 const DIR_NAME_MAX = 120;
 const DIR_NAME_KEEP = 100;
 const HASH_LENGTH = 8;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: intentionally matching C0 control characters for path escaping
 const ILLEGAL_SEGMENT_CHARS = /[<>:"|?*\x00-\x1f]/g;
 
 /** Escape characters that are unsafe in a single filesystem path segment. */
