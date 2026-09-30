@@ -74,6 +74,7 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 - 配置文件位置不变（`~/.pi/agent/sandbox.json`、`<project>/.pi/sandbox.json`）；旧 `image`/`runtime`/`host` 段会被忽略并告警，按需改写为上面的新字段
 - 容器运行时（docker/podman）、镜像构建、`runtime.mounts`、`/sandbox` 命令、`--container*` flags、外部路径审批流不属于本包
 - 需要容器级强隔离（独立文件系统/网络命名空间）请安装 `@yandy0725/pi-container-sandbox`（保留容器实现）
+- `pi-sandbox` 与 `@yandy0725/pi-container-sandbox` **互斥**：两者都接管 `bash`/`write`/`edit`，且共用同一个 `sandbox.json`（schema 不兼容）——同一时刻只启用一个，切换前先卸载或停用另一个
 
 ## 开发
 

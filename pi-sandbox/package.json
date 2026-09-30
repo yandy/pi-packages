@@ -12,7 +12,9 @@
 		"directory": "pi-sandbox"
 	},
 	"type": "module",
-	"keywords": ["pi-package"],
+	"keywords": [
+		"pi-package"
+	],
 	"files": [
 		"index.ts",
 		"src/"

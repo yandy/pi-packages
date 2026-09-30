@@ -52,7 +52,7 @@ PR #136（提交 `7083d0d`）把 `pi-container-sandbox` 的 2.0 实现整体换�
 ```
 git mv pi-container-sandbox pi-sandbox          # 新实现整棵树搬到新包名（git 识别 rename，--follow 可追溯）
 git checkout 98d1536 -- pi-container-sandbox    # 容器实现整棵树回到原路径
-rm -r pi-sandbox/docs/superpowers/specs/        # 见下方「spec 归属」：13 份容器期 spec 随 mv 误入新包，必须移除
+rm -f pi-sandbox/docs/superpowers/specs/2026-0[678]-*.md   # 见下方「spec 归属」：13 份容器期 spec 随 mv 误入新包，必须移除（保留 2026-09-29-process-sandbox-design.md）
 ```
 
 **spec 归属（易错点）**：`git mv` 搬的是整棵树，旧包的 13 份容器期 spec 会被一并搬进 `pi-sandbox/`。它们描述的是容器架构（镜像构建、mounts、path-translation、podman 支持……），与 `pi-sandbox` 无关，且已被 `git checkout 98d1536 -- pi-container-sandbox` 恢复到旧包，因此必须从新包删除。新包最终**只保留 1 份 spec**：`2026-09-29-process-sandbox-design.md`。
@@ -70,7 +70,7 @@ rm -r pi-sandbox/docs/superpowers/specs/        # 见下方「spec 归属」：1
 | 文件 | 改动 |
 |---|---|
 | `package.json` | `name` → `@yandy0725/pi-sandbox`；`version` → `1.0.0`；`repository.directory` → `"pi-sandbox"`；`description` 去掉容器语义 → `pi coding-agent extension: process-level sandbox (bwrap / landlock / seatbelt) — workspace writable, everything else readable, fail-closed`；新增 `keywords: ["pi-package"]`（`pi-package-spec.md` 要求项，原包一直缺失）；`files`、`deps`（`@deepseek-ai/node-addon-system@^0.1.2`、`typebox@1.1.38`）、`peerDependencies`、`scripts`、`pi` 字段不变 |
-| `README.md` / `README.zh.md` | 标题、`pi install` 命令、自引用改为 `pi-sandbox`；删除 "No containers since 2.0" / "2.0 起不再使用容器" 这类相对旧包的措辞；「Migrating from 1.x」改写为「从 `@yandy0725/pi-container-sandbox@1.x`（容器实现）迁移到本包」，结尾 "If you need container-grade isolation, stay on 1.x" 改为指向已恢复容器实现的 `pi-container-sandbox` |
+| `README.md` / `README.zh.md` | 标题、`pi install` 命令、自引用改为 `pi-sandbox`；删除 "No containers since 2.0" / "2.0 起不再使用容器" 这类相对旧包的措辞；「Migrating from 1.x」改写为「从 `@yandy0725/pi-container-sandbox@1.x`（容器实现）迁移到本包」，结尾 "If you need container-grade isolation, stay on 1.x" 改为指向已恢复容器实现的 `pi-container-sandbox`；并在迁移节补一条与 `pi-container-sandbox` 的互斥说明（两包都接管 `bash`/`write`/`edit` 且共用 `sandbox.json`，schema 不同） |
 | `docs/superpowers/specs/2026-09-29-process-sandbox-design.md` | 随实现迁到本包；文首加「2026-09-30 落地修订」段：设计本体（沙箱机制与 Ruling 1–19）不变，但原文 §1 的两条打包决策（"保留包名 `@yandy0725/pi-container-sandbox`，发 2.0.0"、"完全替换 pi-container-sandbox，不并存容器引擎"）已被 D1/D5 取代。**Ruling 与 §编号不重编**（`index.ts`、`src/tools.ts`、`src/config.ts` 等源码注释引用 spec §5 / §9 / Ruling 10 / Ruling 19） |
 | `docs/superpowers/specs/` 下 13 份容器期 spec | **删除**（随 `git mv` 误入新包；见 §3「spec 归属」） |
 

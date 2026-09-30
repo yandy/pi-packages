@@ -74,6 +74,7 @@ bash/write/edit take two optional parameters: `sandbox_permissions` (`workspace-
 - Config files stay where they are (`~/.pi/agent/sandbox.json`, `<project>/.pi/sandbox.json`); legacy `image`/`runtime`/`host` sections are ignored with a warning — rewrite them as the new fields above as needed
 - The container runtime (docker/podman), image builds, `runtime.mounts`, the `/sandbox` command, `--container*` flags, and the external-path approval flow are not part of this package
 - Need container-grade isolation (separate filesystem/network namespaces)? Install `@yandy0725/pi-container-sandbox` — it keeps the container implementation
+- `pi-sandbox` and `@yandy0725/pi-container-sandbox` are **mutually exclusive**: both take over `bash`/`write`/`edit` and both read the same `sandbox.json` (with incompatible schemas) — enable only one at a time, and uninstall or disable the other before switching
 
 ## Development
 
