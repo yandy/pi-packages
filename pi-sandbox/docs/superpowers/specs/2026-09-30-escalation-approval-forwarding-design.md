@@ -135,7 +135,9 @@ interface ToolCtxLike {
 	hasUI: boolean;
 	cwd?: string;
 	ui: { select(title: string, options: string[], opts?: { signal?: AbortSignal }): Promise<string | undefined> };
-	sessionManager: { getSessionId(): string };
+	/** 可选：现有 `tests/tools.test.ts` 的窄 ctx（`toolCtx(false)`）就不带它，异常宿主也可能缺；
+	 *  缺失时经 `readChildSessionId()` 归为"无法路由" → fail-closed，绝不得抛 TypeError。 */
+	sessionManager?: { getSessionId(): string };
 }
 ```
 
@@ -251,6 +253,7 @@ abort 的两种时机：
 |---|---|
 | 子会话 `hasUI === true`（未来 pi-subagents 给子会话接入 uiContext） | 走原 direct 路径，不经 broker，行为自动恢复 |
 | 无 link（非 pi-subagents 子代理 / 事件缺失 / 版本漂移） | `resolveChannel → null` → 哑通道 → 抛 `no approval channel is available` |
+| ctx 上没有 `sessionManager`（窄测试 ctx / 异常宿主） | `readChildSessionId → null` → 同上（不得抛 TypeError） |
 | 有 link 但父未注册（父 headless、父已 `session_shutdown`） | 同上 |
 | 有 link、父已注册但 `hasUI()` 现为 false | 继续向上找祖先；找不到 → 同上 |
 | depth ≥ 2 | 沿 link 向上找第一个「已注册且 hasUI」的祖先 |
