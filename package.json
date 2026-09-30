@@ -12,6 +12,7 @@
 		"pi-lark",
 		"pi-dingtalk",
 		"pi-permission-system",
+		"pi-sandbox",
 		"pi-subagents",
 		"pi-superpowers"
 	],
