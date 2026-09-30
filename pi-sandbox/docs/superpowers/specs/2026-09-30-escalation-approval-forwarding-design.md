@@ -198,7 +198,7 @@ function approvalChannelFor(ctx: ToolCtxLike, signal: AbortSignal | undefined): 
 
 **为什么两条路径都透传 signal（用户已确认）**：
 
-- **转发路径（必须）**：子代理可能在用户没碰弹窗的情况下就死了——请求还在 FIFO 里排队时子代理已被中断（父 ESC → `abortAll()` → 子 `session.abort()`）、子代理撞 max-turns 硬 abort、后台任务被丢弃。透传 signal 后：已 abort 的请求**根本不会弹窗**（`interactive-mode.js:2036-2039`），在飞的弹窗会被自动关闭——避免弹出一个没人接收结果的窗（用户点了 `Allow once` 也白点）。
+- **转发路径（必须）**：子代理可能在用户没碰弹窗的情况下就死了——请求还在 FIFO 里排队时子代理已被中断（父 ESC → `abortAll()` → 子 `session.abort()`）、子代理撞 max-turns 硬 abort、后台任务被丢弃。透传 signal 后：已 abort 的请求**根本不会弹窗**（宿主 `showExtensionSelector` 在弹窗前先检查 `signal.aborted`），在飞的弹窗会被自动关闭——避免弹出一个没人接收结果的窗（用户点了 `Allow once` 也白点）。
 - **direct 路径（一致性）**：注意弹窗抢焦点后 ESC 已经能取消它（§4.1），所以这里唯一的可观察差异是：当父 run 被**非 ESC 途径**中断（`ctx.abort()`、session 切换/reload）时，弹窗自动关闭并落进现有 `was cancelled` 分支，而不是留在屏幕上。收益小、风险也小，且与转发路径共用同一段代码（不必在 `approvalChannelFor` 里分叉）。
 - 两条路径都恒传第三参 `opts`（无 `signal` 时其值为 `undefined`，与省略在运行时不可区分：宿主签名为 `opts?`，dist 内无 `arguments.length` 判断），headless 行为逐字不变。
 
@@ -269,6 +269,10 @@ pi.on("session_start", (_event, ctx) => {
 	} catch {
 		return; // 拿不到会话身份就不注册（严格 fail-closed，不猜）
 	}
+	if (registeredSessionId !== null && registeredSessionId !== sessionId) {
+		// 同一 activate 内二次 session_start 且换了会话：先摘掉旧通道，避免残留在注册表里
+		broker.unregisterParent(registeredSessionId);
+	}
 	registeredSessionId = sessionId;
 	broker.registerParent({
 		sessionId,
@@ -319,7 +323,7 @@ abort 的两种时机：
 
 | 情况 | 行为 |
 |---|---|
-| 子会话 `hasUI === true`（未来 pi-subagents 给子会话接入 uiContext） | 走原 direct 路径，不经 broker，行为自动恢复 |
+| 子会话 `hasUI === true`（未来 pi-subagents 给子会话接入 uiContext） | 不再需要转发：走 direct 分支——该会话自己注册了通道就经 FIFO 车道，未注册则回落直连（Ruling 17），行为自动恢复 |
 | 无 link（非 pi-subagents 子代理 / 事件缺失 / 版本漂移） | `resolveChannel → null` → 哑通道 → 抛 `no approval channel is available` |
 | ctx 上没有 `sessionManager`（窄测试 ctx / 异常宿主） | `readSessionId → null` → 同上（不得抛 TypeError） |
 | 有 link 但父未注册（父 headless、父已 `session_shutdown`） | 同上 |
@@ -350,7 +354,7 @@ abort 的两种时机：
 
 **D1（不做跨进程）的后果**：使用进程型子代理扩展（如 nicobailon/pi-subagents、HazAT/pi-interactive-subagents）时，子代理提权仍 fail-closed，解救路径与今天一致（`/permission` + `steer_subagent`）。
 
-**D2（无固定超时）的后果**：若父用户长期不理会弹窗，该子代理的这次工具调用会一直挂着，直到用户 ESC（弹窗抢焦点，ESC = `tui.select.cancel`，直接取消）、子代理被中断（signal 关弹窗）、或父会话关闭。可接受的依据：这与父会话自己提权时用户不理会弹窗的行为完全一致，且中断链路已存在（§4.1）。pi 的 `ExtensionUIDialogOptions.timeout`（types.d.ts:43-44）能做自动消失倒计时，但按 D2 **不使用**。
+**D2（无固定超时）的后果**：若父用户长期不理会弹窗，该子代理的这次工具调用会一直挂着，直到用户 ESC（弹窗抢焦点，ESC = `tui.select.cancel`，直接取消）、子代理被中断（signal 关弹窗）、或父会话关闭。可接受的依据：这与父会话自己提权时用户不理会弹窗的行为完全一致，且中断链路已存在（§4.1）。pi 的 `ExtensionUIDialogOptions.timeout` 能做自动消失倒计时，但按 D2 **不使用**。
 
 **依赖 pi-subagents 的事件契约（非稳定 API）**：`subagents:child:session-created` / `:disposed` 的通道名与载荷形状是约定而非编译期契约（两包刻意不相互依赖）。上游改名或改形状的后果是**退回今天的 fail-closed 行为**（link 缺失 → 抛错），不会造成误放行——失败方向安全。契约当前由 `pi-subagents/tests/lifecycle/child-lifecycle.test.ts` 钉住。
 
@@ -359,7 +363,7 @@ abort 的两种时机：
 ## 9. 未来扩展点
 
 - **跨进程转发**：若将来需要，新增一个 mailbox 实现即可——`resolveChannel` 的第二来源（env `PI_SUBAGENT_PARENT_SESSION`）+ `request` 的第二实现（文件邮箱 + 轮询）。`EscalationUI` seam（`{ hasUI, select }`）与 `escalation.ts` 均不必改。
-- **子会话接入 uiContext**：pi-subagents 若将来给子会话传 uiContext，direct 路径自动恢复（现有设计已保证，无需改本包代码）。
+- **子会话接入 uiContext**：pi-subagents 若将来给子会话传 uiContext，子会话即走 direct 分支（自己注册了通道就经 FIFO 车道，未注册则直连），无需改本包代码。
 
 ## 10. 文档改动清单
 
