@@ -49,7 +49,8 @@ gh release create pi-<name>-v<新版本号> --target $COMMIT \
 
 ## 注意事项
 
-- `npm version --workspace` 在 monorepo 中不会自动 commit/tag（已用 `--no-git-tag-version`），需手动提交
+- `npm version --workspace` 在 monorepo 中不会自动 commit/tag（已用 `--no-git-tag-version`），需手动提交；但它**会**自动同步根 `package-lock.json` 的 workspace 条目
+- **直接编辑**任何 workspace 包的 `package.json`（`version` 字段或依赖）时——无论发布流程还是功能分支——必须在**仓库根目录**重跑 `npm install --package-lock-only` 并连同 lock 一起提交。CI 的 `lockfile-sync` job 会执行同命令并要求 lock 零 diff，否则失败；包级门禁（`npm test` / `typecheck` / `check-dev-deps`）均不检查根 lock 同步，本地全绿不代表 CI 绿（实例：#136 的 2.0.0 cutover 直接改版本号漏同步，lockfile-sync 失败）
 - 必须同时 add `package.json` 和 `package-lock.json`
 - `gh release create` 会自动创建对应名称的 git tag，**无需手动 `git tag`**
 - `--target` 指定 tag 指向的 commit，确保 tag 落在版本升级的那个 commit 上
