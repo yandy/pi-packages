@@ -210,3 +210,59 @@ describe("request（FIFO + abort，spec §4.6）", () => {
 		await expect(broker.request(channel, "t2", ["Allow once"])).resolves.toBe("Allow once");
 	});
 });
+
+describe("resolveOwnChannel（本会话自己的通道，Ruling 17）", () => {
+	it("已注册且 hasUI() 为真 → 返回自己", () => {
+		const broker = getEscalationBroker();
+		const { channel } = fakeChannel("self");
+		broker.registerParent(channel);
+		expect(broker.resolveOwnChannel("self")).toBe(channel);
+	});
+
+	it("未注册 → null", () => {
+		expect(getEscalationBroker().resolveOwnChannel("nobody")).toBeNull();
+	});
+
+	it("已注册但 hasUI() 为假 → null", () => {
+		const broker = getEscalationBroker();
+		const { channel } = fakeChannel("self", false);
+		broker.registerParent(channel);
+		expect(broker.resolveOwnChannel("self")).toBeNull();
+	});
+
+	it("hasUI() 抛错 → null，不冒泡（fail-closed，Minor 4）", () => {
+		const broker = getEscalationBroker();
+		broker.registerParent({
+			sessionId: "boom",
+			hasUI: () => {
+				throw new Error("This extension ctx is stale");
+			},
+			select: async () => undefined,
+		});
+		broker.linkChild("c", "boom");
+		expect(broker.resolveChannel("c")).toBeNull();
+		expect(broker.resolveOwnChannel("boom")).toBeNull();
+	});
+
+	it("不走 link：本会话即使有 link 也只按 sessionId 命中自己", () => {
+		const broker = getEscalationBroker();
+		const { channel: parent } = fakeChannel("parent");
+		broker.registerParent(parent);
+		broker.linkChild("self", "parent");
+		expect(broker.resolveOwnChannel("self")).toBeNull();
+		expect(broker.resolveChannel("self")).toBe(parent);
+	});
+});
+
+describe("request 的\"从不 reject\"契约（病态输入，Minor 5）", () => {
+	it("signal 的 aborted getter 抛错 → resolve undefined，不 reject", async () => {
+		const broker = getEscalationBroker();
+		const { channel } = fakeChannel("p");
+		const hostile = {
+			get aborted(): boolean {
+				throw new Error("hostile signal");
+			},
+		} as AbortSignal;
+		await expect(broker.request(channel, "T", ["Allow once"], hostile)).resolves.toBeUndefined();
+	});
+});

@@ -36,11 +36,11 @@ Network is always allowed (no network isolation).
 ## /permission command
 
 - `/permission` — show the current status (mode and source, selected runner and enforcement, workspace)
-- `/permission <read-only|workspace-write|danger-full-access>` — switch mode, **process-wide**: the next tool call in the parent session and in every subagent child session adopts it immediately
+- `/permission <read-only|workspace-write|danger-full-access>` — switch mode, **process-wide**: the next tool call in the parent session and in every subagent child session adopts it immediately (known limitation: when a child session's cwd differs from the parent's, the host's extension-module cache is keyed by cwd and re-imports the extension, so the override may not reach that child)
 
 ## Escalation approval (model-initiated)
 
-bash/write/edit take two optional parameters: `sandbox_permissions` (`workspace-write` or `danger-full-access`) + `justification` (a one-sentence reason). After an operation is denied by the sandbox, the model may retry the exact same call once with these two parameters, which opens an approval prompt (Allow once / Deny); approval applies to that one call only. A background subagent's escalation is forwarded to the parent session's prompt (in-process pi-subagents, and the parent must have UI); with no parent channel available (headless, cross-process subagents) escalation is always refused (fail-closed) — widen the process mode with `/permission` to unblock it.
+bash/write/edit take two optional parameters: `sandbox_permissions` (`workspace-write` or `danger-full-access`) + `justification` (a one-sentence reason). After an operation is denied by the sandbox, the model may retry the exact same call once with these two parameters, which opens an approval prompt (Allow once / Deny); approval applies to that one call only. A subagent child session's escalation (foreground or background) is forwarded to the parent session's prompt (in-process pi-subagents, and the parent must have UI); with no parent channel available (headless, cross-process subagents) escalation is always refused (fail-closed) — widen the process mode with `/permission` to unblock it.
 
 ## Configuration
 

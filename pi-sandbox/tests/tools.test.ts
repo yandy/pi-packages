@@ -334,4 +334,84 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 		);
 		expect(ctx.ui.select.mock.calls[0][2]).toBeUndefined();
 	});
+
+	it("direct 路径也排进 FIFO 车道：本会话已注册通道时经 broker.request（Ruling 17）", async () => {
+		const { deps } = makeDeps();
+		const ownSelect = vi.fn(async () => "Allow once");
+		getEscalationBroker().registerParent({ sessionId: "self", hasUI: () => true, select: ownSelect });
+		const ctx = {
+			hasUI: true,
+			sessionManager: { getSessionId: () => "self" },
+			ui: {
+				select: vi.fn(async () => {
+					throw new Error("must go through the broker lane");
+				}),
+			},
+		} as never;
+		const mode = await resolveCallMode(
+			{ sandbox_permissions: "danger-full-access", justification: "j" },
+			ctx, deps, "command", () => "x",
+		);
+		expect(mode).toBe("danger-full-access");
+		expect(ownSelect).toHaveBeenCalledTimes(1);
+	});
+
+	it("hasUI 但本会话未注册通道 → 回落直连 ctx.ui.select（行为与改动前一致）", async () => {
+		const { deps } = makeDeps();
+		const select = vi.fn(async () => "Allow once");
+		const ctx = { hasUI: true, sessionManager: { getSessionId: () => "unregistered" }, ui: { select } } as never;
+		const mode = await resolveCallMode(
+			{ sandbox_permissions: "danger-full-access", justification: "j" },
+			ctx, deps, "command", () => "x",
+		);
+		expect(mode).toBe("danger-full-access");
+		expect(select).toHaveBeenCalledTimes(1);
+	});
+
+	it("execute 层透传 signal：已 abort → 不弹窗、按取消抛错（bash，Important #2）", async () => {
+		const { deps } = makeDeps();
+		const parentSelect = registerParent("parent-e1");
+		getEscalationBroker().linkChild("child-e1", "parent-e1");
+		const { bash } = createSandboxTools(deps);
+		const ac = new AbortController();
+		ac.abort();
+		await expect(bash.execute("call-e1", {
+			command: "touch ./x",
+			sandbox_permissions: "danger-full-access",
+			justification: "probe",
+		}, ac.signal, undefined, subagentCtx("child-e1"))).rejects.toThrow(/cancelled/);
+		expect(parentSelect).not.toHaveBeenCalled();
+	});
+
+	it("execute 层透传 signal：已 abort → 不弹窗（write，Important #2）", async () => {
+		const { deps } = makeDeps();
+		const parentSelect = registerParent("parent-e2");
+		getEscalationBroker().linkChild("child-e2", "parent-e2");
+		const { write } = createSandboxTools(deps);
+		const ac = new AbortController();
+		ac.abort();
+		await expect(write.execute("call-e2", {
+			path: join(outsideDir, `e2-${process.pid}-${Date.now()}.txt`),
+			content: "x",
+			sandbox_permissions: "danger-full-access",
+			justification: "probe",
+		}, ac.signal, undefined, subagentCtx("child-e2"))).rejects.toThrow(/cancelled/);
+		expect(parentSelect).not.toHaveBeenCalled();
+	});
+
+	it("execute 层透传 signal：已 abort → 不弹窗（edit，Important #2）", async () => {
+		const { deps } = makeDeps();
+		const parentSelect = registerParent("parent-e3");
+		getEscalationBroker().linkChild("child-e3", "parent-e3");
+		const { edit } = createSandboxTools(deps);
+		const ac = new AbortController();
+		ac.abort();
+		await expect(edit.execute("call-e3", {
+			path: join(outsideDir, `e3-${process.pid}-${Date.now()}.txt`),
+			edits: [{ oldText: "x", newText: "y" }],
+			sandbox_permissions: "danger-full-access",
+			justification: "probe",
+		}, ac.signal, undefined, subagentCtx("child-e3"))).rejects.toThrow(/cancelled/);
+		expect(parentSelect).not.toHaveBeenCalled();
+	});
 });

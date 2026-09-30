@@ -201,6 +201,9 @@ describe("escalation approval forwarding wiring (spec 2026-09-30 §4.5)", () => 
 		// 上游契约漂移（缺字段 / 类型错）→ 不 link、不抛错，子会话保持 fail-closed
 		expect(() => channels["subagents:child:session-created"]?.({})).not.toThrow();
 		expect(() => channels["subagents:child:session-created"]?.({ sessionId: 42, parentSessionId: "p" })).not.toThrow();
+		// 数字载荷被 typeof 守卫拦下：既没建立 link，也没污染后续合法 link（正对照）
+		channels["subagents:child:session-created"]?.({ sessionId: "c2", parentSessionId: "p" });
+		expect(broker.resolveChannel("c2")).not.toBeNull();
 		expect(broker.resolveChannel("42")).toBeNull();
 	});
 

@@ -36,11 +36,11 @@ bash 命令被包装进平台沙箱 runner 后在本地 spawn（**路径透明**
 ## /permission 命令
 
 - `/permission` —— 显示当前状态（模式及来源、选中 runner 与 enforcement、工作区）
-- `/permission <read-only|workspace-write|danger-full-access>` —— 切换模式，**进程级**生效：父会话与所有 subagent 子会话的下一次工具调用立即采用
+- `/permission <read-only|workspace-write|danger-full-access>` —— 切换模式，**进程级**生效：父会话与所有 subagent 子会话的下一次工具调用立即采用（已知限制：子会话 cwd 与父不同时，宿主的扩展模块缓存会按 cwd 失效并重新导入，覆盖可能不及于该子会话）
 
 ## 提权审批（模型发起）
 
-bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write` 或 `danger-full-access`）+ `justification`（一句话理由）。操作被沙箱拒绝后，模型可带这两个参数原样重试一次，会弹出审批（Allow once / Deny）；批准只对那一次调用生效。后台 subagent 的提权会转发到父会话弹窗（同进程 pi-subagents，且父会话需有 UI）；无父通道时（headless、跨进程子代理）提权一律拒绝（fail-closed），此时用 `/permission` 放宽进程档位解救。
+bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write` 或 `danger-full-access`）+ `justification`（一句话理由）。操作被沙箱拒绝后，模型可带这两个参数原样重试一次，会弹出审批（Allow once / Deny）；批准只对那一次调用生效。subagent 子会话（前台与后台都算）的提权会转发到父会话弹窗（同进程 pi-subagents，且父会话需有 UI）；无父通道时（headless、跨进程子代理）提权一律拒绝（fail-closed），此时用 `/permission` 放宽进程档位解救。
 
 ## 配置
 

@@ -20,10 +20,24 @@ const MAX_ANCESTOR_DEPTH = 32;
 function noop(): void {}
 
 /**
+ * 通道实现的 `hasUI()` 可能抛错（宿主 stale ctx 的 `assertActive()`、或同进程其他扩展注册的
+ * 敌对实现）——一律按"无 UI"处理：fail-closed 路径上绝不冒泡异常（spec §6）。
+ */
+function hasUIOf(channel: ParentApprovalChannel): boolean {
+	try {
+		return channel.hasUI();
+	} catch {
+		return false;
+	}
+}
+
+/**
  * 父会话注册的审批通道。
  * `hasUI` 是函数而非布尔快照：注册后父会话可能失去 UI（reload / 会话替换），每次解析都现查。
- * `opts.signal` 直通 pi 的 ExtensionUIDialogOptions.signal——子代理被中断时父弹窗被真正关闭，
- * 且已 abort 的请求根本不会弹窗（宿主实现见 TUI 的 showExtensionSelector 与 RPC 模式的 createDialogPromise：二者都在 signal abort 时关闭弹窗并 resolve undefined；此处不引 dist 行号——本机 pi 0.99.1 与本仓 peer floor 0.80.2 的同一函数行号不同，行号引用跨版本即腐）。
+ * `opts.signal` 直通 pi 的 `ExtensionUIDialogOptions.signal`——子代理被中断时父弹窗被真正关闭，
+ * 且已 abort 的请求根本不会弹窗。宿主实现见 TUI 的 `showExtensionSelector` 与 RPC 模式的
+ * `createDialogPromise`：二者都在 signal abort 时关闭弹窗并 resolve `undefined`。
+ * 此处不引 dist 行号——行号引用跨宿主版本即腐（Ruling 3）。
  */
 export interface ParentApprovalChannel {
 	readonly sessionId: string;
@@ -42,6 +56,11 @@ export interface EscalationBroker {
 	unlinkChild(childSessionId: string): void;
 	/** 严格解析：沿 link 向上找第一个「已注册且 hasUI()」的祖先通道；找不到返回 null。 */
 	resolveChannel(childSessionId: string): ParentApprovalChannel | null;
+	/**
+	 * 本会话自己注册的通道：父会话用它把自己的提权也排进同一条 FIFO 车道（Ruling 17）——
+	 * 宿主的 select 只有一个对话框槽位且不排队，第二次调用会让前一个弹窗收不到按键、promise 变孤儿。
+	 */
+	resolveOwnChannel(sessionId: string): ParentApprovalChannel | null;
 	/** 提交一次审批；signal abort → resolve(undefined)，落进既有"取消"分支。 */
 	request(
 		channel: ParentApprovalChannel,
@@ -86,10 +105,16 @@ class InProcessEscalationBroker implements EscalationBroker {
 			const parentSessionId = this.links.get(current);
 			if (parentSessionId === undefined) return null; // 链路断：严格 fail-closed
 			const channel = this.parents.get(parentSessionId);
-			if (channel?.hasUI()) return channel;
+			if (channel !== undefined && hasUIOf(channel)) return channel;
 			current = parentSessionId; // 中间会话无通道（depth ≥ 2）：继续向上
 		}
 		return null;
+	}
+
+	resolveOwnChannel(sessionId: string): ParentApprovalChannel | null {
+		const channel = this.parents.get(sessionId);
+		if (channel === undefined) return null;
+		return hasUIOf(channel) ? channel : null;
 	}
 
 	request(
@@ -99,9 +124,11 @@ class InProcessEscalationBroker implements EscalationBroker {
 		signal?: AbortSignal,
 	): Promise<string | undefined> {
 		const run = async (): Promise<string | undefined> => {
-			// 排队期间已被中断：根本不弹窗，否则用户会看到没人接收结果的幽灵审批（Review Focus #2）。
-			if (signal?.aborted === true) return undefined;
 			try {
+				// 排队期间已被中断：根本不弹窗，否则用户会看到没人接收结果的幽灵审批（Review Focus #2）。
+				// 读取 aborted 也放在 try 内——病态 signal getter 抛错时仍须保证 request 从不 reject，
+				// 这条契约是 escalation.ts 能零改动的前提。
+				if (signal?.aborted === true) return undefined;
 				// 在飞时 abort 由 pi 的对话框自行关闭并 resolve undefined（opts.signal 已透传）。
 				return await channel.select(title, options, signal === undefined ? undefined : { signal });
 			} catch {

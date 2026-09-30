@@ -62,10 +62,10 @@
 | 父/子**不共享模块实例**（pi 对每个会话重新调用扩展 factory），但共享 `globalThis` | `pi-sandbox/src/permission.ts:16-18`（本包已依赖此事实做 `/permission` 进程级覆盖） |
 | 子会话 `hasUI === false` 的原因是 `bindExtensions({})` 未传 uiContext，与进程边界无关 | `pi-subagents/src/lifecycle/create-subagent-session.ts:228` |
 | 生命周期事件契约：`subagents:child:session-created { sessionId, parentSessionId }` 在 `bindExtensions()` **之前同步** emit；`subagents:child:disposed { sessionId }` 在 run 的 `finally` 必发 | `pi-subagents/src/lifecycle/child-lifecycle.ts`；emit 点 `create-subagent-session.ts:224`；契约由其 `tests/lifecycle/child-lifecycle.test.ts` 钉住 |
-| 取消链路：父 TUI 按 ESC → `InterruptHandler.abortAll()` → 子 `session.abort()` → 子会话工具 `execute` 的 `signal` 触发 | `pi-subagents/src/handlers/interrupt.ts`；`subagent-session.ts:225-232`；`pi-sandbox/src/tools.ts:158,189,206`（三个工具的 execute 第 3 参已是 `signal`） |
-| `ui.select` 的第三参 `ExtensionUIDialogOptions { signal?: AbortSignal; timeout?: number }`：传入后（a）**弹窗前**发现 `signal.aborted` → 直接 resolve `undefined`、不显示；（b）**弹窗开着时** abort → `hideExtensionSelector()` 关闭弹窗 + resolve `undefined` | pi `dist/core/extensions/types.d.ts:40-44,74`；实现 `dist/modes/interactive/interactive-mode.js:2034-2059`；RPC 模式同理 `dist/modes/rpc/rpc-mode.js:48` |
-| 弹窗显示时抢走焦点（`setFocus(extensionSelector)`），而 `tui.select.cancel` 默认绑 `escape` / `ctrl+c` → **用户在弹窗上按 ESC 已经能取消它**（不依赖 signal） | `interactive-mode.js:2055-2057`；pi `docs/keybindings.md:96`（`app.interrupt` 也是 `escape`，:123，但焦点在弹窗时归 `tui.select.cancel`） |
-| pi 扩展 API：`pi.on("session_start" \| "session_shutdown", (event, ctx) => ...)`、`ctx.hasUI`、`ctx.ui.select(title, options)`、`ctx.sessionManager.getSessionId()`、`pi.events.on/emit` | pi `dist/core/extensions/types.d.ts:1134,1141,1148,219,74,223,1356`；`dist/core/session-manager.d.ts:246`；`dist/core/event-bus.d.ts` |
+| 取消链路：父 TUI 按 ESC → `InterruptHandler.abortAll()` → 子 `session.abort()` → 子会话工具 `execute` 的 `signal` 触发 | `pi-subagents/src/handlers/interrupt.ts`；`subagent-session.ts:225-232`；`pi-sandbox/src/tools.ts` 三个工具的 `execute`（当前 `:201`/`:232`/`:249`，第 3 参已是 `signal`） |
+| `ui.select` 的第三参 `ExtensionUIDialogOptions { signal?: AbortSignal; timeout?: number }`：传入后（a）**弹窗前**发现 `signal.aborted` → 直接 resolve `undefined`、不显示；（b）**弹窗开着时** abort → `hideExtensionSelector()` 关闭弹窗 + resolve `undefined` | pi `dist/core/extensions/types.d.ts` 的 `ExtensionUIDialogOptions` 与 `ExtensionUIContext.select`；实现 `dist/modes/interactive/interactive-mode.js` 的 `showExtensionSelector`；RPC 模式同理 `dist/modes/rpc/rpc-mode.js` 的 `createDialogPromise`（不引 dist 行号：本机 pi 与 peer floor 0.80.2 的同一符号行号不同，Ruling 3） |
+| 弹窗显示时抢走焦点（`setFocus(extensionSelector)`），而 `tui.select.cancel` 默认绑 `escape` / `ctrl+c` → **用户在弹窗上按 ESC 已经能取消它**（不依赖 signal） | `interactive-mode.js` 的 `showExtensionSelector` 内的 `setFocus(extensionSelector)`；pi `docs/keybindings.md:96`（`app.interrupt` 也是 `escape`，:123，但焦点在弹窗时归 `tui.select.cancel`） |
+| pi 扩展 API：`pi.on("session_start" \| "session_shutdown", (event, ctx) => ...)`、`ctx.hasUI`、`ctx.ui.select(title, options)`、`ctx.sessionManager.getSessionId()`、`pi.events.on/emit` | pi `dist/core/extensions/types.d.ts` 的 `ExtensionHandler` / `ExtensionAPI.on("session_start" \| "session_shutdown")` / `ExtensionContext.hasUI` / `ExtensionUIContext.select` / `ExtensionContext.sessionManager` / `ExtensionAPI.events`；`dist/core/session-manager.d.ts` 的 `ReadonlySessionManager.getSessionId`；`dist/core/event-bus.d.ts` |
 
 ### 4.2 新增 `src/escalation-broker.ts`（~110 行，纯内存，零 fs、零定时器）
 
@@ -103,6 +103,12 @@ export interface EscalationBroker {
 	resolveChannel(childSessionId: string): ParentApprovalChannel | null;
 
 	/**
+	 * 本会话自己注册的通道：父会话用它把自己的提权也排进同一条 FIFO 车道（Ruling 17）——
+	 * 宿主的 select 只有一个对话框槽位且不排队，第二次调用会让前一个弹窗收不到按键、promise 变孤儿。
+	 */
+	resolveOwnChannel(sessionId: string): ParentApprovalChannel | null;
+
+	/**
 	 * FIFO 串行提交一次审批：同一时刻最多一个 `select` 在飞，其余排队。
 	 * `signal` 透传给 `channel.select` 的 `opts.signal`；abort 时 **resolve(undefined)**
 	 * （不 reject）——让调用方落进 `approveEscalation` 现有的"取消"分支，
@@ -123,13 +129,15 @@ export function getEscalationBroker(): EscalationBroker;
 export function resetEscalationBrokerForTests(): void;
 ```
 
+`resolveOwnChannel` 由 Ruling 17 引入（见 §4.3）。
+
 内部状态：`parents: Map<sessionId, ParentApprovalChannel>`、`links: Map<childSessionId, parentSessionId>`、`queue: Promise<unknown>`（FIFO 链尾）。无 fs、无定时器、无网络。
 
 按 D5，接口**不含** `describe()`。
 
 ### 4.3 `src/tools.ts`：只改通道解析
 
-`ToolCtxLike`（现 `:58-62`）新增只读依赖：
+`ToolCtxLike`（`src/tools.ts` 内的模块私有接口声明）新增只读依赖：
 
 ```ts
 interface ToolCtxLike {
@@ -137,18 +145,18 @@ interface ToolCtxLike {
 	cwd?: string;
 	ui: { select(title: string, options: string[], opts?: { signal?: AbortSignal }): Promise<string | undefined> };
 	/** 可选：现有 `tests/tools.test.ts` 的窄 ctx（`toolCtx(false)`）就不带它，异常宿主也可能缺；
-	 *  缺失时经 `readChildSessionId()` 归为"无法路由" → fail-closed，绝不得抛 TypeError。 */
+	 *  缺失时经 `readSessionId()` 归为"无法路由" → fail-closed，绝不得抛 TypeError。 */
 	sessionManager?: { getSessionId(): string };
 }
 ```
 
 （`{ signal?: AbortSignal }` 是 pi `ExtensionUIDialogOptions` 的子集，全部属性可选，因此真实的 `ctx.ui.select` 结构上可直接赋给这个窄类型，无需 cast。）
 
-新增模块私有函数，替换 `resolveCallMode` 里现在直接读 `ctx.hasUI` / `ctx.ui.select` 的那一处（现 `:90`）。返回类型 `EscalationUI` 已由 `src/escalation.ts:50` 导出，`src/tools.ts:13` 的现有 import 追加 `type EscalationUI` 即可：
+新增模块私有函数，替换 `resolveCallMode` 里构造 `approveEscalation` 第 2 参的那一处（原本直接读 `ctx.hasUI` / `ctx.ui.select`）。返回类型 `EscalationUI` 已由 `src/escalation.ts` 导出，`src/tools.ts` 的现有 import 追加 `type EscalationUI` 即可：
 
 ```ts
-/** 防御性读取子会话 id：缺失、非字符串或抛错都归为"无法路由"（fail-closed）。 */
-function readChildSessionId(ctx: ToolCtxLike): string | null {
+/** 防御性读取会话 id：缺失、非字符串或抛错都归为"无法路由"（fail-closed）。父/子两侧共用。 */
+function readSessionId(ctx: ToolCtxLike): string | null {
 	try {
 		const sessionId = ctx.sessionManager?.getSessionId();
 		return typeof sessionId === "string" && sessionId.trim().length > 0 ? sessionId.trim() : null;
@@ -158,35 +166,43 @@ function readChildSessionId(ctx: ToolCtxLike): string | null {
 }
 
 /**
- * 审批通道解析（spec 2026-09-30 §4.3）：本会话有 UI 就直连；否则向 broker 要父通道。
- * 解析不到时返回 hasUI:false 的哑通道，让 approveEscalation 抛出既有 fail-closed 文案
- * ——不新增错误分支、不改变校验顺序，escalation.ts 因此零改动。
- * signal 两条路径都透传（D6）：中断既能关掉在飞的弹窗，也能让排队中的请求根本不弹。
+ * 审批通道解析（spec 2026-09-30 §4.3）：
+ * - 本会话有 UI：优先用它自己注册的通道，经 broker 的同一条 FIFO 车道弹窗（Ruling 17）——宿主的
+ *   select 只有一个对话框槽位且不排队，第二次调用会让前一个弹窗收不到按键、其 promise 变成孤儿。
+ *   解析不到自己的通道（宿主未发 session_start、拿不到会话 id）才回落直连，回落行为与改动前逐字一致。
+ * - 本会话无 UI（子会话）：沿 link 严格解析父通道（D3），解析不到就返回哑通道。
+ * 哑通道让 approveEscalation 抛出既有 fail-closed 文案——不新增错误分支、不改变校验顺序，
+ * escalation.ts 因此零改动。signal 两条路径都透传（D6）：中断既能关掉在飞的弹窗，
+ * 也能让排队中的请求根本不弹。
  */
 function approvalChannelFor(ctx: ToolCtxLike, signal: AbortSignal | undefined): EscalationUI {
 	const opts = signal === undefined ? undefined : { signal };
+	const broker = getEscalationBroker();
+	const sessionId = readSessionId(ctx);
 	if (ctx.hasUI) {
-		return { hasUI: true, select: (title, options) => ctx.ui.select(title, options, opts) };
+		const own = sessionId === null ? null : broker.resolveOwnChannel(sessionId);
+		if (own === null) {
+			return { hasUI: true, select: (title, options) => ctx.ui.select(title, options, opts) };
+		}
+		return { hasUI: true, select: (title, options) => broker.request(own, title, options, signal) };
 	}
-	const childSessionId = readChildSessionId(ctx);
-	const channel = childSessionId === null ? null : getEscalationBroker().resolveChannel(childSessionId);
+	const channel = sessionId === null ? null : broker.resolveChannel(sessionId);
 	if (channel === null) {
 		return { hasUI: false, select: async () => undefined };
 	}
-	return {
-		hasUI: true,
-		select: (title, options) => getEscalationBroker().request(channel, title, options, signal),
-	};
+	return { hasUI: true, select: (title, options) => broker.request(channel, title, options, signal) };
 }
 ```
 
-`resolveCallMode` 增加第 6 参 `signal?: AbortSignal`，三个工具的 `execute` 把已有的 `signal`（`tools.ts:158/189/206`）透传到调用点（`:162/192/209`）；`approveEscalation` 的第 2 参由 `{ hasUI: ctx.hasUI, select: ... }`（`:90`）换成 `approvalChannelFor(ctx, signal)`。
+`resolveCallMode` 增加第 6 参 `signal?: AbortSignal`，三个工具的 `execute` 把已有的 `signal`（各自 `execute` 的第 3 参）透传到其 `resolveCallMode` 调用点；`approveEscalation` 的第 2 参由 `{ hasUI: ctx.hasUI, select: ... }` 换成 `approvalChannelFor(ctx, signal)`。
 
 **为什么两条路径都透传 signal（用户已确认）**：
 
 - **转发路径（必须）**：子代理可能在用户没碰弹窗的情况下就死了——请求还在 FIFO 里排队时子代理已被中断（父 ESC → `abortAll()` → 子 `session.abort()`）、子代理撞 max-turns 硬 abort、后台任务被丢弃。透传 signal 后：已 abort 的请求**根本不会弹窗**（`interactive-mode.js:2036-2039`），在飞的弹窗会被自动关闭——避免弹出一个没人接收结果的窗（用户点了 `Allow once` 也白点）。
 - **direct 路径（一致性）**：注意弹窗抢焦点后 ESC 已经能取消它（§4.1），所以这里唯一的可观察差异是：当父 run 被**非 ESC 途径**中断（`ctx.abort()`、session 切换/reload）时，弹窗自动关闭并落进现有 `was cancelled` 分支，而不是留在屏幕上。收益小、风险也小，且与转发路径共用同一段代码（不必在 `approvalChannelFor` 里分叉）。
-- 两条路径都只在 `signal` 存在时才传第三参，headless（无 signal）行为逐字不变。
+- 两条路径都恒传第三参 `opts`（无 `signal` 时其值为 `undefined`，与省略在运行时不可区分：宿主签名为 `opts?`，dist 内无 `arguments.length` 判断），headless 行为逐字不变。
+
+**direct 路径也排进 FIFO 车道（Ruling 17，整分支审查后追加）**：宿主的 `showExtensionSelector` 只有一个对话框槽位且不排队——第二次调用会清掉容器并覆盖该字段，第一个弹窗从此收不到按键，其 promise 只能靠自己的 `signal` abort 才结算。可达路径不需要任何异常：父会话自己的一次提权弹窗正开着，此时后台子代理提权 → broker 出队 → 第二次调用父 `ctx.ui.select` → 父自己那次审批被孤儿化并静默变成 `was cancelled`。因此 `ctx.hasUI` 分支先用 `resolveOwnChannel(本会话 id)` 找自己注册的通道，命中就走 `broker.request`（与转发请求共用同一条车道，"一次只弹一个"成为包内不变量）；解析不到（宿主未发 `session_start`、拿不到会话 id）才回落直连，回落行为与改动前逐字一致。这不触碰 D1–D6：不新增终止来源、不改文案、不加诊断行、不动严格路由。
 
 按 D4，**标题与选项文案一字不改**（`escalation.ts:78-86` 现有拼接：`Sandbox escalation: allow this <subject> under "<mode>"?` + 空行 + `Reason:` + `Command:`/`Path:`；选项 `Allow once` / `Deny`）。
 
@@ -276,7 +292,7 @@ pi.on("session_shutdown", () => {
 
 ### 4.6 FIFO 与并发
 
-多个子代理（或同一子代理的多个工具调用）并发提权时，`request` 串到模块级 promise 链尾，父 TUI **一次只弹一个**对话框；前一个 settle（选择/取消/abort）后才弹下一个。
+多个子代理（或同一子代理的多个工具调用）、以及父会话自己的提权并发时，`request` 串到模块级 promise 链尾，父 TUI **一次只弹一个**对话框；前一个 settle（选择/取消/abort）后才弹下一个。车道是 broker 级单行道，父会话自己的提权也排在其中（Ruling 17）；释放车道的三条出口不变（用户选择、ESC 取消弹窗、子会话 signal abort）。
 
 abort 的两种时机：
 
@@ -305,7 +321,7 @@ abort 的两种时机：
 |---|---|
 | 子会话 `hasUI === true`（未来 pi-subagents 给子会话接入 uiContext） | 走原 direct 路径，不经 broker，行为自动恢复 |
 | 无 link（非 pi-subagents 子代理 / 事件缺失 / 版本漂移） | `resolveChannel → null` → 哑通道 → 抛 `no approval channel is available` |
-| ctx 上没有 `sessionManager`（窄测试 ctx / 异常宿主） | `readChildSessionId → null` → 同上（不得抛 TypeError） |
+| ctx 上没有 `sessionManager`（窄测试 ctx / 异常宿主） | `readSessionId → null` → 同上（不得抛 TypeError） |
 | 有 link 但父未注册（父 headless、父已 `session_shutdown`） | 同上 |
 | 有 link、父已注册但 `hasUI()` 现为 false | 继续向上找祖先；找不到 → 同上 |
 | 父 ctx 已失效（会话替换 / reload 后宿主 `assertActive()` 抛错） | `index.ts` 的 `readHasUI()` 捕获 → 视为无 UI → 继续向上找祖先；找不到 → 同上（绝不让宿主内部报错冒泡成子代理的工具调用错误） |
@@ -317,6 +333,8 @@ abort 的两种时机：
 | 提权目标 == effective mode | 免审批直接执行（`escalation.ts:71`），不触达 broker |
 | 用户已用 `/permission` 放宽 | effective mode 变宽，提权通常不再需要；覆盖仍是最终兜底杠杆 |
 | broker 被同进程其他扩展篡改 | 见 §7 |
+| 父会话自己的提权与子代理转发的提权并发 | 排进同一条 FIFO 车道，一次只弹一个（Ruling 17）；不会互相顶掉弹窗 |
+| 通道实现的 `hasUI()` 抛错（宿主 stale ctx / 同进程其他扩展注册的敌对通道） | `hasUIOf()` 捕获 → 视为无 UI → 继续向上或返回 `null` → fail-closed |
 
 ## 7. 安全与信任边界
 
@@ -336,6 +354,8 @@ abort 的两种时机：
 
 **依赖 pi-subagents 的事件契约（非稳定 API）**：`subagents:child:session-created` / `:disposed` 的通道名与载荷形状是约定而非编译期契约（两包刻意不相互依赖）。上游改名或改形状的后果是**退回今天的 fail-closed 行为**（link 缺失 → 抛错），不会造成误放行——失败方向安全。契约当前由 `pi-subagents/tests/lifecycle/child-lifecycle.test.ts` 钉住。
 
+**`/permission` 覆盖在异 cwd 子会话下可能失效（既有缺陷，非本设计引入）**：`processPermissionState` 是模块级单例，而宿主的扩展模块缓存以 cwd + generation 为令牌（pi `dist/core/extensions/loader.js` 的 `useExtensionCacheCwd` / `loadExtensionModule`：令牌变化即用 `createJiti({ moduleCache: false })` 重新导入 → 新模块实例）。pi-subagents 的子会话 cwd 为 `params.cwd ?? snapshot.cwd`（`create-subagent-session.ts:148`），可与父不同；此时父会话设的 `/permission` 覆盖对子会话不可见，"放宽进程档位解救"在该配置下不成立。broker 挂 `globalThis` 正是为了不受此影响。修法（把 `processPermissionState` 同样挂 `globalThis`）超出本设计范围，应作为独立后续分支处理（Ruling 19）。
+
 ## 9. 未来扩展点
 
 - **跨进程转发**：若将来需要，新增一个 mailbox 实现即可——`resolveChannel` 的第二来源（env `PI_SUBAGENT_PARENT_SESSION`）+ `request` 的第二实现（文件邮箱 + 轮询）。`EscalationUI` seam（`{ hasUI, select }`）与 `escalation.ts` 均不必改。
@@ -351,6 +371,8 @@ abort 的两种时机：
 | 同上 §9（三处） | (1) "子 agent 的 escalation 一律 fail-closed" 改写为转发语义 + 保留 fail-closed 条件；(2) "拒绝上报与解救路径（无专用通道，走普通结果流）" → "（转发通道不可用时，走普通结果流）"；(3) 尾句删除对已删包 `pi-permission-system` 的引用，改为记录 `subagents:child:session-created` 的同步 emit 时序 |
 | `README.zh.md` / `README.md` 的提权审批一节 | "无 UI 通道（headless、后台 subagent）时提权一律拒绝" → "后台 subagent 的提权会转发到父会话弹窗（同进程 pi-subagents，且父会话需有 UI）；无父通道时（headless、跨进程子代理）仍一律拒绝（fail-closed），此时用 `/permission` 放宽进程档位解救"（双语语义对等） |
 | `/permission` 状态块 | **不改**（D5） |
+| 本文件 §4.2/§4.3/§4.6/§6 | Ruling 17 落地后同步：新增 resolveOwnChannel、direct 路径改为经 FIFO 车道、并发与 hasUI() 抛错两行矩阵 |
+| 双语 README 的 /permission 一节 | 追加"异 cwd 子会话下覆盖可能不及"的已知限制（Ruling 19）|
 
 ## 11. 测试计划
 
@@ -373,6 +395,9 @@ abort 的两种时机：
 | direct 路径透传 signal | `hasUI: true` + 传入 signal → `ctx.ui.select` 收到 `{ signal }`；无 signal 时第三参为 `undefined`（行为逐字不变） | 同上 |
 | 现有 escalation 语义不回归 | 严格更宽校验、配对校验、Deny/取消文案全部不变 | `tests/escalation.test.ts`（现有用例必须继续通过，零改动） |
 | 接线冒烟 | 加载 `index.ts` 不抛错；`session_start`/`session_shutdown`/两个事件通道均被订阅 | `tests/index-smoke.test.ts`（扩） |
+| resolveOwnChannel 五种情形（命中/未注册/hasUI 假/hasUI 抛错/不走 link） | 见 tests/escalation-broker.test.ts | 同上 |
+| execute 层 signal 接线（bash/write/edit 各一条） | 已 abort 的 signal → 不弹窗且抛 cancelled | tests/tools.test.ts |
+| 包内组合级：事件→link→子 execute→父 select→落盘→disposed 回到 fail-closed | 钉住单元判例之间的接缝（Ruling 18） | tests/forwarding-integration.test.ts（新增）|
 
 ## 12. 交付范围
 

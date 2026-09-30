@@ -68,8 +68,8 @@ interface ToolCtxLike {
 	sessionManager?: { getSessionId(): string };
 }
 
-/** 防御性读取子会话 id：缺失、非字符串或抛错都归为"无法路由"（fail-closed）。 */
-function readChildSessionId(ctx: ToolCtxLike): string | null {
+/** 防御性读取会话 id：缺失、非字符串或抛错都归为"无法路由"（fail-closed）。父/子两侧共用。 */
+function readSessionId(ctx: ToolCtxLike): string | null {
 	try {
 		const sessionId = ctx.sessionManager?.getSessionId();
 		return typeof sessionId === "string" && sessionId.trim().length > 0 ? sessionId.trim() : null;
@@ -79,25 +79,31 @@ function readChildSessionId(ctx: ToolCtxLike): string | null {
 }
 
 /**
- * 审批通道解析（spec 2026-09-30 §4.3）：本会话有 UI 就直连；否则向 broker 要父通道。
- * 解析不到时返回 hasUI:false 的哑通道，让 approveEscalation 抛出既有 fail-closed 文案
- * ——不新增错误分支、不改变校验顺序，escalation.ts 因此零改动。
- * signal 两条路径都透传（D6）：中断既能关掉在飞的弹窗，也能让排队中的请求根本不弹。
+ * 审批通道解析（spec 2026-09-30 §4.3）：
+ * - 本会话有 UI：优先用它自己注册的通道，经 broker 的同一条 FIFO 车道弹窗（Ruling 17）——宿主的
+ *   select 只有一个对话框槽位且不排队，第二次调用会让前一个弹窗收不到按键、其 promise 变成孤儿。
+ *   解析不到自己的通道（宿主未发 session_start、拿不到会话 id）才回落直连，回落行为与改动前逐字一致。
+ * - 本会话无 UI（子会话）：沿 link 严格解析父通道（D3），解析不到就返回哑通道。
+ * 哑通道让 approveEscalation 抛出既有 fail-closed 文案——不新增错误分支、不改变校验顺序，
+ * escalation.ts 因此零改动。signal 两条路径都透传（D6）：中断既能关掉在飞的弹窗，
+ * 也能让排队中的请求根本不弹。
  */
 function approvalChannelFor(ctx: ToolCtxLike, signal: AbortSignal | undefined): EscalationUI {
 	const opts = signal === undefined ? undefined : { signal };
+	const broker = getEscalationBroker();
+	const sessionId = readSessionId(ctx);
 	if (ctx.hasUI) {
-		return { hasUI: true, select: (title, options) => ctx.ui.select(title, options, opts) };
+		const own = sessionId === null ? null : broker.resolveOwnChannel(sessionId);
+		if (own === null) {
+			return { hasUI: true, select: (title, options) => ctx.ui.select(title, options, opts) };
+		}
+		return { hasUI: true, select: (title, options) => broker.request(own, title, options, signal) };
 	}
-	const childSessionId = readChildSessionId(ctx);
-	const channel = childSessionId === null ? null : getEscalationBroker().resolveChannel(childSessionId);
+	const channel = sessionId === null ? null : broker.resolveChannel(sessionId);
 	if (channel === null) {
 		return { hasUI: false, select: async () => undefined };
 	}
-	return {
-		hasUI: true,
-		select: (title, options) => getEscalationBroker().request(channel, title, options, signal),
-	};
+	return { hasUI: true, select: (title, options) => broker.request(channel, title, options, signal) };
 }
 
 /**

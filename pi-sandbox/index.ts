@@ -95,6 +95,10 @@ export default function (pi: ExtensionAPI) {
 		} catch {
 			return; // 拿不到会话身份就不注册（严格 fail-closed，不猜）
 		}
+		if (registeredSessionId !== null && registeredSessionId !== sessionId) {
+			// 同一 activate 内二次 session_start 且换了会话：先摘掉旧通道，避免残留在注册表里
+			broker.unregisterParent(registeredSessionId);
+		}
 		registeredSessionId = sessionId;
 		broker.registerParent({
 			sessionId,
