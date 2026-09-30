@@ -62,7 +62,8 @@
 | 子会话 `hasUI === false` 的原因是 `bindExtensions({})` 未传 uiContext，与进程边界无关 | `pi-subagents/src/lifecycle/create-subagent-session.ts:228` |
 | 生命周期事件契约：`subagents:child:session-created { sessionId, parentSessionId }` 在 `bindExtensions()` **之前同步** emit；`subagents:child:disposed { sessionId }` 在 run 的 `finally` 必发 | `pi-subagents/src/lifecycle/child-lifecycle.ts`；emit 点 `create-subagent-session.ts:224`；契约由其 `tests/lifecycle/child-lifecycle.test.ts` 钉住 |
 | 取消链路：父 TUI 按 ESC → `InterruptHandler.abortAll()` → 子 `session.abort()` → 子会话工具 `execute` 的 `signal` 触发 | `pi-subagents/src/handlers/interrupt.ts`；`subagent-session.ts:225-232`；`pi-sandbox/src/tools.ts:158,189,206`（三个工具的 execute 第 3 参已是 `signal`） |
-| `ui.select` 支持第三个参数 `ExtensionUIDialogOptions { signal?: AbortSignal; timeout?: number }`，`signal` 可**以编程方式关闭对话框** | pi `dist/core/extensions/types.d.ts:40-44,74` |
+| `ui.select` 的第三参 `ExtensionUIDialogOptions { signal?: AbortSignal; timeout?: number }`：传入后（a）**弹窗前**发现 `signal.aborted` → 直接 resolve `undefined`、不显示；（b）**弹窗开着时** abort → `hideExtensionSelector()` 关闭弹窗 + resolve `undefined` | pi `dist/core/extensions/types.d.ts:40-44,74`；实现 `dist/modes/interactive/interactive-mode.js:2034-2059`；RPC 模式同理 `dist/modes/rpc/rpc-mode.js:48` |
+| 弹窗显示时抢走焦点（`setFocus(extensionSelector)`），而 `tui.select.cancel` 默认绑 `escape` / `ctrl+c` → **用户在弹窗上按 ESC 已经能取消它**（不依赖 signal） | `interactive-mode.js:2055-2057`；pi `docs/keybindings.md:96`（`app.interrupt` 也是 `escape`，:123，但焦点在弹窗时归 `tui.select.cancel`） |
 | pi 扩展 API：`pi.on("session_start" \| "session_shutdown", (event, ctx) => ...)`、`ctx.hasUI`、`ctx.ui.select(title, options)`、`ctx.sessionManager.getSessionId()`、`pi.events.on/emit` | pi `dist/core/extensions/types.d.ts:1134,1141,1148,219,74,223,1356`；`dist/core/session-manager.d.ts:246`；`dist/core/event-bus.d.ts` |
 
 ### 4.2 新增 `src/escalation-broker.ts`（~110 行，纯内存，零 fs、零定时器）
@@ -165,7 +166,11 @@ function approvalChannelFor(ctx: ToolCtxLike, signal: AbortSignal | undefined): 
 
 `resolveCallMode` 增加第 6 参 `signal?: AbortSignal`，三个工具的 `execute` 把已有的 `signal`（`tools.ts:158/189/206`）透传到调用点（`:162/192/209`）；`approveEscalation` 的第 2 参由 `{ hasUI: ctx.hasUI, select: ... }`（`:90`）换成 `approvalChannelFor(ctx, signal)`。
 
-**direct 路径的行为变化（有意）**：现状 `ctx.ui.select(title, options)` 不传第三参（`tools.ts:90`），中断不会关闭父会话自己的提权弹窗；改为透传 `signal` 后，ESC 会关闭它并落进"取消"分支。这与 D2 的中断语义一致，且只在 `signal` 存在时才传（headless 无 signal 时行为逐字不变）。
+**为什么两条路径都透传 signal（用户已确认）**：
+
+- **转发路径（必须）**：子代理可能在用户没碰弹窗的情况下就死了——请求还在 FIFO 里排队时子代理已被中断（父 ESC → `abortAll()` → 子 `session.abort()`）、子代理撞 max-turns 硬 abort、后台任务被丢弃。透传 signal 后：已 abort 的请求**根本不会弹窗**（`interactive-mode.js:2036-2039`），在飞的弹窗会被自动关闭——避免弹出一个没人接收结果的窗（用户点了 `Allow once` 也白点）。
+- **direct 路径（一致性）**：注意弹窗抢焦点后 ESC 已经能取消它（§4.1），所以这里唯一的可观察差异是：当父 run 被**非 ESC 途径**中断（`ctx.abort()`、session 切换/reload）时，弹窗自动关闭并落进现有 `was cancelled` 分支，而不是留在屏幕上。收益小、风险也小，且与转发路径共用同一段代码（不必在 `approvalChannelFor` 里分叉）。
+- 两条路径都只在 `signal` 存在时才传第三参，headless（无 signal）行为逐字不变。
 
 按 D4，**标题与选项文案一字不改**（`escalation.ts:78-86` 现有拼接：`Sandbox escalation: allow this <subject> under "<mode>"?` + 空行 + `Reason:` + `Command:`/`Path:`；选项 `Allow once` / `Deny`）。
 
@@ -271,7 +276,7 @@ abort 的两种时机：
 
 **D1（不做跨进程）的后果**：使用进程型子代理扩展（如 nicobailon/pi-subagents、HazAT/pi-interactive-subagents）时，子代理提权仍 fail-closed，解救路径与今天一致（`/permission` + `steer_subagent`）。
 
-**D2（无固定超时）的后果**：若父用户长期不理会弹窗，该子代理的这次工具调用会一直挂着，直到用户 ESC、子代理被中断、或父会话关闭。可接受的依据：这与父会话自己提权时用户不理会弹窗的行为完全一致，且中断链路已存在（§4.1）。pi 的 `ExtensionUIDialogOptions.timeout`（types.d.ts:43-44）能做自动消失倒计时，但按 D2 **不使用**。
+**D2（无固定超时）的后果**：若父用户长期不理会弹窗，该子代理的这次工具调用会一直挂着，直到用户 ESC（弹窗抢焦点，ESC = `tui.select.cancel`，直接取消）、子代理被中断（signal 关弹窗）、或父会话关闭。可接受的依据：这与父会话自己提权时用户不理会弹窗的行为完全一致，且中断链路已存在（§4.1）。pi 的 `ExtensionUIDialogOptions.timeout`（types.d.ts:43-44）能做自动消失倒计时，但按 D2 **不使用**。
 
 **依赖 pi-subagents 的事件契约（非稳定 API）**：`subagents:child:session-created` / `:disposed` 的通道名与载荷形状是约定而非编译期契约（两包刻意不相互依赖）。上游改名或改形状的后果是**退回今天的 fail-closed 行为**（link 缺失 → 抛错），不会造成误放行——失败方向安全。契约当前由 `pi-subagents/tests/lifecycle/child-lifecycle.test.ts` 钉住。
 
