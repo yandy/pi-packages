@@ -21,7 +21,8 @@
 		"typecheck": "npm run typecheck --workspaces --if-present",
 		"lint": "npm run lint --workspaces --if-present",
 		"format": "npm run format --workspaces --if-present",
-		"check:dev-deps": "node scripts/check-dev-deps.mjs"
+		"check:dev-deps": "node scripts/check-dev-deps.mjs",
+		"check:host-deps": "node scripts/check-host-deps.mjs"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.14",
