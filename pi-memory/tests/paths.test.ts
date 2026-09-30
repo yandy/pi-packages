@@ -88,8 +88,8 @@ describe("projectDirName", () => {
 		expect(projectDirName("/home/yandy/proj/with:colon")).toBe("home__yandy__proj__with_3acolon");
 	});
 
-	it("treats backslashes as separators", () => {
-		expect(projectDirName("C:\\Users\\me\\proj")).toBe("C_3a__Users__me__proj");
+	it("keeps backslashes literal (POSIX naming)", () => {
+		expect(projectDirName("/home/a\\b")).toBe("home__a\\b");
 	});
 
 	it("drops empty, . and .. segments", () => {
@@ -216,6 +216,27 @@ describe("projectIdentity", () => {
 		await git(["remote", "add", "zeta", "https://example.com/zeta/repo.git"], dir);
 		await git(["remote", "add", "alpha", "https://example.com/alpha/repo.git"], dir);
 		expect(await projectIdentity(dir)).toEqual({ kind: "git", key: "example.com/alpha/repo" });
+	});
+
+	it("accepts scp-style remotes without a user and git+ scheme aliases", async () => {
+		await initRepo(dir, "github.com:yandy/pi-packages.git");
+		expect(await projectIdentity(dir)).toEqual({ kind: "git", key: "github.com/yandy/pi-packages" });
+		await git(["remote", "set-url", "origin", "git+ssh://git@github.com/yandy/pi-packages.git"], dir);
+		expect(await projectIdentity(dir)).toEqual({ kind: "git", key: "github.com/yandy/pi-packages" });
+		await git(["remote", "set-url", "origin", "git+https://github.com/yandy/pi-packages.git"], dir);
+		expect(await projectIdentity(dir)).toEqual({ kind: "git", key: "github.com/yandy/pi-packages" });
+	});
+
+	it("falls back to the first usable remote, not the first non-empty one", async () => {
+		await initRepo(dir, "/srv/mirror/pi-packages.git");
+		await git(["remote", "add", "upstream", "https://github.com/yandy/pi-packages.git"], dir);
+		expect(await projectIdentity(dir)).toEqual({ kind: "git", key: "github.com/yandy/pi-packages" });
+	});
+
+	it("ignores url.*.insteadOf rewrites when resolving the remote", async () => {
+		await initRepo(dir, "https://github.com/yandy/pi-packages.git");
+		await git(["config", "url./srv/mirror/.insteadOf", "https://github.com/"], dir);
+		expect(await projectIdentity(dir)).toEqual({ kind: "git", key: "github.com/yandy/pi-packages" });
 	});
 
 	it("falls back to local when no remote exists", async () => {

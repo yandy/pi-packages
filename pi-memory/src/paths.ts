@@ -105,46 +105,52 @@ export function normalizeRemoteUrl(url: string): string | null {
 	return `${host.toLowerCase()}/${path}`;
 }
 
-async function gitRemoteUrl(cwd: string): Promise<string | null> {
+interface RemoteEntry {
+	name: string;
+	url: string;
+}
+
+/**
+ * Read every remote URL from the raw git config, in identity order:
+ * `origin` first, then alphabetical. `url.*.insteadOf` rewrites do not apply here.
+ */
+async function gitRemoteUrls(cwd: string): Promise<RemoteEntry[]> {
 	try {
-		const { stdout } = await execFileP("git", ["remote", "get-url", "origin"], { cwd, timeout: GIT_TIMEOUT_MS });
-		const url = stdout.trim();
-		if (url) return url;
-	} catch {
-		// origin missing or without URL — fall through to the remote list
-	}
-	try {
-		const { stdout } = await execFileP("git", ["remote"], { cwd, timeout: GIT_TIMEOUT_MS });
-		const names = stdout
-			.split("\n")
-			.map((name) => name.trim())
-			.filter(Boolean)
-			.sort();
-		for (const name of names) {
-			try {
-				const { stdout: remoteOut } = await execFileP("git", ["remote", "get-url", name], {
-					cwd,
-					timeout: GIT_TIMEOUT_MS,
-				});
-				const url = remoteOut.trim();
-				if (url) return url;
-			} catch {
-				// try the next remote
-			}
+		const { stdout } = await execFileP("git", ["config", "--get-regexp", "^remote\\..*\\.url$"], {
+			cwd,
+			timeout: GIT_TIMEOUT_MS,
+		});
+		const byName = new Map<string, string>();
+		for (const line of stdout.split("\n")) {
+			const sep = line.indexOf(" ");
+			if (sep === -1) continue;
+			const key = line.slice(0, sep);
+			if (!key.startsWith("remote.") || !key.endsWith(".url")) continue;
+			const name = key.slice("remote.".length, -".url".length);
+			const url = line.slice(sep + 1).trim();
+			// First URL per remote wins, matching git's fetch-URL precedence.
+			if (!name || !url || byName.has(name)) continue;
+			byName.set(name, url);
 		}
+		const entries = [...byName].map(([name, url]) => ({ name, url }));
+		entries.sort((a, b) => {
+			if ((a.name === "origin") !== (b.name === "origin")) return a.name === "origin" ? -1 : 1;
+			return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+		});
+		return entries;
 	} catch {
-		// no remotes at all
+		return [];
 	}
-	return null;
 }
 
 /** Resolve the project identity: normalized git remote, or the project root path. */
 export async function projectIdentity(cwd: string): Promise<ProjectIdentity> {
 	const toplevel = await gitToplevel(cwd);
 	if (!toplevel) return { kind: "local", key: resolve(cwd) };
-	const remote = await gitRemoteUrl(cwd);
-	const key = remote ? normalizeRemoteUrl(remote) : null;
-	if (key) return { kind: "git", key };
+	for (const { url } of await gitRemoteUrls(cwd)) {
+		const key = normalizeRemoteUrl(url);
+		if (key) return { kind: "git", key };
+	}
 	return { kind: "local", key: resolve(toplevel) };
 }
 
