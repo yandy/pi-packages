@@ -14,6 +14,33 @@ async function gitToplevel(cwd: string): Promise<string | null> {
 	}
 }
 
+const DIR_NAME_MAX = 120;
+const DIR_NAME_KEEP = 100;
+const HASH_LENGTH = 8;
+const ILLEGAL_SEGMENT_CHARS = /[<>:"|?*\x00-\x1f]/g;
+
+/** Escape characters that are unsafe in a single filesystem path segment. */
+function escapeSegment(segment: string): string {
+	return segment.replace(ILLEGAL_SEGMENT_CHARS, (ch) => `_${ch.charCodeAt(0).toString(16).padStart(2, "0")}`);
+}
+
+/**
+ * Encode a project key into a single, human-readable directory name.
+ * `host/repo/path` → `host__repo__path`; `/abs/path` → `abs__path`.
+ */
+export function projectDirName(key: string): string {
+	const segments = key
+		.replace(/\\/g, "/")
+		.split("/")
+		.filter((segment) => segment !== "" && segment !== "." && segment !== "..")
+		.map(escapeSegment);
+	if (segments.length === 0) return "root";
+	const joined = segments.join("__");
+	if (joined.length <= DIR_NAME_MAX) return joined;
+	const suffix = createHash("sha256").update(key).digest("hex").slice(0, HASH_LENGTH);
+	return `${joined.slice(0, DIR_NAME_KEEP)}__${suffix}`;
+}
+
 export async function projectHash(cwd: string): Promise<string> {
 	const key = (await gitToplevel(cwd)) ?? resolve(cwd);
 	return createHash("sha256").update(key).digest("hex").slice(0, 12);
