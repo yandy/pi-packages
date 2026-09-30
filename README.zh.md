@@ -8,7 +8,7 @@
 |---|---|---|
 | [pi-ask-user](./pi-ask-user/README.zh.md) | 交互式 ask_user 工具，支持可搜索分栏 UI、多选和自由文本 | `@yandy0725/pi-ask-user` |
 | [pi-coding-tools](./pi-coding-tools/README.zh.md) | AST/LSP 代码智能工具（ast_grep_search/lsp_symbols/lsp_hover/lsp_navigate）+ ls/find/grep | `@yandy0725/pi-coding-tools` |
-| [pi-container-sandbox](./pi-container-sandbox/README.zh.md) | Docker 沙箱扩展 | `@yandy0725/pi-container-sandbox` |
+| [pi-container-sandbox](./pi-container-sandbox/README.zh.md) | 进程级沙箱扩展（bwrap/landlock/seatbelt）：工作目录可写、其余宿主文件可读，fail-closed；2.0 起不再使用容器 | `@yandy0725/pi-container-sandbox` |
 | [pi-dingtalk](./pi-dingtalk/README.zh.md) | 钉钉集成（AI 表格、日历、审批、文档等） | `@yandy0725/pi-dingtalk` |
 | [pi-lark](./pi-lark/README.zh.md) | Lark/飞书集成 | `@yandy0725/pi-lark` |
 | [pi-memory](./pi-memory/README.zh.md) | 基于文件系统的持久化记忆层，为 pi 编程代理提供跨会话记忆 | `@yandy0725/pi-memory` |
