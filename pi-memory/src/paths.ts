@@ -15,8 +15,8 @@ async function gitToplevel(cwd: string): Promise<string | null> {
 	}
 }
 
-const DIR_NAME_MAX = 120;
-const DIR_NAME_KEEP = 100;
+const DIR_NAME_MAX_BYTES = 120;
+const DIR_NAME_KEEP_BYTES = 100;
 const HASH_LENGTH = 8;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: intentionally matching C0 control characters for path escaping
 const ILLEGAL_SEGMENT_CHARS = /[<>:"|?*\x00-\x1f]/g;
@@ -24,6 +24,16 @@ const ILLEGAL_SEGMENT_CHARS = /[<>:"|?*\x00-\x1f]/g;
 /** Escape characters that are unsafe in a single filesystem path segment. */
 function escapeSegment(segment: string): string {
 	return segment.replace(ILLEGAL_SEGMENT_CHARS, (ch) => `_${ch.charCodeAt(0).toString(16).padStart(2, "0")}`);
+}
+
+/** Truncate to at most `maxBytes` UTF-8 bytes without splitting a code point. */
+function truncateToBytes(input: string, maxBytes: number): string {
+	let kept = "";
+	for (const ch of input) {
+		if (Buffer.byteLength(kept + ch, "utf8") > maxBytes) break;
+		kept += ch;
+	}
+	return kept;
 }
 
 /**
@@ -38,9 +48,11 @@ export function projectDirName(key: string): string {
 		.map(escapeSegment);
 	if (segments.length === 0) return "root";
 	const joined = segments.join("__");
-	if (joined.length <= DIR_NAME_MAX) return joined;
+	// Filesystems cap one name at 255 bytes: count bytes so multi-byte names
+	// (CJK, emoji) cannot exceed the limit, and cut on code point boundaries.
+	if (Buffer.byteLength(joined, "utf8") <= DIR_NAME_MAX_BYTES) return joined;
 	const suffix = createHash("sha256").update(key).digest("hex").slice(0, HASH_LENGTH);
-	return `${joined.slice(0, DIR_NAME_KEEP)}__${suffix}`;
+	return `${truncateToBytes(joined, DIR_NAME_KEEP_BYTES)}__${suffix}`;
 }
 
 export type ProjectKind = "git" | "local";

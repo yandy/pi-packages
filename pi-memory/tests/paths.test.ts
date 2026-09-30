@@ -115,6 +115,20 @@ describe("projectDirName", () => {
 		expect(projectDirName(a)).toBe(projectDirName(a));
 		expect(projectDirName(a)).not.toBe(projectDirName(b));
 	});
+
+	it("caps truncated names by UTF-8 bytes, not UTF-16 units", () => {
+		const key = `/home/yandy/${"工".repeat(115)}`;
+		const name = projectDirName(key);
+		expect(name).toMatch(/__[0-9a-f]{8}$/);
+		expect(Buffer.byteLength(name, "utf8")).toBeLessThanOrEqual(255);
+	});
+
+	it("never splits a surrogate pair when truncating", () => {
+		const key = `/home/yandy/${"😀".repeat(60)}`;
+		const name = projectDirName(key);
+		const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+		expect(name).not.toMatch(loneSurrogate);
+	});
 });
 
 describe("normalizeRemoteUrl", () => {
