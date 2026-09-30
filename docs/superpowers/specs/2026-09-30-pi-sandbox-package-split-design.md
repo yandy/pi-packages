@@ -35,7 +35,17 @@ PR #136（提交 `7083d0d`）把 `pi-container-sandbox` 的 2.0 实现整体换�
 | **D4** | **不做** npm registry 弃用标记 | 两包并存，旧包不是"废弃"而是"容器场景专用"；要给全部用户打警告与定位冲突。将来若要做，机制是 `npm deprecate @yandy0725/pi-container-sandbox@* "<msg>"`（npm 无 archive 语义，deprecate 不删除任何版本、可逆；本机需先 `npm login`） |
 | **D5** | 旧包 README **不加**交叉指引 | 属于 D2 的一部分；指引写在新包 README 的「迁移」一节 |
 
-**明确排除（非目标）**：旧包任何文件改动、旧包新版本发布、registry 侧弃用标记、为 deprecate 新增 CI workflow、把两包合并到一个可切换的包。
+**明确排除（非目标）**：旧包任何文件改动、旧包新版本发布、registry 侧弃用标记、为 deprecate 新增 CI workflow、把两包合并到一个可切换的包、`pi-permission-system` 的任何改动。
+
+### 命名决策记录
+
+| 候选 | 结论 | 理由 |
+|---|---|---|
+| `pi-sandbox` | **采用** | 机制名，对其它包的生死免疫；短、易记；语义由 README 首行说明 |
+| `pi-process-sandbox` | 未采用 | 与 `pi-container-sandbox` 成对、自描述更好，代价是长 8 字符；作为后续若需明确对称时可改（本次不取） |
+| `pi-permission-sandbox` | 否决 | ① 语义轴错位：本包核心是隔离机制（runner + 写围栏），三档 mode / 提权只是旋钮；② 名字挂在被淘汰者的词根上——只在 `pi-permission-system` 消失后才读得通，而在它消失前（用户本机即两包同装，`/permission` vs `/permission-system`）持续误导；③ 若将来能力不并入本包，"permission" 前缀会永久带来错误暗示 |
+
+背景：`pi-permission-system`（0.2.0，213 文件 / ~38k 行，本机在用）拟淘汰，其能力在用户判断中已被本沙箱的三档模式 + 提权审批覆盖（决策 A）。这恰好支持用机制名：命名不挂靠另一个包的存废。淘汰动作为**独立任务**，不在本次范围。
 
 ## 3. 拆分机制
 
@@ -129,6 +139,7 @@ PR 合并后的后续动作（由用户决定，不在本次范围）：
 
 - `pi-sandbox` 首次发布：`gh release create pi-sandbox-v1.0.0 --target <commit>` 即可触发 npm publish —— **首次发布无需 `npm version`**（`1.0.0` 已写在 `package.json`），但必须确认根 `package-lock.json` 中该 workspace 的版本条目已是 `1.0.0`（V4 覆盖；#136 曾因 lockfile 漂移触发 CI 失败）
 - 如需 registry 侧弃用提示：`npm deprecate @yandy0725/pi-container-sandbox@* "<msg>"`（D4，本机需先 `npm login`）
+- `pi-permission-system` 的淘汰（独立任务，非本次范围）：其能力已被本沙箱三档模式 + 提权审批覆盖（命名决策记录里的决策 A）；届时需单独设计 registry 弃用与能力取舍，本次不得改动该包 |
 
 ## 9. 风险与回滚
 
