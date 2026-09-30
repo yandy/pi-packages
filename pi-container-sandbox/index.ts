@@ -1,49 +1,454 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { getSandboxConfig } from "./src/config";
-import { createPermissionCommand, processPermissionState } from "./src/permission";
-import { canonicalPath } from "./src/policy";
-import { selectRunner } from "./src/runners";
-import { createSandboxTools } from "./src/tools";
+import { resolve } from "node:path";
+import {
+	createBashTool,
+	createEditTool,
+	createReadTool,
+	createWriteTool,
+	type ExtensionAPI,
+	type ExtensionUIContext,
+} from "@earendil-works/pi-coding-agent";
+import { createSandboxCommandHandlers } from "./src/commands/sandbox";
+import { discoverDockerfiles, imageRef, loadSbxConfig, PACKAGE_DOCKER_DIR, resolveEngine } from "./src/config";
+import {
+	createEditOps,
+	createHostBashOps,
+	createReadOps,
+	createContainerBashOps,
+	createWriteOps,
+	execCapture,
+	extractCommandName,
+} from "./src/ops";
+import {
+	ensureExternalReadApproved,
+	getExternalPath,
+	isAllowedExternalResource,
+	PathApprovalStore,
+	CONTAINER_ROOT,
+} from "./src/paths";
+import { createRuntime, deriveContainerName, type MountSpec } from "./src/runtime";
+import { clearSbx, getSbx, type SbxSession, setSbx } from "./src/session";
+import { translateHostToolCall } from "./src/path-translation";
+import { fixSkillLocations, parseAvailableSkills, skillsToMountSpecs } from "./src/skills";
 
 export default function (pi: ExtensionAPI) {
-	const cwd = process.cwd();
-	// I2 fail-safe：坏配置在此 warn 并回落 DEFAULT（仍是受约束的 workspace-write），
-	// 绝不 throw——throw 会让 pi 把整个扩展置 null，三个基础工具随即无沙箱裸跑（fail-open）。
-	getSandboxConfig(cwd);
+	pi.registerFlag("container", {
+		description: "Sandbox all bash/read/write/edit ops inside a Linux container (default: on)",
+		type: "boolean",
+		default: true,
+	});
+	pi.registerFlag("no-container", {
+		description: "Force-disable container sandboxing",
+		type: "boolean",
+		default: false,
+	});
+	pi.registerFlag("noc", {
+		description: "Alias for --no-container",
+		type: "boolean",
+		default: false,
+	});
 
-	// C1：/permission 覆盖用进程级模块单例（spec §9）——pi 对每个会话（含 subagent 子会话）
-	// 重新调用本 factory，activate 闭包不跨会话共享；模块单例才能覆盖父/子全部会话。
-	const tools = createSandboxTools({ cwd, permission: processPermissionState });
-	pi.registerTool(tools.bash as never);
-	pi.registerTool(tools.write as never);
-	pi.registerTool(tools.edit as never);
+	const localCwd = process.cwd();
+	const localRead = createReadTool(localCwd);
+	const localWrite = createWriteTool(localCwd);
+	const localEdit = createEditTool(localCwd);
+	const localBash = createBashTool(localCwd);
+	let hostBashTool: ReturnType<typeof createBashTool> | null = null;
 
-	pi.registerCommand("permission", createPermissionCommand({
-		state: processPermissionState,
-		// C2：pi 从不 chdir，会话 cwd 只经命令 ctx.cwd 可达；空串回落 activate 时 cwd。
-		describeStatus: (statusCwd) => {
-			const effectiveCwd = statusCwd || cwd;
-			const cfg = getSandboxConfig(effectiveCwd);
-			const effective = processPermissionState.override ?? cfg.mode;
-			const source = processPermissionState.override !== null ? "/permission override" : "config default";
-			let runnerText: string;
-			// Ruling 19：danger-full-access 首判——自定义 runner 已配置但模式为全放行时，
-			// runner 行必须显示 bypassed（runner 不参与该模式的执行）。
-			if (effective === "danger-full-access") {
-				runnerText = "bypassed (danger-full-access)";
-			} else if (cfg.runnerCommand !== null && cfg.runnerCommand.length > 0) {
-				runnerText = `custom command (${cfg.runnerCommand.join(" ")})`;
-			} else {
-				const selected = selectRunner(cfg.probeTimeoutMs);
-				runnerText = selected.runner === "unavailable"
-					? "unavailable (fail-closed: confined commands will be refused)"
-					: `${selected.runner} (${selected.enforcement} enforcement)`;
-			}
-			return [
-				`sandbox mode: ${effective} (${source})`,
-				`runner: ${runnerText}`,
-				`workspace: ${canonicalPath(effectiveCwd)}`,
-			].join("\n");
+	const pathApprovals = new PathApprovalStore(localCwd);
+	const handlers = createSandboxCommandHandlers(localCwd, pathApprovals);
+
+	async function guardExternalRead(
+		paramsPath: string,
+		sbx: SbxSession,
+		ctx: { ui: ExtensionUIContext; hasUI: boolean },
+	): Promise<void> {
+		const external = getExternalPath(paramsPath, sbx.hostCwd, [...sbx.skillMounts, ...sbx.userMounts]);
+		if (!external) return;
+		if (isAllowedExternalResource(external, sbx.allowedExternalPrefixes)) return;
+		if (!ctx.hasUI) {
+			throw new Error(
+				`sandbox: refusing to access ${external}: outside of project cwd ${sbx.hostCwd}. ` +
+					`Use --container-allow-paths or /sandbox allow to grant access.`,
+			);
+		}
+		await ensureExternalReadApproved(external, sbx.allowedExternalPrefixes, pathApprovals, ctx.ui);
+	}
+
+	pi.registerTool({
+		...localRead,
+		async execute(id, params, signal, onUpdate, _ctx) {
+			const sbx = getSbx();
+			if (!sbx) return localRead.execute(id, params, signal, onUpdate);
+			await guardExternalRead(params.path, sbx, _ctx);
+			const tool = createReadTool(localCwd, { operations: createReadOps({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }) });
+			return tool.execute(id, params, signal, onUpdate);
 		},
-	}));
+	});
+
+	pi.registerTool({
+		...localWrite,
+		async execute(id, params, signal, onUpdate, _ctx) {
+			const sbx = getSbx();
+			if (!sbx) return localWrite.execute(id, params, signal, onUpdate);
+			const tool = createWriteTool(localCwd, { operations: createWriteOps({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }) });
+			return tool.execute(id, params, signal, onUpdate);
+		},
+	});
+
+	pi.registerTool({
+		...localEdit,
+		async execute(id, params, signal, onUpdate, _ctx) {
+			const sbx = getSbx();
+			if (!sbx) return localEdit.execute(id, params, signal, onUpdate);
+			const tool = createEditTool(localCwd, { operations: createEditOps({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }) });
+			return tool.execute(id, params, signal, onUpdate);
+		},
+	});
+
+	pi.registerTool({
+		...localBash,
+		label: "bash (sandboxed)",
+		async execute(id, params, signal, onUpdate, _ctx) {
+			const sbx = getSbx();
+			if (!sbx) return localBash.execute(id, params, signal, onUpdate);
+
+			const hostCommands = sbx.config.host.commands ?? [];
+			const cmdName = extractCommandName(params.command);
+			if (cmdName && hostCommands.includes(cmdName)) {
+				if (!hostBashTool) {
+					hostBashTool = createBashTool(localCwd, {
+						operations: createHostBashOps(sbx.hostCwd, [...sbx.skillMounts, ...sbx.userMounts]),
+					});
+				}
+				return hostBashTool.execute(id, params, signal, onUpdate);
+			}
+
+			const tool = createBashTool(localCwd, { operations: createContainerBashOps({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }) });
+			return tool.execute(id, params, signal, onUpdate);
+		},
+	});
+
+	pi.on("tool_call", (event) => {
+		const sbx = getSbx();
+		if (!sbx) return;
+		translateHostToolCall(event, sbx.hostCwd);
+	});
+
+	pi.on("user_bash", () => {
+		const sbx = getSbx();
+		if (!sbx) return;
+		return { operations: createContainerBashOps({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }) };
+	});
+
+	pi.on("before_agent_start", async (event) => {
+		const sbx = getSbx();
+		if (!sbx) return;
+
+		// 1. Fix <location> paths to point inside the container.
+		//    Uses skillFileMapping (from session_start) — no XML re-parsing.
+		const fixedPrompt = fixSkillLocations(event.systemPrompt, sbx.skillFileMapping);
+
+		// 2. Build skill mount info from sbx.skillMounts (no /skills/ prefix filtering)
+		const skillInfo = sbx.skillMounts.length
+			? `Skills mounted at: ${sbx.skillMounts.map((m) => m.target).join(", ")}.`
+			: "";
+
+		const userInfo = sbx.userMounts.length
+			? `User mounts: ${sbx.userMounts.map((m) => `${m.source} → ${m.target}${m.mode === "rw" ? " (rw)" : ""}`).join(", ")}.`
+			: "";
+
+		// 3. Build host command hint
+		const hostCommands = sbx.config.host.commands ?? [];
+		const hostCmdHint = hostCommands.length
+			? [
+					"",
+					`The following commands run directly on the host (not inside the container):`,
+					`  ${hostCommands.join(", ")}`,
+					"",
+					`When using these commands, prefer relative paths (e.g. \`src/foo.ts\`)`,
+					`rather than absolute ${CONTAINER_ROOT} paths, because they execute outside the container where ${CONTAINER_ROOT} does not exist.`,
+				].join("\n")
+			: "";
+
+		// 4. Replace CWD line with sandbox-aware version
+		return {
+			systemPrompt: fixedPrompt.replace(
+				/Current working directory:\s*\S+/,
+				[
+					`Current working directory: ${CONTAINER_ROOT} (sandboxed in ${sbx.engine} container ${sbx.name}, host cwd ${localCwd} mounted read-write)`,
+					[skillInfo, userInfo].filter(Boolean).join("\n"),
+					hostCmdHint,
+				]
+					.filter(Boolean)
+					.join("\n"),
+			),
+		};
+	});
+
+	pi.on("session_start", async (_event, ctx) => {
+		if ((pi.getFlag("no-container") as boolean) || (pi.getFlag("noc") as boolean)) return;
+		if (!(pi.getFlag("container") as boolean)) return;
+
+		try {
+			const cfg = loadSbxConfig(localCwd);
+			const rt = cfg.runtime;
+			const engine = resolveEngine(cfg.runtime.engine);
+			const image = imageRef(cfg.image);
+			const allowNetwork = rt.network;
+			const keep = rt.persist;
+
+			// Convert sandbox.json MountConfig[] to MountSpec[]
+			const userMounts: MountSpec[] = rt.mounts.map((m) => ({
+				source: m.source,
+				target: m.target,
+				mode: m.mode ?? ("ro" as const),
+			}));
+
+			// validate mount entries
+			for (const m of rt.mounts) {
+				if (typeof m.source !== "string" || !m.source || typeof m.target !== "string" || !m.target) {
+					throw new Error(
+						`sandbox: invalid mount entry "${JSON.stringify(m)}" — expected { source: "<host-path>", target: "<container-path>", mode?: "ro" | "rw" }. ` +
+							`The old string[] format for runtime.mounts is no longer supported.`,
+					);
+				}
+			}
+
+			// Dynamic skill discovery: parse <available_skills> XML from system prompt.
+			// Catches ALL pi-loaded skills — npm packages, project .agents/skills/,
+			// settings config, etc. — not just ~/.agents/skills/.
+			const skillParsed = parseAvailableSkills(ctx.getSystemPrompt());
+			const skillMounts = skillsToMountSpecs(skillParsed);
+
+			// Detect target conflicts between user mounts and skill mounts
+			for (const um of userMounts) {
+				const conflict = skillMounts.find((sm) => sm.target === um.target);
+				if (conflict) {
+					throw new Error(
+						`sandbox: mount target "${um.target}" is reserved for skill "${conflict.source}". ` +
+							`Use a different target in sandbox.json.`,
+					);
+				}
+			}
+			const allMounts = [...skillMounts, ...userMounts];
+
+			const sandboxName = rt.name ?? deriveContainerName(localCwd);
+			const isReusable = !!rt.name;
+
+			const cacheVolume = rt.cache ?? undefined;
+
+			const allowedExternalPrefixes: string[] = [];
+
+			const resources: { memory?: string; cpus?: string; swap?: string; pidsLimit?: number } = {};
+			if (rt.memory) resources.memory = rt.memory;
+			if (rt.cpus) resources.cpus = rt.cpus;
+			if (rt.pidsLimit !== null) resources.pidsLimit = rt.pidsLimit;
+			if (rt.swap !== null) resources.swap = rt.swap;
+
+			const runtime = createRuntime(engine, {
+				image,
+				hostCwd: localCwd,
+				name: sandboxName,
+				allowNetwork,
+				resources,
+				extraMounts: allMounts.length ? allMounts : undefined,
+				cacheVolume,
+				env: cfg.runtime.env,
+				onProgress: (msg: string) => ctx.ui.setStatus("sandbox", `[build] ${msg}`),
+			});
+
+			await runtime.init();
+
+			const hasImage = await runtime.imageExists();
+			if (!hasImage) {
+				if (!ctx.hasUI) {
+					ctx.ui.notify(`镜像 ${image} 不存在。请运行 docker build 手动构建，或使用 /sandbox build 命令。`, "error");
+					return;
+				}
+
+				const dockerfiles = discoverDockerfiles();
+				if (dockerfiles.length === 0) {
+					ctx.ui.notify("没有找到内置 Dockerfile（docker/ 目录为空）。请自行构建镜像。", "warning");
+					return;
+				}
+
+				const skipLabel = "跳过 - 我自己构建";
+				const labelMap = new Map<string, string>();
+				const options: string[] = [];
+				for (const f of dockerfiles) {
+					const label = `${f} (内置)`;
+					labelMap.set(label, f);
+					options.push(label);
+				}
+				options.push(skipLabel);
+
+				const selected = await ctx.ui.select("Docker 镜像不存在，选择 Dockerfile 构建", options);
+				if (!selected || selected === skipLabel) {
+					ctx.ui.notify(
+						`镜像 ${image} 不存在。请手动构建，例如：\n  docker build -t ${image} -f docker/cn.Dockerfile docker`,
+						"warning",
+					);
+					return;
+				}
+
+				const dockerfile = resolve(PACKAGE_DOCKER_DIR, `${labelMap.get(selected)}.Dockerfile`);
+				const buildCtx = PACKAGE_DOCKER_DIR;
+
+				try {
+					await runtime.buildImage({
+						dockerfile,
+						buildContext: buildCtx,
+						onProgress: (msg: string) => ctx.ui.setStatus("sandbox", `[build] ${msg}`),
+					});
+				} catch (e) {
+					ctx.ui.notify(`镜像构建失败: ${e instanceof Error ? e.message : String(e)}`, "error");
+					return;
+				}
+			}
+
+			if (!runtime.isReady()) {
+				await runtime.withReady();
+			}
+
+			setSbx({
+				runtime,
+				engine,
+				name: sandboxName,
+				hostCwd: localCwd,
+				keep,
+				skillMounts,
+				userMounts,
+				skillFileMapping: skillParsed,
+				allowedExternalPrefixes,
+				resources,
+				imageRef: image,
+				config: cfg,
+				isReusable,
+				isReattached: false,
+			});
+
+			let cleaned = false;
+			const cleanup = async () => {
+				if (cleaned) return;
+				cleaned = true;
+				const s = getSbx();
+				if (s && !s.keep) {
+					try {
+						await s.runtime.shutdown();
+					} catch {
+						/* ignore */
+					}
+					clearSbx();
+				}
+			};
+			process.on("beforeExit", async () => {
+				await cleanup();
+			});
+			process.once("SIGINT", async () => {
+				await cleanup();
+				process.exit(130);
+			});
+			process.once("SIGTERM", async () => {
+				await cleanup();
+				process.exit(143);
+			});
+
+			const sbx = getSbx();
+			if (!sbx) throw new Error("sandbox not initialized");
+			const ok = (await execCapture({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }, "id -un && pwd", 10000)).toString().trim();
+
+			const resParts: string[] = [];
+			if (resources.memory) resParts.push(`mem=${resources.memory}`);
+			if (resources.cpus) resParts.push(`cpu=${resources.cpus}`);
+			if (resources.swap) resParts.push(`swap=${resources.swap}`);
+			if (resources.pidsLimit !== undefined) resParts.push(`pids=${resources.pidsLimit}`);
+			const resStr = ` (${resParts.join(", ")})`;
+
+			const actualName = runtime.getContainerId()?.slice(0, 12) ?? sandboxName;
+			const statusPrefix = "Sandbox up";
+			ctx.ui.setStatus(
+				"sandbox",
+				ctx.ui.theme.fg(
+					"accent",
+					`${statusPrefix}: ${actualName} (net=${allowNetwork ? "on" : "off"})${resStr}${allMounts.length ? `, mounts=${allMounts.length}` : ""}`,
+				),
+			);
+			ctx.ui.notify(
+				[
+					`${statusPrefix}: ${engine} ${actualName}${resStr}${isReusable ? " [re-usable]" : ""}`,
+					ok,
+					skillMounts.length ? `Skills mounted: ${skillMounts.map((m) => m.target).join(", ")}` : "",
+					userMounts.length
+						? `Extra mounts: ${userMounts.map((m) => `${m.source} → ${m.target} (${m.mode ?? "ro"})`).join(", ")}`
+						: "",
+					cacheVolume ? `Cache volume: ${cacheVolume} at /cache` : "",
+				]
+					.filter(Boolean)
+					.join("\n"),
+				"info",
+			);
+		} catch (e) {
+			clearSbx();
+			ctx.ui.notify(`Sandbox init failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+		}
+	});
+
+	pi.on("session_shutdown", async (event) => {
+		if (event.reason !== "quit") return;
+		const sbx = getSbx();
+		if (!sbx) return;
+		if (!sbx.keep) {
+			try {
+				await sbx.runtime.shutdown();
+			} catch {
+				/* ignore */
+			}
+		}
+		clearSbx();
+	});
+
+	pi.registerCommand("sandbox", {
+		description:
+			"Sandbox management. Subcommands: status, start, build, stop, keep, exec, doctor, config, allow, paths",
+		handler: async (args, ctx) => {
+			const parts = args.trim().split(/\s+/);
+			const sub = parts[0]?.toLowerCase() || "status";
+			const rest = parts.slice(1).join(" ");
+
+			switch (sub) {
+				case "status":
+				case "info":
+					return handlers.status(rest, ctx);
+				case "start":
+					return handlers.start(rest, ctx);
+				case "build":
+				case "rebuild":
+					return handlers.build(rest, ctx);
+				case "stop":
+					return handlers.stop(rest, ctx);
+				case "keep":
+					return handlers.keep(rest, ctx);
+				case "exec":
+					return handlers.exec(rest, ctx);
+				case "doctor":
+				case "check":
+					return handlers.doctor(rest, ctx);
+				case "config":
+				case "settings":
+					return handlers.config(rest, ctx);
+				case "allow":
+					return handlers.allow(rest, ctx);
+				case "paths":
+					return handlers.paths(rest, ctx);
+				default:
+					ctx.ui.notify(
+						[
+							`Unknown subcommand: ${sub}`,
+							"Available: status, start, build, stop, keep, exec, doctor, config, allow, paths",
+						].join("\n"),
+						"info",
+					);
+			}
+		},
+	});
 }

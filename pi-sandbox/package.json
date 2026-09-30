@@ -4,7 +4,7 @@
 		"access": "public"
 	},
 	"version": "1.1.2",
-	"description": "pi coding-agent extension that runs every read/write/edit/bash op inside a per-session Docker container",
+	"description": "pi coding-agent extension: process-level sandbox (bwrap / landlock / seatbelt) — workspace writable, everything else readable, fail-closed",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
@@ -14,8 +14,7 @@
 	"type": "module",
 	"files": [
 		"index.ts",
-		"src/",
-		"docker/"
+		"src/"
 	],
 	"scripts": {
 		"test": "vitest run",
@@ -23,7 +22,6 @@
 		"typecheck": "tsc --noEmit",
 		"lint": "biome lint .",
 		"format": "biome format --write .",
-		"build-image": "node --experimental-strip-types scripts/build-image.ts",
 		"clean": "rm -rf dist"
 	},
 	"pi": {
@@ -40,5 +38,8 @@
 		"typescript": "~7.0.2",
 		"vitest": "^5.0.1"
 	},
-	"dependencies": {}
+	"dependencies": {
+		"@deepseek-ai/node-addon-system": "^0.1.2",
+		"typebox": "1.1.38"
+	}
 }
