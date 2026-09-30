@@ -41,7 +41,7 @@
 - `safeTopicPath()` 的安全校验语义
 - memory 文件内部格式（`MEMORY.md`、topic 文件、`.dream-meta.json`）
 - `memoryDir` 配置项语义（仍是 memory 数据根目录）
-- session 持久化（`memoryDir/sessions/`）与 session-search 逻辑
+- session 持久化（`<项目记忆目录>/sessions/`）与 session-search 逻辑
 
 ## Design
 
@@ -69,8 +69,9 @@ export async function projectIdentity(cwd: string): Promise<ProjectIdentity>;
    - 无 remote 或全部不可归一化 → `{ kind: "local", key: toplevel }`
    - 用原始配置而非 `git remote get-url`，因此全局 `url.*.insteadOf` 重写不影响身份判定；同时也只需一次 git 调用
 4. URL 判定与归一化 `normalizeRemoteUrl(url)`：
-   - 含 `://` 的 scheme 形式用 WHATWG `URL` 解析（userinfo 按**最后一个** `@` 切分、host 转小写、端口由 `.hostname` 天然剔除、`.`/`..` 段被归一化）；scheme ∈ {`http`, `https`, `ssh`, `git`}，并接受 `git+ssh` / `git+https` 别名（先剥离 `git+` 前缀）
-   - scp 式 `[user@]host:path`（user 可省略）：手工切分（git 私有伪 URL，无标准库解析器）——`:` 之前不得含 `/`，userinfo 同样按最后一个 `@` 切分
+   - 含 `://` 的 scheme 形式用 WHATWG `URL` 解析（userinfo 按**最后一个** `@` 切分、端点由 `.hostname` 天然剔除、`.`/`..` 段被归一化）；scheme ∈ {`http`, `https`, `ssh`, `git`}，并接受 `git+ssh` / `git+https` 别名（先剥离 `git+` 前缀）
+   - scp 式 `[user@]host:path`（user 可省略）：手工切分（git 私有伪 URL，无标准库解析器）——先按首个 `:` 切分（`:` 之前不得含 `/`，方括号 IPv6 字面量内的 `:` 不算），再在该 authority 内按最后一个 `@` 剥离 userinfo
+   - host 统一重新归一化（`new URL("https://" + host).hostname`，失败则转小写）：因为 `ssh://`/`git://` 等非 special scheme 的 `URL.hostname` 是未归一化的 opaque host（不转小写、IDN 不转 punycode），该步骤使 `https://例子.com`、`ssh://例子.com`、`例子.com:...` 三种写法得到同一 key
    - 其他（`file://`、`git+file://`、本地路径、其他 scheme）→ 视为不可用 → `{ kind: "local", key: toplevel }`
    - 余下路径去掉首尾 `/` 与尾部的 `.git`（大小写不敏感）
    - 路径为空（如 `https://github.com/`）→ 视为不可用 → `local` + toplevel
@@ -86,7 +87,7 @@ export async function projectIdentity(cwd: string): Promise<ProjectIdentity>;
    - 控制字符（`\x00-\x1f`）、`<` `>` `:` `"` `|` `?` `*`
    - `_` **不转义**（已确认取舍，见「已知限制」）
 4. 用 `__` 连接各段
-5. 长度（UTF-8 字节数）> 120 → 按码点取前 100 字节（不切断多字节字符）+ `__` + `sha256(key)` 前 8 位
+5. 长度（UTF-8 字节数）> 120 → 按 **grapheme cluster** 取前 100 字节（不切断多字节字符、代理对与 ZWJ/国旗等字素序列）+ `__` + `sha256(key)` 前 8 位
    - 实现注记（2026-09-30 复审后）：初版按「字符数」计数，CJK 路径可产出 284 字节的目录名（突破文件系统 255 字节上限）且可能截断出孤立代理项。数值 120/100 不变，单位改为字节。
 6. 所有段都被丢弃（如 key 为 `/`）→ 目录名 `root`
 
@@ -150,12 +151,12 @@ return join(config.memoryDir, kind, projectDirName(key));
 |--------|------|
 | `projectIdentity` — 非 git | 普通目录 → local + `resolve(cwd)` |
 | `projectIdentity` — git remote 协议 | https / http / scp 式 ssh / `ssh://` / `git://` → git + 同一 key |
-| `projectIdentity` — URL 清洗 | 端口、userinfo、尾 `.git`、尾 `/`、大小写 host |
+| `projectIdentity` — URL 清洗 | 端口、userinfo（含密码含 `@`）、尾 `.git`、尾 `/`、host 大小写与 IDN punycode（https/ssh/scp 三形式一致）、方括号 IPv6 |
 | `projectIdentity` — 多 remote | 有 origin 用 origin；无 origin 用字母序第一个 |
 | `projectIdentity` — 降级 | 无 remote、`file://`、本地路径 remote → local + toplevel |
 | `projectIdentity` — 常规 | 子目录启动与仓库根目录得到相同身份 |
 | `projectDirName` | 层级拼接、非法字符 `_XX`、`.`/`..` 丢弃、反斜杠视为普通字符、空 key → `root` |
-| `projectDirName` — 截断 | >120 时 ≤110 且以 `__<8 hex>` 结尾、确定性、不同长 key 不同名 |
+| `projectDirName` — 截断 | >120 字节时 ≤110 字节且以 `__<8 hex>` 结尾、按字节计数、不切断代理对与 grapheme（ZWJ/国旗）、确定性、不同长 key 不同名 |
 | `resolveMemoryDir` | git / local 两类的完整组合断言（`join(memoryDir, kind, name)`） |
 | `safeTopicPath` | 保留现有 4 个安全用例 |
 | `index-wiring` | mock 面与新导出同步后，session_start wiring 测试保持通过 |

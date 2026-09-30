@@ -86,13 +86,13 @@ pi install npm:@yandy0725/pi-memory
 | `memIndexMaxBytes` | `25600` | `MEMORY.md` 最大字节数 |
 | `defaults.model` | — | 所有子任务共享的模型回退值。per-task `model` 会覆盖 |
 | `defaults.sessionPersistence.enabled` | `false` | 共享的 session 持久化回退（默认不持久化）。per-task 可覆盖 |
-| `defaults.sessionPersistence.sessionDir` | `<项目目录>/sessions/` | 自定义持久化目录 |
+| `defaults.sessionPersistence.sessionDir` | `<项目记忆目录>/sessions/` | 自定义持久化目录 |
 | `dream.nudgeAfterSessions` | `5` | 触发提醒需经过的会话数 |
 | `dream.nudgeAfterHours` | `24` | 触发提醒需经过的小时数 |
 | `dream.model` | — | 整理使用的模型（`"provider/id"`）。回退链：per-task → `defaults.model` → 父模型 |
 | `dream.thinkLevel` | `"high"` | 整理子 agent 的思考深度：`"off"` / `"minimal"` / `"low"` / `"medium"` / `"high"` / `"xhigh"` |
 | `dream.sessionPersistence.enabled` | `false` | 持久化 dream agent 的 session 到磁盘（调试/审计）。回退到 `defaults.sessionPersistence.enabled` |
-| `dream.sessionPersistence.sessionDir` | `<项目目录>/sessions/` | dream session 自定义目录 |
+| `dream.sessionPersistence.sessionDir` | `<项目记忆目录>/sessions/` | dream session 自定义目录 |
 | `sessionSearch.maxSessions` | `10` | 搜索历史时最多扫描的会话数 |
 | `sessionSearch.maxMatches` | `5` | 历史搜索最多返回的匹配数 |
 | `autoSurfacing.enabled` | `true` | ⭐ 启用 per-turn topic 文件自动注入 |
@@ -107,6 +107,8 @@ pi install npm:@yandy0725/pi-memory
 | `extractMemories.thinkLevel` | `"high"` | ⭐ 提取的思考深度：`"off"` / `"minimal"` / `"low"` / `"medium"` / `"high"` / `"xhigh"` |
 | `extractMemories.sessionPersistence.enabled` | `false` | 持久化 extract agent 的 session。回退到 `defaults.sessionPersistence.enabled` |
 | `extractMemories.maxContextTokens` | `2000` | ⭐ 分析对话的最大 token 数 |
+
+持久化的无头 agent session 默认落在 `<项目记忆目录>/sessions/` —— 位于项目的记忆目录内，而非你的代码工作目录，例如 `~/.pi/memory/git/github.com__owner__repo/sessions/`。
 
 项目级配置（`.pi/memory.json`）仅在项目受信任时加载。
 
@@ -243,12 +245,13 @@ memory(action: "add" | "remove" | "search",
 
 - remote 为 http(s)、ssh（含 scp 式 `[user@]host:owner/repo`，user 可省略）或 `git://`，以及 `git+ssh://` / `git+https://` 别名的 git 仓库 → `git/<host>__<owner>__<repo>`；端口、认证信息、尾部 `/` 与 `.git` 均被剥离，host 转小写
 - remote URL 读取自原始 git 配置（`remote.<name>.url`；`origin` 优先，其余按字母序，取首个可归一化者），因此 `url.*.insteadOf` 重写不会改变映射结果
-- 其余情况 —— 非 git 目录、无 remote 的 git 仓库、`file://` 或本地路径 remote → `local/<绝对路径>`（git 仓库取仓库根目录）
+- scheme 形式经 WHATWG URL 归一化（IDN host 转 punycode、应用百分号编码与 `.`/`..` 折叠、凭据/query/fragment 被剔除），scp 形式则保留原样路径 —— 因此同一仓库的不同写法可能落到不同目录
+- 其余情况 —— 非 git 目录、无 remote 的 git 仓库、`file://` 或本地路径 remote → `local/<绝对路径>`（git 仓库取仓库根目录；Windows 风格盘符 remote 如 `C:/repos/foo.git` 在 POSIX 上按 scp 式远端处理，与 git 行为一致）
 - `/` 转为 `__`；文件名不安全的字符（`<>:"|?*`、控制字符）转为 `_XX` 十六进制转义
 - 目录名超过 120 UTF-8 字节时按码点截取前 100 字节并追加 `__<hash8>` 后缀
 - 命名面向 POSIX 文件系统：反斜杠视为普通字符，不做 Windows 设备名或结尾点/空格处理
 
-该映射不是单射：下划线保持原样，因此 `/home/a__b` 与 `/home/a/b` 都会映射为 `home__a__b`（共享同一记忆目录）。修改或重命名 remote、移动本地目录都会改变记忆目录，旧目录将成为孤儿。
+该映射不是单射：下划线保持原样，因此 `/home/a__b` 与 `/home/a/b` 都会映射为 `home__a__b`（共享同一记忆目录）。修改或重命名 remote、新增一个排序在当前使用的 remote 之前的 remote、或移动本地目录，都会改变记忆目录，旧目录将成为孤儿。
 
 **旧版布局**：早期版本把记忆存放在 `~/.pi/memory/<12位sha256>/` 下，这些目录不再被读取或写入。如需手动迁移，用 `printf '%s' "$(git rev-parse --show-toplevel)" | sha256sum | cut -c1-12` 计算旧哈希（非 git 项目改用 `$PWD`），把对应目录 `mv` 到新路径（在项目里执行 `/memory` 可查看新路径）。
 
