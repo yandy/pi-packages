@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, mkdir } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	normalizeRemoteUrl,
 	projectDirName,
@@ -17,10 +17,14 @@ const execFileP = promisify(execFile);
 let dir: string;
 
 beforeEach(async () => {
+	// Keep git hermetic: never read the machine's global or system config.
+	vi.stubEnv("GIT_CONFIG_GLOBAL", "/dev/null");
+	vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
 	dir = await mkdtemp(join(tmpdir(), "pi-memory-paths-"));
 });
 
 afterEach(async () => {
+	vi.unstubAllEnvs();
 	await rm(dir, { recursive: true, force: true });
 });
 
@@ -140,7 +144,8 @@ describe("projectDirName", () => {
 		const key = `/home/yandy/${"工".repeat(115)}`;
 		const name = projectDirName(key);
 		expect(name).toMatch(/__[0-9a-f]{8}$/);
-		expect(Buffer.byteLength(name, "utf8")).toBeLessThanOrEqual(255);
+		expect(name.startsWith(`home__yandy__${"工".repeat(29)}`)).toBe(true);
+		expect(Buffer.byteLength(name, "utf8")).toBeLessThanOrEqual(110);
 	});
 
 	it("never splits a surrogate pair when truncating", () => {
@@ -148,6 +153,14 @@ describe("projectDirName", () => {
 		const name = projectDirName(key);
 		const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 		expect(name).not.toMatch(loneSurrogate);
+	});
+
+	it("never splits a grapheme cluster when truncating", () => {
+		const zwjFamily = projectDirName(`/home/yandy/${"👨‍👩‍👧".repeat(40)}`);
+		expect(zwjFamily.endsWith("\u200D")).toBe(false);
+		const flags = projectDirName(`/home/yandy/${"🇯🇵".repeat(60)}`);
+		const regionalIndicators = flags.match(/[\u{1F1E6}-\u{1F1FF}]/gu) ?? [];
+		expect(regionalIndicators.length % 2).toBe(0);
 	});
 });
 
@@ -181,6 +194,18 @@ describe("normalizeRemoteUrl", () => {
 	it("lowercases the host and strips a case-insensitive .git suffix", () => {
 		expect(normalizeRemoteUrl("https://GitHub.com/Owner/Repo.GIT")).toBe("github.com/Owner/Repo");
 	});
+	it("normalizes bracketed IPv6 hosts like their ssh:// form", () => {
+		expect(normalizeRemoteUrl("[2001:db8::1]:o/r.git")).toBe("[2001:db8::1]/o/r");
+		expect(normalizeRemoteUrl("ssh://git@[2001:db8::1]/o/r.git")).toBe("[2001:db8::1]/o/r");
+	});
+
+	it("normalizes IDN hosts and host case identically across forms", () => {
+		const expected = "xn--fsqu00a.com/o/r";
+		expect(normalizeRemoteUrl("https://例子.com/o/r.git")).toBe(expected);
+		expect(normalizeRemoteUrl("ssh://例子.com/o/r.git")).toBe(expected);
+		expect(normalizeRemoteUrl("例子.com:o/r.git")).toBe(expected);
+	});
+
 	it("strips the git:// port", () => {
 		expect(normalizeRemoteUrl("git://github.com:9418/yandy/pi-packages.git")).toBe("github.com/yandy/pi-packages");
 	});
@@ -253,9 +278,23 @@ describe("projectIdentity", () => {
 		expect(await projectIdentity(dir)).toEqual({ kind: "git", key: "github.com/yandy/pi-packages" });
 	});
 
-	it("ignores url.*.insteadOf rewrites when resolving the remote", async () => {
+	it("ignores url.*.insteadOf rewrites from the global git config", async () => {
 		await initRepo(dir, "https://github.com/yandy/pi-packages.git");
-		await git(["config", "url./srv/mirror/.insteadOf", "https://github.com/"], dir);
+		const globalConfig = join(dir, "gitconfig");
+		await writeFile(globalConfig, '[url "/srv/mirror/"]\n\tinsteadOf = https://github.com/\n', "utf8");
+		vi.stubEnv("GIT_CONFIG_GLOBAL", globalConfig);
+		expect(await projectIdentity(dir)).toEqual({ kind: "git", key: "github.com/yandy/pi-packages" });
+	});
+
+	it("uses the fetch URL when a remote has multiple URLs", async () => {
+		await initRepo(dir, "https://github.com/yandy/pi-packages.git");
+		await git(["remote", "set-url", "--add", "origin", "https://second.example.com/o/r.git"], dir);
+		expect(await projectIdentity(dir)).toEqual({ kind: "git", key: "github.com/yandy/pi-packages" });
+	});
+
+	it("ignores push URLs", async () => {
+		await initRepo(dir, "https://github.com/yandy/pi-packages.git");
+		await git(["remote", "set-url", "--push", "origin", "https://push.example.com/o/r.git"], dir);
 		expect(await projectIdentity(dir)).toEqual({ kind: "git", key: "github.com/yandy/pi-packages" });
 	});
 

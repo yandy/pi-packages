@@ -26,12 +26,14 @@ function escapeSegment(segment: string): string {
 	return segment.replace(ILLEGAL_SEGMENT_CHARS, (ch) => `_${ch.charCodeAt(0).toString(16).padStart(2, "0")}`);
 }
 
-/** Truncate to at most `maxBytes` UTF-8 bytes without splitting a code point. */
+/** Truncate to at most `maxBytes` UTF-8 bytes on grapheme-cluster boundaries. */
+const GRAPHEME_SEGMENTER = new Intl.Segmenter("en", { granularity: "grapheme" });
+
 function truncateToBytes(input: string, maxBytes: number): string {
 	let kept = "";
-	for (const ch of input) {
-		if (Buffer.byteLength(kept + ch, "utf8") > maxBytes) break;
-		kept += ch;
+	for (const { segment } of GRAPHEME_SEGMENTER.segment(input)) {
+		if (Buffer.byteLength(kept + segment, "utf8") > maxBytes) break;
+		kept += segment;
 	}
 	return kept;
 }
@@ -67,6 +69,15 @@ export interface ProjectIdentity {
 const GIT_PROTOCOLS = new Set(["http", "https", "ssh", "git"]);
 const SCHEME_URL = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
 
+/** Lowercase and IDN-normalize a host the way the URL API does for https. */
+function normalizeHost(host: string): string {
+	try {
+		return new URL(`https://${host}`).hostname;
+	} catch {
+		return host.toLowerCase();
+	}
+}
+
 /**
  * Normalize an http(s)/ssh/git remote URL to `host/path`.
  * Accepts `[user@]host:path` scp syntax and `git+ssh` / `git+https` aliases.
@@ -87,23 +98,28 @@ export function normalizeRemoteUrl(url: string): string | null {
 		}
 		const scheme = parsed.protocol.slice(0, -1).toLowerCase().replace(/^git\+/, "");
 		if (!GIT_PROTOCOLS.has(scheme)) return null;
-		host = parsed.hostname;
+		// Non-special schemes (ssh, git) keep an opaque, un-normalized host.
+		host = normalizeHost(parsed.hostname);
 		path = parsed.pathname;
 	} else {
 		// scp-style `[user@]host:path` — git-specific syntax, no stdlib parser.
-		const colon = raw.indexOf(":");
+		// Split at the first `:` outside a bracketed IPv6 literal.
+		const open = raw.indexOf("[");
+		const close = open === -1 ? -1 : raw.indexOf("]", open);
+		if (open !== -1 && close === -1) return null;
+		const colon = raw.indexOf(":", close === -1 ? 0 : close + 1);
 		if (colon === -1) return null;
 		const authority = raw.slice(0, colon);
 		if (!authority || authority.includes("/")) return null;
 		const at = authority.lastIndexOf("@");
-		host = at === -1 ? authority : authority.slice(at + 1);
+		host = normalizeHost(at === -1 ? authority : authority.slice(at + 1));
 		path = raw.slice(colon + 1);
 	}
 
 	if (!host) return null;
 	path = path.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\.git$/i, "");
 	if (!path) return null;
-	return `${host.toLowerCase()}/${path}`;
+	return `${host}/${path}`;
 }
 
 interface RemoteEntry {
