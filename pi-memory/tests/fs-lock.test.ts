@@ -116,6 +116,39 @@ describe("withLock", () => {
 		expect(maxActive).toBe(1);
 		expect(completed).toHaveLength(5);
 	});
+
+	// 续约（心跳）守卫：TTL 只对「不再续约的持有者」生效。dream 是 headless 智能体（200 条目、
+	// thinkLevel: high），跑满 10 分钟完全现实 —— 健康的长任务不得被别的写者判为 stale 后抢锁。
+	// renewIntervalMs = max(1000, ttl/2)，因此 ttl 2000ms → 每 1000ms 续约一次。
+	// 等到 2500ms：已续约的记录年龄约 500ms（< ttl，抢不到）；未续约的记录年龄 2500ms（> ttl，会被抢走）。
+	// 续约周期有 1s 下限，这条性质无法用注入时钟断言，只能等真实时间。
+	it("renews the record so a long-lived holder is never reclaimed as stale", async () => {
+		const options = { timeoutMs: 0, ttlMs: 2000 };
+		await withLock(lockPath, "long", options, async () => {
+			await new Promise((resolve) => setTimeout(resolve, 2500));
+			const holder = JSON.parse(await readFile(lockPath, "utf8")) as LockInfo;
+			expect(holder.pid).toBe(process.pid);
+			expect(holder.op).toBe("long");
+			// startedAt 已被心跳推后 → 用真实时钟看它不老于 TTL
+			expect(Date.now() - Date.parse(holder.startedAt)).toBeLessThan(options.ttlMs);
+			// 因此另一个写者判定它不 stale，抢不到锁（未续约时这里会删锁并返回 "stolen"）
+			await expect(withLock(lockPath, "thief", options, async () => "stolen")).rejects.toThrow(
+				MemoryLockedError,
+			);
+		});
+	}, 15_000);
+
+	// 释放必须校验所有权：锁被别人接管后（stale 误判 / 人工干预），无条件 rm 会删掉别人的锁，
+	// 对方的 finally 再删掉第三个写者的锁 —— 与已被修掉的空文件窗口同类级联失效。
+	it("does not delete a lock that another process now owns", async () => {
+		await withLock(lockPath, "mine", { timeoutMs: 0, ttlMs: 60_000 }, async () => {
+			// 持有期间把锁文件换成别人的记录（ttl 60s → 心跳周期 30s，本用例内不会触发续约）
+			await writeLock({ pid: process.pid + 1, op: "thief" });
+		});
+		const holder = JSON.parse(await readFile(lockPath, "utf8")) as LockInfo;
+		expect(holder.op).toBe("thief");
+		expect(holder.pid).toBe(process.pid + 1);
+	});
 });
 
 describe("tryWithLock", () => {

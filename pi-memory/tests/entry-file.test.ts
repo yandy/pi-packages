@@ -28,6 +28,16 @@ describe("serializeEntryFile / parseEntryFile", () => {
 		expect(parseEntryFile(serializeEntryFile(META, body))?.body).toBe(body);
 	});
 
+	// CRLF 文件（Windows 编辑器、git autocrlf、记事本手改 —— D11 明确鼓励手工编辑）不得解析为 null：
+	// 那会让该 entry 从清单、搜索、remove/replace 定位与 rebuildIndex 里一起消失 —— 静默丢记忆。
+	it("round-trips a CRLF file back to the original meta and body", () => {
+		const body = "第一段。\n\n## 细节\n\n- 要点一\n\n---\n\n下文";
+		const crlf = serializeEntryFile(META, body).replace(/\n/g, "\r\n");
+		const parsed = parseEntryFile(crlf);
+		expect(parsed?.meta).toEqual(META);
+		expect(parsed?.body).toBe(body);
+	});
+
 	it("returns null without frontmatter", () => {
 		expect(parseEntryFile("just text")).toBeNull();
 	});

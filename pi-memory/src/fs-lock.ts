@@ -1,4 +1,4 @@
-import { link, open, readFile, rm, unlink } from "node:fs/promises";
+import { link, open, readFile, rename, rm, unlink } from "node:fs/promises";
 import { hostname } from "node:os";
 
 export interface LockInfo {
@@ -128,6 +128,76 @@ function holderInfo(op: string, now: number): LockInfo {
 	return { pid: process.pid, hostname: hostname(), startedAt: new Date(now).toISOString(), op };
 }
 
+/** 续约周期：TTL 的一半，且至少 1 秒。 */
+function renewIntervalMs(ttlMs: number): number {
+	return Math.max(1000, Math.floor(ttlMs / 2));
+}
+
+/**
+ * 以同目录临时文件 + rename 原子覆盖锁文件（与获取同样避免出现半写状态）。
+ *
+ * 不能用 `writeFile` 直接覆盖锁文件 —— 那会重现获取路径已修掉的空文件窗口（等待者读到空文件
+ * → `readLockInfo` 返回 null → `isStale(null)` 恒为 true → 删锁抢锁）。rename 之后等待者读到的
+ * 要么是旧记录、要么是新记录。
+ *
+ * 只在锁仍是自己持有时续约：若锁已被别人接管（stale 误判 / 人工干预），无条件 rename 会把对方的
+ * 锁抢回来 —— 与释放路径同类的所有权盲写。
+ */
+async function renewLock(lockPath: string, info: LockInfo): Promise<void> {
+	const holder = await readLockInfo(lockPath);
+	if (!holder || holder.pid !== info.pid) return;
+	tempCounter += 1;
+	const tempPath = `${lockPath}.${process.pid}.${tempCounter}.tmp`;
+	try {
+		const handle = await open(tempPath, "wx");
+		try {
+			await handle.writeFile(JSON.stringify(info), "utf8");
+		} finally {
+			await handle.close();
+		}
+		await rename(tempPath, lockPath);
+	} finally {
+		await unlink(tempPath).catch(() => {});
+	}
+}
+
+/** 只在锁仍是自己持有的情况下删除；否则留给真正的持有者。 */
+async function releaseLock(lockPath: string): Promise<void> {
+	const holder = await readLockInfo(lockPath);
+	if (holder && holder.pid !== process.pid) return;
+	await rm(lockPath, { force: true });
+}
+
+/**
+ * 已持锁期间运行 `fn`：心跳续约 + 释放。
+ *
+ * 心跳是必需的：`isStale` 在同 host 且 PID 存活时**并不**直接返回 false，而是落到 TTL 判断上，
+ * 所以超过 ttlMs（默认 600s）后，健康进程持有的锁会被别的写者删掉并抢走。dream 是 headless
+ * 智能体，跑满 10 分钟完全现实。续约后 TTL 只对「不再续约的持有者」生效，spec §5.1 的语义不变。
+ */
+async function runHeld<T>(
+	lockPath: string,
+	ttlMs: number,
+	clock: () => number,
+	held: LockInfo,
+	fn: () => Promise<T>,
+): Promise<T> {
+	let renewing = true;
+	const renew = setInterval(() => {
+		if (!renewing) return;
+		void renewLock(lockPath, { ...held, startedAt: new Date(clock()).toISOString() }).catch(() => {});
+	}, renewIntervalMs(ttlMs));
+	// 心跳不得把进程钉在事件循环上（否则 CLI 写完也会等到下一个 tick 才退出）。
+	renew.unref();
+	try {
+		return await fn();
+	} finally {
+		renewing = false;
+		clearInterval(renew);
+		await releaseLock(lockPath);
+	}
+}
+
 /** 等待获取锁（轮询 pollMs，默认 50ms）；超时抛 MemoryLockedError。 */
 export async function withLock<T>(
 	lockPath: string,
@@ -136,23 +206,19 @@ export async function withLock<T>(
 	fn: () => Promise<T>,
 ): Promise<T> {
 	const clock = options.now ?? Date.now;
-	const info = holderInfo(op, clock());
+	const held = holderInfo(op, clock());
 	const deadline = clock() + options.timeoutMs;
 
 	let last: LockInfo | null = null;
 	for (;;) {
-		const result = await attempt(lockPath, info, options.ttlMs, clock());
+		const result = await attempt(lockPath, held, options.ttlMs, clock());
 		if (result.acquired) break;
 		last = result.holder;
 		if (clock() >= deadline) throw new MemoryLockedError(last, op);
 		await sleep(options.pollMs ?? 50);
 	}
 
-	try {
-		return await fn();
-	} finally {
-		await rm(lockPath, { force: true });
-	}
+	return runHeld(lockPath, options.ttlMs, clock, held, fn);
 }
 
 /** 只尝试一次；锁被活进程持有时返回 null，不等待。 */
@@ -163,11 +229,9 @@ export async function tryWithLock<T>(
 	fn: () => Promise<T>,
 ): Promise<T | null> {
 	const clock = options.now ?? Date.now;
-	const result = await attempt(lockPath, holderInfo(op, clock()), options.ttlMs, clock());
+	const held = holderInfo(op, clock());
+	const result = await attempt(lockPath, held, options.ttlMs, clock());
 	if (!result.acquired) return null;
-	try {
-		return await fn();
-	} finally {
-		await rm(lockPath, { force: true });
-	}
+	// 单次获取也要续约：tryWithLock 的持有期同样可能超过 ttlMs。
+	return runHeld(lockPath, options.ttlMs, clock, held, fn);
 }

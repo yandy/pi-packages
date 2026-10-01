@@ -86,12 +86,47 @@ describe("addEntry", () => {
 		expect((await store.readEntry("部署 🔥 检查"))?.file).toBe(file);
 	});
 
+	// MEMORY.md 不是条目，被 #entryFiles 过滤掉，因此它从来不在「已占用文件名」集合里。
+	// 不计入的话，一次合法的 addEntry({ name: "MEMORY" }) 会解析出索引本身并写穿它 ——
+	// 手写头部与全部索引行静默销毁，而调用还返回成功。
+	it("never writes over the index file itself", async () => {
+		await store.addEntry({ name: "A", body: "A 正文" });
+		const before = await store.readIndex();
+		const { file } = await store.addEntry({ name: "MEMORY", body: "关于记忆系统本身" });
+
+		expect(file).not.toBe("MEMORY.md");
+		expect(await store.readIndex()).toContain(before.trim());
+		const entries = parseEntryIndex(await store.readIndex()).entries;
+		expect(entries.filter((e) => e.file === "A.md")).toHaveLength(1);
+		expect((await store.readEntry(file))?.name).toBe("MEMORY");
+	});
+
+	it("treats a name that derives to the index file name as taken too", async () => {
+		// entryFileName 会剥掉前置句点，所以 ".MEMORY" 同样派生出 MEMORY.md；
+		// 大小写不敏感文件系统上的 "Memory" 也一样（那里靠写前的磁盘探测兜底）。
+		const { file } = await store.addEntry({ name: ".MEMORY", body: "正文" });
+		expect(file).not.toBe("MEMORY.md");
+		expect((await store.readEntry(file))?.body).toBe("正文");
+	});
+
 	it("snapshots MEMORY.md before mutating", async () => {
 		await writeFile(join(dir, "MEMORY.md"), "# Memory Index\n", "utf8");
 		await store.addEntry({ name: "A", body: "正文" });
 		const snapshots = await readdir(join(dir, ".backups"));
 		expect(snapshots).toHaveLength(1);
 		expect(await readFile(join(dir, ".backups", snapshots[0], "MEMORY.md"), "utf8")).toBe("# Memory Index\n");
+	});
+
+	// spec §18.1「快照失败 → 写入失败」（§6 的 fail-closed）。把 .backups 建成普通文件，
+	// createSnapshot 的 mkdir 会抛 EEXIST —— 此时既不得写出条目文件，也不得改动 MEMORY.md。
+	it("aborts the write when the snapshot cannot be created", async () => {
+		await writeFile(join(dir, "MEMORY.md"), "# Memory Index\n", "utf8");
+		await writeFile(join(dir, ".backups"), "not a directory", "utf8");
+
+		await expect(store.addEntry({ name: "A", body: "正文" })).rejects.toThrow();
+		expect(await readdir(dir)).not.toContain("A.md");
+		expect(await store.readIndex()).toBe("# Memory Index\n");
+		expect(await store.listEntries()).toEqual([]);
 	});
 
 	it("preserves handwritten index lines", async () => {
@@ -116,6 +151,19 @@ describe("addEntry", () => {
 		);
 	});
 
+	// name 里的 `](` 会伪造索引行的 name/file 分组：
+	// formatIndexLine("A](x.md) — fake", "real.md", "d") → `- [A](x.md) — fake](real.md) — d`，
+	// 解析回 { name: "A", file: "x.md" }。于是 removeIndexLine(raw, "x.md") 删掉的是这一行，
+	// 真正的 `- [X](x.md) — d` 留下 —— 删 X 报成功却留下死链，real.md 变成无索引的孤儿。
+	it("rejects a name containing '](' and leaves the index untouched", async () => {
+		await writeFile(join(dir, "MEMORY.md"), "# Memory Index\n", "utf8");
+		await expect(store.addEntry({ name: "A](x.md) — fake", body: "正文" })).rejects.toThrow(
+			"name must not contain ']('",
+		);
+		expect(await store.readIndex()).toBe("# Memory Index\n");
+		expect(await store.listEntries()).toEqual([]);
+	});
+
 	it("falls back to the entry name when the derived description is empty", async () => {
 		const { file } = await store.addEntry({ name: "空摘要条目", body: "- \n实际内容在下一行" });
 		expect((await store.readEntry(file))?.description).toBe("空摘要条目");
@@ -130,6 +178,19 @@ describe("addEntry", () => {
 		expect(second.capacityWarning).toContain("over its limit");
 		expect(second.capacityWarning).toContain("2/1 lines");
 		expect(parseEntryIndex(await tiny.readIndex()).entries).toHaveLength(2);
+	});
+
+	// 存储目录尚不存在时首次 add 必须能工作：锁的临时文件就落在该目录下，不先建目录会报出一个
+	// 既没有 memory 字眼、也没有目录说明的 ENOENT。今天靠 memory-tool.ts 的 mkdir 兜着，
+	// Plan B 删掉那条路径后全新项目的第一次 memory add 就会崩。
+	it("creates the memory directory on the first write", async () => {
+		const nested = join(dir, "a", "b", "memory");
+		const fresh = new MemoryStore(CFG(nested));
+		const { file } = await fresh.addEntry({ name: "A", body: "正文" });
+
+		expect(file).toBe("A.md");
+		expect(parseEntryFile(await readFile(join(nested, file), "utf8"))?.body).toBe("正文");
+		expect(parseEntryIndex(await fresh.readIndex()).entries).toHaveLength(1);
 	});
 
 	it("serialises concurrent adds from the same process", async () => {
@@ -174,6 +235,17 @@ describe("replaceEntry", () => {
 
 	it("throws for an unknown ref", async () => {
 		await expect(store.replaceEntry("nope", { body: "x" })).rejects.toThrow('Entry "nope" not found');
+	});
+
+	// 与 addEntry 共用同一条校验：两个原语必须一致，否则改名就成了绕过入口。
+	it("rejects a rename to a name containing '](' and leaves the index untouched", async () => {
+		await store.addEntry({ name: "A", body: "正文" });
+		const before = await store.readIndex();
+		await expect(store.replaceEntry("A", { name: "A](x.md) — fake" })).rejects.toThrow(
+			"name must not contain ']('",
+		);
+		expect(await store.readIndex()).toBe(before);
+		expect((await store.readEntry("A"))?.body).toBe("正文");
 	});
 
 	it("rejects a rename onto an existing name, leaving both entries intact", async () => {

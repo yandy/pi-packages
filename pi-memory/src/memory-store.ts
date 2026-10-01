@@ -1,4 +1,4 @@
-import { readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { deriveDescription, type EntryType, parseEntryFile, serializeEntryFile } from "./entry-file";
@@ -10,6 +10,33 @@ import { createSnapshot } from "./snapshot";
 export const INDEX_FILE = "MEMORY.md";
 export const LOCK_FILE = ".lock";
 export const BACKUP_DIR = ".backups";
+
+/**
+ * 删除文件；ENOENT 视为成功，其余错误一律上抛（与快照的 fail-closed 策略一致）。
+ *
+ * 吞错会让调用方拿到「删除成功」的假信号：removeEntry 已删索引行、已失效缓存但文件还在，
+ * 下次 rebuildIndex（dream 会常规调用）会把它加回来 —— 删除被静默回滚。
+ * 导出仅为测试：这条语义无法在 Linux 上经由 MemoryStore 的公开 API 触发（锁的临时文件与
+ * entry 文件同目录，目录不可写时会在获取锁阶段先失败）。
+ */
+export async function unlinkStrict(path: string): Promise<void> {
+	try {
+		await unlink(path);
+	} catch (e) {
+		if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+	}
+}
+
+/**
+ * 两个路径是否指向同一个 inode。同样导出仅为测试。
+ *
+ * 大小写不敏感 / 会对 Unicode 做规范化的文件系统上，`file !== current.file` 只是字符串比较：
+ * writeFile("b.md") 可能已经写穿了 "B.md" 的 inode，紧接着 unlink("B.md") 会把刚写入的文件删掉。
+ */
+export async function sameFile(a: string, b: string): Promise<boolean> {
+	const [left, right] = await Promise.all([stat(a).catch(() => null), stat(b).catch(() => null)]);
+	return left !== null && right !== null && left.dev === right.dev && left.ino === right.ino;
+}
 
 export interface StoreConfig {
 	memoryDir: string;
@@ -47,6 +74,16 @@ function compareSummaries(a: EntrySummary, b: EntrySummary): number {
  * 先写新文件、再删旧文件、最后重写索引；若在「删旧文件」与「重写索引」之间进程退出，
  * `MEMORY.md` 会残留一条指向已删文件的死链。`upsertIndexLine` 以 file 为键，因此这条死链
  * 不会被后续写入自动覆盖 —— 只能从 `.backups/` 快照恢复。
+ *
+ * 锁契约（Plan B 的 dream / 迁移必须遵守）：
+ * - 每个写原语自己取锁（进程内队列 + 跨进程 `.lock`），因此**原语不可在已持有 `.lock` 时调用** ——
+ *   `.lock` 不是可重入锁，会自锁到 `timeoutMs` 后抛 MemoryLockedError。
+ * - dream / 迁移需要「整个运行期间独占」时，Plan B 应为本类补一个公开且可重入的 `withLock(op, fn)`
+ *   （spec §4.2 已把它列为 MemoryStore 的原语，§4.3 指派给迁移），而不是直接用 fs-lock.withLock 包住原语。
+ * - 时序注意：`#savingQueue`（进程内队列）**没有**超时，而 spec §5.2 的 `timeoutMs` 只在出队之后的
+ *   `#locked` 里生效，所以「等待 5s 后给出明确错误」不是从调用算起的上界 —— 同进程的长任务
+ *   （headless agent 与主进程同进程）会让 `memory add` 一直排队，调用方看到的是一个没有超时的
+ *   挂起，而不是 MemoryLockedError。
  */
 export class MemoryStore {
 	readonly #cache = new Map<string, CacheRow>();
@@ -58,12 +95,45 @@ export class MemoryStore {
 		return names.filter((n) => n.endsWith(".md") && n !== INDEX_FILE && !n.startsWith(".")).sort();
 	}
 
+	/** 已被占用的文件名：磁盘上的条目文件 + 索引文件本身。
+	 *  索引必须计入 —— 它被 #entryFiles 过滤掉（它不是条目），但绝不能作为条目文件名被写入：
+	 *  一次合法的 addEntry({ name: "MEMORY" }) 会解析出 MEMORY.md 并写穿它，销毁手写头部与全部索引行。
+	 *  ".MEMORY"（entryFileName 会剥掉前置句点）同样命中，因此这里按派生后的文件名而不是原始 name 判断。 */
+	async #takenFileNames(): Promise<Set<string>> {
+		const used = new Set(await this.#entryFiles());
+		used.add(INDEX_FILE);
+		return used;
+	}
+
+	/** 解析目标文件名：先按字符串占用集取名，再对磁盘探测一次。
+	 *  大小写不敏感、或会对 Unicode 做规范化的文件系统上，"b.md" 与 "B.md" / NFC 与 NFD
+	 *  可能指向同一个 inode —— 纯字符串比较会让我们以为名字空闲，写穿别人的文件。
+	 *  `exclude` 是调用方自己的现有文件（改名时的自碰撞应复用原文件，而不是产生 A-B-2.md）。 */
+	async #resolveTargetFile(name: string, exclude?: string): Promise<string> {
+		const used = await this.#takenFileNames();
+		if (exclude) used.delete(exclude);
+		let candidate = resolveUniqueFileName(used, entryFileName(name));
+		for (let attempt = 0; attempt < 100; attempt++) {
+			if (candidate === exclude) return candidate;
+			const taken = await stat(join(this.cfg.memoryDir, candidate)).then(
+				() => true,
+				() => false,
+			);
+			if (!taken) return candidate;
+			used.add(candidate);
+			candidate = resolveUniqueFileName(used, entryFileName(name));
+		}
+		throw new Error(`Unable to find a free file name for "${name}"`);
+	}
+
 	#indexPath(): string {
 		return join(this.cfg.memoryDir, INDEX_FILE);
 	}
 
-	/** 进程内串行；跨进程安全由 #locked 负责。 */
+	/** 进程内串行；跨进程安全由 #locked 负责。写路径都必须先保证目录存在 ——
+	 *  锁的临时文件就落在该目录下，目录不存在会在获取锁时报出与 memory 无关的 ENOENT。 */
 	async #savingQueue<T>(fn: () => Promise<T>): Promise<T> {
+		await mkdir(this.cfg.memoryDir, { recursive: true });
 		return withFileMutationQueue(this.#indexPath(), fn);
 	}
 
@@ -158,6 +228,21 @@ export class MemoryStore {
 		await this.listEntries();
 	}
 
+	/** name 校验：非空、单行、不含 `](`。add 与 replace 共用，否则改名就成了绕过入口。 */
+	#validateName(name: string): void {
+		if (!name) throw new Error("name is required");
+		if (/[\r\n]/.test(name)) throw new Error("name must be a single line");
+		// `](` 会伪造索引行的 name/file 分组：formatIndexLine("A](x.md) — fake", "real.md", "d") 产出
+		// `- [A](x.md) — fake](real.md) — d`，解析回 { name: "A", file: "x.md" }。于是 removeIndexLine
+		// 删掉的是这一行，真正那条 x.md 留下（删 X 报成功却留下死链），而 real.md 变成无索引的孤儿。
+		// description 里出现 `](` 无害（该组是到行尾的 `(.*)`），只有 name 危险。
+		if (name.includes("](")) throw new Error("name must not contain ']('");
+	}
+
+	#validateDescription(value: string | undefined): void {
+		if (value && /[\r\n]/.test(value)) throw new Error("description must be a single line");
+	}
+
 	async addEntry(input: {
 		name: string;
 		description?: string;
@@ -165,12 +250,9 @@ export class MemoryStore {
 		body: string;
 	}): Promise<{ file: string; capacityWarning?: string }> {
 		const name = input.name.trim();
-		if (!name) throw new Error("name is required");
-		if (/[\r\n]/.test(name)) throw new Error("name must be a single line");
+		this.#validateName(name);
 		const requestedDescription = input.description?.trim();
-		if (requestedDescription && /[\r\n]/.test(requestedDescription)) {
-			throw new Error("description must be a single line");
-		}
+		this.#validateDescription(requestedDescription);
 		const body = input.body.trim();
 		if (!body) throw new Error("body is required");
 
@@ -178,7 +260,7 @@ export class MemoryStore {
 			this.#locked("add", this.cfg.lock.timeoutMs, async () => {
 				const summaries = await this.listEntries();
 				const existing = summaries.find((s) => s.name === name);
-				const file = existing?.file ?? resolveUniqueFileName(new Set(await this.#entryFiles()), entryFileName(name));
+				const file = existing?.file ?? (await this.#resolveTargetFile(name));
 				const created = existing ? ((await this.readEntry(existing.file))?.created ?? isoDate(new Date())) : isoDate(new Date());
 				// `|| name` 是必需的：deriveDescription 可能返回 ""，而空 description 会让该 entry 对侧查询不可见。
 				const description = requestedDescription || deriveDescription(body) || name;
@@ -219,12 +301,9 @@ export class MemoryStore {
 				if (!current) throw new Error(`Entry "${ref}" not found`);
 
 				const name = (patch.name ?? current.name).trim();
-				if (!name) throw new Error("name is required");
-				if (/[\r\n]/.test(name)) throw new Error("name must be a single line");
+				this.#validateName(name);
 				const requestedDescription = patch.description?.trim();
-				if (requestedDescription && /[\r\n]/.test(requestedDescription)) {
-					throw new Error("description must be a single line");
-				}
+				this.#validateDescription(requestedDescription);
 				const body = patch.body === undefined ? current.body : patch.body.trim();
 				const description =
 					requestedDescription ||
@@ -239,10 +318,8 @@ export class MemoryStore {
 				if (name !== current.name && (await this.listEntries()).some((s) => s.name === name)) {
 					throw new Error(`Entry "${name}" already exists`);
 				}
-				const used = new Set(await this.#entryFiles());
-				// 自碰撞（如 "A B" → "A-B" 派生出同一个文件名）应复用原文件，而不是产生 A-B-2.md
-				used.delete(current.file);
-				const file = name === current.name ? current.file : resolveUniqueFileName(used, entryFileName(name));
+				// 自碰撞（如 "A B" → "A-B" 派生出同一个文件名）由 #resolveTargetFile 的 exclude 参数复用原文件
+				const file = name === current.name ? current.file : await this.#resolveTargetFile(name, current.file);
 
 				await this.#snapshot("write", [INDEX_FILE, current.file, file]);
 				await writeFile(
@@ -259,7 +336,13 @@ export class MemoryStore {
 					),
 					"utf8",
 				);
-				if (file !== current.file) await unlink(join(this.cfg.memoryDir, current.file)).catch(() => {});
+				if (file !== current.file) {
+					// 大小写不敏感 / 做 Unicode 规范化的文件系统上，两个不同的字符串可能指向同一 inode；
+					// 那种情况下上面的 writeFile 已经写穿了原文件，再 unlink 会把刚写入的文件删掉。
+					const target = join(this.cfg.memoryDir, file);
+					const source = join(this.cfg.memoryDir, current.file);
+					if (!(await sameFile(target, source))) await unlinkStrict(source);
+				}
 
 				const raw = await this.readIndex();
 				// 目标文件名可能残留一条陈旧索引行（手工删了文件却没删行）。不先清掉的话，
@@ -290,7 +373,7 @@ export class MemoryStore {
 				if (!current) throw new Error(`Entry "${ref}" not found`);
 
 				await this.#snapshot("write", [INDEX_FILE, current.file]);
-				await unlink(join(this.cfg.memoryDir, current.file)).catch(() => {});
+				await unlinkStrict(join(this.cfg.memoryDir, current.file));
 				await writeFile(this.#indexPath(), removeIndexLine(await this.readIndex(), current.file), "utf8");
 				this.#cache.delete(current.file);
 			}),

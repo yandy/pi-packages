@@ -43,12 +43,16 @@ export function serializeEntryFile(meta: EntryMeta, body: string): string {
 
 /** 解析 entry 文件。frontmatter 缺失或字段不全时返回 null。 */
 export function parseEntryFile(raw: string): ParsedEntryFile | null {
-	if (!raw.startsWith("---\n")) return null;
-	const end = raw.indexOf("\n---", 4);
+	// CRLF 会让整份文件解析不出来（首行分隔匹配不上、字段行的值也匹配不到 \r），
+	// 该 entry 就会从清单、搜索、remove/replace 定位里一起消失 —— 静默丢记忆。
+	// 归一只在解析入口做一次，serializeEntryFile 仍然只输出 \n。
+	const text = raw.includes("\r") ? raw.replace(/\r\n?/g, "\n") : raw;
+	if (!text.startsWith("---\n")) return null;
+	const end = text.indexOf("\n---", 4);
 	if (end === -1) return null;
 
 	const fields: Record<string, string> = {};
-	for (const line of raw.slice(4, end).split("\n")) {
+	for (const line of text.slice(4, end).split("\n")) {
 		const m = line.match(FIELD_RE);
 		if (m) fields[m[1]] = m[2].trim();
 	}
@@ -62,8 +66,8 @@ export function parseEntryFile(raw: string): ParsedEntryFile | null {
 	// 若把空值当成缺字段，写出的文件将永远解析不了（对 store 静默不可见）。
 	if (!name || !created || !modified || !isEntryType(type) || !("description" in fields)) return null;
 
-	const bodyStart = raw.indexOf("\n", end + 1);
-	const body = bodyStart === -1 ? "" : raw.slice(bodyStart + 1).trim();
+	const bodyStart = text.indexOf("\n", end + 1);
+	const body = bodyStart === -1 ? "" : text.slice(bodyStart + 1).trim();
 	return { meta: { name, description, type, created, modified }, body };
 }
 

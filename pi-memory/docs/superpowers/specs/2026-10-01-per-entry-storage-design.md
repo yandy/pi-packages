@@ -619,6 +619,12 @@ session_shutdown
 | 会话内索引冻结 → 本会话看不到刚写入的记忆 | 刻意选择（D13，prefix cache 优先）；工具返回值已确认写入；新会话立即生效 |
 | `sections` 注入方式依赖 pi 内部行为 | 已核对源码与类型：`systemPromptOptions` 可变、section 名约束、`resolveTranscript` 的折叠分叉均已验证；退路是回 `forceSystemPrompt`（功能不受损，仅缓存变差） |
 | 自实现的 section 重放与 pi 语义漂移 | 重放逻辑极小（`null` 删除 / 否则覆盖、保留首次位置）；重放失败或拿不到 `memory_index` 时**回退为从磁盘读**，不会因此丢失索引 |
+| 文件身份以字符串比较为准（大小写不敏感 / Unicode 规范化的文件系统上，两个不同的文件名可能指向同一 inode → 可能写穿别人的文件或改名后自删刚写入的文件） | 取名前对磁盘做一次存在性探测（`MemoryStore.#resolveTargetFile`）；删除前比较 inode（`sameFile`），同一 inode 则不删；`unlinkStrict` 使删除失败 fail-closed。但**跨平台语义未在 CI 覆盖**（Linux 上无法构造出该派生路径） |
+| `.lock` 的 stale 回收竞态：两个等待者同时判定 stale 时会互相 `rm` | §5.1 的「删除并重试一次」是已批准设计；持有期心跳续约（`renewIntervalMs` = TTL/2，至少 1s）使健康持有者不再被判 stale，续约与释放前均校验所有权（pid）以切断级联删除；候选的彻底修法是 rename 接管 |
+| 迁移的回滚点可能被快照保留策略裁掉 | `createSnapshot` 恒产出 `<ts>-<label>`，**不可能**以 `migrate-` 开头，而 `pruneSnapshots` 永不裁剪 `migrate-` 前缀 —— 因此迁移必须自己建 `.backups/migrate-<ts>/` 作为回滚点 |
+| `rebuildIndex` 不返回 `capacityWarning`（与 `addEntry` / `replaceEntry` 不同），尽管它最可能在膨胀目录上运行 | 已知的 API 不一致：调用方（dream / 迁移）在 `rebuildIndex` 之后需自行做容量检查；若要返回值对齐需扩展其签名 |
+| `.lock` 不可重入；dream / 迁移需要「全程持锁」时会自锁到 `timeoutMs` 后抛 MemoryLockedError | Plan B 必须先为 `MemoryStore` 补一个公开且可重入的 `withLock(op, fn)`（§4.2 已列为原语、§4.3 指派给迁移），而不是直接用 `fs-lock.withLock` 包住写原语；详见 `MemoryStore` 类注释的「锁契约」 |
+| `removeEntry` / `replaceEntry` 的 `unlink` 失败现在会抛错（fail-closed），不再静默当作删除成功 | 调用方必须把「保存失败」当作用户可见的错误处理（工具层不得吞掉 rejection）；失败时索引与文件保持一致，且写前快照可从 `.backups/` 回滚 |
 
 ---
 

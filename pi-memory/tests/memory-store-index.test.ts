@@ -1,10 +1,10 @@
-import { mkdtemp, readFile, readdir, rm, unlink, writeFile } from "node:fs/promises";
+import { chmod, link, mkdtemp, readFile, readdir, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { serializeEntryFile, type EntryMeta } from "../src/entry-file";
 import { parseEntryIndex } from "../src/entry-index";
-import { MemoryStore, type StoreConfig } from "../src/memory-store";
+import { MemoryStore, sameFile, unlinkStrict, type StoreConfig } from "../src/memory-store";
 
 let dir: string;
 let store: MemoryStore;
@@ -64,6 +64,66 @@ describe("removeEntry", () => {
 		const snapshots = (await readdir(join(dir, ".backups"))).sort();
 		const last = snapshots[snapshots.length - 1];
 		expect(await readFile(join(dir, ".backups", last, "A.md"), "utf8")).toContain("正文");
+	});
+
+	// 与 addEntry 同一性质（spec §6 / §18.1）：快照建不了时删除必须中止，
+	// 否则会出现「无快照可回滚」的不可逆删除。
+	it("aborts the removal when the snapshot cannot be created", async () => {
+		await store.addEntry({ name: "A", body: "正文" });
+		const before = await store.readIndex();
+		await rm(join(dir, ".backups"), { recursive: true, force: true });
+		await writeFile(join(dir, ".backups"), "not a directory", "utf8");
+
+		await expect(store.removeEntry("A")).rejects.toThrow();
+		expect(await readdir(dir)).toContain("A.md");
+		expect(await store.readIndex()).toBe(before);
+	});
+
+	// 删除失败必须 fail-closed：吞掉错误的话索引行已删、缓存已失效但文件还在，
+	// 下次 rebuildIndex（dream 会常规调用）会把它加回来 —— 删除被静默回滚。
+	// 注：目录只读时锁的临时文件也建不了，所以本用例钉的是「只读目录 → 干净失败、无半成品」这个端到端
+	// 性质；unlinkStrict 本身的抛错语义由下面的 internal 用例直接覆盖。
+	it("fails the removal when the entry file cannot be deleted", async () => {
+		if (typeof process.getuid === "function" && process.getuid() === 0) return; // root 会绕过权限检查
+		await store.addEntry({ name: "A", body: "正文" });
+		await chmod(dir, 0o500); // 目录只读 → unlink 失败
+		try {
+			await expect(store.removeEntry("A")).rejects.toThrow();
+		} finally {
+			await chmod(dir, 0o700);
+		}
+		expect((await store.readEntry("A"))?.body).toBe("正文");
+		expect(parseEntryIndex(await store.readIndex()).entries.some((e) => e.file === "A.md")).toBe(true);
+	});
+});
+
+describe("unlinkStrict / sameFile", () => {
+	it("treats a missing file as already deleted", async () => {
+		await expect(unlinkStrict(join(dir, "nope.md"))).resolves.toBeUndefined();
+	});
+
+	// fail-closed 的本体：ENOENT 之外的错误一律上抛，不得静默变成「删除成功」。
+	it("rethrows any error that is not ENOENT", async () => {
+		if (typeof process.getuid === "function" && process.getuid() === 0) return;
+		await writeFile(join(dir, "a.md"), "x", "utf8");
+		await chmod(dir, 0o500);
+		try {
+			await expect(unlinkStrict(join(dir, "a.md"))).rejects.toThrow();
+		} finally {
+			await chmod(dir, 0o700);
+		}
+		expect(await readFile(join(dir, "a.md"), "utf8")).toBe("x");
+	});
+
+	// 大小写不敏感 / Unicode 规范化的文件系统上，两个不同的字符串可能指向同一 inode；
+	// 那时 rename 后的 unlink 会把刚写入的文件删掉。硬链接是 Linux 上能构造出的同 inode 双名字。
+	it("detects two names that point at the same inode", async () => {
+		await writeFile(join(dir, "a.md"), "x", "utf8");
+		await writeFile(join(dir, "c.md"), "y", "utf8");
+		await link(join(dir, "a.md"), join(dir, "b.md"));
+		expect(await sameFile(join(dir, "a.md"), join(dir, "b.md"))).toBe(true);
+		expect(await sameFile(join(dir, "a.md"), join(dir, "c.md"))).toBe(false);
+		expect(await sameFile(join(dir, "a.md"), join(dir, "missing.md"))).toBe(false);
 	});
 });
 
