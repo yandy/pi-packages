@@ -1,4 +1,6 @@
-const LINE_RE = /^-\s+\[([^\]]+)\]\(([^)]+)\)\s*—\s*(.*)$/;
+// name 与 file 两组都必须是**非贪婪**的：(1) file 可能含 `)`（entryFileName 不剥括号）；
+// (2) name 可能含 `]`。贪婪组会把分割点吃掉，[^\]]+ / [^)]+ 则表示这两种行根本匹配不上。
+const LINE_RE = /^-\s+\[(.+?)\]\((.+?)\)\s*—\s*(.*)$/;
 
 export interface IndexLineEntry {
 	name: string;

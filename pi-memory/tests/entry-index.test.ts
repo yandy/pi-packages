@@ -23,6 +23,20 @@ describe("parseEntryIndex", () => {
 	it("records the line number of each entry", () => {
 		expect(parseEntryIndex(HANDWRITTEN).entries[0].lineNo).toBe(3);
 	});
+
+	// 这两个用例钉住 LINE_RE 的「非贪婪」选择。文件名由 entryFileName 从 name 派生，而它**不剥离**
+	// 括号与方括号，所以 `Fix login (v2)` 会得到 `Fix-login-(v2).md`、`Array [0]` 会得到 `Array-[0].md`。
+	// 若把 name 组写成 [^\]]+ 或把 file 组写成 [^)]+，这两种行会 NO MATCH → 被计入 unrecognized，
+	// 随后 upsert 会追加一条同 file 的重复行、remove 又删不掉它（MEMORY.md 随写入次数无界增长）。
+	it("parses a file name containing parentheses", () => {
+		const line = formatIndexLine("Fix login (v2)", "Fix-login-(v2).md", "d");
+		expect(parseEntryIndex(line).entries[0]).toMatchObject({ name: "Fix login (v2)", file: "Fix-login-(v2).md", description: "d" });
+	});
+
+	it("parses a name containing square brackets", () => {
+		const line = formatIndexLine("Array [0]", "Array-[0].md", "d");
+		expect(parseEntryIndex(line).entries[0]).toMatchObject({ name: "Array [0]", file: "Array-[0].md", description: "d" });
+	});
 });
 
 describe("formatIndexLine", () => {
@@ -33,6 +47,13 @@ describe("formatIndexLine", () => {
 	it("round-trips through parseEntryIndex", () => {
 		const line = formatIndexLine("集成测试", "集成测试.md", "摘要");
 		expect(parseEntryIndex(line).entries[0]).toMatchObject({ name: "集成测试", file: "集成测试.md", description: "摘要" });
+	});
+
+	// 回归守卫：file 组必须是非贪婪的。若改成贪婪的 (.+)，description 里的 `) — ` 会把分割点吃到最后一个括号，
+	// 使 file 变成 `a.md) — see (x` 而 description 只剩 `y`。
+	it("round-trips a description containing parentheses and an em dash", () => {
+		const line = formatIndexLine("A", "a.md", "see (x) — y");
+		expect(parseEntryIndex(line).entries[0]).toMatchObject({ name: "A", file: "a.md", description: "see (x) — y" });
 	});
 });
 
