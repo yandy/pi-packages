@@ -84,6 +84,20 @@ npm run typecheck
 ./tests/e2e.sh
 ```
 
+### 用本地构建验证提权转发
+
+父会话可以用 `pi -e <path>` 直接加载本地 pi-sandbox，但 **`-e` 只影响父会话**：pi-subagents 为子会话另建资源加载器，子会话按 `agentDir` 与项目 `.pi/` **重新发现**扩展。若 `~/.pi/agent/settings.json` 里仍声明 `npm:@yandy0725/pi-sandbox`，子会话会加载发布版，转发会**静默失效**（子会话只报 `requires approval, but no approval channel is available`）。让父子两侧发现同一份构建：
+
+```bash
+AG=$(mktemp -d); cp ~/.pi/agent/auth.json "$AG/" 2>/dev/null || true
+cat > "$AG/settings.json" <<EOF
+{ "packages": ["<repo>/pi-sandbox", "<repo>/pi-subagents"] }
+EOF
+cd <可写项目目录> && PI_CODING_AGENT_DIR="$AG" pi
+```
+
+观察点与验证记录见 `docs/superpowers/specs/2026-09-30-escalation-approval-forwarding-design.md` §11。
+
 ## License
 
 MIT

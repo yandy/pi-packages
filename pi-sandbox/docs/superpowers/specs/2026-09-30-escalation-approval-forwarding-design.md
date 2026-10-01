@@ -403,6 +403,33 @@ abort 的两种时机：
 | execute 层 signal 接线（bash/write/edit 各一条） | 已 abort 的 signal → 不弹窗且抛 cancelled | tests/tools.test.ts |
 | 包内组合级：事件→link→子 execute→父 select→落盘→disposed 回到 fail-closed | 钉住单元判例之间的接缝（Ruling 18） | tests/forwarding-integration.test.ts（新增）|
 
+### 真机验证（人工，需交互式 TUI）
+
+本功能的全部价值取决于 6 个宿主/上游集成事实（事件通道名与载荷、emit 早于 `bindExtensions()`、同进程扩展共享 `globalThis`、事件里的 id 与子会话 ctx 的 id 同源、`hasUI` getter 语义、`select` 第三参的 signal 语义），因此自动化判例之外必须做一次真机验证。
+
+**用本地构建验证时，必须让父子两侧发现同一份构建**：父会话可以用 `pi -e <path>` 直接加载本地 pi-sandbox，但 **`-e` 只影响父会话**——pi-subagents 为子会话另建资源加载器（`create-subagent-session.ts:178-187`：只传 `cwd` / `agentDir` / `noPromptTemplates` / `noThemes` / `noContextFiles`），子会话按 `agentDir` 与项目 `.pi/` **重新发现**扩展。若 `~/.pi/agent/settings.json` 里仍声明 `npm:@yandy0725/pi-sandbox`，子会话会加载**发布版**：父会话注册的通道对它是不可见的（另一个构建不认识 broker），表现为转发静默失效——子会话仍报 `requires approval, but no approval channel is available`。推荐用临时 agent dir（不动 home 配置）：
+
+```bash
+AG=$(mktemp -d)
+cp ~/.pi/agent/auth.json "$AG/" 2>/dev/null || true    # 模型凭据（若有）
+cp ~/.pi/agent/models.json "$AG/" 2>/dev/null || true
+cat > "$AG/settings.json" <<EOF
+{ "packages": ["<repo>/pi-sandbox", "<repo>/pi-subagents"] }
+EOF
+cd <可写项目目录> && PI_CODING_AGENT_DIR="$AG" pi
+```
+
+观察点（在 TUI 里让后台子代理往工作区外写一个文件；被拒后模型带 `sandbox_permissions` + `justification` 原样重试）：
+
+1. 子代理第一次写被拒（`[sandbox: file access denied under workspace-write mode]` + escalation 提示）
+2. 带参重试 → **父会话 TUI 弹窗**：标题与选项与父会话自己提权时完全一致，不含任何子代理标识（D4）
+3. `Allow once` → 文件真的写出，且 `/permission` 档位不变（一次性）
+4. 弹窗出现后按 `Esc` → 弹窗取消，子代理收到 `was cancelled`
+5. 弹窗出现**前**按 `Esc`（中断父 run）→ 不应弹出任何窗（Review Focus #2）
+6. 父会话自己的提权弹窗开着时子代理提权 → 排队等前一个 settle（Ruling 17），不顶掉前一个弹窗
+
+**验证记录（2026-10-01，临时 agent dir 方式）**：观察点 1–3 通过，链路日志完整且全程同一进程——`session_start{hasUI:true}` → `registerParent` → `event.session-created` → `linkChild`（事件里的 `parentSessionId` 与已注册父 id 逐字相等）→ 子 `session_start{hasUI:false}` → `resolveChannel.hit` → `tools.child{resolved:true}` → `request.enter` → `request.settle{choice:"Allow once"}` → `session_shutdown` → `unregisterParent`；无任何失败分支。观察点 **4、5、6 当次未执行**（第 6 项需构造"两条请求并发"的场景），仍需补测。
+
 ## 12. 交付范围
 
 - 分支 `feat/sandbox-escalation-forwarding`，用 `.worktrees/` 隔离（已 gitignore）
