@@ -35,7 +35,7 @@ MEMORY.md 里一行要概括一个 topic 下的全部条目，而这一行是**�
 
 1. 采用 CC 的存储语义：一个 entry 一个文件、索引一行一个 entry、读写同口径 200 行 / 25KB。
 2. 消除 memory 目录的双写入路径，使写入可加锁、可快照、可回滚、可单测。
-3. 修复 P0 级正确性问题：并发覆盖、数据丢失、prompt injection、幂等缺失、compaction 后状态陈旧。
+3. 修复 P0 级正确性问题：并发覆盖、数据丢失、prompt injection、幂等缺失、compaction 后 `injectedTopics` 不复位。
 4. 提升提取保真度与用户可见性。
 
 ### 1.4 非目标
@@ -63,6 +63,8 @@ MEMORY.md 里一行要概括一个 topic 下的全部条目，而这一行是**�
 | D9 | 索引满 200 行后：写入成功 + 向模型返回可操作错误 | 对齐 CC。D3 已让注入预算能显示 200 行，所以这个上限是诚实的 |
 | D10 | 迁移在首次 `session_start` 自动执行 | 避免用户升级后记忆「消失」 |
 | D11 | 净化只在注入时进行，不改磁盘内容 | 磁盘文件必须保持用户可读可编辑的原始形态 |
+| D12 | 每个 agent session 只注册它自己的工具子集 | dream 的 `rename` / `rebuild_index` 只在 dream 的 headless session 内注册，不进主 agent 的 schema —— 既省每轮上下文，也避免主 agent 误用破坏结构的能力 |
+| D13 | 注入的索引文本在**整个 session 内冻结** | system prompt 是 provider prefix cache 的最前段；会话中途改变它会让**整段对话**的缓存前缀失效。会话内的记忆写入服务的是未来会话，当前会话不需要看到 |
 
 ---
 
@@ -164,13 +166,15 @@ withLock<T>(op: string, fn: () => Promise<T>): Promise<T>
 
 ### 4.3 谁用什么
 
-| 调用方 | 可用原语 |
-|---|---|
-| `memory` 工具（主 agent） | `addEntry` / `replaceEntry` / `removeEntry` / `searchEntries` / `listEntries` |
-| extract 子 agent | 同上 |
-| dream 子 agent | 全部（额外含 `renameEntry` / `rebuildIndex`） |
-| auto-surfacing 侧查询 | 只读 |
-| 迁移 | `withLock` + 目录级操作 |
+| 调用方 | 可用原语 | 注册范围 |
+|---|---|---|
+| `memory` 工具（主 agent） | `addEntry` / `replaceEntry` / `removeEntry` / `searchEntries` / `listEntries` | 进程级 `pi.registerTool()`，**仅这 5 个 action** |
+| extract 子 agent | 同上 5 个 action | **仅其 headless session**（作为 `customTools` 传入 `createAgentSession`） |
+| dream 子 agent | 全部 7 个 action（额外 `rename` / `rebuild_index`） | **仅其 headless session**（同上） |
+| auto-surfacing 侧查询 | 只读 | 无任何工具 |
+| 迁移 | `withLock` + 目录级操作 | 不涉及工具 |
+
+**注册范围是硬约束（D12）**：工具定义由 `createMemoryTool(deps, { actions: [...] })` 按 session 构建。`rename` 与 `rebuild_index` **不得**出现在主 agent 与 extract 的 schema 中；反之 extract 也不需要它们。
 
 dream **不再**拥有 `write` / `edit` / `ls` / `bash`。它的重构能力边界由上述原语定义：合并两条 = `replaceEntry(目标, 合并正文)` + `removeEntry(另一条)`。
 
@@ -246,6 +250,8 @@ memory(
 - `list`：列出全部 entry 的 `name` / `description` / `type` / `modified`。
 - `search`：`scope=memory` 全文搜索；`scope=sessions` 检索历史 session（行为不变）。
 
+> 这是**主 agent** 的 action 集合（5 个）。dream 额外拥有 `rename` / `rebuild_index`，但仅在 dream 自己的 session 内注册（D12、§12.1），**不出现在上述 schema 中**。
+
 ### 7.2 幂等
 
 `add` 遇到 **`name` 精确相同**的 entry 时覆盖该 entry，不追加重复行。仅**文件名**冲突（不同 `name` 派生出同一文件名）时按 §3.2 追加 `-2` 后缀，**不覆盖、不合并**。这消除了旧实现中「重复写入后 `remove` 报 `Multiple matches` 无法删除」的问题。
@@ -286,18 +292,28 @@ memory(
 
 ## 9. 注入（`before_agent_start`）
 
-### 9.1 索引注入改为 system prompt section
+### 9.1 索引注入改为 system prompt section，且会话内冻结
 
-不再是 `return { systemPrompt }`，而是就地修改可变对象：
+两个独立要求，必须同时满足。
+
+**(a) 用 section 而非全量替换。** 不再是 `return { systemPrompt }`，而是就地修改可变对象：
 
 ```ts
-event.systemPromptOptions.sections["memory_index"] = sanitize(indexText);
+event.systemPromptOptions.sections["memory_index"] = indexSnapshot;   // 已 sanitize
 ```
 
 - section 名必须匹配 `/^[a-z][a-z0-9_-]*$/`（pi 的约束），渲染为 `<memory_index>…</memory_index>`。
 - 理由：`return { systemPrompt }` 走 pi 的 `forceSystemPrompt` 分支，使整个 prompt 变成「无 sections 的不透明字符串」，pi 无法按段 diff（`dist/core/system-prompt.js`、`dist/core/extensions/runner.js`）。
-- **删除 `indexSnapshot` 状态变量**：每个 `before_agent_start` 从磁盘重读 `MEMORY.md`（1 次文件读）。pi 的 `diffSystemPromptSections` 在内容未变时不产生 patch，因此每轮重算无额外 token 成本。
-- 收益：compaction 后索引自动是新的，无需专门的刷新钩子；同时消除了「快照陈旧」这一 bug 类别。
+
+**(b) 会话内内容冻结（D13）。** `indexSnapshot` 在 `session_start` 读取一次并保留到 session 结束；`before_agent_start` 每轮只是重新赋同一个字符串，**不再从磁盘重读**。
+
+- 理由：system prompt 位于 provider prefix cache 的最前段。会话中途改变它 —— 无论是 extract 写了新记忆、还是 dream 重建了索引 —— 都会让**整段对话的缓存前缀失效**，代价远高于「索引晚一轮更新」。
+- 语义上也可接受：会话中的记忆写入（extract、`memory add`）服务的是**未来**会话；当前会话不需要看到自己刚写的记忆，工具返回值已经确认了写入。
+- 因此在**整个 session 生命周期内（含 compaction 之后）**该 section 保持不变。compaction **不刷新**索引 —— 这是刻意选择，不是遗漏。
+- pi 的 `diffSystemPromptSections` 会对比上一轮内容；冻结下内容恒等 → 每轮不产生 patch，成本为 0。
+- `session_start` 会在 `startup` / `reload` / `new` / `resume` / `fork` 时触发，因此新会话总会拿到最新索引。
+
+> **与原分析 #8 的差异**：原分析建议「compaction 后从磁盘重注入索引」。本设计改为**会话内永久冻结**，理由是 prefix cache 优先级更高。代价是同一会话内看不到本轮新增的记忆；收益是整段对话的缓存前缀在会话期间稳定。compaction 相关修复收窄为清空 `injectedTopics`（§9.3、§10）。
 
 ### 9.2 侧查询清单缓存
 
@@ -327,10 +343,10 @@ Map<filename, { mtimeMs: number; name: string; description: string; type: string
 
 | 事件 | 行为 |
 |---|---|
-| `session_start` | 加载配置；解析 memoryDir；若需迁移则执行迁移（§15）；注册 `memory` 工具（仅首次）；重建侧查询缓存；nudge 检查 |
-| `before_agent_start` | 设置 `sections["memory_index"]`（每轮重读索引）；auto-surfacing（main session 且非 subagent） |
+| `session_start` | 加载配置；解析 memoryDir；若需迁移则执行迁移（§15）；**读取并冻结索引快照**（sanitize 后）；注册 `memory` 工具（仅首次，5 个 action）；重建侧查询缓存；nudge 检查 |
+| `before_agent_start` | 赋 `sections["memory_index"] = indexSnapshot`（冻结值，**不重读磁盘**）；auto-surfacing（main session 且非 subagent） |
 | `agent_end` | 触发 extract（异步，行为见 §11） |
-| `session_compact` | **清空 `injectedTopics`**（compaction 会把已注入内容挤出上下文，不清空则该 entry 本会话再也不会浮现）。索引无需处理 —— 每轮重读已覆盖 |
+| `session_compact` | **清空 `injectedTopics`**（compaction 会把已注入内容挤出上下文，不清空则该 entry 本会话再也不会浮现）。索引 section **刻意不刷新**（D13） |
 | `session_shutdown` | 等待进行中的写操作收尾（上限 `lock.timeoutMs`），避免留下 stale 锁。`.dream-meta.json` 由 dream 运行器在完成时写入，不在此处处理 |
 
 ---
@@ -365,7 +381,8 @@ Map<filename, { mtimeMs: number; name: string; description: string; type: string
 
 ### 12.1 能力变更
 
-- 工具集从 `read/write/edit/ls` 改为 `memory` 工具的原语全集（`add` / `replace` / `rename` / `remove` / `list` / `search` / `rebuild_index`）。
+- 工具集从 `read/write/edit/ls` 改为 `memory` 工具的 7 个 action（`add` / `replace` / `rename` / `remove` / `list` / `search` / `rebuild_index`）。
+- **注册范围限定在 dream 自己的 headless session 内**（D12）：通过 `runHeadlessAgent({ customTools })` 传入 `createAgentSession`，**不经** `pi.registerTool()`，因此这 7 个 action 不会进入主 agent 或 extract 的 prompt。`rename` 与 `rebuild_index` 是 dream 专属。
 - **失去裸写权限**，因此行为首次可被单测覆盖。
 
 ### 12.2 Prompt 重写
@@ -487,13 +504,14 @@ Map<filename, { mtimeMs: number; name: string; description: string; type: string
 session_start
   ├ 加载配置 / 解析 memoryDir
   ├ migrateIfNeeded()  ── 需要则迁移（持锁 + 快照）
+  ├ 读 MEMORY.md 一次 → sanitize → indexSnapshot（会话内冻结，D13）
   ├ 重建侧查询缓存（读全目录）
-  ├ registerTool(memory)  ── 仅首次
-  └ nudge 检查 → 用户确认 → runDream（持锁，原语化）
+  ├ registerTool(memory, 5 actions)  ── 仅首次
+  └ nudge 检查 → 用户确认 → runDream（持锁，原语化；7 actions 仅注册于其 session）
 
 before_agent_start（每个用户回合）
-  ├ 读 MEMORY.md（1 次）→ sanitize → sections["memory_index"]
-  ├ auto-surfacing：缓存清单 → 侧查询选 ≤3 → sanitize → return { message }
+  ├ sections["memory_index"] = indexSnapshot（冻结值，不重读磁盘）
+  ├ auto-surfacing：缓存清单（可含本会话新增 entry）→ 侧查询选 ≤3 → sanitize → return { message }
   └ （不再 return systemPrompt）
 
 agent_end（每个 run 结束）
@@ -501,7 +519,7 @@ agent_end（每个 run 结束）
        └ 完整消息序列 → 结构化渲染 → headless agent（持锁写原语）
 
 session_compact
-  └ injectedTopics.clear()
+  └ injectedTopics.clear()（索引 section 刻意不刷新）
 
 session_shutdown
   └ 等待进行中的写操作收尾（避免留下 stale 锁）
@@ -522,8 +540,9 @@ session_shutdown
 | 索引外科式修改 | 保留手写 `## 分组` 标题与注释；只改目标行；行序稳定 |
 | 容量 | 超 200 行：写入成功且返回可操作错误 |
 | 净化 | 零宽字符、bidi 控制符、≥5 种仿冒标签；磁盘内容不被修改 |
-| 注入 | `event.systemPromptOptions.sections["memory_index"]` 被设置；未设置 `forceSystemPrompt` |
-| 生命周期 | `session_compact` 后 `injectedTopics` 为空 |
+| 注入 | `event.systemPromptOptions.sections["memory_index"]` 被设置；未设置 `forceSystemPrompt`；**同一 session 内多轮之间内容恒等**（磁盘 MEMORY.md 被并发修改后仍恒等） |
+| 工具注册范围 | 主 agent 的 `memory` schema 只含 5 个 action；`rename` / `rebuild_index` 不出现在主 agent 与 extract 的工具集中；dream 的工具集含 7 个 |
+| 生命周期 | `session_compact` 后 `injectedTopics` 为空；且 `session_compact` 后 `indexSnapshot` 不变 |
 | 提取 | prompt 含全部 user 消息与 tool_result 摘要；中段裁减策略；单条上限生效 |
 | 缓存 | 第二轮不读文件内容（mock `readFile` 计数）；`mtimeMs` 变化时重读 |
 | 迁移 | 多条目拆分；单条目；零条目；跨文件重名；中文标题；幂等（重跑不重复）；失败不写标记 |
@@ -551,6 +570,7 @@ session_shutdown
 | 锁 stale 误判导致双写 | stale 需满足「PID 不存活」或「超 TTL」；删除后仅重试一次 |
 | 净化过度破坏正文可读性 | 只在注入时净化，磁盘内容不变（D11） |
 | 200 行上限比旧模型更快触顶 | §8.2 的可操作错误 + dream 容量管理职责文档化 |
+| 会话内索引冻结 → 本会话看不到刚写入的记忆 | 刻意选择（D13，prefix cache 优先）；工具返回值已确认写入；新会话立即生效 |
 | `sections` 注入方式依赖 pi 内部行为 | 已有源码与类型验证；退路是回 `forceSystemPrompt`（功能不受损，仅失去按段 diff） |
 
 ---
