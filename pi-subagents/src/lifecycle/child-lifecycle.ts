@@ -25,7 +25,15 @@ export const SUBAGENT_CHILD_SESSION_CREATED = "subagents:child:session-created";
 /** Emitted after the child's prompt resolves (normal, steered, or aborted). */
 export const SUBAGENT_CHILD_COMPLETED = "subagents:child:completed";
 
-/** Emitted in the run's `finally` — always fires, on success and error. */
+/**
+ * Emitted when the child's **session record** is torn down — the eviction sweep
+ * (`SubagentManager.cleanup()`), `clearCompleted()` on session start/switch, or
+ * the manager's `dispose()` on session shutdown — and immediately when binding a
+ * freshly created session fails. It does **not** fire when a run finishes: a
+ * completed agent keeps its session (and this registration) until one of the
+ * above happens, so subscribers must treat it as teardown, not per-run cleanup.
+ * For per-run completion use `SUBAGENT_CHILD_COMPLETED`.
+ */
 export const SUBAGENT_CHILD_DISPOSED = "subagents:child:disposed";
 
 /** Payload for `subagents:child:spawning`. */
