@@ -5,7 +5,7 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { loadConfig, type MemoryConfig, type SessionPersistenceConfig } from "./src/config";
 import { runDream } from "./src/dream";
 import { runExtract } from "./src/extract";
-import { buildInjection, injectSurfacedContent, loadIndexSnapshot, runSideQuery, scanTopics } from "./src/inject";
+import { buildInjection, injectSurfacedContent, loadIndexSnapshot, runSideQuery, scanEntries } from "./src/inject";
 import { createMemoryTool, MAIN_AGENT_ACTIONS, type MemoryToolDeps } from "./src/memory-tool";
 import { MemoryStore } from "./src/memory-store";
 import { readDreamMeta, shouldNudge, writeDreamMeta } from "./src/nudge";
@@ -37,7 +37,8 @@ export default function (pi: ExtensionAPI) {
 	let indexSnapshot = "";
 	let toolRegistered = false;
 	let currentCwd = "";
-	const injectedTopics = new Set<string>();
+	/** 本 session 已注入过的 entry **文件名**（spec §9.3）。session_compact 会清空它 —— Plan C。 */
+	const injectedFiles = new Set<string>();
 	let lastSystemPrompt = "";
 
 	/**
@@ -114,7 +115,9 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("before_agent_start", async (event, ctx) => {
 		lastSystemPrompt = event.systemPrompt;
-		if (!config?.enabled || !indexSnapshot || !memoryDir) return;
+		// 先拷到 const：`store` 是工厂作用域的 let，在异步回调里 TS 不会保留它的外层收窄。
+		const activeStore = store;
+		if (!config?.enabled || !indexSnapshot || !memoryDir || !activeStore) return;
 
 		const autoSurfacing = config.autoSurfacing;
 		// Skip auto-surfacing in subagent sessions: pi-subagents injects an
@@ -127,12 +130,12 @@ export default function (pi: ExtensionAPI) {
 		if (autoSurfacing?.enabled && event.prompt && !isSubagent) {
 			try {
 				if (ctx.hasUI) ctx.ui.setStatus("surfacing", "Searching relevant memories…");
-				const manifest = await scanTopics(memoryDir);
+				const manifest = await scanEntries(activeStore);
 				if (manifest.length > 0) {
 					const selected = await runSideQuery(
 						manifest,
 						event.prompt.slice(0, 4000),
-						injectedTopics,
+						injectedFiles,
 						autoSurfacing.maxFiles,
 						autoSurfacing.thinkLevel,
 						resolveDefault(config, "autoSurfacing", "model"),
@@ -143,13 +146,13 @@ export default function (pi: ExtensionAPI) {
 					);
 					if (selected.length > 0) {
 						const content = await injectSurfacedContent(
-							memoryDir,
+							activeStore,
 							selected,
 							autoSurfacing.maxEntryBytes,
 							autoSurfacing.maxInjectionBytes,
 						);
 						if (content) {
-							for (const f of selected) injectedTopics.add(f);
+							for (const f of selected) injectedFiles.add(f);
 							injectedMessage = { customType: "memory-auto-surfacing", content, display: false };
 						}
 					}

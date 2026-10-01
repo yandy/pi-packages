@@ -30,8 +30,8 @@ const { MOCK_BASE, mockConfigValue } = vi.hoisted(() => {
 	return { MOCK_BASE: `/tmp/pi-memory-wiring-${process.pid}`, mockConfigValue: cfg };
 });
 
-const { scanTopicsMock, runSideQueryMock, injectSurfacedContentMock, runExtractMock } = vi.hoisted(() => ({
-	scanTopicsMock: vi.fn(),
+const { scanEntriesMock, runSideQueryMock, injectSurfacedContentMock, runExtractMock } = vi.hoisted(() => ({
+	scanEntriesMock: vi.fn(),
 	runSideQueryMock: vi.fn(),
 	injectSurfacedContentMock: vi.fn(),
 	runExtractMock: vi.fn().mockResolvedValue(undefined),
@@ -74,7 +74,7 @@ vi.mock("../src/inject", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../src/inject")>();
 	return {
 		...actual,
-		scanTopics: scanTopicsMock,
+		scanEntries: scanEntriesMock,
 		runSideQuery: runSideQueryMock,
 		injectSurfacedContent: injectSurfacedContentMock,
 	};
@@ -119,7 +119,7 @@ describe("index wiring (integration)", () => {
 		).catch(() => {});
 
 		// Reset mock call counts
-		scanTopicsMock.mockReset();
+		scanEntriesMock.mockReset();
 		runSideQueryMock.mockReset();
 		injectSurfacedContentMock.mockReset();
 	});
@@ -178,8 +178,8 @@ describe("index wiring (integration)", () => {
 		await handlers["session_start"][0]({}, fakeCtx);
 
 		// Mock auto-surfacing functions
-		scanTopicsMock.mockResolvedValue([
-			{ filename: "ssh.md", name: "SSH", description: "ssh config", type: "project", mtimeMs: 100 },
+		scanEntriesMock.mockResolvedValue([
+			{ file: "ssh.md", name: "SSH", description: "ssh config", type: "project", modified: "2026-01-01T00:00:00.000Z" },
 		]);
 		runSideQueryMock.mockResolvedValue(["ssh.md"]);
 		// biome-ignore lint/style/useTemplate: clear separator
@@ -206,7 +206,7 @@ describe("index wiring (integration)", () => {
 		const result = await handlers["before_agent_start"][0](mainEvent, mainCtx as any);
 
 		// Auto-surfacing must have run
-		expect(scanTopicsMock).toHaveBeenCalledTimes(1);
+		expect(scanEntriesMock).toHaveBeenCalledTimes(1);
 		expect(runSideQueryMock).toHaveBeenCalledTimes(1);
 		expect(runSideQueryMock).toHaveBeenCalledWith(
 			expect.any(Array), expect.any(String), expect.any(Set), 5, "off",
@@ -226,8 +226,8 @@ describe("index wiring (integration)", () => {
 		const fakeCtx = { cwd: tmpDir, hasUI: false, isProjectTrusted: () => true };
 		await handlers["session_start"][0]({}, fakeCtx);
 
-		scanTopicsMock.mockResolvedValue([
-			{ filename: "ssh.md", name: "SSH", description: "ssh config", type: "project", mtimeMs: 100 },
+		scanEntriesMock.mockResolvedValue([
+			{ file: "ssh.md", name: "SSH", description: "ssh config", type: "project", modified: "2026-01-01T00:00:00.000Z" },
 		]);
 
 		// Subagent: systemPrompt contains pi-subagents' <active_agent> marker
@@ -246,7 +246,7 @@ describe("index wiring (integration)", () => {
 		const result = await handlers["before_agent_start"][0](subagentEvent, subagentCtx as any);
 
 		// Auto-surfacing must NOT run for subagents
-		expect(scanTopicsMock).not.toHaveBeenCalled();
+		expect(scanEntriesMock).not.toHaveBeenCalled();
 		expect(runSideQueryMock).not.toHaveBeenCalled();
 		// MEMORY.md index injection still happens
 		expect(result?.systemPrompt).toContain("# Memory Index");
@@ -263,8 +263,8 @@ describe("index wiring (integration)", () => {
 		const fakeCtx = { cwd: tmpDir, hasUI: false, isProjectTrusted: () => true };
 		await handlers["session_start"][0]({}, fakeCtx);
 
-		scanTopicsMock.mockResolvedValue([
-			{ filename: "ssh.md", name: "SSH", description: "ssh config", type: "project", mtimeMs: 100 },
+		scanEntriesMock.mockResolvedValue([
+			{ file: "ssh.md", name: "SSH", description: "ssh config", type: "project", modified: "2026-01-01T00:00:00.000Z" },
 		]);
 		runSideQueryMock.mockResolvedValue(["ssh.md"]);
 		injectSurfacedContentMock.mockResolvedValue("<relevant_memories>\n## ssh.md\nssh config\n</relevant_memories>");
@@ -297,8 +297,8 @@ describe("index wiring (integration)", () => {
 		const fakeCtx = { cwd: tmpDir, hasUI: false, isProjectTrusted: () => true };
 		await handlers["session_start"][0]({}, fakeCtx);
 
-		scanTopicsMock.mockResolvedValue([
-			{ filename: "ssh.md", name: "SSH", description: "ssh config", type: "project", mtimeMs: 100 },
+		scanEntriesMock.mockResolvedValue([
+			{ file: "ssh.md", name: "SSH", description: "ssh config", type: "project", modified: "2026-01-01T00:00:00.000Z" },
 		]);
 		runSideQueryMock.mockResolvedValue(["ssh.md"]);
 		injectSurfacedContentMock.mockResolvedValue("<relevant_memories>\n## ssh.md\nssh config\n</relevant_memories>");

@@ -6,7 +6,6 @@ import {
   removeEntryByTopic,
   findEntryByTopic,
   updateHook,
-  truncateForInjection,
   checkCapacity,
   type IndexEntry,
 } from "../src/index-file";
@@ -104,28 +103,6 @@ describe("updateHook", () => {
   it("throws when topic not found", () => {
     const entries = parseIndex(SAMPLE).entries;
     expect(() => updateHook(entries, "nonexistent.md", "h")).toThrow("not found");
-  });
-});
-
-describe("truncateForInjection", () => {
-  it("keeps content under limits", () => {
-    const r = truncateForInjection(SAMPLE, 200, 25600);
-    expect(r.ok).toBe(true);
-    expect(r.truncated).toBe(false);
-  });
-  it("truncates by line count", () => {
-    const many = Array.from({ length: 10 }, (_, i) => `- [T${i}](t${i}.md) — desc`).join("\n");
-    const r = truncateForInjection(many, 3, 25600);
-    expect(r.truncated).toBe(true);
-    expect(r.content.split("\n").length).toBe(4);
-    expect(r.content).toContain("[truncated:");
-  });
-  it("truncates by byte count", () => {
-    const longLine = `- [A very long title that exceeds the byte limit](example.md) — hook`;
-    const r = truncateForInjection(longLine, 100, 50);
-    expect(r.truncated).toBe(true);
-    const beforeMarker = r.content.split("\n")[0];
-    expect(Buffer.byteLength(beforeMarker, "utf8")).toBeLessThanOrEqual(50);
   });
 });
 

@@ -61,28 +61,6 @@ export function updateHook(entries: IndexEntry[], topic: string, hook: string): 
 	return next;
 }
 
-export function truncateForInjection(
-	content: string,
-	maxLines: number,
-	maxBytes: number,
-): { ok: boolean; content: string; truncated: boolean } {
-	const lines = content.split("\n");
-	let out = content;
-	let truncated = false;
-	if (lines.length > maxLines) {
-		out = lines.slice(0, maxLines).join("\n");
-		truncated = true;
-	}
-	if (Buffer.byteLength(out, "utf8") > maxBytes) {
-		let cut = out;
-		while (Buffer.byteLength(cut, "utf8") > maxBytes && cut.length > 0) cut = cut.slice(0, -1);
-		out = cut;
-		truncated = true;
-	}
-	if (truncated) out += `\n[truncated: memory index exceeds injection limit]`;
-	return { ok: !truncated, content: out, truncated };
-}
-
 export function checkCapacity(entries: IndexEntry[], maxLines: number, maxBytes: number): boolean {
 	const serialized = serializeIndex(entries);
 	if (entries.length > maxLines) return false;
