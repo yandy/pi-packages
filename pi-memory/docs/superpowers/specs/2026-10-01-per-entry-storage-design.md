@@ -64,7 +64,8 @@ MEMORY.md 里一行要概括一个 topic 下的全部条目，而这一行是**�
 | D10 | 迁移在首次 `session_start` 自动执行 | 避免用户升级后记忆「消失」 |
 | D11 | 净化只在注入时进行，不改磁盘内容 | 磁盘文件必须保持用户可读可编辑的原始形态 |
 | D12 | 每个 agent session 只注册它自己的工具子集 | dream 的 `rename` / `rebuild_index` 只在 dream 的 headless session 内注册，不进主 agent 的 schema —— 既省每轮上下文，也避免主 agent 误用破坏结构的能力 |
-| D13 | 注入的索引文本在**整个 session 内冻结** | system prompt 是 provider prefix cache 的最前段；会话中途改变它会让**整段对话**的缓存前缀失效。会话内的记忆写入服务的是未来会话，当前会话不需要看到 |
+| D13 | 索引 section 的值在**整个 session 内不变** | `diffSystemPromptSections` 在内容恒等时返回 `undefined` → 一条消息都不追加。而 `memory_index` 是 system prompt 的**最后一段**，一旦值变化，折叠路径（Anthropic 默认）下其后的**整段对话**失去缓存。理由的完整推导见 §9.1(b) |
+| D14 | 索引来源：新 session 从磁盘读；`resume`/`fork`/`reload` 用 transcript 的录制值；`session_compact` 从磁盘重读 | 冻结保证缓存；compaction 是边际缓存成本最低、收益最高的唯一刷新点 |
 
 ---
 
@@ -292,28 +293,66 @@ memory(
 
 ## 9. 注入（`before_agent_start`）
 
-### 9.1 索引注入改为 system prompt section，且会话内冻结
+### 9.1 索引注入：section + 会话内冻结（compaction 例外）
 
-两个独立要求，必须同时满足。
+#### (a) 用 section 而非全量替换
 
-**(a) 用 section 而非全量替换。** 不再是 `return { systemPrompt }`，而是就地修改可变对象：
+不再是 `return { systemPrompt }`，而是就地修改可变对象：
 
 ```ts
 event.systemPromptOptions.sections["memory_index"] = indexSnapshot;   // 已 sanitize
 ```
 
-- section 名必须匹配 `/^[a-z][a-z0-9_-]*$/`（pi 的约束），渲染为 `<memory_index>…</memory_index>`。
-- 理由：`return { systemPrompt }` 走 pi 的 `forceSystemPrompt` 分支，使整个 prompt 变成「无 sections 的不透明字符串」，pi 无法按段 diff（`dist/core/system-prompt.js`、`dist/core/extensions/runner.js`）。
+section 名必须匹配 `/^[a-z][a-z0-9_-]*$/`（pi 的约束），渲染为 `<memory_index>…</memory_index>`。
 
-**(b) 会话内内容冻结（D13）。** `indexSnapshot` 在 `session_start` 读取一次并保留到 session 结束；`before_agent_start` 每轮只是重新赋同一个字符串，**不再从磁盘重读**。
+#### (b) 为什么「中途改变索引」很贵：三层机制
 
-- 理由：system prompt 位于 provider prefix cache 的最前段。会话中途改变它 —— 无论是 extract 写了新记忆、还是 dream 重建了索引 —— 都会让**整段对话的缓存前缀失效**，代价远高于「索引晚一轮更新」。
-- 语义上也可接受：会话中的记忆写入（extract、`memory add`）服务的是**未来**会话；当前会话不需要看到自己刚写的记忆，工具返回值已经确认了写入。
-- 因此在**整个 session 生命周期内（含 compaction 之后）**该 section 保持不变。compaction **不刷新**索引 —— 这是刻意选择，不是遗漏。
-- pi 的 `diffSystemPromptSections` 会对比上一轮内容；冻结下内容恒等 → 每轮不产生 patch，成本为 0。
-- `session_start` 会在 `startup` / `reload` / `new` / `resume` / `fork` 时触发，因此新会话总会拿到最新索引。
+**第一层 —— diff 只产出 patch。** `diffSystemPromptSections(previous, current)`（`dist/core/system-prompt.js`）逐 section 比较，只把变化的键放进 patch；**全部相同时返回 `undefined`**，此时 pi 一条消息都不追加。
 
-> **与原分析 #8 的差异**：原分析建议「compaction 后从磁盘重注入索引」。本设计改为**会话内永久冻结**，理由是 prefix cache 优先级更高。代价是同一会话内看不到本轮新增的记忆；收益是整段对话的缓存前缀在会话期间稳定。compaction 相关修复收窄为清空 `injectedTopics`（§9.3、§10）。
+**第二层 —— patch 是一条追加的 system 消息。** `_preparePromptAndToolLoadout`（`dist/core/agent-session.js`）在 sections 有变化时返回 `{ role: "system", content: "", sections }` 并追加到对话。
+
+**第三层 —— provider 决定这条 patch 是「追加」还是「被折叠回头部」。** `resolveTranscript(context, supportsMidConvoSystemMessages)`（pi-ai）：
+
+```js
+function collapseSystemMessages(context){
+  const head = getCurrentSystemMessage(context.messages);   // 按顺序重放所有 system 消息的 sections，取最终值，保留原位置
+  return { messages: head ? [head, ...context.messages.filter(m => m.role !== "system")] : messages };
+}
+function resolveTranscript(context, supportsMidConvoSystemMessages){
+  return supportsMidConvoSystemMessages ? context : collapseSystemMessages(context);
+}
+```
+
+`supportsMidConvoSystemMessages` 默认 **false**（`anthropic-messages` 与 `azure-openai-responses` 均为 `model.compat?.supportsMidConvoSystemMessages ?? false`；另一批 provider 在 pi-ai 内部硬编码 `true`）。
+
+**关键位置事实**：`buildSystemPromptSections` 的插入顺序为 `preamble → tools → rules → docs → addendum → project_context → skills → cwd → 自定义 sections`。自定义 section **最后插入**，因此 `memory_index` 是 system prompt 的**最后一段**，其后紧跟全部对话消息。
+
+于是索引值变化时：
+
+| 情形 | 后果 |
+|---|---|
+| 折叠路径（Anthropic 默认） | 头部尾部被改写 → 缓存从 `memory_index` 处失效，**其后是整个对话历史** |
+| 非折叠路径 | patch 作为独立消息追加 → 前缀保留，但每条 patch 永久留在对话里，反复变更会累积 token |
+| 全量 `forceSystemPrompt`（旧实现） | 头部 = 每轮渲染的完整 prompt，任何变化都从 **position 0** 失效 |
+
+#### (c) 冻结与唯一的例外
+
+因为 `diffSystemPromptSections` 在内容不变时返回 `undefined`，**只要 section 的值在整个 session 内不变，就一条 patch 都不会产生，折叠后的头部逐字节稳定，缓存完整命中**。这就是冻结的全部价值 —— 不是省一次文件读，而是让 system prompt 绝对不变。
+
+索引值的来源规则：
+
+| 场景 | 来源 | 理由 |
+|---|---|---|
+| `startup` / `new`（无录制值） | 从磁盘读 | 全新 session |
+| `resume` / `fork` | **录制值**（从该 session 的 transcript 重放得到） | 保持父会话/被恢复会话的头部不变 |
+| `reload` | **录制值**（同上） | 扩展重载不应改写 system prompt |
+| `session_compact` | 从磁盘**重读**并覆盖 | compaction 已重写对话中段，边际缓存损失最小；长会话到中期往往已积累新记忆，刷新收益最大 |
+
+实现要点：读录制值需重放 transcript 的 system 消息。`ctx.sessionManager` 暴露 `getEntries` / `getLeafId` / `buildContextEntries`，包根另导出 `sessionEntryToContextMessages`；据此按 pi 的 patch 语义（`null` = 删除；否则覆盖，保留首次插入位置）重放即可得到 `sections["memory_index"]`。**若重放得不到该键**（例如更早版本的 session），回退为从磁盘读。
+
+语义代价（有意接受）：同一会话内看不到本轮新增的记忆（extract / `memory add` 服务的是未来会话，工具返回值已确认写入）；后果是 compaction 之后视图会刷新一次。
+
+> **与原分析 #8 的差异**：原分析建议「compaction 后从磁盘重注入」。本设计保留 compaction 的重注入，但**拒绝在其余任何时点刷新**（含 resume/fork），并把 D13 的理由从「缓存前缀失效」修正为上面的三层机制 + 位置事实。compaction 相关修复同时包含清空 `injectedTopics`（§9.3、§10）。
 
 ### 9.2 侧查询清单缓存
 
@@ -343,10 +382,10 @@ Map<filename, { mtimeMs: number; name: string; description: string; type: string
 
 | 事件 | 行为 |
 |---|---|
-| `session_start` | 加载配置；解析 memoryDir；若需迁移则执行迁移（§15）；**读取并冻结索引快照**（sanitize 后）；注册 `memory` 工具（仅首次，5 个 action）；重建侧查询缓存；nudge 检查 |
+| `session_start` | 加载配置；解析 memoryDir；若需迁移则执行迁移（§15）；**确定索引来源并冻结**（`startup`/`new` 读磁盘；`resume`/`fork`/`reload` 重放 transcript 取录制值）；注册 `memory` 工具（仅首次，5 个 action）；重建侧查询缓存；nudge 检查 |
 | `before_agent_start` | 赋 `sections["memory_index"] = indexSnapshot`（冻结值，**不重读磁盘**）；auto-surfacing（main session 且非 subagent） |
 | `agent_end` | 触发 extract（异步，行为见 §11） |
-| `session_compact` | **清空 `injectedTopics`**（compaction 会把已注入内容挤出上下文，不清空则该 entry 本会话再也不会浮现）。索引 section **刻意不刷新**（D13） |
+| `session_compact` | **清空 `injectedTopics`**（compaction 会把已注入内容挤出上下文，不清空则该 entry 本会话再也不会浮现）；**并从磁盘重读索引覆盖 `indexSnapshot`**（D14，唯一的会话内刷新点） |
 | `session_shutdown` | 等待进行中的写操作收尾（上限 `lock.timeoutMs`），避免留下 stale 锁。`.dream-meta.json` 由 dream 运行器在完成时写入，不在此处处理 |
 
 ---
@@ -504,7 +543,8 @@ Map<filename, { mtimeMs: number; name: string; description: string; type: string
 session_start
   ├ 加载配置 / 解析 memoryDir
   ├ migrateIfNeeded()  ── 需要则迁移（持锁 + 快照）
-  ├ 读 MEMORY.md 一次 → sanitize → indexSnapshot（会话内冻结，D13）
+  ├ 确定索引来源：startup/new 读磁盘；resume/fork/reload 重放 transcript 取录制值
+  │                  → sanitize → indexSnapshot（会话内冻结，D13）
   ├ 重建侧查询缓存（读全目录）
   ├ registerTool(memory, 5 actions)  ── 仅首次
   └ nudge 检查 → 用户确认 → runDream（持锁，原语化；7 actions 仅注册于其 session）
@@ -519,7 +559,7 @@ agent_end（每个 run 结束）
        └ 完整消息序列 → 结构化渲染 → headless agent（持锁写原语）
 
 session_compact
-  └ injectedTopics.clear()（索引 section 刻意不刷新）
+  └ injectedTopics.clear() + 从磁盘重读索引覆盖 indexSnapshot（唯一刷新点）
 
 session_shutdown
   └ 等待进行中的写操作收尾（避免留下 stale 锁）
@@ -541,8 +581,9 @@ session_shutdown
 | 容量 | 超 200 行：写入成功且返回可操作错误 |
 | 净化 | 零宽字符、bidi 控制符、≥5 种仿冒标签；磁盘内容不被修改 |
 | 注入 | `event.systemPromptOptions.sections["memory_index"]` 被设置；未设置 `forceSystemPrompt`；**同一 session 内多轮之间内容恒等**（磁盘 MEMORY.md 被并发修改后仍恒等） |
+| 索引来源 | `startup`/`new`：从磁盘读；`resume`/`fork`/`reload`：重放 transcript 取录制值（**不读磁盘**）；重放得不到该键时回退磁盘；重放遵循 `null` = 删除、否则覆盖 |
 | 工具注册范围 | 主 agent 的 `memory` schema 只含 5 个 action；`rename` / `rebuild_index` 不出现在主 agent 与 extract 的工具集中；dream 的工具集含 7 个 |
-| 生命周期 | `session_compact` 后 `injectedTopics` 为空；且 `session_compact` 后 `indexSnapshot` 不变 |
+| 生命周期 | `session_compact` 后 `injectedTopics` 为空；且 `session_compact` 后 `indexSnapshot` **被磁盘值覆盖**；其余事件后 `indexSnapshot` 不变 |
 | 提取 | prompt 含全部 user 消息与 tool_result 摘要；中段裁减策略；单条上限生效 |
 | 缓存 | 第二轮不读文件内容（mock `readFile` 计数）；`mtimeMs` 变化时重读 |
 | 迁移 | 多条目拆分；单条目；零条目；跨文件重名；中文标题；幂等（重跑不重复）；失败不写标记 |
@@ -571,7 +612,8 @@ session_shutdown
 | 净化过度破坏正文可读性 | 只在注入时净化，磁盘内容不变（D11） |
 | 200 行上限比旧模型更快触顶 | §8.2 的可操作错误 + dream 容量管理职责文档化 |
 | 会话内索引冻结 → 本会话看不到刚写入的记忆 | 刻意选择（D13，prefix cache 优先）；工具返回值已确认写入；新会话立即生效 |
-| `sections` 注入方式依赖 pi 内部行为 | 已有源码与类型验证；退路是回 `forceSystemPrompt`（功能不受损，仅失去按段 diff） |
+| `sections` 注入方式依赖 pi 内部行为 | 已核对源码与类型：`systemPromptOptions` 可变、section 名约束、`resolveTranscript` 的折叠分叉均已验证；退路是回 `forceSystemPrompt`（功能不受损，仅缓存变差） |
+| 自实现的 section 重放与 pi 语义漂移 | 重放逻辑极小（`null` 删除 / 否则覆盖、保留首次位置）；重放失败或拿不到 `memory_index` 时**回退为从磁盘读**，不会因此丢失索引 |
 
 ---
 
