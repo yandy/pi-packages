@@ -6,7 +6,12 @@ import { loadConfig, type MemoryConfig, type SessionPersistenceConfig } from "./
 import { runDream } from "./src/dream";
 import { runExtract } from "./src/extract";
 import { buildInjection, injectSurfacedContent, loadIndexSnapshot, runSideQuery, scanEntries } from "./src/inject";
-import { createMemoryTool, MAIN_AGENT_ACTIONS, type MemoryToolDeps } from "./src/memory-tool";
+import {
+	createMemoryTool,
+	DREAM_ACTIONS,
+	MAIN_AGENT_ACTIONS,
+	type MemoryToolDeps,
+} from "./src/memory-tool";
 import { MemoryStore } from "./src/memory-store";
 import { readDreamMeta, shouldNudge, writeDreamMeta } from "./src/nudge";
 import { resolveMemoryDir } from "./src/paths";
@@ -82,7 +87,9 @@ export default function (pi: ExtensionAPI) {
 			const { nudge, message, sessions } = await shouldNudge(memoryDir, config, ctx.cwd);
 			if (nudge) {
 				const ok = await ctx.ui.confirm("Memory Consolidation", `${message}\n\nConsolidate memory files now?`);
-				if (ok) {
+				// dream 需要 store（整轮逻辑锁 + 快照都挂在它上面）；这里必然非空，但 const 拷贝让 TS 也能看到。
+				const activeStore = store;
+				if (ok && activeStore) {
 					// Fire-and-forget: does not block session_start. The headless
 					// dream agent runs independently; completion notifies the user.
 					const dreamModel = resolveDefault(config, "dream", "model");
@@ -93,9 +100,20 @@ export default function (pi: ExtensionAPI) {
 						model: dreamModel,
 						thinkLevel: dreamThinkLevel,
 						memoryDir: dir,
+						store: activeStore,
+						maxLines: config.memIndexMaxLines,
 						modelRegistry: ctx.modelRegistry,
 						parentModel: ctx.model,
 						sessionPersistence: resolveDefault(config, "dream", "sessionPersistence"),
+						// dream 的 7 个 action 只注入它自己的 headless session（D12）；整轮持锁与
+						// 进入时的全目录快照都在 runDream 里，所以内部原语两个选项都跳过。
+						customTools: [
+							createMemoryTool(toolDeps, {
+								actions: DREAM_ACTIONS,
+								skipLogicalLock: true,
+								skipSnapshot: true,
+							}),
+						],
 					})
 						.then(async (summary) => {
 							await writeDreamMeta(dir, sessions);
@@ -238,7 +256,8 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("dream", {
 		description: "Consolidate all memory files via a headless agent",
 		handler: async (_args, ctx) => {
-			if (!config || !memoryDir) {
+			const activeStore = store;
+			if (!config || !memoryDir || !activeStore) {
 				ctx.ui.notify("Memory not initialized.", "info");
 				return;
 			}
@@ -250,9 +269,18 @@ export default function (pi: ExtensionAPI) {
 				model: resolveDefault(config, "dream", "model"),
 				thinkLevel: config.dream.thinkLevel,
 				memoryDir,
+				store: activeStore,
+				maxLines: config.memIndexMaxLines,
 				modelRegistry: ctx.modelRegistry,
 				parentModel: ctx.model,
 				sessionPersistence: resolveDefault(config, "dream", "sessionPersistence"),
+				customTools: [
+					createMemoryTool(toolDeps, {
+						actions: DREAM_ACTIONS,
+						skipLogicalLock: true,
+						skipSnapshot: true,
+					}),
+				],
 			})
 				.then(async (summary) => {
 					const sessions = (await SessionManager.list(ctx.cwd)).length;
