@@ -1,6 +1,11 @@
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { type EntryType, parseEntryFile } from "./entry-file";
+import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { deriveDescription, type EntryType, parseEntryFile, serializeEntryFile } from "./entry-file";
+import { indexCapacity, parseEntryIndex, upsertIndexLine } from "./entry-index";
+import { entryFileName, resolveUniqueFileName } from "./filename";
+import { withLock } from "./fs-lock";
+import { createSnapshot } from "./snapshot";
 
 export const INDEX_FILE = "MEMORY.md";
 export const LOCK_FILE = ".lock";
@@ -44,6 +49,36 @@ export class MemoryStore {
 	async #entryFiles(): Promise<string[]> {
 		const names = await readdir(this.cfg.memoryDir).catch(() => []);
 		return names.filter((n) => n.endsWith(".md") && n !== INDEX_FILE && !n.startsWith(".")).sort();
+	}
+
+	#indexPath(): string {
+		return join(this.cfg.memoryDir, INDEX_FILE);
+	}
+
+	/** 进程内串行；跨进程安全由 #locked 负责。 */
+	async #savingQueue<T>(fn: () => Promise<T>): Promise<T> {
+		return withFileMutationQueue(this.#indexPath(), fn);
+	}
+
+	async #locked<T>(op: string, timeoutMs: number, fn: () => Promise<T>): Promise<T> {
+		return withLock(join(this.cfg.memoryDir, LOCK_FILE), op, { timeoutMs, ttlMs: this.cfg.lock.ttlMs }, fn);
+	}
+
+	async #snapshot(label: string, files: string[]): Promise<void> {
+		await createSnapshot(join(this.cfg.memoryDir, BACKUP_DIR), label, files, this.cfg.memoryDir, {
+			keep: this.cfg.lock.snapshotKeep,
+		});
+	}
+
+	#capacityWarning(raw: string): string | undefined {
+		const cap = indexCapacity(raw, this.cfg.indexMaxLines, this.cfg.indexMaxBytes);
+		if (cap.ok) return undefined;
+		return (
+			`MEMORY.md is over its limit: ${cap.lineCount}/${this.cfg.indexMaxLines} lines, ` +
+			`${cap.byteLength}/${this.cfg.indexMaxBytes} bytes. The write succeeded, but everything past ` +
+			"the limit is dropped on the next load. Rewrite it now: keep one line per entry, merge or drop " +
+			"stale entries, and move detail into entry bodies rather than the index."
+		);
 	}
 
 	/** 扫描目录并返回按 (modified, file) 排序的条目标量；mtime 未变时复用缓存的 frontmatter。 */
@@ -115,4 +150,119 @@ export class MemoryStore {
 		this.#cache.clear();
 		await this.listEntries();
 	}
+
+	async addEntry(input: {
+		name: string;
+		description?: string;
+		type?: EntryType;
+		body: string;
+	}): Promise<{ file: string; capacityWarning?: string }> {
+		const name = input.name.trim();
+		if (!name) throw new Error("name is required");
+		if (/[\r\n]/.test(name)) throw new Error("name must be a single line");
+		const requestedDescription = input.description?.trim();
+		if (requestedDescription && /[\r\n]/.test(requestedDescription)) {
+			throw new Error("description must be a single line");
+		}
+		const body = input.body.trim();
+		if (!body) throw new Error("body is required");
+
+		return this.#savingQueue(() =>
+			this.#locked("add", this.cfg.lock.timeoutMs, async () => {
+				const summaries = await this.listEntries();
+				const existing = summaries.find((s) => s.name === name);
+				const file = existing?.file ?? resolveUniqueFileName(new Set(await this.#entryFiles()), entryFileName(name));
+				const created = existing ? ((await this.readEntry(existing.file))?.created ?? isoDate(new Date())) : isoDate(new Date());
+				// `|| name` 是必需的：deriveDescription 可能返回 ""，而空 description 会让该 entry 对侧查询不可见。
+				const description = requestedDescription || deriveDescription(body) || name;
+				const now = new Date();
+
+				await this.#snapshot("write", [INDEX_FILE, file]);
+				await writeFile(
+					join(this.cfg.memoryDir, file),
+					serializeEntryFile(
+						{
+							name,
+							description,
+							type: input.type ?? existing?.type ?? "feedback",
+							created,
+							modified: now.toISOString(),
+						},
+						body,
+					),
+					"utf8",
+				);
+
+				const next = upsertIndexLine(await this.readIndex(), { name, file, description });
+				await writeFile(this.#indexPath(), next, "utf8");
+				this.#cache.delete(file);
+
+				return { file, capacityWarning: this.#capacityWarning(next) };
+			}),
+		);
+	}
+
+	async replaceEntry(
+		ref: string,
+		patch: { name?: string; description?: string; type?: EntryType; body?: string },
+	): Promise<{ file: string; capacityWarning?: string }> {
+		return this.#savingQueue(() =>
+			this.#locked("replace", this.cfg.lock.timeoutMs, async () => {
+				const current = await this.readEntry(ref);
+				if (!current) throw new Error(`Entry "${ref}" not found`);
+
+				const name = (patch.name ?? current.name).trim();
+				if (!name) throw new Error("name is required");
+				if (/[\r\n]/.test(name)) throw new Error("name must be a single line");
+				const requestedDescription = patch.description?.trim();
+				if (requestedDescription && /[\r\n]/.test(requestedDescription)) {
+					throw new Error("description must be a single line");
+				}
+				const body = patch.body === undefined ? current.body : patch.body.trim();
+				const description =
+					requestedDescription ||
+					(patch.body === undefined ? current.description : deriveDescription(body)) ||
+					current.description ||
+					name;
+				const file =
+					name === current.name
+						? current.file
+						: resolveUniqueFileName(new Set(await this.#entryFiles()), entryFileName(name));
+
+				await this.#snapshot("write", [INDEX_FILE, current.file, file]);
+				await writeFile(
+					join(this.cfg.memoryDir, file),
+					serializeEntryFile(
+						{
+							name,
+							description,
+							type: patch.type ?? current.type,
+							created: current.created,
+							modified: new Date().toISOString(),
+						},
+						body,
+					),
+					"utf8",
+				);
+				if (file !== current.file) await unlink(join(this.cfg.memoryDir, current.file)).catch(() => {});
+
+				const raw = await this.readIndex();
+				const line = parseEntryIndex(raw).entries.find((e) => e.file === current.file);
+				const next = upsertIndexLine(
+					raw,
+					{ name, file, description },
+					line ? { atLineNo: line.lineNo } : undefined,
+				);
+				await writeFile(this.#indexPath(), next, "utf8");
+				this.#cache.delete(current.file);
+				this.#cache.delete(file);
+
+				return { file, capacityWarning: this.#capacityWarning(next) };
+			}),
+		);
+	}
+}
+
+function isoDate(date: Date): string {
+	return date.toISOString().slice(0, 10);
 }
