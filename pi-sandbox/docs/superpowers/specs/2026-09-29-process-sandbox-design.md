@@ -67,7 +67,7 @@ fail-closed：平台无可用 runner 时 bash 抛 `SANDBOX_UNAVAILABLE` 错误�
 **bwrap**：
 ```
 bwrap --ro-bind / / --dev /dev --unshare-pid --proc /proc --die-with-parent
-      [workspace-write 追加: --tmpfs /tmp --bind $ws $ws]
+      [workspace-write 追加: --bind /tmp /tmp --bind $ws $ws]
       -- <argv...>
 ```
 
@@ -108,7 +108,17 @@ type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
 
 **canonical 化**：所有授予根用 `realpathSync.native` 解析符号链接（失败时保留原拼写——不存在的根匹配不到任何路径，保守结果），与 deepseek `roots.ts` 一致。`writableRoots(workspace-write)` = `dedupe([workspaceRoot, '/tmp', tmpdir()].map(canonical))`；`read-only` = `[]`。workspace root = 该会话的 cwd（canonical 化）。
 
-bwrap/landlock 保持 deepseek 的自有拼写（bwrap 只加 `--tmpfs /tmp`，landlock 只加 `'/tmp'`），seatbelt 与 fs 围栏共用 `writableRoots()`——四处语义由同一推导函数供给并有测试钉住 parity，防止"write 工具能写 /tmp 但 bash 不能"式漂移。
+**writable 根在四个后端的映射**（`/tmp` 一处为 2026-10-01 的有意偏离）：bwrap 把宿主 `/tmp` rw bind 进沙箱（`--bind /tmp /tmp`，原路径透明），landlock 用 `--rw /tmp` 放行宿主 `/tmp`，seatbelt 与 fs 围栏共用 `writableRoots()`——四处对 `/tmp` 的语义一致（都是宿主 /tmp），并有测试钉住 argv/白名单，防止"write 工具能写 /tmp 但 bash 不能"式漂移。
+
+> **决策（2026-10-01，用户拍板）**：原实现沿用 deepseek profile 的 `--tmpfs /tmp`，后果是 bash 里的 `/tmp` 是**每条命令重建的空私有 tmpfs**——宿主 /tmp 不可见、跨命令不持久、与 write 工具/landlock/seatbelt 三处语义漂移，还必须在模型提示里常驻一句 /tmp 说明（`BASH_TMP_NOTE`）。改为 `--bind /tmp /tmp` 后四处一致、提示可删、README 的"路径透明"对 /tmp 也成立。
+> 已知并接受的代价：① 沙箱内命令的 /tmp 写入落到宿主——`rm -rf /tmp/*` 这类破坏不再被限制在命令内（宿主 /tmp 常有会话 socket 与 pi 自己的临时文件）；② 宿主 /tmp 不可写时沙箱内 /tmp 也随之不可写（旧实现由 tmpfs 兜底）；③ **偏离参考实现**（见下，不是拼写级差异）；④ 并发 bash 调用之间不再有 /tmp 隔离：旧实现每次工具调用一个新 bwrap 进程 → 新 mount namespace → 新 tmpfs（同名路径互不干扰，是并发安全的来源），现在共享宿主 /tmp，两个并发命令落在同一路径名会互相覆盖（与它们本来就共享 workspace 属同类风险）。
+>
+> **与参考实现的关系（deepseek harness，代码见 `.superpowers/refs/deepseek-harness`）**：分层与此包一一对应——`dsh-sandbox/roots.ts` ↔ `policy.ts`、`dsh-sandbox-local/profiles.ts` ↔ `runners.ts`、`dsh-fs-sandbox` ↔ `fence.ts`、`dsh-bash-sandbox` ↔ `bash-ops.ts`；同样是**只有 shell 走内核级 runner**，write/edit 只是 trusted code 里的预检（其 docstring 自陈 "This is containment, not a security boundary; kernel-grade isolation of untrusted CODE stays `ctx.shell`'s job"，与 §4 栏杆语义一致），read 不设围栏。
+> 差异在于 bwrap/landlock 的 /tmp：参考实现里**不是疏漏而是被记录的 per-runner 差异**——`profiles.ts:19` `--tmpfs /tmp` vs `:33` `readWrite.push('/tmp', …)`，`roots.ts` 模块注释称之为 "the honest per-runner differences recorded in the sandbox RFC"，并由 `sandbox-local/tests/bwrap.e2e.ts`（"workspace-write mounts an EPHEMERAL /tmp: the write succeeds inside, the host /tmp stays untouched"）与 `landlock.e2e.ts`（"workspace-write grants the host /tmp (the documented Landlock-profile difference)"）钉住。本包的决定是**不记录差异，而对齐四处语义**——即有意偏离参考；被取代的还有参考测试里那套用 ephemeral /tmp 做鉴别的手法（`bash-sandbox/tests/bwrap.e2e.ts` 注释 "bwrap replaces `/tmp`, which cannot prove the workspace-root boundary"）。pi-sandbox 目前没有真实 runner e2e（argv 由单测钉住），因此无测试依赖那套手法；若将来加真机 e2e，需改用其他鉴别物（如只在工作区内的哨兵文件）。
+> 参照意义：参考实现同样把 `os.tmpdir()` 只给 seatbelt 与 fs 围栏（bwrap/landlock 不含，尽管 `roots.ts` 注释承认 "omitting it would deny what the mode promises"）——本包的 `os.tmpdir()` 残留差集与参考一致，非本包独有。参考另有 Windows ACL runner 与 pwsh 词法，本包无（Windows 上 fail-closed）。
+> 残留差集（未对齐，未决）：`os.tmpdir()`——`TMPDIR` 指向非 /tmp 路径时，只有 seatbelt 与 fs 围栏放行，bwrap 与 landlock 仍拒；对齐需把 runtime dir（wayland/dbus/pulse/gpg-agent socket）也 bind 进沙箱，风险更大，故不做。
+> bwrap 的 `--dev`/`--proc` 另给沙箱两个私有挂载：`/dev` 是 uid=自己、mode=755 的新 tmpfs（所以 `/dev/shm` 与 /dev 下新建文件可写，但仅命令内有效），`/proc` 是新建 procfs。因此改动后 bwrap 沙箱内**命令内有效**的私有可写区仍有两处：`/dev` 与匿名内存。
+> 另一个旧实现带来的具体痛点（本次治理的动机之一）：pi 把被截断的完整输出写在**宿主** `os.tmpdir()`（`dist/core/bash-executor.js` 的 `pi-bash-<id>.log`）并在结果里告知模型路径，但旧 profile 下沙箱内的 bash 读不到它（`No such file or directory`），只有非沙箱的 read/grep 工具读得到。
 
 ## 5. 配置 schema v2
 
@@ -159,13 +169,15 @@ bash / write / edit 各增加可选参数：
 
 参数描述与 `promptGuidelines` 写明提权规则（deepseek `sandboxPermissionsDescription` 语义）："被沙箱拒绝后，用最小够用的更宽模式把**原调用原样重试一次**，会弹用户审批"。
 
-落地形态按"提示预算"分面（2026-10-01 调整）：`tool.description` 与参数 schema 是**按工具**进每次请求的（同一句写进 bash/write/edit 就付 3 份），`promptGuidelines` 进 system prompt 的 rules 且 pi 按字符串去重（只付 1 份）。因此常驻面只保留两句：跨工具规则 `SANDBOX_NOTE`（正常调用两个提权字段都不传、workspace-write 已包含工作区与 /tmp）与 bash 专属 `BASH_TMP_NOTE`（`--tmpfs /tmp` 语义，`src/tools.ts`）；协议细节一律放按需面——拒绍标记、畸形参数报错、批准后标记（`src/escalation.ts`）。
+落地形态按"提示预算"分面（2026-10-01 调整）：`tool.description` 与参数 schema 是**按工具**进每次请求的（同一句写进 bash/write/edit 就付 3 份），`promptGuidelines` 进 system prompt 的 rules 且 pi 按字符串去重（只付 1 份）。因此常驻面只保留**一句**跨工具规则 `SANDBOX_NOTE`（正常调用两个提权字段都不传、workspace-write 已包含工作区与 /tmp，`src/tools.ts`）；协议细节一律放按需面——拒绝标记、畸形参数报错、批准后标记（`src/escalation.ts`）。
+
+> 曾短暂存在 bash 专属的 `BASH_TMP_NOTE`（“/tmp 是每命令重建的私有 tmpfs，跨命令暂存放工作区”）：它随 §4 的 `--bind /tmp /tmp` 决策一并删除——/tmp 现在就是宿主 /tmp，不再需要这套措辞（剩余差集 `os.tmpdir()` 只在真实被拒时经 denial hint 告知）。
 
 ### 拒绝时给模型的标记（两处来源：fs 围栏拒绝、bash denial 分类命中）
 
 ```
 [sandbox: file access denied under <effective-mode> mode]
-[sandbox: escalation available — writable here: the workspace + a private per-command /tmp; retry this exact command once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]
+[sandbox: escalation available — writable here: the workspace + /tmp; retry this exact command once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]
 ```
 （fs 工具的 subject 用 `operation`，bash 用 `command`。前半句先给"不用提权的出路"：实际拒绝多发于 `~/.cache`、`/var/tmp`、`/run/user/<uid>` 这类落到围栏外的路径，换到可写根内即可完成，无需打扰用户。）
 

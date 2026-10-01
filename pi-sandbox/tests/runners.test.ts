@@ -18,10 +18,10 @@ describe("bwrapProfileArgs", () => {
 			"--ro-bind", "/", "/", "--dev", "/dev", "--unshare-pid", "--proc", "/proc", "--die-with-parent",
 		]);
 	});
-	it("workspace-write adds tmpfs /tmp and rw bind of the workspace, verbatim", () => {
+	it("workspace-write binds the host /tmp rw plus the workspace, verbatim", () => {
 		expect(bwrapProfileArgs(wsWrite)).toEqual([
 			"--ro-bind", "/", "/", "--dev", "/dev", "--unshare-pid", "--proc", "/proc", "--die-with-parent",
-			"--tmpfs", "/tmp", "--bind", WS, WS,
+			"--bind", "/tmp", "/tmp", "--bind", WS, WS,
 		]);
 	});
 	it("paths with spaces/quotes/backslashes pass through as single argv entries (no shell quoting)", () => {

@@ -39,7 +39,7 @@ describe("markers", () => {
 	});
 	it("hint marker names the subject verbatim and offers the writable roots before escalation", () => {
 		expect(escalationHintMarker("command")).toBe(
-			"[sandbox: escalation available — writable here: the workspace + a private per-command /tmp; retry this exact command once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]",
+			"[sandbox: escalation available — writable here: the workspace + /tmp; retry this exact command once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]",
 		);
 	});
 	it("applied marker says the approval covered this call only", () => {

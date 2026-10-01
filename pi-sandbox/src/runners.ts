@@ -29,13 +29,14 @@ export interface RunnerHooks {
 }
 
 /**
- * bwrap mount profile（deepseek profiles.ts 语义）：宿主 / 全盘 ro-bind（一切可读），
- * workspace-write 追加 tmpfs /tmp 与工作区 rw bind（原路径，路径透明）。
+ * bwrap mount profile（deepseek profiles.ts 语义，/tmp 一处为 2026-10-01 的有意偏离，见 spec §4）：
+ * 宿主 / 全盘 ro-bind（一切可读），workspace-write 追加宿主 /tmp 与工作区的 rw bind——
+ * 两者都原路径透明：沙箱内的 /tmp 就是宿主 /tmp（跨命令、跨 read/write 工具语义一致）。
  */
 export function bwrapProfileArgs(policy: RunnerPolicy): string[] {
 	const args = ["--ro-bind", "/", "/", "--dev", "/dev", "--unshare-pid", "--proc", "/proc", "--die-with-parent"];
 	if (policy.mode === "workspace-write") {
-		args.push("--tmpfs", "/tmp");
+		args.push("--bind", "/tmp", "/tmp");
 		args.push("--bind", policy.workspaceRoot, policy.workspaceRoot);
 	}
 	return args;

@@ -45,7 +45,7 @@ export function sandboxDenialMarker(mode: SandboxMode): string {
  * nudge 放在决策点，不依赖模型回忆工具描述（常态提示预算见 tools.ts 的提示预算说明）。
  */
 export function escalationHintMarker(subject: "command" | "operation"): string {
-	return `[sandbox: escalation available — writable here: the workspace + a private per-command /tmp; retry this exact ${subject} once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]`;
+	return `[sandbox: escalation available — writable here: the workspace + /tmp; retry this exact ${subject} once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]`;
 }
 
 /**

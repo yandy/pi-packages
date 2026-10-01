@@ -164,17 +164,14 @@ function extendParams(base: TSchema): TSchema {
  * 提示预算（β′，每请求成本受控）：
  * - `tool.description` 与参数 schema 是**按工具**进请求的 → 同一句话写进 bash/write/edit 就付 3 份；
  * - `promptGuidelines` 进 system prompt 的 rules，pi 按字符串去重（`buildRules` 的 seen 集）→ 只付 1 份。
- * 所以：跨工具规则只留一句（ESCALATION_GUIDELINE + 这一句 SANDBOX_NOTE），工具专属事实只写那个工具
- * （BASH_TMP_NOTE），协议细节一律放按需面（denial hint / 校验错误 / 批准后标记）。
+ * 所以：跨工具规则只留一句（ESCALATION_GUIDELINE + 这一句 SANDBOX_NOTE），协议细节一律放按需面
+ * （denial hint / 校验错误 / 批准后标记）。
  */
 const SANDBOX_NOTE =
 	"Sandbox: confined to the current mode; workspace-write already allows the workspace and /tmp. Pass neither escalation field unless you are retrying a denial (never null).";
-/** bash 专属（bwrap `--tmpfs /tmp` 的语义）：只写进 bash 的 description，不摊给 write/edit。 */
-const BASH_TMP_NOTE =
-	"bash's /tmp is a private tmpfs emptied after every command; keep scratch files that later commands need inside the workspace.";
 
-function escalationDescription(base: string, extra?: string): string {
-	return [base, "", SANDBOX_NOTE, ...(extra === undefined ? [] : [extra])].join("\n");
+function escalationDescription(base: string): string {
+	return [base, "", SANDBOX_NOTE].join("\n");
 }
 
 /** 批准后追加一行按需反馈（其余字段原样保留）。 */
@@ -227,7 +224,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 	const bash = {
 		...baseBash,
 		label: `${baseBash.label} (sandboxed)`,
-		description: escalationDescription(baseBash.description, BASH_TMP_NOTE),
+		description: escalationDescription(baseBash.description),
 		promptGuidelines: [...(baseBash.promptGuidelines ?? []), ESCALATION_GUIDELINE],
 		parameters: extendParams(baseBash.parameters),
 		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
