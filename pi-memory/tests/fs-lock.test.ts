@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -79,6 +79,42 @@ describe("withLock", () => {
 		await writeFile(lockPath, "not json", "utf8");
 		const out = await withLock(lockPath, "add", FAST, async () => "garbage");
 		expect(out).toBe("garbage");
+	});
+
+	// 合法 JSON 但不是锁记录时也必须能回收。否则 `isStale` 会因 hostname 不是字符串而跳过 pid 检查、
+	// 又因 `Date.parse(undefined)` 是 NaN 而跳过 TTL 检查 —— 锁永远不会变 stale，调用方永远超时。
+	it("reclaims a lock file that parses as JSON but is not a lock record", async () => {
+		await writeFile(lockPath, "123", "utf8");
+		await expect(withLock(lockPath, "add", FAST, async () => "reclaimed")).resolves.toBe("reclaimed");
+		await writeFile(lockPath, "{}", "utf8");
+		await expect(tryWithLock(lockPath, "add", FAST, async () => "reclaimed")).resolves.toBe("reclaimed");
+	});
+
+	it("leaves no temporary files behind after acquiring or failing to acquire", async () => {
+		await withLock(lockPath, "a", FAST, async () => "ok");
+		await writeLock({ pid: process.pid });
+		await expect(withLock(lockPath, "b", FAST, async () => "no")).rejects.toThrow(MemoryLockedError);
+		expect((await readdir(dir)).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+	});
+
+	// 互斥性的直接守卫：并发竞争同一个锁时，临界区内的并发数必须恒为 1。
+	it("serialises overlapping withLock calls", async () => {
+		let active = 0;
+		let maxActive = 0;
+		const completed: number[] = [];
+		await Promise.all(
+			[1, 2, 3, 4, 5].map((n) =>
+				withLock(lockPath, "seq", { timeoutMs: 5000, ttlMs: 600_000, pollMs: 5 }, async () => {
+					active += 1;
+					maxActive = Math.max(maxActive, active);
+					await new Promise((resolve) => setTimeout(resolve, 5));
+					completed.push(n);
+					active -= 1;
+				}),
+			),
+		);
+		expect(maxActive).toBe(1);
+		expect(completed).toHaveLength(5);
 	});
 });
 
