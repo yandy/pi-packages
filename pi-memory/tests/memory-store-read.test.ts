@@ -12,7 +12,7 @@ const CFG = (memoryDir: string): StoreConfig => ({
 	memoryDir,
 	indexMaxLines: 200,
 	indexMaxBytes: 25600,
-	lock: { timeoutMs: 5000, dreamTimeoutMs: 30000, ttlMs: 600_000, snapshotKeep: 5 },
+	lock: { timeoutMs: 5000, snapshotKeep: 5 },
 });
 
 function meta(name: string, over: Partial<EntryMeta> = {}): EntryMeta {

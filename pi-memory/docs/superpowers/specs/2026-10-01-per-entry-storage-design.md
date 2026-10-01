@@ -153,15 +153,18 @@ searchEntries(query: string): Promise<Entry[]>
 ### 4.2 写原语
 
 ```ts
-addEntry(input: { name: string; description?: string; type?: EntryType; body: string }): Promise<{ file: string }>
-replaceEntry(ref: string, patch: { name?: string; description?: string; type?: EntryType; body?: string }): Promise<{ file: string }>
-renameEntry(ref: string, newName: string): Promise<{ file: string }>   // 改名 + 改文件名 + 改索引行
-removeEntry(ref: string): Promise<void>                                 // 删文件 + 删索引行
-rebuildIndex(): Promise<void>                                           // 从目录重建 MEMORY.md
-withLock<T>(op: string, fn: () => Promise<T>): Promise<T>
+addEntry(input: { name: string; description?: string; type?: EntryType; body: string }, options?: WriteOptions): Promise<{ file: string; capacityWarning?: string }>
+replaceEntry(ref: string, patch: { name?: string; description?: string; type?: EntryType; body?: string }, options?: WriteOptions): Promise<{ file: string; capacityWarning?: string }>
+renameEntry(ref: string, newName: string, options?: WriteOptions): Promise<{ file: string }>   // 改名 + 改文件名 + 改索引行
+removeEntry(ref: string, options?: WriteOptions): Promise<void>                                 // 删文件 + 删索引行
+rebuildIndex(options?: WriteOptions): Promise<{ entries: number; headerLines: number }>          // 从目录重建 MEMORY.md
+withLogicalLock<T>(fn: () => Promise<T>): Promise<T>   // 整轮持有进程内逻辑锁（dream / 迁移）
+logicalLockActive(): boolean                           // 整轮持有者的启动自检
+
+interface WriteOptions { skipLogicalLock?: boolean }   // 整轮持有者内部调用传 true，否则自锁
 ```
 
-所有写原语内部一律：`withLock` → 快照 → 读 → 改 → 写 → 更新缓存 → 释放。
+所有写原语内部一律：**进程内逻辑锁**（毫秒）→ 进程内 mutation 队列 → **跨进程 `.lock`**（毫秒）→ 快照 → 读 → 改 → 写 → 更新缓存 → 释放。锁序固定（逻辑锁在外），不存在锁序反转。
 
 `description` 缺省时由 store 从正文首句派生（首个句号/换行前，截断到 200 字符）。
 
@@ -173,7 +176,7 @@ withLock<T>(op: string, fn: () => Promise<T>): Promise<T>
 | extract 子 agent | 同上 5 个 action | **仅其 headless session**（作为 `customTools` 传入 `createAgentSession`） |
 | dream 子 agent | 全部 7 个 action（额外 `rename` / `rebuild_index`） | **仅其 headless session**（同上） |
 | auto-surfacing 侧查询 | 只读 | 无任何工具 |
-| 迁移 | `withLock` + 目录级操作 | 不涉及工具 |
+| 迁移 | `withLogicalLock`（整轮）+ 原语传 `skipLogicalLock` | 不涉及工具 |
 
 **注册范围是硬约束（D12）**：工具定义由 `createMemoryTool(deps, { actions: [...] })` 按 session 构建。`rename` 与 `rebuild_index` **不得**出现在主 agent 与 extract 的 schema 中；反之 extract 也不需要它们。
 
@@ -192,22 +195,37 @@ dream **不再**拥有 `write` / `edit` / `ls` / `bash`。它的重构能力边�
 ```
 
 - 获取（**必须原子**）：先把持有者信息写进同目录的唯一临时文件 `${lockPath}.<pid>.<n>.tmp`，再 `link(temp, lockPath)`；`EEXIST` 即未获取，`finally` 清理临时文件。
-  **不得**用 `open(lockPath, "wx")` 后紧接着单独写内容 —— 那会让锁路径出现「存在但 0 字节」的中间态，而 `readLockInfo` 读到空文件会返回 null、`isStale(null)` 恒为 true（pid 与 TTL 检查根本不会执行），并发等待者恰好采样到这个窗口就会删掉刚被正确获取的锁并据为己有。
-- 失败时读取持有者信息（**必须做形状校验**：合法 JSON 但不是锁记录、如 `123` / `{}`，一律当作无法解释的锁 → 可回收；否则 `isStale` 会因 hostname 非字符串而跳过 pid 检查、又因 `Date.parse(undefined)` 是 NaN 而跳过 TTL 检查，锁永远不会变 stale）：
-  - 同 host 且 `pid` 不存活 → stale（只有 `ESRCH` 算死亡；`EPERM` 与意外 errno 一律按存活 —— 「误判为存活」最多等到 TTL 兜底，「误判为死亡」却会删掉活持有者的锁）；
-  - 或 `now - startedAt > lock.ttlMs`（默认 10 分钟）→ stale；
-  - stale 则删除并重试一次；仍失败则按等待策略处理。
-- **续约（心跳）**：持有期间每 `max(1000, ttlMs / 2)` 毫秒以「临时文件 + `rename`」原子刷新 `startedAt`（同样不得直接 `writeFile` 覆盖）。这样上面的 TTL 只对**不再续约**的持有者（崩溃、挂死）生效 —— 否则一个健康但耗时超过 TTL 的长任务（dream 跑满 10 分钟）会被别的写者抢锁，而抢锁者的锁又会被原持有者的 `finally` 删掉，级联出两个写者同时进临界区。
-- 释放：`finally` 中删除，但**仅当锁仍是自己持有的才删**（比对持有记录的 pid / hostname），否则留给真正的持有者；在途的续约不得在释放之后再落回。进程被 kill 时靠 stale 检测回收。
+  **不得**用 `open(lockPath, "wx")` 后紧接着单独写内容 —— 那会让锁路径出现「存在但 0 字节」的中间态，等待者读到空文件会把它判为「无法解释」并据为己有。
+- 读锁必须区分**三种**状态，不得把前两者混为一谈：
+  - **不存在（absent）= 空闲**。若 `link` 失败后读到的却是 absent（持有者刚释放），这不是错误，直接重试 `link` —— 它本身就是一次 CAS，会自然决出唯一赢家。把 absent 当成「无法解释」会让正常竞争报出误导性的「锁已遗弃」。
+  - **存在但读不懂（unreadable）= 遗弃**：非 JSON、空文件、形状不对（必须做形状校验：`pid` 为有限数、`hostname` / `startedAt` / `op` 均为字符串）、或读不到（权限等）。没有任何人能释放它。
+  - **持有中**：同 host 且 `pid` 不存活（只有 `ESRCH` 算死亡）也算**遗弃**；跨 host 存活状况不可知，一律按活持有者处理。
+- **永不自动回收**：遗弃的锁**立刻**报一条可操作的错误（写明 pid / op / startedAt / 锁路径，并提示删除该文件），而不是移除它。
+  理由：任何「移走旧锁再建立自己的」接管都让锁路径出现空窗，而**空窗正是 `link` 这个合法获取原语的条件**，其它等待者可以名正言顺地抢占；一旦移走的是某个**活持有者**刚建立的记录，互斥就无法恢复（把记录挪回去又会顶掉抢占者，而路径只能容纳一条记录）。实测：`rm` 与 `rename` 两种接管都会双持有；加上「比字节 + 放回」反而把空窗拉长，同进程内可稳定复现双持有。POSIX 没有 compare-and-replace，所以这里选「安全优先」。
+- 释放：`finally` 中删除，但**仅当锁仍是自己持有的才删**（同时比对 pid 与 hostname），否则留给真正的持有者；记录读不懂时也**不删**（那是别人的或需人工处理的状态）。
+- **没有 TTL、没有续约**：§5.2 的两级锁让 `.lock` 永远只持毫秒，不存在「持锁太久」，因此 TTL、心跳续约、存活探测驱动的回收全部不需要存在。
 
 ### 5.2 等待策略
 
-| 调用方 | 策略 |
-|---|---|
-| `memory` 工具（主 agent 同步调用） | 轮询等待，总超时 `lock.timeoutMs`（默认 5000ms），超时抛出明确错误：`Memory is locked by <op> (pid N, started ...)` |
-| extract 子 agent | **不等待**。检测到锁存在即跳过本轮（后台任务，静默跳过合理） |
-| dream | 等待，超时 `lock.dreamTimeoutMs`（默认 30000ms），超时报错 |
-| 迁移 | 等待，超时 `lock.dreamTimeoutMs`（默认 30000ms），超时报错 |
+**两级锁。** 作用域分配是这里的关键：`memory add`、extract、dream **都在同一个 pi 进程里**（dream / extract 是进程内的 SDK 会话，不是子进程），而它们的互斥作用域长度相差三个数量级 —— 单次写入是毫秒，dream 整轮是分钟。因此：
+
+| 层级 | 由谁实现 | 作用域 |
+|---|---|---|
+| **逻辑锁**（进程内） | `process-lock.ts` 的 Promise 队列，按 `memoryDir` 分键 | 单次原语 = 该次调用；dream / 迁移 = **整轮** |
+| **物理锁**（跨进程 `.lock`） | `fs-lock.ts`，原子 `link` 获取 | **永远只持毫秒**（一次物理写入） |
+
+为什么不让 `.lock` 同时承担整轮：
+1. dream 整轮持 `.lock` 时，它**自己**的每次原语调用都会撞上自己的锁（`.lock` 不可重入）；
+2. 另一个 pi 进程（同仓库的多个 worktree 共享 `memoryDir`）的写入会被堵住整轮；
+3. 「持锁数分钟」逼出 TTL 续约心跳与 stale 接管，而后者在 POSIX 上做不到可证明安全（见 §5.1）。
+
+| 调用方 | 逻辑锁（进程内） | 物理锁（跨进程） |
+|---|---|---|
+| `memory` 工具（主 agent） | 每次调用自取（毫秒） | 每次原语（毫秒） |
+| extract 子 agent | **不等待**：拿不到即跳过本轮 | 同上 |
+| dream / 迁移 | **整轮持有**（`MemoryStore.withLogicalLock`）；其内部调用传 `{ skipLogicalLock: true }` 以免自锁 | 每次原语（毫秒） |
+
+拿不到逻辑锁时的错误：进程内为 `ProcessLockTimeoutError`（`Memory operations for <dir> are already running in this process`），跨进程为 `MemoryLockedError`（`Memory is locked by <op> (pid N, started …)`）。启动前用 `logicalLockActive()` 自检「整轮是否真的已包住锁」—— 忘了包会静默失去整轮互斥。
 
 ### 5.3 锁解决的具体问题
 
@@ -518,8 +536,6 @@ Map<filename, { mtimeMs: number; name: string; description: string; type: string
   "memIndexInjectMaxBytes": 25600,    // 由 3072 改为 25600（D3）
   "lock": {
     "timeoutMs": 5000,
-    "dreamTimeoutMs": 30000,
-    "ttlMs": 600000,
     "snapshotKeep": 5
   },
   "defaults": { "sessionPersistence": { "enabled": false } },   // defaults.model 保留：缺省时回退父会话模型
@@ -622,10 +638,11 @@ session_shutdown
 | `sections` 注入方式依赖 pi 内部行为 | 已核对源码与类型：`systemPromptOptions` 可变、section 名约束、`resolveTranscript` 的折叠分叉均已验证；退路是回 `forceSystemPrompt`（功能不受损，仅缓存变差） |
 | 自实现的 section 重放与 pi 语义漂移 | 重放逻辑极小（`null` 删除 / 否则覆盖、保留首次位置）；重放失败或拿不到 `memory_index` 时**回退为从磁盘读**，不会因此丢失索引 |
 | 文件身份以字符串比较为准（大小写不敏感 / Unicode 规范化的文件系统上，两个不同的文件名可能指向同一 inode → 可能写穿别人的文件或改名后自删刚写入的文件） | 取名前对磁盘做一次存在性探测（`MemoryStore.#resolveTargetFile`）；删除前比较 inode（`sameFile`），同一 inode 则不删；`unlinkStrict` 使删除失败 fail-closed。但**跨平台语义未在 CI 覆盖**（Linux 上无法构造出该派生路径） |
-| `.lock` 的 stale 回收竞态：两个等待者同时判定 stale 时会互相 `rm` | §5.1 的「删除并重试一次」是已批准设计；持有期心跳续约（`renewIntervalMs` = TTL/2，至少 1s）使健康持有者不再被判 stale，续约与释放前均校验所有权（比对 pid；未比 hostname —— NFS 共享 `memoryDir` 且两 host 出现相同 pid 时仍可能删错锁，`memoryDir` 目前是每 host 一份）以切断级联删除；候选的彻底修法是 rename 接管 |
+| ~~`.lock` 的 stale 回收竞态~~ **已移除** | 不再存在接管：`.lock` 永不自动回收（见 §5.1），且它永远只持毫秒（§5.2）—— 两者共同消除了「移走别人的锁」这一动作与它带来的空窗。实测证据：`rm` 与 `rename` 两种接管都会双持有；加上「比字节 + 放回」会把空窗拉长，同进程内可稳定复现 |
+| 崩溃遗留的 `.lock` 需**人工清除** | 这是「安全优先」的代价：没有任何进程会去删别人的锁，于是互斥是硬保证。锁只在毫秒级写入期间被持有，所以这只会在进程崩在写入中途时发生；错误文案会写明 pid / op / startedAt / 路径并提示如何清除，Plan B 可加显式 `/memory unlock` |
 | 迁移的回滚点可能被快照保留策略裁掉 | `createSnapshot` 恒产出 `<ts>-<label>`，**不可能**以 `migrate-` 开头，而 `pruneSnapshots` 永不裁剪 `migrate-` 前缀 —— 因此迁移必须自己建 `.backups/migrate-<ts>/` 作为回滚点 |
 | `rebuildIndex` 不返回 `capacityWarning`（与 `addEntry` / `replaceEntry` 不同），尽管它最可能在膨胀目录上运行 | 已知的 API 不一致：调用方（dream / 迁移）在 `rebuildIndex` 之后需自行做容量检查；若要返回值对齐需扩展其签名 |
-| `.lock` 不可重入；dream / 迁移需要「全程持锁」时会自锁到 `timeoutMs` 后抛 MemoryLockedError | Plan B 必须先为 `MemoryStore` 补一个公开且可重入的 `withLock(op, fn)`（§4.2 已列为原语、§4.3 指派给迁移），而不是直接用 `fs-lock.withLock` 包住写原语；详见 `MemoryStore` 类注释的「锁契约」 |
+| ~~`.lock` 不可重入~~ **已由两级锁解决** | dream / 迁移的整轮互斥改由进程内逻辑锁承担（§5.2），`.lock` 因此永远只持毫秒、不需要可重入；整轮持有者用 `MemoryStore.withLogicalLock()`，其内部调用传 `{ skipLogicalLock: true }` |
 | `removeEntry` / `replaceEntry` 的 `unlink` 失败现在会抛错（fail-closed），不再静默当作删除成功 | 调用方必须把「保存失败」当作用户可见的错误处理（工具层不得吞掉 rejection）；失败时索引与文件保持一致，且写前快照可从 `.backups/` 回滚 |
 | **CRLF 的 `MEMORY.md` 对索引层不可见** | entry 文件侧的 CRLF 已在 `parseEntryFile` 入口归一化；但 `entry-index` 的 `LINE_RE` 尾组 `(.*)$` 匹配不到以 `\r` 结尾的行，于是整个索引都被计成 `unrecognized`、`removeIndexLine` 空操作（删除会留下死链）、`upsertIndexLine` 追加重复行、`rebuildIndex` 把整块当作「手写头部」保留。用户用 Windows 编辑器手改 `MEMORY.md` 时触发 |
 | 续约心跳的在途请求可能在释放之后落回 | 会留下一个没有持有者的 `.lock`，后续同进程写入会超时抛错直到 TTL（≤ 600s）自愈，无数据丢失。概率约 1e-6/长任务。硬化方向：释放前 await 在途续约 |

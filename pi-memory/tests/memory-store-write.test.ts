@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseEntryFile } from "../src/entry-file";
 import { parseEntryIndex } from "../src/entry-index";
 import { MemoryStore, type StoreConfig } from "../src/memory-store";
+import { ProcessLockTimeoutError } from "../src/process-lock";
 
 let dir: string;
 let store: MemoryStore;
@@ -13,7 +14,7 @@ const CFG = (memoryDir: string, over: Partial<StoreConfig> = {}): StoreConfig =>
 	memoryDir,
 	indexMaxLines: 200,
 	indexMaxBytes: 25600,
-	lock: { timeoutMs: 5000, dreamTimeoutMs: 30000, ttlMs: 600_000, snapshotKeep: 5 },
+	lock: { timeoutMs: 5000, snapshotKeep: 5 },
 	...over,
 });
 
@@ -276,5 +277,48 @@ describe("replaceEntry", () => {
 		await store.replaceEntry("B", { name: "Old" });
 
 		expect(parseEntryIndex(await store.readIndex()).entries.filter((e) => e.file === "Old.md")).toHaveLength(1);
+	});
+});
+
+// 两级锁：进程内逻辑锁承担「逻辑作用域」（单次调用 / dream 整轮），跨进程 .lock 只管毫秒级物理写入。
+// 这样 dream 整轮持锁时，它**自己**的原语调用（传 skipLogicalLock）不会自锁，而其它调用方会被挡在门外。
+describe("进程内逻辑锁", () => {
+	const shortLock = (memoryDir: string): StoreConfig => ({ ...CFG(memoryDir), lock: { timeoutMs: 40, snapshotKeep: 5 } });
+
+	it("blocks a primitive while a long scope holds the logical lock, and passes the holder's own calls through", async () => {
+		const store = new MemoryStore(shortLock(dir));
+
+		await store.withLogicalLock(async () => {
+			expect(store.logicalLockActive()).toBe(true);
+			await expect(store.addEntry({ name: "A", body: "正文" })).rejects.toThrow(ProcessLockTimeoutError);
+			await expect(store.addEntry({ name: "A", body: "正文" }, { skipLogicalLock: true })).resolves.toMatchObject({
+				file: "A.md",
+			});
+		});
+
+		expect(store.logicalLockActive()).toBe(false);
+		await expect(store.readEntry("A")).resolves.toMatchObject({ body: "正文" });
+	});
+
+	it("does not couple different memory directories", async () => {
+		const other = await mkdtemp(join(tmpdir(), "mem-store-other-"));
+		try {
+			const a = new MemoryStore(shortLock(dir));
+			const b = new MemoryStore(shortLock(other));
+			await a.withLogicalLock(async () => {
+				await expect(b.addEntry({ name: "B", body: "正文" })).resolves.toMatchObject({ file: "B.md" });
+			});
+		} finally {
+			await rm(other, { recursive: true, force: true });
+		}
+	});
+
+	it("serialises two primitives that arrive at the same time", async () => {
+		const store = new MemoryStore(CFG(dir));
+		const results = await Promise.all(
+			["A", "B", "C"].map((name) => store.addEntry({ name, body: `${name} 正文` })),
+		);
+		expect(new Set(results.map((r) => r.file)).size).toBe(3);
+		expect(parseEntryIndex(await store.readIndex()).entries).toHaveLength(3);
 	});
 });

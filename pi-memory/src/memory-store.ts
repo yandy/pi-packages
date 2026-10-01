@@ -5,6 +5,7 @@ import { deriveDescription, type EntryType, parseEntryFile, serializeEntryFile }
 import { formatIndexLine, indexCapacity, parseEntryIndex, removeIndexLine, upsertIndexLine } from "./entry-index";
 import { entryFileName, resolveUniqueFileName } from "./filename";
 import { withLock } from "./fs-lock";
+import { isProcessLockActive, withProcessLock } from "./process-lock";
 import { createSnapshot } from "./snapshot";
 
 export const INDEX_FILE = "MEMORY.md";
@@ -38,11 +39,24 @@ export async function sameFile(a: string, b: string): Promise<boolean> {
 	return left !== null && right !== null && left.dev === right.dev && left.ino === right.ino;
 }
 
+/**
+ * 写原语的调用选项。
+ *
+ * `skipLogicalLock` 供**整轮持有者**使用：dream / 迁移先用 `withLogicalLock()` 包住整轮，
+ * 它内部再调用原语时若还去抢同一把进程内锁就会自锁。默认值（不传）= 自己拿锁，这对
+ * 「一次调用一个作用域」的调用方（主 agent 工具、extract）是安全的默认。
+ */
+export interface WriteOptions {
+	skipLogicalLock?: boolean;
+}
+
 export interface StoreConfig {
 	memoryDir: string;
 	indexMaxLines: number;
 	indexMaxBytes: number;
-	lock: { timeoutMs: number; dreamTimeoutMs: number; ttlMs: number; snapshotKeep: number };
+	/** 跨进程 `.lock` 的等待上限。注意这里**没有 ttl** —— 锁只在毫秒级的物理写入期间持有，
+	 *  且永不自动回收（见 fs-lock.ts）；dream 的整轮互斥由 process-lock.ts 的进程内队列承担。 */
+	lock: { timeoutMs: number; snapshotKeep: number };
 }
 
 export interface EntrySummary {
@@ -76,14 +90,15 @@ function compareSummaries(a: EntrySummary, b: EntrySummary): number {
  * 不会被后续写入自动覆盖 —— 只能从 `.backups/` 快照恢复。
  *
  * 锁契约（Plan B 的 dream / 迁移必须遵守）：
- * - 每个写原语自己取锁（进程内队列 + 跨进程 `.lock`），因此**原语不可在已持有 `.lock` 时调用** ——
- *   `.lock` 不是可重入锁，会自锁到 `timeoutMs` 后抛 MemoryLockedError。
- * - dream / 迁移需要「整个运行期间独占」时，Plan B 应为本类补一个公开且可重入的 `withLock(op, fn)`
- *   （spec §4.2 已把它列为 MemoryStore 的原语，§4.3 指派给迁移），而不是直接用 fs-lock.withLock 包住原语。
- * - 时序注意：`#savingQueue`（进程内队列）**没有**超时，而 spec §5.2 的 `timeoutMs` 只在出队之后的
- *   `#locked` 里生效，所以「等待 5s 后给出明确错误」不是从调用算起的上界 —— 同进程的长任务
- *   （headless agent 与主进程同进程）会让 `memory add` 一直排队，调用方看到的是一个没有超时的
- *   挂起，而不是 MemoryLockedError。
+ * - **两级锁，作用域不同**：进程内**逻辑锁**（`process-lock.ts`，按 `memoryDir` 分键）承担
+ *   「逻辑作用域」（单次原语 = 该次调用；dream / 迁移 = 整轮）；跨进程 `.lock` 承担「毫秒级的
+ *   物理写入」。因此 `.lock` 永远只被持有一瞬间，不需要 TTL / 续约 / 接管（见 fs-lock.ts）。
+ * - 不做整轮的调用方（主 agent 工具、extract）**不必传任何选项** —— 默认就会自取逻辑锁。
+ * - 需要整轮独占时：用 `withLogicalLock()` 包住整轮，且**其内部调用必须传
+ *   `{ skipLogicalLock: true }`**，否则会去抢自己已持有的锁而自锁到 `timeoutMs`。
+ *   启动前用 `logicalLockActive()` 自检 —— 忘了包锁会静默失去整轮互斥。
+ * - `#savingQueue`（进程内 mutation 队列）**没有**超时；它是毫秒级的，且已在逻辑锁之内，
+ *   所以不会把超时语义弄糊。
  */
 export class MemoryStore {
 	readonly #cache = new Map<string, CacheRow>();
@@ -138,7 +153,43 @@ export class MemoryStore {
 	}
 
 	async #locked<T>(op: string, timeoutMs: number, fn: () => Promise<T>): Promise<T> {
-		return withLock(join(this.cfg.memoryDir, LOCK_FILE), op, { timeoutMs, ttlMs: this.cfg.lock.ttlMs }, fn);
+		return withLock(join(this.cfg.memoryDir, LOCK_FILE), op, { timeoutMs }, fn);
+	}
+
+	/**
+	 * 进程内逻辑锁的 key。与跨进程锁同源（同一个 memoryDir），因此「同一目录的多个 store 实例」
+	 * 共享同一把逻辑锁。注意 key 用配置里已展开的路径字符串：若同一个目录以不同写法（`..`、符号链接）
+	 * 配置给两个 store，会得到两把锁 —— 目前所有调用方都走同一条 `resolveMemoryDir` 路径。
+	 */
+	get #logicalKey(): string {
+		return this.#indexPath();
+	}
+
+	/**
+	 * 写管线（所有原语的唯一入口）：
+	 *   进程内逻辑锁（毫秒级：本调用） → 进程内 mutation 队列 → 跨进程 `.lock`（毫秒级） → 快照 → 读改。
+	 * 两级锁的顺序固定（逻辑锁在外），因此不存在锁序反转。
+	 */
+	async #pipeline<T>(op: string, options: WriteOptions | undefined, fn: () => Promise<T>): Promise<T> {
+		const run = () => this.#savingQueue(() => this.#locked(op, this.cfg.lock.timeoutMs, fn));
+		if (options?.skipLogicalLock) return run();
+		return withProcessLock(this.#logicalKey, this.cfg.lock.timeoutMs, run);
+	}
+
+	/**
+	 * 在「进程内逻辑锁」下跑一整轮（dream / 迁移）。持有期间调用原语必须传
+	 * `{ skipLogicalLock: true }`，否则会自锁到超时。
+	 *
+	 * 整轮互斥放进程内、而不是让跨进程 `.lock` 持整轮，是刻意的：`.lock` 只承担毫秒级的物理写入，
+	 * 因而不需要 TTL / 续约 / 接管（见 fs-lock.ts）；而 dream 自己的原语调用也不会撞上自己的锁。
+	 */
+	async withLogicalLock<T>(fn: () => Promise<T>): Promise<T> {
+		return withProcessLock(this.#logicalKey, this.cfg.lock.timeoutMs, fn);
+	}
+
+	/** 整轮持有者启动前的自检：忘了包 `withLogicalLock` 会静默失去整轮互斥。 */
+	logicalLockActive(): boolean {
+		return isProcessLockActive(this.#logicalKey);
 	}
 
 	async #snapshot(label: string, files: string[]): Promise<void> {
@@ -243,12 +294,10 @@ export class MemoryStore {
 		if (value && /[\r\n]/.test(value)) throw new Error("description must be a single line");
 	}
 
-	async addEntry(input: {
-		name: string;
-		description?: string;
-		type?: EntryType;
-		body: string;
-	}): Promise<{ file: string; capacityWarning?: string }> {
+	async addEntry(
+		input: { name: string; description?: string; type?: EntryType; body: string },
+		options?: WriteOptions,
+	): Promise<{ file: string; capacityWarning?: string }> {
 		const name = input.name.trim();
 		this.#validateName(name);
 		const requestedDescription = input.description?.trim();
@@ -256,8 +305,7 @@ export class MemoryStore {
 		const body = input.body.trim();
 		if (!body) throw new Error("body is required");
 
-		return this.#savingQueue(() =>
-			this.#locked("add", this.cfg.lock.timeoutMs, async () => {
+		return this.#pipeline("add", options, async () => {
 				const summaries = await this.listEntries();
 				const existing = summaries.find((s) => s.name === name);
 				const file = existing?.file ?? (await this.#resolveTargetFile(name));
@@ -287,16 +335,15 @@ export class MemoryStore {
 				this.#cache.delete(file);
 
 				return { file, capacityWarning: this.#capacityWarning(next) };
-			}),
-		);
+		});
 	}
 
 	async replaceEntry(
 		ref: string,
 		patch: { name?: string; description?: string; type?: EntryType; body?: string },
+		options?: WriteOptions,
 	): Promise<{ file: string; capacityWarning?: string }> {
-		return this.#savingQueue(() =>
-			this.#locked("replace", this.cfg.lock.timeoutMs, async () => {
+		return this.#pipeline("replace", options, async () => {
 				const current = await this.readEntry(ref);
 				if (!current) throw new Error(`Entry "${ref}" not found`);
 
@@ -362,13 +409,11 @@ export class MemoryStore {
 				this.#cache.delete(file);
 
 				return { file, capacityWarning: this.#capacityWarning(next) };
-			}),
-		);
+		});
 	}
 
-	async removeEntry(ref: string): Promise<void> {
-		await this.#savingQueue(() =>
-			this.#locked("remove", this.cfg.lock.timeoutMs, async () => {
+	async removeEntry(ref: string, options?: WriteOptions): Promise<void> {
+		await this.#pipeline("remove", options, async () => {
 				const current = await this.readEntry(ref);
 				if (!current) throw new Error(`Entry "${ref}" not found`);
 
@@ -376,19 +421,17 @@ export class MemoryStore {
 				await unlinkStrict(join(this.cfg.memoryDir, current.file));
 				await writeFile(this.#indexPath(), removeIndexLine(await this.readIndex(), current.file), "utf8");
 				this.#cache.delete(current.file);
-			}),
-		);
+		});
 	}
 
-	async renameEntry(ref: string, newName: string): Promise<{ file: string }> {
-		const { file } = await this.replaceEntry(ref, { name: newName });
+	async renameEntry(ref: string, newName: string, options?: WriteOptions): Promise<{ file: string }> {
+		const { file } = await this.replaceEntry(ref, { name: newName }, options);
 		return { file };
 	}
 
 	/** 从磁盘全量重建索引；保留第一条索引行之前的手写块，其余无法识别行丢弃。 */
-	async rebuildIndex(): Promise<{ entries: number; headerLines: number }> {
-		return this.#savingQueue(() =>
-			this.#locked("rebuild", this.cfg.lock.dreamTimeoutMs, async () => {
+	async rebuildIndex(options?: WriteOptions): Promise<{ entries: number; headerLines: number }> {
+		return this.#pipeline("rebuild", options, async () => {
 				await this.#snapshot("index", [INDEX_FILE]);
 
 				const summaries = await this.listEntries();
@@ -406,8 +449,7 @@ export class MemoryStore {
 				this.#cache.clear();
 
 				return { entries: summaries.length, headerLines: effectiveHeader.length };
-			}),
-		);
+		});
 	}
 }
 
