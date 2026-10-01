@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { approveEscalation, escalationHintMarker, sandboxDenialMarker, validateEscalationArgs, WIDER_MODES } from "../src/escalation";
+import { approveEscalation, escalationAppliedMarker, escalationHintMarker, sandboxDenialMarker, validateEscalationArgs, WIDER_MODES } from "../src/escalation";
 
 const base = {
 	justification: "need to install a global npm package",
@@ -16,14 +16,17 @@ describe("validateEscalationArgs", () => {
 	it("both present and non-empty: ok", () => {
 		expect(() => validateEscalationArgs("danger-full-access", "because")).not.toThrow();
 	});
-	it("permissions without justification: malformed", () => {
-		expect(() => validateEscalationArgs("danger-full-access", undefined)).toThrow(/requires a justification/);
+	it("permissions without justification: malformed + actionable (nothing ran, fix recipe)", () => {
+		expect(() => validateEscalationArgs("danger-full-access", undefined))
+			.toThrow(/nothing ran.*Cause: sandbox_permissions was sent without justification.*omit BOTH fields/s);
 	});
-	it("justification without permissions: malformed", () => {
-		expect(() => validateEscalationArgs(undefined, "because")).toThrow(/only valid together with sandbox_permissions/);
+	it("justification without permissions: malformed (the null-placeholder failure mode)", () => {
+		expect(() => validateEscalationArgs(undefined, "because"))
+			.toThrow(/nothing ran.*Cause: justification was sent without sandbox_permissions.*omit BOTH fields/s);
 	});
 	it("blank justification: malformed", () => {
-		expect(() => validateEscalationArgs("danger-full-access", "   ")).toThrow(/non-empty sentence/);
+		expect(() => validateEscalationArgs("danger-full-access", "   "))
+			.toThrow(/nothing ran.*Cause: justification was empty/);
 	});
 	it("both absent: ok (a plain call)", () => {
 		expect(() => validateEscalationArgs(undefined, undefined)).not.toThrow();
@@ -34,9 +37,14 @@ describe("markers", () => {
 	it("denial marker names the mode verbatim", () => {
 		expect(sandboxDenialMarker("read-only")).toBe("[sandbox: file access denied under read-only mode]");
 	});
-	it("hint marker names the subject verbatim", () => {
+	it("hint marker names the subject verbatim and offers the writable roots before escalation", () => {
 		expect(escalationHintMarker("command")).toBe(
-			"[sandbox: escalation available — retry this exact command once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]",
+			"[sandbox: escalation available — writable here: the workspace + a private per-command /tmp; retry this exact command once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]",
+		);
+	});
+	it("applied marker says the approval covered this call only", () => {
+		expect(escalationAppliedMarker("danger-full-access")).toBe(
+			'[sandbox: this call ran with a one-shot escalation to "danger-full-access"; the approval covered this call only — later calls are confined again]',
 		);
 	});
 });
@@ -75,13 +83,13 @@ describe("approveEscalation", () => {
 	it("narrower target → not-strictly-wider error, no prompt", async () => {
 		const u = ui(true, "Allow once");
 		await expect(approveEscalation({ ...base, effectiveMode: "danger-full-access", requestedMode: "workspace-write" }, u))
-			.rejects.toThrow(/not strictly wider/);
+			.rejects.toThrow(/not strictly wider.*nothing was executed/s);
 		expect(u.select).not.toHaveBeenCalled();
 	});
-	it("hasUI=false → unavailable error BEFORE any select (Review Focus #4)", async () => {
+	it("hasUI=false → unavailable error BEFORE any select (Review Focus #4), with the /permission rescue path", async () => {
 		const u = ui(false, "Allow once");
 		await expect(approveEscalation({ ...base, requestedMode: "danger-full-access" }, u))
-			.rejects.toThrow(/no approval channel is available/);
+			.rejects.toThrow(/no approval channel is available.*nothing was executed.*\/permission danger-full-access/s);
 		expect(u.select).not.toHaveBeenCalled();
 	});
 });

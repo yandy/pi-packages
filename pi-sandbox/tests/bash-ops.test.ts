@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { createSandboxBashOps } from "../src/bash-ops";
+import { escalationHintMarker, sandboxDenialMarker } from "../src/escalation";
 
 function fakeChild() {
 	const child = new EventEmitter() as EventEmitter & {
@@ -103,8 +104,8 @@ describe("createSandboxBashOps", () => {
 		const result = await p;
 		expect(result.exitCode).toBe(1);
 		const text = chunks.map((c) => c.toString()).join("");
-		expect(text).toContain("[sandbox: file access denied under workspace-write mode]");
-		expect(text).toContain("[sandbox: escalation available — retry this exact command once");
+		expect(text).toContain(sandboxDenialMarker("workspace-write"));
+		expect(text).toContain(escalationHintMarker("command"));
 	});
 	it("runner failure rejects with SandboxUnavailableError (exit-gated)", async () => {
 		const child = fakeChild();

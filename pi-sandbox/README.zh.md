@@ -65,6 +65,7 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 ## 安全说明
 
 - 受约束进程可**读取**宿主上你有权读的一切（包括 `~/.ssh` 等）——这是本沙箱的设计语义（与 deepseek harness 一致）；root 专属文件受文件权限保护
+- bwrap 下 bash 内部的 `/tmp` 是**每条命令重建的私有 tmpfs**：宿主 `/tmp` 的内容在沙箱内不可见，写在其中的文件命令一结束就消失——需要跨命令（或给 read/write 工具）用的暂存请放在工作区
 - 受限子进程强制 `LC_MESSAGES=C`（保证拒绝诊断可分类），不改动你的 `LANG`/`LC_CTYPE`
 - 受限 bash 在独立进程组中运行（detached）：timeout/abort 会杀掉整个进程组；但若 pi 自身被硬杀（如 SIGKILL），命令派生的后台孙进程可能存活（pi 内部的子进程追踪 API 不对扩展开放）
 - landlock 回退在旧内核 ABI 上为 partial enforcement（状态里会标注）

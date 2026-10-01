@@ -4,7 +4,7 @@ import { PassThrough } from "node:stream";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createSandboxTools, resolveCallMode } from "../src/tools";
+import { createSandboxTools, resolveCall, resolveCallMode } from "../src/tools";
 import { createPermissionState } from "../src/permission";
 import { DEFAULT_SANDBOX_CONFIG } from "../src/config";
 import { getEscalationBroker, resetEscalationBrokerForTests } from "../src/escalation-broker";
@@ -68,11 +68,26 @@ describe("createSandboxTools schemas", () => {
 		expect(props.sandbox_permissions).toBeDefined();
 		expect(props.justification).toBeDefined();
 	});
-	it("description teaches the escalation contract", () => {
+	it("description teaches the escalation contract within the per-tool budget (β′)", () => {
 		const { deps } = makeDeps();
-		const { write } = createSandboxTools(deps);
-		expect(write.description).toContain("sandbox_permissions");
-		expect((write.promptGuidelines ?? []).join(" ")).toContain("sandbox_permissions");
+		const { bash, write, edit } = createSandboxTools(deps);
+		// 跨工具规则只留一句：正常调用两个提权字段都不传（never null），协议细节在按需面。
+		for (const tool of [bash, write, edit]) {
+			expect(tool.description).toContain("Pass neither escalation field unless you are retrying a denial (never null).");
+			expect(tool.description).toContain("workspace-write already allows the workspace and /tmp");
+			// 旧版把这套协议写进每个 description（×3 重复）：不许回潮。
+			expect(tool.description).not.toContain("Writes outside the permitted roots are denied");
+			expect(tool.description).not.toContain("Pass justification:");
+		}
+		// bash 专属事实（bwrap --tmpfs /tmp 语义）只写进 bash，不摊给 write/edit。
+		expect(bash.description).toContain("private tmpfs emptied after every command");
+		expect(write.description).not.toContain("private tmpfs");
+		expect(edit.description).not.toContain("private tmpfs");
+		// 预算回归闸（β′）：三个工具的常驻增量合计 ≤ 700 chars（当前 636，改前 1281）。
+		const added = [bash, write, edit].flatMap((t) =>
+			t.description.split("\n").filter((l) => l.startsWith("Sandbox:") || l.startsWith("bash's")),
+		);
+		expect(added.join("").length).toBeLessThanOrEqual(700);
 	});
 	it("keeps base promptSnippet/promptGuidelines and schema options (Ruling 15)", () => {
 		const { deps } = makeDeps();
@@ -99,7 +114,16 @@ describe("resolveCallMode", () => {
 	it("malformed pair throws", async () => {
 		const { deps } = makeDeps();
 		await expect(resolveCallMode({ sandbox_permissions: "danger-full-access" }, toolCtx(), deps, "command", () => "x"))
-			.rejects.toThrow(/requires a justification/);
+			.rejects.toThrow(/nothing ran.*omit BOTH fields/s);
+	});
+	it("resolveCall flags a genuine one-shot escalation only (same-mode request stays escalated:false)", async () => {
+		const { deps } = makeDeps();
+		expect(await resolveCall({}, toolCtx(), deps, "command", () => "x")).toEqual({ mode: "workspace-write", escalated: false });
+		// 请求档位 == effective：免审批执行，不是提权（否则会给模型发假的"特批"信号）。
+		expect(await resolveCall({ sandbox_permissions: "workspace-write", justification: "same as effective" }, toolCtx(), deps, "command", () => "x"))
+			.toEqual({ mode: "workspace-write", escalated: false });
+		expect(await resolveCall({ sandbox_permissions: "danger-full-access", justification: "need /etc write" }, toolCtx(true, "Allow once"), deps, "command", () => "x"))
+			.toEqual({ mode: "danger-full-access", escalated: true });
 	});
 	it("approved escalation is one-shot: override state untouched (Review Focus #5)", async () => {
 		const { deps } = makeDeps();
@@ -137,19 +161,26 @@ describe("write tool fence + escalation wiring", () => {
 		await expect(write.execute("call-2", { path: outside, content: "x" }, undefined, undefined, toolCtx()))
 			.rejects.toThrow(/file access denied under workspace-write mode[\s\S]*escalation available/);
 	});
-	it("escalated retry with Allow once writes outside", async () => {
+	it("escalated retry with Allow once writes outside and carries the one-shot marker", async () => {
 		const { deps } = makeDeps();
 		const { write } = createSandboxTools(deps);
 		const outside = join(outsideDir, `tools-test-${process.pid}-${Date.now()}.txt`);
 		// 自证断言对：同一路径不带提权必须被拒——落点若其实在围栏内，本判例会响亮失败而非假绿。
 		await expect(write.execute("call-3-pre", { path: outside, content: "no" }, undefined, undefined, toolCtx()))
 			.rejects.toThrow(/file access denied under workspace-write mode/);
-		// 带提权（Allow once）后真实落盘。
-		await write.execute("call-3", {
+		// 带提权（Allow once）后真实落盘，并随结果下发"仅此一次"标记。
+		const result = await write.execute("call-3", {
 			path: outside, content: "ok",
 			sandbox_permissions: "danger-full-access", justification: "user-approved external write",
-		}, undefined, undefined, toolCtx(true, "Allow once"));
+		}, undefined, undefined, toolCtx(true, "Allow once")) as { content: { text: string }[] };
 		expect(await (await import("node:fs/promises")).readFile(outside, "utf-8")).toBe("ok");
+		expect(result.content.map((c) => c.text).join("\n")).toContain('one-shot escalation to "danger-full-access"');
+	});
+	it("plain call carries no escalation marker (no false one-shot signal)", async () => {
+		const { deps } = makeDeps();
+		const { write } = createSandboxTools(deps);
+		const result = await write.execute("call-3b", { path: join(ws, "plain.txt"), content: "x" }, undefined, undefined, toolCtx()) as { content: { text: string }[] };
+		expect(result.content.map((c) => c.text).join("\n")).not.toContain("one-shot escalation");
 	});
 	it("Deny: error tells the model to stop and explain", async () => {
 		const { deps } = makeDeps();

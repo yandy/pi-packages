@@ -1,6 +1,7 @@
 import { access as fsAccess, constants, mkdir as fsMkdir, readFile as fsReadFile, writeFile as fsWriteFile } from "node:fs/promises";
 import { Type, type TSchema } from "typebox";
 import {
+	type AgentToolResult,
 	createBashToolDefinition,
 	createEditToolDefinition,
 	createWriteToolDefinition,
@@ -10,7 +11,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { createSandboxBashOps, type SpawnFn } from "./bash-ops";
 import { getSandboxConfig, type SandboxConfig } from "./config";
-import { approveEscalation, type EscalationUI, sandboxPermissionsDescription, validateEscalationArgs } from "./escalation";
+import { approveEscalation, escalationAppliedMarker, type EscalationUI, validateEscalationArgs } from "./escalation";
 import { getEscalationBroker } from "./escalation-broker";
 import { assertWriteAllowed, type FencePolicy } from "./fence";
 import type { PermissionState } from "./permission";
@@ -109,20 +110,26 @@ function approvalChannelFor(ctx: ToolCtxLike, signal: AbortSignal | undefined): 
 /**
  * 解析一次调用的生效模式（spec §4/§7）：
  * malformed 校验 → effective（/permission 覆盖 > config）→ 可选的已批准提权。
+ * escalated 为真仅当本次真的经审批提了权（请求档位 == effective 时免审批，不是提权）。
  */
-export async function resolveCallMode(
+export interface ResolvedCall {
+	mode: SandboxMode;
+	escalated: boolean;
+}
+
+export async function resolveCall(
 	params: EscalationParams,
 	ctx: ToolCtxLike,
 	deps: SandboxToolDeps,
 	subject: "command" | "operation",
 	summary: () => string,
 	signal?: AbortSignal,
-): Promise<SandboxMode> {
+): Promise<ResolvedCall> {
 	validateEscalationArgs(params.sandbox_permissions, params.justification);
 	const config = configForCall(deps, ctx.cwd ?? deps.cwd);
 	const effective = resolveEffectiveMode(deps.permission.override, config.mode);
-	if (params.sandbox_permissions === undefined) return effective;
-	return approveEscalation(
+	if (params.sandbox_permissions === undefined) return { mode: effective, escalated: false };
+	const mode = await approveEscalation(
 		{
 			requestedMode: params.sandbox_permissions,
 			justification: params.justification as string,
@@ -132,6 +139,19 @@ export async function resolveCallMode(
 		},
 		approvalChannelFor(ctx, signal),
 	);
+	return { mode, escalated: mode !== effective };
+}
+
+/** 兼容包装：既有调用方与判例按裸 mode 断言（一次性提权语义不变，Review Focus #5）。 */
+export async function resolveCallMode(
+	params: EscalationParams,
+	ctx: ToolCtxLike,
+	deps: SandboxToolDeps,
+	subject: "command" | "operation",
+	summary: () => string,
+	signal?: AbortSignal,
+): Promise<SandboxMode> {
+	return (await resolveCall(params, ctx, deps, subject, summary, signal)).mode;
 }
 
 /** Ruling 15：对象 spread 保留 base schema 的自有 options（如 editSchema 的 additionalProperties:false）。 */
@@ -140,14 +160,26 @@ function extendParams(base: TSchema): TSchema {
 	return { ...base, properties: { ...b.properties, ...ESCALATION_PROPS } } as TSchema;
 }
 
-function escalationDescription(base: string, subject: "command" | "operation"): string {
-	return [
-		base,
-		"",
-		"Sandbox: file effects are confined by the current permission mode (read-only | workspace-write | danger-full-access).",
-		`Writes outside the permitted roots are denied. To retry, pass sandbox_permissions — ${sandboxPermissionsDescription(subject)}`,
-		"Pass justification: a one-sentence reason shown verbatim in the user's approval prompt.",
-	].join("\n");
+/**
+ * 提示预算（β′，每请求成本受控）：
+ * - `tool.description` 与参数 schema 是**按工具**进请求的 → 同一句话写进 bash/write/edit 就付 3 份；
+ * - `promptGuidelines` 进 system prompt 的 rules，pi 按字符串去重（`buildRules` 的 seen 集）→ 只付 1 份。
+ * 所以：跨工具规则只留一句（ESCALATION_GUIDELINE + 这一句 SANDBOX_NOTE），工具专属事实只写那个工具
+ * （BASH_TMP_NOTE），协议细节一律放按需面（denial hint / 校验错误 / 批准后标记）。
+ */
+const SANDBOX_NOTE =
+	"Sandbox: confined to the current mode; workspace-write already allows the workspace and /tmp. Pass neither escalation field unless you are retrying a denial (never null).";
+/** bash 专属（bwrap `--tmpfs /tmp` 的语义）：只写进 bash 的 description，不摊给 write/edit。 */
+const BASH_TMP_NOTE =
+	"bash's /tmp is a private tmpfs emptied after every command; keep scratch files that later commands need inside the workspace.";
+
+function escalationDescription(base: string, extra?: string): string {
+	return [base, "", SANDBOX_NOTE, ...(extra === undefined ? [] : [extra])].join("\n");
+}
+
+/** 批准后追加一行按需反馈（其余字段原样保留）。 */
+function withEscalationNote<T>(result: AgentToolResult<T>, mode: SandboxMode): AgentToolResult<T> {
+	return { ...result, content: [...result.content, { type: "text", text: escalationAppliedMarker(mode) }] };
 }
 
 const ESCALATION_GUIDELINE =
@@ -195,14 +227,14 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 	const bash = {
 		...baseBash,
 		label: `${baseBash.label} (sandboxed)`,
-		description: escalationDescription(baseBash.description, "command"),
+		description: escalationDescription(baseBash.description, BASH_TMP_NOTE),
 		promptGuidelines: [...(baseBash.promptGuidelines ?? []), ESCALATION_GUIDELINE],
 		parameters: extendParams(baseBash.parameters),
 		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
 			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;
 			const workspaceRoot = workspaceRootFor(sessionCwd);
 			const config = configForCall(deps, sessionCwd);
-			const mode = await resolveCallMode(params as EscalationParams, ctx, deps, "command", () => String(params.command ?? ""), signal);
+			const { mode, escalated } = await resolveCall(params as EscalationParams, ctx, deps, "command", () => String(params.command ?? ""), signal);
 			// M3：配置了自定义 runnerCommand 时跳过链探测（confine 直接用 runnerCommand）。
 			const selected = mode === "danger-full-access" || (config.runnerCommand?.length ?? 0) > 0
 				? undefined
@@ -219,39 +251,42 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 					spawnFn: deps.spawnFn,
 				}),
 			});
-			return tool.execute(toolCallId, stripEscalation(params) as never, signal, onUpdate as never, ctx);
+			const result = await tool.execute(toolCallId, stripEscalation(params) as never, signal, onUpdate as never, ctx);
+			return escalated ? withEscalationNote(result, mode) : result;
 		},
 	};
 
 	const write = {
 		...baseWrite,
 		label: `${baseWrite.label} (sandboxed)`,
-		description: escalationDescription(baseWrite.description, "operation"),
+		description: escalationDescription(baseWrite.description),
 		promptGuidelines: [...(baseWrite.promptGuidelines ?? []), ESCALATION_GUIDELINE],
 		parameters: extendParams(baseWrite.parameters),
 		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
 			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;
 			const workspaceRoot = workspaceRootFor(sessionCwd);
-			const mode = await resolveCallMode(params as EscalationParams, ctx, deps, "operation", () => String(params.path ?? ""), signal);
+			const { mode, escalated } = await resolveCall(params as EscalationParams, ctx, deps, "operation", () => String(params.path ?? ""), signal);
 			// fence 拒绝不捕获：FenceDenialError 从 ops 抛出、经 pi execute 原样上抛
 			//（withFileMutationQueue 不吞错）——pi 的 agent 循环会转成 error result。
 			const tool = createWriteToolDefinition(sessionCwd, { operations: createFencedWriteOps({ mode, workspaceRoot, _tmpRoots: deps._tmpRoots }) });
-			return tool.execute(toolCallId, stripEscalation(params) as never, signal, onUpdate as never, ctx);
+			const result = await tool.execute(toolCallId, stripEscalation(params) as never, signal, onUpdate as never, ctx);
+			return escalated ? withEscalationNote(result, mode) : result;
 		},
 	};
 
 	const edit = {
 		...baseEdit,
 		label: `${baseEdit.label} (sandboxed)`,
-		description: escalationDescription(baseEdit.description, "operation"),
+		description: escalationDescription(baseEdit.description),
 		promptGuidelines: [...(baseEdit.promptGuidelines ?? []), ESCALATION_GUIDELINE],
 		parameters: extendParams(baseEdit.parameters),
 		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
 			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;
 			const workspaceRoot = workspaceRootFor(sessionCwd);
-			const mode = await resolveCallMode(params as EscalationParams, ctx, deps, "operation", () => String(params.path ?? ""), signal);
+			const { mode, escalated } = await resolveCall(params as EscalationParams, ctx, deps, "operation", () => String(params.path ?? ""), signal);
 			const tool = createEditToolDefinition(sessionCwd, { operations: createFencedEditOps({ mode, workspaceRoot, _tmpRoots: deps._tmpRoots }) });
-			return tool.execute(toolCallId, stripEscalation(params) as never, signal, onUpdate as never, ctx);
+			const result = await tool.execute(toolCallId, stripEscalation(params) as never, signal, onUpdate as never, ctx);
+			return escalated ? withEscalationNote(result, mode) : result;
 		},
 	};
 
