@@ -78,13 +78,18 @@ export class MemoryStore {
 		return out.sort(compareSummaries);
 	}
 
+	/** 读单个 entry 的正文；调用方自己提供已扫描到的 summary，避免重复扫目录。 */
+	async #readBody(summary: EntrySummary): Promise<Entry | null> {
+		const parsed = parseEntryFile(await readFile(join(this.cfg.memoryDir, summary.file), "utf8").catch(() => ""));
+		return parsed ? { ...summary, created: parsed.meta.created, body: parsed.body } : null;
+	}
+
 	/** 按文件名或 name 定位一个 entry。 */
 	async readEntry(ref: string): Promise<Entry | null> {
 		const summaries = await this.listEntries();
 		const summary = summaries.find((s) => s.file === ref) ?? summaries.find((s) => s.name === ref);
 		if (!summary) return null;
-		const parsed = parseEntryFile(await readFile(join(this.cfg.memoryDir, summary.file), "utf8").catch(() => ""));
-		return parsed ? { ...summary, created: parsed.meta.created, body: parsed.body } : null;
+		return this.#readBody(summary);
 	}
 
 	async readIndex(): Promise<string> {
@@ -94,8 +99,10 @@ export class MemoryStore {
 	async searchEntries(query: string): Promise<Entry[]> {
 		const needle = query.toLowerCase();
 		const out: Entry[] = [];
+		// 必须走 #readBody 而不是 readEntry：readEntry 会再调一次 listEntries（= 再一轮 readdir +
+		// 每文件一次 stat），在 N 条目上就会变成 N+1 次目录扫描、约 N² 次 stat。
 		for (const summary of await this.listEntries()) {
-			const entry = await this.readEntry(summary.file);
+			const entry = await this.#readBody(summary);
 			if (!entry) continue;
 			const haystack = [entry.name, entry.description, entry.body].map((f) => f.toLowerCase());
 			if (haystack.some((f) => f.includes(needle))) out.push(entry);
