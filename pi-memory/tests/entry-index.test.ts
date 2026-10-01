@@ -113,3 +113,45 @@ describe("indexCapacity", () => {
 		expect(indexCapacity(atLimit, 2, Buffer.byteLength(atLimit, "utf8") - 1).ok).toBe(false);
 	});
 });
+
+// CRLF 的索引行在 `LINE_RE` 下完全匹配不上（JS 的 `.` 不匹配 `\r`，且无 `m` 标志的 `$`
+// 无法在 `\r` 前成立），于是**每一行**都被计成 unrecognized：删除变空操作、追加变重复行。
+describe("CRLF handling", () => {
+	const LF = "# Memory Index\n\n## Project\n- [A](a.md) — 甲\n- [B](b.md) — 乙\n<!-- keep me -->\n";
+	const CRLF = LF.replace(/\n/g, "\r\n");
+
+	it("parses a CRLF index exactly like an LF one", () => {
+		const lf = parseEntryIndex(LF);
+		const crlf = parseEntryIndex(CRLF);
+
+		expect(crlf.entries).toHaveLength(2);
+		expect(crlf.unrecognized).toBe(lf.unrecognized);
+		expect(crlf.entries.map((e) => [e.name, e.file, e.description, e.lineNo])).toEqual(
+			lf.entries.map((e) => [e.name, e.file, e.description, e.lineNo]),
+		);
+	});
+
+	it("removes the right line from a CRLF index without leaving carriage returns", () => {
+		const out = removeIndexLine(CRLF, "a.md");
+
+		expect(out).not.toContain("\r");
+		expect(parseEntryIndex(out).entries.map((e) => e.file)).toEqual(["b.md"]);
+		expect(out).toContain("## Project");
+		expect(out).toContain("<!-- keep me -->");
+	});
+
+	it("replaces a CRLF index line in place and writes LF-only output", () => {
+		const out = upsertIndexLine(CRLF, { name: "A2", file: "a.md", description: "甲改" });
+
+		expect(out).not.toContain("\r");
+		const entries = parseEntryIndex(out).entries;
+		expect(entries).toHaveLength(2);
+		expect(entries[0]).toMatchObject({ name: "A2", file: "a.md", description: "甲改" });
+		expect(entries[1].file).toBe("b.md");
+	});
+
+	it("leaves the input byte-identical when nothing matches", () => {
+		expect(removeIndexLine(CRLF, "zzz.md")).toBe(CRLF);
+		expect(removeIndexLine("# Memory Index", "zzz.md")).toBe("# Memory Index");
+	});
+});

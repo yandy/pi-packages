@@ -1,6 +1,23 @@
-import { link, open, readFile, rename, rm, unlink } from "node:fs/promises";
+import { link, open, readFile, rm, unlink } from "node:fs/promises";
 import { hostname } from "node:os";
 
+/**
+ * **跨进程**锁。只保护「毫秒级的物理写入」这一件事。
+ *
+ * 作用域分工（见 process-lock.ts 的说明）：进程内的**逻辑作用域**（单次调用、dream 整轮）由
+ * `process-lock.ts` 的 Promise 队列承担，因此这里永远只被持有一瞬间 —— 不存在「持有太久」，
+ * 也就不需要 TTL、续约心跳与存活探测。
+ *
+ * **永不自动回收**：另一个进程崩溃留下的锁没有任何人能释放它，但**也不会被自动删掉**。
+ * 原因是「移走别人的锁」无法用 POSIX 原语做到可证明安全：`link` 这个合法获取原语的条件正是
+ * 「锁路径不存在」，所以任何「先移走旧锁、再建立自己的」的接管都会产生一个空窗，其它等待者
+ * 可以合法地抢占它；一旦移走的其实是某个**活持有者**刚建立的记录，互斥就无法再恢复（把记录
+ * 挪回去又会顶掉抢占者，而路径只能容纳一条记录）。实测：把 `rm` 换成原子 `rename` 仍然会双持有，
+ * 加上「比字节 + 放回」则会把空窗拉长，同进程内可稳定复现双持有。
+ *
+ * 因此这里的策略是「安全优先」：崩溃遗留的锁**立刻**报一条可操作的错误（写明 pid / op /
+ * startedAt / 路径，并提示如何清除），由人（或 Plan B 的显式 `/memory unlock`）处理。
+ */
 export interface LockInfo {
 	pid: number;
 	hostname: string;
@@ -10,18 +27,25 @@ export interface LockInfo {
 
 export interface LockOptions {
 	timeoutMs: number;
-	ttlMs: number;
 	pollMs?: number;
 	now?: () => number;
 }
 
 export class MemoryLockedError extends Error {
 	constructor(
+		readonly lockPath: string,
 		readonly holder: LockInfo | null,
 		readonly op: string,
+		/** 记录指向一个已死的本机进程，或本身无法解释 —— 没有任何人会释放它，只能人工清除。 */
+		readonly abandoned: boolean,
 	) {
+		const described = holder
+			? `${holder.op} (pid ${holder.pid}, started ${holder.startedAt})`
+			: "an unreadable record";
 		super(
-			`Memory is locked by ${holder?.op ?? "unknown"} (pid ${holder?.pid ?? "?"}, started ${holder?.startedAt ?? "?"})`,
+			abandoned
+				? `Memory lock at ${lockPath} is abandoned by ${described} — delete the file to clear it`
+				: `Memory is locked by ${described}`,
 		);
 		this.name = "MemoryLockedError";
 	}
@@ -31,13 +55,13 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** 仅用于诊断（决定错误文案，不参与任何回收决策）。 */
 function isProcessAlive(pid: number): boolean {
 	try {
 		process.kill(pid, 0);
 		return true;
 	} catch (e) {
-		// 只有 ESRCH（无此进程）才算死亡。EPERM 是「存在但无权限发信号」；其它意外 errno 一并按存活处理 ——
-		// 对互斥而言，「误判为存活」最多等到 TTL 兜底，「误判为死亡」却会删掉别人的锁、让两个写者同时进入临界区。
+		// 只有 ESRCH（无此进程）才算死亡；EPERM 是「存在但无权限发信号」，其余意外 errno 一并按存活处理。
 		return (e as NodeJS.ErrnoException).code !== "ESRCH";
 	}
 }
@@ -54,19 +78,51 @@ function isLockInfo(value: unknown): value is LockInfo {
 	);
 }
 
+type LockRead =
+	/** 锁路径不存在 —— 这是「空闲」，不是「有问题」。 */
+	| { kind: "absent" }
+	/** 存在但无法解释（非 JSON、空文件、形状不对、读不到）：只有人工能清除它。 */
+	| { kind: "unreadable" }
+	| { kind: "held"; holder: LockInfo };
+
 /**
- * 读取锁的持有者。返回 null 表示「无法解释的锁」→ 上层按 stale 回收。
- * 必须做形状校验：合法 JSON 但不是锁记录（`123`、`{}`、未来 schema）若原样返回，
- * `isStale` 会因为 hostname 不是字符串而跳过 pid 检查、又因为 `Date.parse(undefined)` 是 NaN
- * 而跳过 TTL 检查，于是这个锁**永远不会**变 stale —— 调用方会永远超时。
+ * 读锁的三种状态。**必须区分「不存在」与「存在但读不懂」** —— 把前者当成后者会让
+ * 「持有者刚释放、锁刚被删」被误报成「遗弃的锁」，从而在正常竞争下抛出误导性的错误。
  */
-async function readLockInfo(lockPath: string): Promise<LockInfo | null> {
+async function readLockState(lockPath: string): Promise<LockRead> {
+	let raw: string;
 	try {
-		const parsed: unknown = JSON.parse(await readFile(lockPath, "utf8"));
-		return isLockInfo(parsed) ? parsed : null;
-	} catch {
-		return null;
+		raw = await readFile(lockPath, "utf8");
+	} catch (e) {
+		if ((e as NodeJS.ErrnoException).code === "ENOENT") return { kind: "absent" };
+		// 权限之类的错误：无法判断内容，按「读不懂」处理（不接管、报可操作错误）
+		return { kind: "unreadable" };
 	}
+	try {
+		const parsed: unknown = JSON.parse(raw);
+		return isLockInfo(parsed) ? { kind: "held", holder: parsed } : { kind: "unreadable" };
+	} catch {
+		return { kind: "unreadable" };
+	}
+}
+
+type AcquireOutcome =
+	| { acquired: true }
+	| { acquired: false; holder: LockInfo | null; abandoned: boolean };
+
+/**
+ * 尝试一次获取。路径为空时不当作失败 —— 那是「刚好被释放」，直接再试一次 link（CAS 会自然地
+ * 决出唯一赢家）；两次都撞上「刚好被释放」才交回给调用方重试。
+ */
+async function acquireOnce(lockPath: string, info: LockInfo): Promise<AcquireOutcome> {
+	for (let round = 0; round < 2; round++) {
+		if (await writeExclusive(lockPath, info)) return { acquired: true };
+		const state = await readLockState(lockPath);
+		if (state.kind === "absent") continue;
+		if (state.kind === "unreadable") return { acquired: false, holder: null, abandoned: true };
+		return { acquired: false, holder: state.holder, abandoned: isAbandoned(state.holder) };
+	}
+	return { acquired: false, holder: null, abandoned: false };
 }
 
 let tempCounter = 0;
@@ -75,9 +131,7 @@ let tempCounter = 0;
  * 原子获取：先把持有者信息写进同目录的唯一临时文件，再 `link` 到锁路径。
  *
  * 不能用 `open(lockPath, "wx")` 后紧接着单独写内容 —— 那会让锁路径出现「存在但 0 字节」的
- * 中间态，而 `readLockInfo` 读到空文件会返回 null、`isStale(null)` 恒为 true（pid 与 TTL
- * 检查根本不会执行）。并发等待者恰好采样到这个窗口就会**删掉刚被正确获取的锁**并据为己有，
- * 于是两个写者同时进入临界区 —— 正是本模块要防止的失效。link 是原子的：锁路径要么不存在，
+ * 中间态，等待者读到空文件会把它判为「无法解释」并据为己有。link 是原子的：锁路径要么不存在，
  * 要么内容是完整的 JSON。
  */
 async function writeExclusive(lockPath: string, info: LockInfo): Promise<boolean> {
@@ -102,103 +156,37 @@ async function writeExclusive(lockPath: string, info: LockInfo): Promise<boolean
 	}
 }
 
-function isStale(holder: LockInfo | null, ttlMs: number, now: number): boolean {
-	if (holder === null) return true;
-	if (holder.hostname === hostname() && !isProcessAlive(holder.pid)) return true;
-	const started = Date.parse(holder.startedAt);
-	return Number.isFinite(started) && now - started > ttlMs;
-}
-
-/** 尝试获取一次（含 stale 回收，stale 只重试一次）。 */
-async function attempt(
-	lockPath: string,
-	info: LockInfo,
-	ttlMs: number,
-	now: number,
-): Promise<{ acquired: boolean; holder: LockInfo | null }> {
-	if (await writeExclusive(lockPath, info)) return { acquired: true, holder: null };
-	const holder = await readLockInfo(lockPath);
-	if (!isStale(holder, ttlMs, now)) return { acquired: false, holder };
-	await rm(lockPath, { force: true });
-	if (await writeExclusive(lockPath, info)) return { acquired: true, holder: null };
-	return { acquired: false, holder: await readLockInfo(lockPath) };
-}
-
 function holderInfo(op: string, now: number): LockInfo {
 	return { pid: process.pid, hostname: hostname(), startedAt: new Date(now).toISOString(), op };
 }
 
-/** 续约周期：TTL 的一半，且至少 1 秒。 */
-function renewIntervalMs(ttlMs: number): number {
-	return Math.max(1000, Math.floor(ttlMs / 2));
+/**
+ * 这把锁是否「已被遗弃」（没有任何人会释放它）。
+ * - 记录无法解释：没有持有者能续约，也没人能释放 —— 遗弃。
+ * - 同 host 且进程已死：持有者永远不会再释放它 —— 遗弃（这是唯一能确定的遗弃情形）。
+ * - 跨 host：存活状况不可知 —— 一律按活持有者处理，绝不接管。
+ */
+function isAbandoned(holder: LockInfo | null): boolean {
+	if (holder === null) return true;
+	return holder.hostname === hostname() && !isProcessAlive(holder.pid);
 }
 
 /**
- * 以同目录临时文件 + rename 原子覆盖锁文件（与获取同样避免出现半写状态）。
- *
- * 不能用 `writeFile` 直接覆盖锁文件 —— 那会重现获取路径已修掉的空文件窗口（等待者读到空文件
- * → `readLockInfo` 返回 null → `isStale(null)` 恒为 true → 删锁抢锁）。rename 之后等待者读到的
- * 要么是旧记录、要么是新记录。
- *
- * 只在锁仍是自己持有时续约：若锁已被别人接管（stale 误判 / 人工干预），无条件 rename 会把对方的
- * 锁抢回来 —— 与释放路径同类的所有权盲写。
+ * 只在锁仍是自己持有的情况下删除；否则留给真正的持有者。
+ * 记录读不懂时也**不删** —— 那是别人的状态（或需要人工处理的状态），不该由我们清理。
  */
-async function renewLock(lockPath: string, info: LockInfo): Promise<void> {
-	const holder = await readLockInfo(lockPath);
-	if (!holder || holder.pid !== info.pid) return;
-	tempCounter += 1;
-	const tempPath = `${lockPath}.${process.pid}.${tempCounter}.tmp`;
-	try {
-		const handle = await open(tempPath, "wx");
-		try {
-			await handle.writeFile(JSON.stringify(info), "utf8");
-		} finally {
-			await handle.close();
-		}
-		await rename(tempPath, lockPath);
-	} finally {
-		await unlink(tempPath).catch(() => {});
-	}
-}
-
-/** 只在锁仍是自己持有的情况下删除；否则留给真正的持有者。 */
 async function releaseLock(lockPath: string): Promise<void> {
-	const holder = await readLockInfo(lockPath);
-	if (holder && holder.pid !== process.pid) return;
+	const state = await readLockState(lockPath);
+	if (state.kind === "unreadable") return;
+	if (state.kind === "held" && !isOwnRecord(state.holder)) return;
 	await rm(lockPath, { force: true });
 }
 
-/**
- * 已持锁期间运行 `fn`：心跳续约 + 释放。
- *
- * 心跳是必需的：`isStale` 在同 host 且 PID 存活时**并不**直接返回 false，而是落到 TTL 判断上，
- * 所以超过 ttlMs（默认 600s）后，健康进程持有的锁会被别的写者删掉并抢走。dream 是 headless
- * 智能体，跑满 10 分钟完全现实。续约后 TTL 只对「不再续约的持有者」生效，spec §5.1 的语义不变。
- */
-async function runHeld<T>(
-	lockPath: string,
-	ttlMs: number,
-	clock: () => number,
-	held: LockInfo,
-	fn: () => Promise<T>,
-): Promise<T> {
-	let renewing = true;
-	const renew = setInterval(() => {
-		if (!renewing) return;
-		void renewLock(lockPath, { ...held, startedAt: new Date(clock()).toISOString() }).catch(() => {});
-	}, renewIntervalMs(ttlMs));
-	// 心跳不得把进程钉在事件循环上（否则 CLI 写完也会等到下一个 tick 才退出）。
-	renew.unref();
-	try {
-		return await fn();
-	} finally {
-		renewing = false;
-		clearInterval(renew);
-		await releaseLock(lockPath);
-	}
+function isOwnRecord(holder: LockInfo): boolean {
+	return holder.pid === process.pid && holder.hostname === hostname();
 }
 
-/** 等待获取锁（轮询 pollMs，默认 50ms）；超时抛 MemoryLockedError。 */
+/** 等待获取锁（轮询 pollMs，默认 50ms）；超时或被遗弃时抛 MemoryLockedError。 */
 export async function withLock<T>(
 	lockPath: string,
 	op: string,
@@ -206,22 +194,30 @@ export async function withLock<T>(
 	fn: () => Promise<T>,
 ): Promise<T> {
 	const clock = options.now ?? Date.now;
-	const held = holderInfo(op, clock());
+	const info = holderInfo(op, clock());
 	const deadline = clock() + options.timeoutMs;
 
-	let last: LockInfo | null = null;
 	for (;;) {
-		const result = await attempt(lockPath, held, options.ttlMs, clock());
-		if (result.acquired) break;
-		last = result.holder;
-		if (clock() >= deadline) throw new MemoryLockedError(last, op);
+		const outcome = await acquireOnce(lockPath, info);
+		if (outcome.acquired) break;
+		// 没人能释放它 → 等下去毫无意义；立刻给出可操作的错误，而不是耗满 timeout
+		if (outcome.abandoned) throw new MemoryLockedError(lockPath, outcome.holder, op, true);
+		if (clock() >= deadline) throw new MemoryLockedError(lockPath, outcome.holder, op, false);
 		await sleep(options.pollMs ?? 50);
 	}
 
-	return runHeld(lockPath, options.ttlMs, clock, held, fn);
+	try {
+		return await fn();
+	} finally {
+		await releaseLock(lockPath);
+	}
 }
 
-/** 只尝试一次；锁被活进程持有时返回 null，不等待。 */
+/**
+ * 只尝试一次，不等待。
+ * 活持有者占用 → 返回 null（调用方跳过本轮）；被遗弃的锁 → **抛错而不是返回 null** ——
+ * 它不会自愈，静默跳过只会让 extract 之类的后台任务永远不再运行且毫无提示。
+ */
 export async function tryWithLock<T>(
 	lockPath: string,
 	op: string,
@@ -229,9 +225,14 @@ export async function tryWithLock<T>(
 	fn: () => Promise<T>,
 ): Promise<T | null> {
 	const clock = options.now ?? Date.now;
-	const held = holderInfo(op, clock());
-	const result = await attempt(lockPath, held, options.ttlMs, clock());
-	if (!result.acquired) return null;
-	// 单次获取也要续约：tryWithLock 的持有期同样可能超过 ttlMs。
-	return runHeld(lockPath, options.ttlMs, clock, held, fn);
+	const outcome = await acquireOnce(lockPath, holderInfo(op, clock()));
+	if (!outcome.acquired) {
+		if (outcome.abandoned) throw new MemoryLockedError(lockPath, outcome.holder, op, true);
+		return null;
+	}
+	try {
+		return await fn();
+	} finally {
+		await releaseLock(lockPath);
+	}
 }
