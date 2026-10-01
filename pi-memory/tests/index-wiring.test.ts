@@ -9,6 +9,7 @@ const { MOCK_BASE, mockConfigValue } = vi.hoisted(() => {
 		memoryDir: "",
 		memIndexMaxLines: 200,
 		memIndexMaxBytes: 25600,
+		lock: { timeoutMs: 5000, snapshotKeep: 5 },
 		dream: { nudgeAfterSessions: 5, nudgeAfterHours: 24, thinkLevel: "high" as const },
 		sessionSearch: { maxSessions: 10, maxMatches: 5 },
 		autoSurfacing: {
@@ -154,6 +155,15 @@ describe("index wiring (integration)", () => {
 
 		expect(tools.length).toBeGreaterThanOrEqual(1);
 		expect(tools[0].name).toBe("memory");
+		// D12：主 agent 的 schema 只有 5 个 action，且不含 dream 专属的 new_name 参数。
+		expect(tools[0].parameters.properties.action.enum).toEqual([
+			"add",
+			"replace",
+			"remove",
+			"list",
+			"search",
+		]);
+		expect(Object.keys(tools[0].parameters.properties)).not.toContain("new_name");
 
 		expect(commands["memory"]).toBeDefined();
 		expect(commands["dream"]).toBeDefined();
@@ -394,6 +404,7 @@ describe("index wiring (integration)", () => {
 		const { createMemoryTool } = await import("../src/memory-tool");
 		const tool = createMemoryTool({
 			getMemoryDir: () => "/fake/dir",
+			getStore: () => null,
 			getConfig: () => ({ memIndexMaxLines: 200, memIndexMaxBytes: 25600, sessionSearch: { maxSessions: 10, maxMatches: 5 } }),
 			getEnabled: () => false,
 			searchSessions: async () => "",
@@ -401,7 +412,23 @@ describe("index wiring (integration)", () => {
 		});
 
 		await expect(
-			tool.execute("id", { action: "search", query: "x", scope: "memory" }, undefined, undefined, undefined),
+			tool.execute("id", { action: "search", query: "x", scope: "memory" }, undefined, undefined, undefined as any),
 		).rejects.toThrow("Memory is disabled (run /memory on)");
+	});
+
+	it("tool execute throws when the store is not initialized", async () => {
+		const { createMemoryTool } = await import("../src/memory-tool");
+		const tool = createMemoryTool({
+			getMemoryDir: () => null,
+			getStore: () => null,
+			getConfig: () => ({ memIndexMaxLines: 200, memIndexMaxBytes: 25600, sessionSearch: { maxSessions: 10, maxMatches: 5 } }),
+			getEnabled: () => true,
+			searchSessions: async () => "",
+			cwd: () => tmpDir,
+		});
+
+		await expect(
+			tool.execute("id", { action: "list" }, undefined, undefined, undefined as any),
+		).rejects.toThrow("Memory not initialized (no session_start yet)");
 	});
 });

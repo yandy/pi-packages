@@ -5,14 +5,9 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { loadConfig, type MemoryConfig, type SessionPersistenceConfig } from "./src/config";
 import { runDream } from "./src/dream";
 import { runExtract } from "./src/extract";
-import {
-	buildInjection,
-	injectSurfacedContent,
-	loadIndexSnapshot,
-	runSideQuery,
-	scanTopics,
-} from "./src/inject";
-import { createMemoryTool, createMemoryTools } from "./src/memory-tool";
+import { buildInjection, injectSurfacedContent, loadIndexSnapshot, runSideQuery, scanTopics } from "./src/inject";
+import { createMemoryTool, MAIN_AGENT_ACTIONS, type MemoryToolDeps } from "./src/memory-tool";
+import { MemoryStore } from "./src/memory-store";
 import { readDreamMeta, shouldNudge, writeDreamMeta } from "./src/nudge";
 import { resolveMemoryDir } from "./src/paths";
 import { searchSessions } from "./src/session-search";
@@ -37,29 +32,46 @@ function resolveDefault(cfg: MemoryConfig, task: "dream" | "autoSurfacing" | "ex
 export default function (pi: ExtensionAPI) {
 	let memoryDir: string | null = null;
 	let config: MemoryConfig | null = null;
+	/** 唯一写入通道（D4）。session_start 里建，之后工具 / extract / dream 都只经它读写。 */
+	let store: MemoryStore | null = null;
 	let indexSnapshot = "";
 	let toolRegistered = false;
+	let currentCwd = "";
 	const injectedTopics = new Set<string>();
 	let lastSystemPrompt = "";
+
+	/**
+	 * 主 agent、extract、dream 共用同一份依赖，三者只差 `actions` 与锁/快照选项（D12）。
+	 * 用 getter 而不是快照值：config / memoryDir / store 都在 session_start 里才确定。
+	 */
+	const toolDeps: MemoryToolDeps = {
+		getMemoryDir: () => memoryDir,
+		getStore: () => store,
+		// biome-ignore lint/style/noNonNullAssertion: config 在 session_start 里赋值，工具执行必然晚于它
+		getConfig: () => config!,
+		getEnabled: () => config?.enabled ?? false,
+		searchSessions,
+		cwd: () => currentCwd,
+	};
 
 	pi.on("session_start", async (_event, ctx) => {
 		config = await loadConfig(ctx);
 		if (!config.enabled) return;
+		currentCwd = ctx.cwd;
 		memoryDir = await resolveMemoryDir(config, ctx.cwd);
+		store = new MemoryStore({
+			memoryDir,
+			indexMaxLines: config.memIndexMaxLines,
+			indexMaxBytes: config.memIndexMaxBytes,
+			lock: config.lock,
+		});
 		indexSnapshot = await loadIndexSnapshot(memoryDir, config.memIndexInjectMaxLines, config.memIndexInjectMaxBytes);
 
 		// register memory tool once
 		if (!toolRegistered) {
 			pi.registerTool(
-				createMemoryTool({
-					getMemoryDir: () => memoryDir,
-					// biome-ignore lint/style/noNonNullAssertion: config assigned in guard above
-					getConfig: () => config!,
-					getEnabled: () => config?.enabled ?? false,
-					searchSessions,
-					cwd: () => ctx.cwd,
-					// biome-ignore lint/suspicious/noExplicitAny: pi registerTool type cast
-				}) as any,
+				// biome-ignore lint/suspicious/noExplicitAny: pi registerTool type cast
+				createMemoryTool(toolDeps) as any,
 			);
 			toolRegistered = true;
 		}
@@ -168,10 +180,9 @@ export default function (pi: ExtensionAPI) {
 			memoryDir,
 			modelRegistry: ctx.modelRegistry,
 			parentModel: ctx.model,
-			customTools: createMemoryTools(memoryDir, {
-				maxLines: config.memIndexMaxLines,
-				maxBytes: config.memIndexMaxBytes,
-			}),
+			// extract 的工具集与主 agent 相同（5 个 action，D12），且**只**注入它自己的 headless session。
+			// skipLogicalLock: extract 整轮持锁的语义在 Task 6 落地（runExtract 内部用 tryWithLogicalLock）。
+			customTools: [createMemoryTool(toolDeps, { actions: MAIN_AGENT_ACTIONS, skipLogicalLock: true })],
 			sessionPersistence: resolveDefault(config, "extractMemories", "sessionPersistence"),
 			messages: event.messages.map((m) => ({
 				// biome-ignore lint/suspicious/noExplicitAny: pi event message union type

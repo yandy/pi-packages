@@ -1,328 +1,158 @@
-import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { withFileMutationQueue, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
-import {
-	checkCapacity,
-	findEntryByTopic,
-	type IndexEntry,
-	parseIndex,
-	removeEntryByTopic,
-	serializeIndex,
-	updateHook,
-	upsertEntryByTopic,
-} from "./index-file";
-import { safeTopicPath } from "./paths";
-import {
-	appendContent,
-	buildFrontmatter,
-	hasEntries,
-	parseEntries,
-	removeEntrySection,
-	replaceFrontmatterField,
-	updateFrontmatterDate,
-} from "./topic-file";
+import { Type, type TSchema } from "typebox";
+import { indexCapacity, type IndexCapacity } from "./entry-index";
+import type { MemoryStore } from "./memory-store";
 
-export interface AddParams {
-	content: string;
-	topic: string;
-	title: string;
-	type?: string;
-	maxLines: number;
-	maxBytes: number;
-}
-export interface RemoveParams {
-	entry: string;
-}
-export interface ActionResult {
-	ok: boolean;
-	error?: string;
-	entries?: IndexEntry[];
-}
+/**
+ * `memory` 工具的 action 全集。注册范围是**硬约束**（spec §4.3 / D12）：
+ *
+ * - 主 agent 与 extract 只拿到 5 个（`MAIN_AGENT_ACTIONS`）；
+ * - `rename` / `rebuild_index` 是 dream 专属（`DREAM_ACTIONS`），且只经
+ *   `runHeadlessAgent({ customTools })` 注入 dream 自己的 headless session，**不经**
+ *   `pi.registerTool()` —— 既省每轮上下文，也避免主 agent 误用破坏结构的能力。
+ */
+export type MemoryAction = "add" | "replace" | "remove" | "list" | "search" | "rename" | "rebuild_index";
 
-const MEMORY_MD = "MEMORY.md";
+/** 主 agent（`pi.registerTool`）与 extract 子会话共用的 5 个 action。 */
+export const MAIN_AGENT_ACTIONS: MemoryAction[] = ["add", "replace", "remove", "list", "search"];
 
-async function readIndex(memoryDir: string): Promise<IndexEntry[]> {
-	try {
-		const raw = await readFile(join(memoryDir, MEMORY_MD), "utf8");
-		return parseIndex(raw).entries;
-	} catch {
-		return [];
-	}
-}
+/** dream 子会话专属的 7 个 action（额外 `rename` / `rebuild_index`）。 */
+export const DREAM_ACTIONS: MemoryAction[] = [
+	"add",
+	"replace",
+	"remove",
+	"list",
+	"search",
+	"rename",
+	"rebuild_index",
+];
 
-function today(): string {
-	return new Date().toISOString().slice(0, 10);
-}
-
-export async function doAdd(memoryDir: string, p: AddParams): Promise<ActionResult> {
-	if (!p.title) return { ok: false, error: "title is required" };
-	const memType = p.type ?? "feedback";
-	if (!["user", "feedback", "project", "reference"].includes(memType)) {
-		return { ok: false, error: `Invalid type "${memType}". Must be one of: user, feedback, project, reference` };
-	}
-	// Normalize topic: always .md extension (LLM may pass "debugging" or "debugging.md")
-	const topic = p.topic.endsWith(".md") ? p.topic : `${p.topic}.md`;
-	let topicPath: string;
-	try {
-		topicPath = safeTopicPath(memoryDir, topic);
-		// biome-ignore lint/suspicious/noExplicitAny: error catch
-	} catch (e: any) {
-		return { ok: false, error: e.message };
-	}
-	return withFileMutationQueue(join(memoryDir, MEMORY_MD), async () => {
-		await mkdir(dirname(topicPath), { recursive: true });
-		const entries = await readIndex(memoryDir);
-		const existing = findEntryByTopic(entries, topic);
-
-		let next: IndexEntry[];
-		if (!existing) {
-			// New topic: create index entry with topic name as display name, entry title as hook
-			const name = topic.replace(/\.md$/, "");
-			const entry: IndexEntry = { name, topic, hook: p.title, raw: "" };
-			next = upsertEntryByTopic(entries, entry);
-			if (!checkCapacity(next, p.maxLines, p.maxBytes)) {
-				return {
-					ok: false,
-					error: `MEMORY.md capacity exceeded (max ${p.maxLines} lines / ${p.maxBytes} bytes). Current entries: ${serializeIndex(entries)}`,
-				};
-			}
-			// Create topic file with full frontmatter
-			const fm = buildFrontmatter({ name, description: p.title, type: memType, updated: today() });
-			const topicContent = appendContent(fm, p.title, p.content);
-			await writeFile(topicPath, topicContent, "utf8");
-		} else {
-			// Existing topic: append entry, then regenerate hook + description from ALL entry titles
-			const raw = await readFile(topicPath, "utf8");
-			const refreshed = updateFrontmatterDate(raw, today());
-			const topicContent = appendContent(refreshed, p.title, p.content);
-
-			// Build hook + description from all entries
-			const allEntries = parseEntries(topicContent);
-			const hook = allEntries
-				.map((e) => e.title)
-				.join("; ")
-				.slice(0, 150);
-			const withDesc = replaceFrontmatterField(topicContent, "description", hook);
-
-			next = updateHook(entries, topic, hook);
-			if (!checkCapacity(next, p.maxLines, p.maxBytes)) {
-				return {
-					ok: false,
-					error: `MEMORY.md capacity exceeded (max ${p.maxLines} lines / ${p.maxBytes} bytes). Current entries: ${serializeIndex(entries)}`,
-				};
-			}
-			await writeFile(topicPath, withDesc, "utf8");
-		}
-
-		// write index
-		await writeFile(join(memoryDir, MEMORY_MD), `${serializeIndex(next)}\n`, "utf8");
-		return { ok: true, entries: next };
-	});
-}
-
-export async function doRemove(memoryDir: string, p: RemoveParams): Promise<ActionResult> {
-	return withFileMutationQueue(join(memoryDir, MEMORY_MD), async () => {
-		const entries = await readIndex(memoryDir);
-
-		// Search across all topic files to find which one contains this entry
-		const files = await readdir(memoryDir).catch(() => []);
-		let foundTopic: string | null = null;
-		const foundTopics: string[] = [];
-
-		for (const f of files) {
-			if (!f.endsWith(".md") || f === MEMORY_MD) continue;
-			const raw = await readFile(join(memoryDir, f), "utf8").catch(() => "");
-			const parsed = parseEntries(raw);
-			if (parsed.some((e) => e.title === p.entry)) {
-				foundTopics.push(f);
-				foundTopic = f;
-			}
-		}
-
-		if (foundTopics.length === 0) {
-			return { ok: false, error: `Entry "${p.entry}" not found in any topic` };
-		}
-		if (foundTopics.length > 1) {
-			return { ok: false, error: `Multiple matches for entry "${p.entry}" in topics: ${foundTopics.join(", ")}` };
-		}
-
-		// biome-ignore lint/style/noNonNullAssertion: foundTopic assigned in guard above
-		const topicFile = foundTopic!;
-		const topicPath = safeTopicPath(memoryDir, topicFile);
-
-		// Remove ## block from topic file
-		try {
-			const raw = await readFile(topicPath, "utf8");
-			const afterRemoval = removeEntrySection(raw, p.entry);
-
-			if (hasEntries(afterRemoval)) {
-				// Still has entries: update hook + description from remaining entries, refresh date
-				const remaining = parseEntries(afterRemoval);
-				const newHook = remaining.map((e) => e.title).join("; ").slice(0, 150);
-				const nextEntries = updateHook(entries, topicFile, newHook);
-				const withDate = updateFrontmatterDate(afterRemoval, today());
-				const withDesc = replaceFrontmatterField(withDate, "description", newHook);
-				await writeFile(topicPath, withDesc, "utf8");
-				await writeFile(join(memoryDir, MEMORY_MD), `${serializeIndex(nextEntries)}\n`, "utf8");
-			} else {
-				// Last entry removed: delete topic file and remove from index
-				const nextEntries = removeEntryByTopic(entries, topicFile);
-				await unlink(topicPath).catch(() => {});
-				await writeFile(join(memoryDir, MEMORY_MD), `${serializeIndex(nextEntries)}\n`, "utf8");
-			}
-			// biome-ignore lint/suspicious/noExplicitAny: error catch
-		} catch (e: any) {
-			if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
-			return { ok: false, error: `Topic file "${topicFile}" not found` };
-		}
-
-		return { ok: true };
-	});
-}
-
-export async function searchMemory(memoryDir: string, query: string): Promise<string> {
-	const files = (await readdir(memoryDir).catch(() => [])).filter((f) => f.endsWith(".md") && f !== MEMORY_MD);
-	const q = query.toLowerCase();
-	const hits: string[] = [];
-	for (const f of files) {
-		const raw = await readFile(join(memoryDir, f), "utf8").catch(() => "");
-		const entryBlocks = parseEntries(raw);
-		for (const entry of entryBlocks) {
-			if (entry.content.toLowerCase().includes(q) || entry.title.toLowerCase().includes(q)) {
-				hits.push(`### ${f}\n\`\`\`\n## ${entry.title}\n${entry.content}\n\`\`\``);
-			}
-		}
-	}
-	return hits.length ? hits.join("\n\n") : "No matches in memory.";
+export interface MemoryToolConfig {
+	memIndexMaxLines: number;
+	memIndexMaxBytes: number;
+	sessionSearch: { maxSessions: number; maxMatches: number };
 }
 
 export interface MemoryToolDeps {
+	/**
+	 * 保留给诊断与 Plan C 的 `/memory` 状态输出。工具本身**不直接读目录** ——
+	 * `MemoryStore` 是唯一写入通道，也是唯一的读取入口（D4）。
+	 */
 	getMemoryDir: () => string | null;
-	getConfig: () => {
-		memIndexMaxLines: number;
-		memIndexMaxBytes: number;
-		sessionSearch: { maxSessions: number; maxMatches: number };
-	};
+	/** `session_start` 之后才有值；为 null 时工具报「未初始化」而不是崩。 */
+	getStore: () => MemoryStore | null;
+	getConfig: () => MemoryToolConfig;
 	getEnabled: () => boolean;
 	searchSessions: (cwd: string, query: string, cfg: { maxSessions: number; maxMatches: number }) => Promise<string>;
 	cwd: () => string;
 }
 
-export function createMemoryTools(
-	memoryDir: string,
-	cfg: { maxLines: number; maxBytes: number },
-): ToolDefinition[] {
-	return [
-		{
-			name: "memory_add",
-			label: "Memory Add",
-			description:
-				"Add a new memory entry to a topic file. Creates the topic if it doesn't exist. Use memory_search and the 'ls'/'read' tools to check for existing topics first.",
-			parameters: Type.Object({
-				content: Type.String({ description: "Knowledge text to store." }),
-				topic: Type.String({ description: "Target topic filename, e.g. 'debugging.md'." }),
-				title: Type.String({
-					description:
-						"Descriptive, self-contained title. Only index lines are injected into prompts — make titles self-descriptive.",
-				}),
-				type: Type.Optional(
-					StringEnum(["user", "feedback", "project", "reference"] as const),
-				),
-			}),
-			async execute(
-				_id: string,
-				params: any,
-				_signal: AbortSignal | undefined,
-				_onUpdate: any,
-				_ctx: any,
-			) {
-				if (!params.content) throw new Error("content is required");
-				if (!params.topic) throw new Error("topic is required");
-				if (!params.title) throw new Error("title is required");
-				const r = await doAdd(memoryDir, {
-					content: params.content,
-					topic: params.topic,
-					title: params.title,
-					type: params.type,
-					maxLines: cfg.maxLines,
-					maxBytes: cfg.maxBytes,
-				});
-				if (!r.ok) throw new Error(r.error);
-				return {
-					details: {},
-					content: [{
-						type: "text",
-						text: `Added "${params.title}" to ${params.topic}. Index has ${r.entries?.length ?? 0} entries.`,
-					}],
-				};
-			},
-		},
-		{
-			name: "memory_search",
-			label: "Memory Search",
-			description:
-				"Search all memory topic files for entries matching a query. Case-insensitive. Use this to find related memories before adding new ones.",
-			parameters: Type.Object({
-				query: Type.String({ description: "Search query." }),
-			}),
-			async execute(
-				_id: string,
-				params: any,
-				_signal: AbortSignal | undefined,
-				_onUpdate: any,
-				_ctx: any,
-			) {
-				if (!params.query) throw new Error("query is required");
-				const text = await searchMemory(memoryDir, params.query);
-				return { details: {}, content: [{ type: "text", text }] };
-			},
-		},
-	];
+export interface MemoryToolOptions {
+	/** 本 session 可见的 action 子集。缺省 = 主 agent 的 5 个。 */
+	actions?: MemoryAction[];
+	/** 整轮逻辑锁持有者（dream / extract）传 true：它们的原语调用不得再去抢自己已持有的锁。 */
+	skipLogicalLock?: boolean;
+	/** dream 传 true：进入时已对整目录拍过一次快照，内部每个原语不再各拍一次。 */
+	skipSnapshot?: boolean;
 }
 
-export function createMemoryTool(deps: MemoryToolDeps) {
+interface MemoryParams {
+	action: MemoryAction;
+	name?: string;
+	description?: string;
+	type?: "user" | "feedback" | "project" | "reference";
+	content?: string;
+	query?: string;
+	scope?: "memory" | "sessions";
+	new_name?: string;
+}
+
+const TYPE_VALUES = ["user", "feedback", "project", "reference"] as const;
+
+/**
+ * 参数 schema 由 `actions` **动态构建**：不在集合里的 action 不出现在枚举里，
+ * `new_name` 也只在含 `rename` 的 schema（= dream）里存在。这是 D12 的执行点。
+ */
+function buildParameters(actions: MemoryAction[]) {
+	const props: Record<string, TSchema> = {
+		action: StringEnum(actions, { description: "Which memory operation to perform." }),
+		name: Type.Optional(
+			Type.String({
+				description:
+					"Unique, human-readable title of the memory. Required for add; the lookup key for replace/remove/rename.",
+			}),
+		),
+		description: Type.Optional(
+			Type.String({
+				description:
+					"One self-contained line describing this memory. Future sessions pick memories from descriptions alone, so it must make sense without the body. Defaults to the first sentence of content.",
+			}),
+		),
+		type: Type.Optional(StringEnum(TYPE_VALUES, { description: "Memory type. Defaults to feedback." })),
+		content: Type.Optional(
+			Type.String({
+				description: "The memory body. Required for add and replace; it becomes the whole entry file.",
+			}),
+		),
+		query: Type.Optional(Type.String({ description: "Search text (search)." })),
+		scope: Type.Optional(
+			StringEnum(["memory", "sessions"] as const, {
+				description: "search target: memory entries (default) or past sessions.",
+			}),
+		),
+	};
+	if (actions.includes("rename")) {
+		props.new_name = Type.Optional(
+			Type.String({
+				description: "New unique title for the memory (rename). Its file name and index line follow.",
+			}),
+		);
+	}
+	return Type.Object(props);
+}
+
+/**
+ * 与 `MemoryStore.#capacityWarning` 同文案。`rebuildIndex` **不返回** capacityWarning
+ * （已知 API 不一致，spec §19），所以 dream 的 `rebuild_index` 必须自己算一遍并把可操作的
+ * 警告回给模型 —— 恢复原语恰恰最可能在膨胀目录上运行。
+ */
+function capacityWarning(cap: IndexCapacity, cfg: MemoryToolConfig): string {
+	return (
+		`MEMORY.md is over its limit: ${cap.lineCount}/${cfg.memIndexMaxLines} lines, ` +
+		`${cap.byteLength}/${cfg.memIndexMaxBytes} bytes. The write succeeded, but everything past ` +
+		"the limit is dropped on the next load. Rewrite it now: keep one line per entry, merge or drop " +
+		"stale entries, and move detail into entry bodies rather than the index."
+	);
+}
+
+export function createMemoryTool(deps: MemoryToolDeps, options: MemoryToolOptions = {}): ToolDefinition {
+	const actions = options.actions ?? MAIN_AGENT_ACTIONS;
+	const writeOpts = { skipLogicalLock: options.skipLogicalLock, skipSnapshot: options.skipSnapshot };
+
 	return {
 		name: "memory",
 		label: "Memory",
 		description:
-			"Read/write project memory across sessions. action 'add' appends content under a topic (auto-created) as an entry; 'remove' deletes an entry by title; 'search' queries memory files or history sessions. IMPORTANT: only MEMORY.md index lines are injected into system prompts — entry titles must be self-contained and descriptive (topic file content is NOT injected automatically — it is auto-surfaced for relevant queries). Use built-in 'read' and 'ls' tools to read topic files and MEMORY.md.",
+			"Read/write persistent project memory. One memory = one file, and MEMORY.md holds exactly one index line per memory. action 'add' creates a memory, or overwrites the one whose name matches exactly; 'replace' rewrites an existing memory's content/description/type; 'remove' deletes it; 'list' shows every memory; 'search' queries memory entries (scope='memory', default) or past sessions (scope='sessions'). A memory's description is the only text a future session sees when deciding relevance, so it must be self-contained.",
 		promptSnippet:
-			"Read/write project memory across sessions (add/remove/search). Only index titles are injected — make titles self-descriptive.",
+			"Read/write persistent project memory (one memory per file). Make every description self-contained — it is the only relevance signal future sessions get.",
 		promptGuidelines: [
-			"Use memory to persist project facts, user preferences, and lessons learned across sessions.",
-			"Use memory action 'add' with an explicit topic filename and a descriptive, self-contained entry title — only the index line (title + topic) is injected into future prompts, NOT the topic file content. The title alone must convey what was learned.",
-			"Use memory action 'search' with scope='sessions' to find past work in history sessions.",
-			"Auto-surfacing: relevant topic files are automatically selected and their content injected into the conversation context. Use built-in 'read' and 'ls' to load additional topics when needed — you don't need to read what's already been surfaced.",
+			"Use memory to persist project facts, user preferences, and lessons learned across sessions. Each memory lives in its own file and occupies exactly one line of the MEMORY.md index.",
+			"Always pass a description with action 'add' and 'replace'. It must be self-contained and specific (what, where, which value), because future sessions select memories from descriptions alone. Bad: \"Debugging tips\". Good: \"staging SSH listens on 2222, not 22\".",
+			"Give each memory a unique, human-readable name. Adding a name that already exists overwrites that memory instead of creating a second one — use 'search' or 'list' first when you are unsure.",
+			"Keep one fact per memory and put the detail in content, not in name or description; the index line stays short.",
+			"The index has a hard capacity limit. When a write reports that MEMORY.md is over its limit, act on it: merge related memories, remove stale ones, and move detail into content.",
+			"Use action 'search' with scope='sessions' to find past work in history sessions.",
+			"Relevant memories are surfaced automatically at the start of a turn inside <relevant_memories>; use 'search' or 'list' to look for anything else.",
 		],
-		parameters: Type.Object({
-			action: StringEnum(["add", "remove", "search"] as const),
-			// add
-			content: Type.Optional(Type.String({ description: "Knowledge text to store (add)." })),
-			topic: Type.Optional(
-				Type.String({ description: "Target topic filename, e.g. 'debugging.md'. Auto-created if new (add/read)." }),
-			),
-			title: Type.Optional(
-				Type.String({
-					description:
-						"Descriptive, self-contained title for the MEMORY.md index line. Only index lines are injected into future prompts (NOT topic file content), so the title must convey enough context on its own. Required for add.",
-				}),
-			),
-			type: Type.Optional(StringEnum(["user", "feedback", "project", "reference"] as const)),
-			// remove
-			entry: Type.Optional(
-				Type.String({ description: "Entry title to remove. Exact match on MEMORY.md index line (remove/read)." }),
-			),
-			// search
-			query: Type.Optional(Type.String()),
-			scope: Type.Optional(StringEnum(["memory", "sessions"] as const)),
-		}),
+		parameters: buildParameters(actions),
 		// biome-ignore lint/suspicious/noExplicitAny: renderCall args
 		renderCall(args: any, theme: any) {
-			let t = theme.fg("toolTitle", theme.bold("memory ")) + theme.fg("muted", args.action);
-			if (args.topic) t += ` ${theme.fg("accent", args.topic)}`;
+			let t = theme.fg("toolTitle", theme.bold("memory ")) + theme.fg("muted", String(args.action));
+			if (args.name) t += ` ${theme.fg("accent", args.name)}`;
+			if (args.new_name) t += ` ${theme.fg("accent", `→ ${args.new_name}`)}`;
 			if (args.query) t += ` ${theme.fg("dim", `"${args.query}"`)}`;
 			return new Text(t, 0, 0);
 		},
@@ -333,52 +163,103 @@ export function createMemoryTool(deps: MemoryToolDeps) {
 			if (result.details?.error) return new Text(theme.fg("error", `Error: ${result.details.error}`), 0, 0);
 			return new Text(theme.fg("success", "✓ ") + theme.fg("muted", text.split("\n")[0]), 0, 0);
 		},
-		// biome-ignore lint/suspicious/noExplicitAny: renderResult result param
+		// biome-ignore lint/suspicious/noExplicitAny: execute params
 		async execute(_id: string, params: any, _signal: AbortSignal | undefined, _onUpdate: any, _ctx: any) {
 			if (!deps.getEnabled()) throw new Error("Memory is disabled (run /memory on)");
-			const dir = deps.getMemoryDir();
+			const store = deps.getStore();
+			if (!store) throw new Error("Memory not initialized (no session_start yet)");
 			const cfg = deps.getConfig();
-			if (!dir) throw new Error("Memory not initialized (no session_start yet)");
+			const p = params as MemoryParams;
+			// schema 的 action 枚举已经按 session 收窄过（D12）；这里是第二道门，防止模型硬编一个
+			// 不在集合里的 action 而落到 switch 的 default 之外。
+			if (!actions.includes(p.action)) throw new Error(`Unknown action: ${p.action}`);
+
 			let text: string;
-			// biome-ignore lint/suspicious/noExplicitAny: execute params
+			// biome-ignore lint/suspicious/noExplicitAny: tool result details
 			let details: any = {};
-			switch (params.action) {
+
+			switch (p.action) {
 				case "add": {
-					if (!params.content) throw new Error("content is required for add");
-					if (!params.topic) throw new Error("topic is required for add");
-					if (!params.title) throw new Error("title is required for add");
-					const r = await doAdd(dir, {
-						content: params.content,
-						topic: params.topic,
-						title: params.title,
-						type: params.type,
-						maxLines: cfg.memIndexMaxLines,
-						maxBytes: cfg.memIndexMaxBytes,
-					});
-					if (!r.ok) throw new Error(r.error);
-					text = `Added "${params.title}" to ${params.topic}. Index now has ${r.entries?.length ?? 0} entries.`;
-					details = { entries: r.entries?.length };
+					if (!p.name?.trim()) throw new Error("name is required for add");
+					if (!p.content) throw new Error("content is required for add");
+					const r = await store.addEntry(
+						{ name: p.name, description: p.description, type: p.type, body: p.content },
+						writeOpts,
+					);
+					text = `Saved "${p.name.trim()}" (${r.file}).`;
+					// 容量超限**不抛错**（D9 / §8.2）：写入已经成功，但必须把可操作的警告回给模型，
+					// 让它去重写索引。抛错会让模型以为记忆没存下来而重复写。
+					if (r.capacityWarning) text += `\n\n${r.capacityWarning}`;
+					details = { file: r.file, capacityWarning: r.capacityWarning };
+					break;
+				}
+				case "replace": {
+					if (!p.name?.trim()) throw new Error("name is required for replace");
+					if (!p.content) throw new Error("content is required for replace");
+					// 不改名：改名是 dream 专属的 `rename`（且 `replaceEntry` 的改名路径会在撞名时报错）。
+					const r = await store.replaceEntry(
+						p.name,
+						{ description: p.description, type: p.type, body: p.content },
+						writeOpts,
+					);
+					text = `Replaced "${p.name.trim()}" (${r.file}).`;
+					if (r.capacityWarning) text += `\n\n${r.capacityWarning}`;
+					details = { file: r.file, capacityWarning: r.capacityWarning };
 					break;
 				}
 				case "remove": {
-					if (!params.entry) throw new Error("entry is required for remove");
-					const r = await doRemove(dir, { entry: params.entry });
-					if (!r.ok) throw new Error(r.error);
-					text = `Removed entry "${params.entry}".`;
+					if (!p.name?.trim()) throw new Error("name is required for remove");
+					await store.removeEntry(p.name, writeOpts);
+					text = `Removed "${p.name.trim()}".`;
+					details = { removed: p.name.trim() };
+					break;
+				}
+				case "list": {
+					const entries = await store.listEntries();
+					text =
+						entries.length === 0
+							? "No memories yet."
+							: entries
+									.map((e) => `- ${e.name} (${e.type}, modified ${e.modified}) — ${e.description} [${e.file}]`)
+									.join("\n");
+					details = { count: entries.length };
 					break;
 				}
 				case "search": {
-					if (!params.query) throw new Error("query is required for search");
-					if (params.scope === "sessions") {
-						text = await deps.searchSessions(deps.cwd(), params.query, cfg.sessionSearch);
-					} else {
-						text = await searchMemory(dir, params.query);
+					if (!p.query?.trim()) throw new Error("query is required for search");
+					if (p.scope === "sessions") {
+						text = await deps.searchSessions(deps.cwd(), p.query, cfg.sessionSearch);
+						break;
 					}
+					const hits = await store.searchEntries(p.query);
+					text =
+						hits.length === 0
+							? "No matches in memory."
+							: hits.map((e) => `## ${e.name}\nfile: ${e.file}\ntype: ${e.type}\n\n${e.body}`).join("\n\n");
+					details = { count: hits.length };
+					break;
+				}
+				case "rename": {
+					if (!p.name?.trim()) throw new Error("name is required for rename");
+					if (!p.new_name?.trim()) throw new Error("new_name is required for rename");
+					const r = await store.renameEntry(p.name, p.new_name, writeOpts);
+					text = `Renamed "${p.name.trim()}" → "${p.new_name.trim()}" (${r.file}).`;
+					details = { file: r.file };
+					break;
+				}
+				case "rebuild_index": {
+					const r = await store.rebuildIndex(writeOpts);
+					// rebuildIndex 不返回 capacityWarning（spec §19）：调用方自己检查。
+					const cap = indexCapacity(await store.readIndex(), cfg.memIndexMaxLines, cfg.memIndexMaxBytes);
+					text = `Rebuilt index: ${r.entries} entries (${r.headerLines} header lines).`;
+					if (!cap.ok) text += `\n\n${capacityWarning(cap, cfg)}`;
+					details = { entries: r.entries, headerLines: r.headerLines, overCapacity: !cap.ok };
 					break;
 				}
 				default:
-					throw new Error(`Unknown action: ${params.action}`);
+					throw new Error(`Unknown action: ${String(p.action)}`);
 			}
+
 			return { content: [{ type: "text", text }], details };
 		},
 	};

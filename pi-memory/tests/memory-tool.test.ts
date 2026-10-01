@@ -1,438 +1,391 @@
-import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { doAdd, doRemove, searchMemory, createMemoryTools } from "../src/memory-tool";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { parseEntryFile } from "../src/entry-file";
+import { parseEntryIndex } from "../src/entry-index";
+import { MemoryStore, type StoreConfig } from "../src/memory-store";
+import { createMemoryTool, DREAM_ACTIONS, MAIN_AGENT_ACTIONS, type MemoryToolDeps } from "../src/memory-tool";
 
-describe("doAdd", () => {
-  let dir: string;
-  beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), "mem-add-")); });
-  afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+let dir: string;
+let store: MemoryStore;
+let enabled: boolean;
 
-  it("creates a new topic file with full frontmatter + MEMORY.md entry (one per topic)", async () => {
-    const res = await doAdd(dir, {
-      content: "staging uses port 2222",
-      topic: "debugging.md",
-      title: "SSH Gotcha",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    expect(res.ok).toBe(true);
-    // One index entry per topic: - [debugging](debugging.md) — SSH Gotcha
-    const mem = await readFile(join(dir, "MEMORY.md"), "utf8");
-    expect(mem).toContain("[debugging](debugging.md)");
-    expect(mem).toContain("SSH Gotcha");
-    expect(mem).toContain(" — ");
-    // Topic file has full frontmatter
-    const topic = await readFile(join(dir, "debugging.md"), "utf8");
-    expect(topic).toContain("staging uses port 2222");
-    expect(topic).toContain("updated:");
-    expect(topic).toContain("name: debugging");
-    expect(topic).toContain("description: SSH Gotcha");
-    expect(topic).toContain("type: feedback");
-    expect(topic).toContain("## SSH Gotcha");
-    // No level-1 heading
-    expect(topic).not.toMatch(/^# SSH Gotcha/m);
-  });
-
-  it("appends second entry to same topic (one index line, hook updated)", async () => {
-    await doAdd(dir, {
-      content: "first note",
-      topic: "debugging.md",
-      title: "SSH Gotcha",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    const res = await doAdd(dir, {
-      content: "second note",
-      topic: "debugging.md",
-      title: "MySQL Timeout",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    expect(res.ok).toBe(true);
-    const topic = await readFile(join(dir, "debugging.md"), "utf8");
-    expect(topic).toContain("## SSH Gotcha");
-    expect(topic).toContain("first note");
-    expect(topic).toContain("## MySQL Timeout");
-    expect(topic).toContain("second note");
-    const mem = await readFile(join(dir, "MEMORY.md"), "utf8");
-    // Only one index line for the topic, hook updated to latest entry title
-    const lines = mem.trim().split("\n");
-    expect(lines.length).toBe(1);
-    expect(mem).toContain("[debugging](debugging.md)");
-    expect(mem).toContain("MySQL Timeout");
-  });
-
-  it("refreshes updated date on append to existing topic", async () => {
-    await doAdd(dir, {
-      content: "first note",
-      topic: "debugging.md",
-      title: "Entry1",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    const res = await doAdd(dir, {
-      content: "second note",
-      topic: "debugging.md",
-      title: "Entry2",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    expect(res.ok).toBe(true);
-    const topic = await readFile(join(dir, "debugging.md"), "utf8");
-    const today = new Date().toISOString().slice(0, 10);
-    expect(topic).toContain(`updated: ${today}`);
-  });
-
-  it("updates description on append to existing topic to match hook", async () => {
-    await doAdd(dir, {
-      content: "first note",
-      topic: "misc.md",
-      title: "Entry One",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    await doAdd(dir, {
-      content: "second note",
-      topic: "misc.md",
-      title: "Entry Two plus more",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    const topic = await readFile(join(dir, "misc.md"), "utf8");
-    // description should be regenerated from all entry titles
-    expect(topic).toContain("description: Entry One; Entry Two plus more");
-    // MEMORY.md hook should match description
-    const mem = await readFile(join(dir, "MEMORY.md"), "utf8");
-    expect(mem).toContain("Entry One; Entry Two plus more");
-  });
-
-  it("rejects when over capacity", async () => {
-    const res = await doAdd(dir, {
-      content: "x",
-      topic: "a.md",
-      title: "A",
-      maxLines: 0,
-      maxBytes: 25600,
-    });
-    expect(res.ok).toBe(false);
-    expect(res.error).toContain("capacity");
-  });
-
-  it("rejects path traversal topic", async () => {
-    const res = await doAdd(dir, {
-      content: "x",
-      topic: "../escape.md",
-      title: "A",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    expect(res.ok).toBe(false);
-    expect(res.error).toMatch(/unsafe|traversal|escape/i);
-  });
-
-  it("rejects when title is missing", async () => {
-    const res = await doAdd(dir, {
-      content: "x",
-      topic: "a.md",
-      maxLines: 200,
-      maxBytes: 25600,
-    } as any);
-    expect(res.ok).toBe(false);
-  });
-
-  it("accepts explicit type parameter", async () => {
-    const res = await doAdd(dir, {
-      content: "user preference",
-      topic: "prefs.md",
-      title: "Editor",
-      type: "user",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    expect(res.ok).toBe(true);
-    const topic = await readFile(join(dir, "prefs.md"), "utf8");
-    expect(topic).toContain("type: user");
-  });
-
-  it("rejects invalid type", async () => {
-    const res = await doAdd(dir, {
-      content: "x",
-      topic: "a.md",
-      title: "A",
-      type: "invalid",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    expect(res.ok).toBe(false);
-    expect(res.error).toContain("Invalid type");
-  });
-
-  it("parallel adds to different topics preserve both entries", async () => {
-    const results = await Promise.all([
-      doAdd(dir, {
-        content: "staging port 2222",
-        topic: "ssh.md",
-        title: "SSH Staging",
-        maxLines: 200,
-        maxBytes: 25600,
-      }),
-      doAdd(dir, {
-        content: "prod port 443",
-        topic: "firewall.md",
-        title: "Firewall",
-        maxLines: 200,
-        maxBytes: 25600,
-      }),
-    ]);
-    expect(results[0].ok).toBe(true);
-    expect(results[1].ok).toBe(true);
-    const mem = await readFile(join(dir, "MEMORY.md"), "utf8");
-    expect(mem).toContain("[ssh](ssh.md)");
-    expect(mem).toContain("[firewall](firewall.md)");
-  });
+const CFG = (memoryDir: string, over: Partial<StoreConfig> = {}): StoreConfig => ({
+	memoryDir,
+	indexMaxLines: 200,
+	indexMaxBytes: 25600,
+	lock: { timeoutMs: 5000, snapshotKeep: 5 },
+	...over,
 });
 
-describe("doRemove", () => {
-  let dir: string;
-  beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), "mem-rm-")); });
-  afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+function deps(over: Partial<MemoryToolDeps> = {}): MemoryToolDeps {
+	return {
+		getMemoryDir: () => dir,
+		getStore: () => store,
+		getConfig: () => ({
+			memIndexMaxLines: store.cfg.indexMaxLines,
+			memIndexMaxBytes: store.cfg.indexMaxBytes,
+			sessionSearch: { maxSessions: 10, maxMatches: 5 },
+		}),
+		getEnabled: () => enabled,
+		searchSessions: async () => "session hits",
+		cwd: () => dir,
+		...over,
+	};
+}
 
-  it("removes entry by title: deletes ## block and updates hook", async () => {
-    await doAdd(dir, {
-      content: "staging uses port 2222",
-      topic: "debugging.md",
-      title: "SSH Gotcha",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    await doAdd(dir, {
-      content: "connection timeout after 30s",
-      topic: "debugging.md",
-      title: "MySQL Timeout",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    const res = await doRemove(dir, { entry: "SSH Gotcha" });
-    expect(res.ok).toBe(true);
-    const mem = await readFile(join(dir, "MEMORY.md"), "utf8");
-    // Index still has one entry for debugging.md, hook updated to remaining entry
-    const lines = mem.trim().split("\n");
-    expect(lines.length).toBe(1);
-    expect(mem).toContain("[debugging](debugging.md)");
-    expect(mem).toContain("MySQL Timeout");
-    const topic = await readFile(join(dir, "debugging.md"), "utf8");
-    // Entry block is gone (but frontmatter description may still reference it)
-    expect(topic).not.toContain("## SSH Gotcha");
-    expect(topic).not.toContain("staging uses port 2222");
-    expect(topic).toContain("## MySQL Timeout");
-    expect(topic).toContain("connection timeout after 30s");
-  });
+/** 跑一次工具调用并取回文本。`tool` 用 any：ToolDefinition 的 execute 第五参是必填的 ExtensionContext。 */
+async function run(tool: any, params: Record<string, unknown>): Promise<string> {
+	const result = await tool.execute("call-1", params, undefined, undefined, undefined);
+	const first = result.content?.[0];
+	return first?.type === "text" ? first.text : "";
+}
 
-  it("deletes topic file and index entry when last entry removed", async () => {
-    await doAdd(dir, {
-      content: "only entry",
-      topic: "temp.md",
-      title: "Temp",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    const res = await doRemove(dir, { entry: "Temp" });
-    expect(res.ok).toBe(true);
-    await expect(readFile(join(dir, "temp.md"), "utf8")).rejects.toThrow();
-    const mem = await readFile(join(dir, "MEMORY.md"), "utf8");
-    expect(mem.trim()).toBe("");
-  });
+function schemaOf(tool: { parameters: unknown }): any {
+	return tool.parameters;
+}
 
-  it("errors when entry not found", async () => {
-    const res = await doRemove(dir, { entry: "NoSuch" });
-    expect(res.ok).toBe(false);
-    expect(res.error).toContain("not found");
-  });
-
-  it("errors on multiple matches across different topics", async () => {
-    await doAdd(dir, {
-      content: "x",
-      topic: "a.md",
-      title: "Dup",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    await doAdd(dir, {
-      content: "y",
-      topic: "b.md",
-      title: "Dup",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    const res = await doRemove(dir, { entry: "Dup" });
-    expect(res.ok).toBe(false);
-    expect(res.error).toMatch(/multiple/i);
-  });
-
-  it("refreshes updated date after removing one entry from multi-entry topic", async () => {
-    await doAdd(dir, {
-      content: "first",
-      topic: "misc.md",
-      title: "Entry1",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    await doAdd(dir, {
-      content: "second",
-      topic: "misc.md",
-      title: "Entry2",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    await doRemove(dir, { entry: "Entry1" });
-    const topic = await readFile(join(dir, "misc.md"), "utf8");
-    const today = new Date().toISOString().slice(0, 10);
-    expect(topic).toContain(`updated: ${today}`);
-  });
-
-  it("updates description after removing one entry from multi-entry topic", async () => {
-    await doAdd(dir, {
-      content: "first",
-      topic: "misc.md",
-      title: "Entry Alpha",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    await doAdd(dir, {
-      content: "second",
-      topic: "misc.md",
-      title: "Entry Beta",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    await doRemove(dir, { entry: "Entry Alpha" });
-    const topic = await readFile(join(dir, "misc.md"), "utf8");
-    expect(topic).toContain("description: Entry Beta");
-    const mem = await readFile(join(dir, "MEMORY.md"), "utf8");
-    expect(mem).toContain("Entry Beta");
-  });
+beforeEach(async () => {
+	dir = await mkdtemp(join(tmpdir(), "mem-tool-"));
+	store = new MemoryStore(CFG(dir));
+	enabled = true;
+});
+afterEach(async () => {
+	await rm(dir, { recursive: true, force: true });
+	vi.restoreAllMocks();
 });
 
-describe("searchMemory", () => {
-  let dir: string;
-  beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), "mem-search-")); });
-  afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
-
-  it("returns the full entry block when query matches", async () => {
-    await doAdd(dir, {
-      content: "staging uses port 2222\nkey at ~/.ssh/staging",
-      topic: "debugging.md",
-      title: "SSH Gotcha",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    await doAdd(dir, {
-      content: "connection timeout after 30s",
-      topic: "debugging.md",
-      title: "MySQL Timeout",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    const result = await searchMemory(dir, "2222");
-    expect(result).toContain("### debugging.md");
-    expect(result).toContain("## SSH Gotcha");
-    expect(result).toContain("staging uses port 2222");
-    expect(result).toContain("~/.ssh/staging");
-    // should NOT include the other entry
-    expect(result).not.toContain("MySQL Timeout");
-  });
-
-  it("returns multiple entries from different topics", async () => {
-    await doAdd(dir, {
-      content: "port 443 for HTTPS",
-      topic: "network.md",
-      title: "Firewall Rules",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    await doAdd(dir, {
-      content: "port 2222 for SSH",
-      topic: "debugging.md",
-      title: "SSH Gotcha",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    const result = await searchMemory(dir, "port");
-    expect(result).toContain("Firewall Rules");
-    expect(result).toContain("SSH Gotcha");
-  });
-
-  it("returns 'No matches' when nothing found", async () => {
-    await doAdd(dir, {
-      content: "some note",
-      topic: "misc.md",
-      title: "Misc",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    const result = await searchMemory(dir, "nonexistent");
-    expect(result).toBe("No matches in memory.");
-  });
-
-  it("handles case-insensitive matching", async () => {
-    await doAdd(dir, {
-      content: "STAGING uses Port 2222",
-      topic: "debugging.md",
-      title: "SSH",
-      maxLines: 200,
-      maxBytes: 25600,
-    });
-    const result = await searchMemory(dir, "staging");
-    expect(result).toContain("STAGING uses Port 2222");
-  });
-});
-
-describe("createMemoryTools", () => {
-	let dir: string;
-	beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), "mem-tools-")); });
-	afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
-
-	it("returns two tool definitions", () => {
-		const tools = createMemoryTools(dir, { maxLines: 200, maxBytes: 25600 });
-		expect(tools).toHaveLength(2);
-		expect(tools.map((t) => t.name).sort()).toEqual(["memory_add", "memory_search"]);
+describe("schema（D12 注册范围）", () => {
+	it("exposes exactly the five main-agent actions and no new_name", () => {
+		const schema = schemaOf(createMemoryTool(deps()));
+		expect(schema.properties.action.enum).toEqual(["add", "replace", "remove", "list", "search"]);
+		expect(schema.properties.action.enum).toEqual(MAIN_AGENT_ACTIONS);
+		expect(Object.keys(schema.properties)).not.toContain("new_name");
+		expect(schema.required).toEqual(["action"]);
 	});
 
-	it("memory_add writes a topic file and returns ok", async () => {
-		const tools = createMemoryTools(dir, { maxLines: 200, maxBytes: 25600 });
-		const addTool = tools.find((t) => t.name === "memory_add")!;
-		const result = await addTool.execute("id", {
-			content: "staging uses port 2222",
-			topic: "debugging.md",
-			title: "SSH Gotcha",
-		}, undefined, undefined, undefined as any);
-		expect(result.content[0].type).toBe("text");
-		expect((result.content[0] as any).text).toContain("Added");
-		const topic = await readFile(join(dir, "debugging.md"), "utf8");
-		expect(topic).toContain("staging uses port 2222");
+	it("exposes all seven actions plus new_name for dream", () => {
+		const schema = schemaOf(createMemoryTool(deps(), { actions: DREAM_ACTIONS }));
+		expect(schema.properties.action.enum).toEqual([
+			"add",
+			"replace",
+			"remove",
+			"list",
+			"search",
+			"rename",
+			"rebuild_index",
+		]);
+		expect(Object.keys(schema.properties)).toContain("new_name");
 	});
 
-it("memory_search finds matching entries", async () => {
-		await doAdd(dir, {
-			content: "port 2222 for SSH",
-			topic: "net.md",
-			title: "Port",
-			maxLines: 200,
-			maxBytes: 25600,
+	it("drops the legacy topic/title/entry parameters", () => {
+		const schema = schemaOf(createMemoryTool(deps(), { actions: DREAM_ACTIONS }));
+		for (const legacy of ["topic", "title", "entry"]) {
+			expect(Object.keys(schema.properties)).not.toContain(legacy);
+		}
+	});
+
+	it("keeps rename and rebuild_index out of the main-agent set", () => {
+		const schema = schemaOf(createMemoryTool(deps()));
+		expect(schema.properties.action.enum).not.toContain("rename");
+		expect(schema.properties.action.enum).not.toContain("rebuild_index");
+	});
+});
+
+describe("action add", () => {
+	it("creates one entry file and exactly one index line", async () => {
+		const tool = createMemoryTool(deps());
+		const text = await run(tool, {
+			action: "add",
+			name: "Use real DB in tests",
+			content: "集成测试必须连真实 PostgreSQL。",
 		});
-		const tools = createMemoryTools(dir, { maxLines: 200, maxBytes: 25600 });
-		const searchTool = tools.find((t) => t.name === "memory_search")!;
-		const result = await searchTool.execute("id", { query: "2222" }, undefined, undefined, undefined as any);
-		expect((result.content[0] as any).text).toContain("port 2222 for SSH");
+
+		expect(text).toBe('Saved "Use real DB in tests" (Use-real-DB-in-tests.md).');
+		const parsed = parseEntryFile(await readFile(join(dir, "Use-real-DB-in-tests.md"), "utf8"));
+		expect(parsed?.meta.name).toBe("Use real DB in tests");
+		expect(parsed?.meta.description).toBe("集成测试必须连真实 PostgreSQL。");
+		expect(parsed?.meta.type).toBe("feedback");
+		expect(parsed?.meta.created).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+		expect(parsed?.meta.modified).toMatch(/T.*Z$/);
+		expect(parseEntryIndex(await store.readIndex()).entries).toHaveLength(1);
 	});
 
-	it("memory_add throws on missing required params", async () => {
-		const tools = createMemoryTools(dir, { maxLines: 200, maxBytes: 25600 });
-		const addTool = tools.find((t) => t.name === "memory_add")!;
-		await expect(
-			addTool.execute("id", { content: "x" }, undefined, undefined, undefined as any),
-		).rejects.toThrow("topic is required");
+	it("is idempotent on the exact same name", async () => {
+		const tool = createMemoryTool(deps());
+		await run(tool, { action: "add", name: "A", content: "第一版" });
+		const text = await run(tool, { action: "add", name: "A", content: "第二版" });
+
+		expect(text).toBe('Saved "A" (A.md).');
+		expect(await readdir(dir)).not.toContain("A-2.md");
+		expect(parseEntryIndex(await store.readIndex()).entries).toHaveLength(1);
+		expect((await store.readEntry("A"))?.body).toBe("第二版");
+	});
+
+	it("does not merge two different names that derive to the same file name", async () => {
+		const tool = createMemoryTool(deps());
+		await run(tool, { action: "add", name: "A B", content: "第一条" });
+		const text = await run(tool, { action: "add", name: "A-B", content: "第二条" });
+
+		expect(text).toBe('Saved "A-B" (A-B-2.md).');
+		expect(parseEntryIndex(await store.readIndex()).entries).toHaveLength(2);
+	});
+
+	it("honours an explicit description and type", async () => {
+		const tool = createMemoryTool(deps());
+		await run(tool, { action: "add", name: "A", description: "显式摘要", type: "project", content: "正文" });
+
+		expect((await store.readEntry("A"))?.description).toBe("显式摘要");
+		expect((await store.readEntry("A"))?.type).toBe("project");
+	});
+
+	it("requires name and content", async () => {
+		const tool = createMemoryTool(deps());
+		await expect(run(tool, { action: "add", content: "正文" })).rejects.toThrow("name is required for add");
+		await expect(run(tool, { action: "add", name: "A" })).rejects.toThrow("content is required for add");
+	});
+
+	// Review Focus #3：MEMORY.md 是索引本身，绝不能被当成 entry 文件写穿。
+	it("never writes an entry over MEMORY.md", async () => {
+		const tool = createMemoryTool(deps());
+		await run(tool, { action: "add", name: "A", content: "A 正文" });
+		const before = await store.readIndex();
+
+		const text = await run(tool, { action: "add", name: "MEMORY", content: "关于记忆系统本身" });
+
+		expect(text).not.toContain("(MEMORY.md)");
+		expect(await store.readIndex()).toContain(before.trim());
+		expect((await store.readEntry("MEMORY"))?.body).toBe("关于记忆系统本身");
+		expect(parseEntryIndex(await store.readIndex()).entries.filter((e) => e.file === "A.md")).toHaveLength(1);
+	});
+
+	it("succeeds over capacity and returns an actionable warning with current values and limits", async () => {
+		store = new MemoryStore(CFG(dir, { indexMaxLines: 1 }));
+		const tool = createMemoryTool(deps());
+		await run(tool, { action: "add", name: "A", content: "正文" });
+		const text = await run(tool, { action: "add", name: "B", content: "正文" });
+
+		expect(text).toContain('Saved "B" (B.md).');
+		expect(text).toContain("over its limit");
+		expect(text).toContain("2/1 lines");
+		expect(text).toContain("Rewrite it now");
+		expect(parseEntryIndex(await store.readIndex()).entries).toHaveLength(2);
+	});
+
+	// Review Focus #5：用户手写的索引内容与「无尾换行」都必须在工具写入后逐字保留。
+	it("preserves handwritten index lines and a missing trailing newline", async () => {
+		await writeFile(join(dir, "MEMORY.md"), "# Memory Index\n\n## Project\n<!-- keep -->", "utf8");
+		const tool = createMemoryTool(deps());
+		await run(tool, { action: "add", name: "A", content: "正文" });
+
+		const raw = await store.readIndex();
+		expect(raw).toContain("# Memory Index");
+		expect(raw).toContain("## Project");
+		expect(raw).toContain("<!-- keep -->");
+		expect(parseEntryIndex(raw).entries).toHaveLength(1);
+	});
+});
+
+describe("action replace", () => {
+	it("rewrites the body and description of an existing entry", async () => {
+		const tool = createMemoryTool(deps());
+		await run(tool, { action: "add", name: "A", description: "旧摘要", content: "旧正文" });
+		const text = await run(tool, { action: "replace", name: "A", content: "新正文", description: "新摘要" });
+
+		expect(text).toBe('Replaced "A" (A.md).');
+		const entry = await store.readEntry("A");
+		expect(entry?.body).toBe("新正文");
+		expect(entry?.description).toBe("新摘要");
+		expect(parseEntryIndex(await store.readIndex()).entries).toHaveLength(1);
+	});
+
+	it("does not rename: rename is a separate, dream-only action", async () => {
+		const tool = createMemoryTool(deps(), { actions: DREAM_ACTIONS });
+		await run(tool, { action: "add", name: "A", content: "正文" });
+		await run(tool, { action: "replace", name: "A", content: "新正文" });
+
+		expect((await store.readEntry("A"))?.name).toBe("A");
+		expect(await readdir(dir)).toContain("A.md");
+	});
+
+	it("propagates the store error for an unknown entry instead of swallowing it", async () => {
+		const tool = createMemoryTool(deps());
+		await expect(run(tool, { action: "replace", name: "nope", content: "x" })).rejects.toThrow(
+			'Entry "nope" not found',
+		);
+	});
+
+	it("requires name and content", async () => {
+		const tool = createMemoryTool(deps());
+		await expect(run(tool, { action: "replace", content: "x" })).rejects.toThrow("name is required for replace");
+		await expect(run(tool, { action: "replace", name: "A" })).rejects.toThrow("content is required for replace");
+	});
+});
+
+describe("action remove", () => {
+	it("deletes the entry file and its index line", async () => {
+		const tool = createMemoryTool(deps());
+		await run(tool, { action: "add", name: "A", content: "正文" });
+		const text = await run(tool, { action: "remove", name: "A" });
+
+		expect(text).toBe('Removed "A".');
+		expect(await readdir(dir)).not.toContain("A.md");
+		expect(parseEntryIndex(await store.readIndex()).entries).toHaveLength(0);
+	});
+
+	it("propagates the store error instead of reporting success", async () => {
+		const tool = createMemoryTool(deps());
+		await expect(run(tool, { action: "remove", name: "nope" })).rejects.toThrow('Entry "nope" not found');
+	});
+
+	it("requires name", async () => {
+		const tool = createMemoryTool(deps());
+		await expect(run(tool, { action: "remove" })).rejects.toThrow("name is required for remove");
+	});
+});
+
+describe("action list", () => {
+	it("renders one line per entry with type, modified, description and file", async () => {
+		const tool = createMemoryTool(deps());
+		await run(tool, { action: "add", name: "A", description: "摘要 A", type: "user", content: "正文 A" });
+		const entry = await store.readEntry("A");
+		const text = await run(tool, { action: "list" });
+
+		expect(text).toBe(`- A (user, modified ${entry?.modified}) — 摘要 A [A.md]`);
+	});
+
+	it("says so when there is nothing yet", async () => {
+		const tool = createMemoryTool(deps());
+		expect(await run(tool, { action: "list" })).toBe("No memories yet.");
+	});
+});
+
+describe("action search", () => {
+	it("searches memory entries by default and prints the bodies", async () => {
+		const tool = createMemoryTool(deps());
+		await run(tool, {
+			action: "add",
+			name: "SSH port",
+			description: "staging 用 2222",
+			content: "staging 的 SSH 端口是 2222。",
+		});
+		await run(tool, { action: "add", name: "Other", description: "无关", content: "完全无关的内容。" });
+
+		const text = await run(tool, { action: "search", query: "2222" });
+
+		expect(text).toContain("## SSH port");
+		expect(text).toContain("file: SSH-port.md");
+		expect(text).toContain("type: feedback");
+		expect(text).toContain("staging 的 SSH 端口是 2222。");
+		expect(text).not.toContain("## Other");
+	});
+
+	it("reports no matches", async () => {
+		const tool = createMemoryTool(deps());
+		expect(await run(tool, { action: "search", query: "nothing" })).toBe("No matches in memory.");
+	});
+
+	it("routes scope=sessions to searchSessions with the configured limits", async () => {
+		const searchSessions = vi.fn(async () => "Found 1 match(es)");
+		const tool = createMemoryTool(deps({ searchSessions }));
+
+		const text = await run(tool, { action: "search", query: "q", scope: "sessions" });
+
+		expect(text).toBe("Found 1 match(es)");
+		expect(searchSessions).toHaveBeenCalledWith(dir, "q", { maxSessions: 10, maxMatches: 5 });
+	});
+
+	it("requires query", async () => {
+		const tool = createMemoryTool(deps());
+		await expect(run(tool, { action: "search" })).rejects.toThrow("query is required for search");
+	});
+});
+
+describe("dream-only actions", () => {
+	it("renames the entry, its file and its index line", async () => {
+		const tool = createMemoryTool(deps(), { actions: DREAM_ACTIONS });
+		await run(tool, { action: "add", name: "旧名字", content: "正文" });
+		const text = await run(tool, { action: "rename", name: "旧名字", new_name: "新名字" });
+
+		expect(text).toBe('Renamed "旧名字" → "新名字" (新名字.md).');
+		expect(await readdir(dir)).not.toContain("旧名字.md");
+		expect(parseEntryIndex(await store.readIndex()).entries.map((e) => e.name)).toEqual(["新名字"]);
+	});
+
+	it("requires name and new_name for rename", async () => {
+		const tool = createMemoryTool(deps(), { actions: DREAM_ACTIONS });
+		await run(tool, { action: "add", name: "A", content: "正文" });
+		await expect(run(tool, { action: "rename", name: "A" })).rejects.toThrow("new_name is required for rename");
+		await expect(run(tool, { action: "rename", new_name: "B" })).rejects.toThrow("name is required for rename");
+	});
+
+	it("rebuilds the index and reports entry and header line counts", async () => {
+		const tool = createMemoryTool(deps(), { actions: DREAM_ACTIONS });
+		await run(tool, { action: "add", name: "A", content: "正文" });
+		await writeFile(join(dir, "MEMORY.md"), "", "utf8");
+
+		const text = await run(tool, { action: "rebuild_index" });
+
+		expect(text).toBe("Rebuilt index: 1 entries (2 header lines).");
+		expect(parseEntryIndex(await store.readIndex()).entries).toHaveLength(1);
+	});
+
+	it("appends an actionable capacity warning after rebuild_index", async () => {
+		store = new MemoryStore(CFG(dir, { indexMaxLines: 1 }));
+		const tool = createMemoryTool(deps(), { actions: DREAM_ACTIONS });
+		await run(tool, { action: "add", name: "A", content: "正文" });
+		await run(tool, { action: "add", name: "B", content: "正文" });
+		await writeFile(join(dir, "MEMORY.md"), "", "utf8");
+
+		const text = await run(tool, { action: "rebuild_index" });
+
+		expect(text).toContain("Rebuilt index: 2 entries");
+		expect(text).toContain("over its limit");
+		expect(text).toContain("/1 lines");
+	});
+
+	it("refuses an action outside the registered set", async () => {
+		const tool = createMemoryTool(deps());
+		await expect(run(tool, { action: "rename", name: "A", new_name: "B" })).rejects.toThrow(
+			"Unknown action: rename",
+		);
+		await expect(run(tool, { action: "rebuild_index" })).rejects.toThrow("Unknown action: rebuild_index");
+	});
+});
+
+describe("guards 与写选项透传", () => {
+	it("throws when memory is disabled", async () => {
+		enabled = false;
+		const tool = createMemoryTool(deps());
+		await expect(run(tool, { action: "list" })).rejects.toThrow("Memory is disabled (run /memory on)");
+	});
+
+	it("throws when the store is not initialized yet", async () => {
+		const tool = createMemoryTool(deps({ getStore: () => null }));
+		await expect(run(tool, { action: "list" })).rejects.toThrow("Memory not initialized (no session_start yet)");
+	});
+
+	it("passes skipLogicalLock and skipSnapshot through to the store", async () => {
+		const addEntry = vi.spyOn(store, "addEntry");
+		const tool = createMemoryTool(deps(), {
+			actions: MAIN_AGENT_ACTIONS,
+			skipLogicalLock: true,
+			skipSnapshot: true,
+		});
+
+		await run(tool, { action: "add", name: "A", content: "正文" });
+
+		expect(addEntry).toHaveBeenCalledWith(
+			{ name: "A", description: undefined, type: undefined, body: "正文" },
+			{ skipLogicalLock: true, skipSnapshot: true },
+		);
+		expect(await readdir(join(dir, ".backups")).then(() => true, () => false)).toBe(false);
+	});
+
+	it("snapshots by default so a bad write can be rolled back", async () => {
+		const tool = createMemoryTool(deps());
+		await run(tool, { action: "add", name: "A", content: "正文" });
+		expect(await readdir(join(dir, ".backups"))).toHaveLength(1);
 	});
 });
