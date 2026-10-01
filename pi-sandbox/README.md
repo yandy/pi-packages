@@ -18,7 +18,7 @@ bash commands are wrapped in a platform sandbox runner and spawned locally (**pa
 
 | Platform | Runner | Mechanism |
 |---|---|---|
-| Linux | `bwrap` (preferred) | `--ro-bind / /` whole filesystem read-only + workspace rw bind + `--tmpfs /tmp` |
+| Linux | `bwrap` (preferred) | `--ro-bind / /` whole filesystem read-only + rw binds of the workspace and the host `/tmp` |
 | Linux | `landlock-run` (fallback, precompiled binary shipped with the package) | Landlock LSM allow list: `/` read-only, workspace + `/tmp` writable |
 | macOS | `sandbox-exec` (built in) | Seatbelt SBPL: `deny file-write*` + workspace/temp exceptions |
 | Other | none | **fail-closed**: confined commands are always refused, never silently run bare |
@@ -65,7 +65,7 @@ bash/write/edit take two optional parameters: `sandbox_permissions` (`workspace-
 ## Security notes
 
 - Confined processes can **read** everything you can read on the host (including `~/.ssh` and the like) — that is this sandbox's design semantics (same as the deepseek harness); root-only files stay protected by file permissions
-- Under bwrap, `/tmp` inside bash is a **private tmpfs recreated for every command**: host `/tmp` is invisible from inside, and anything written there is gone when the command exits — keep scratch files that later commands (or the read/write tools) need inside the workspace
+- Under bwrap, bash's `/tmp` **is the host `/tmp`** (rw bind, matching the write/edit fence and the landlock/macOS runners): confined commands can modify or delete the host's temporary files — including live session sockets and pi's own temp files — and the host's `/tmp` permissions apply as-is. If the host `/tmp` is not writable, neither is the sandbox's
 - Confined child processes force `LC_MESSAGES=C` (so denial diagnostics stay classifiable) and do not touch your `LANG`/`LC_CTYPE`
 - Confined bash runs in its own process group (detached): timeout/abort kills the whole group, but if pi itself is hard-killed (e.g. SIGKILL), background grandchildren spawned by the command may survive (pi's internal child-tracking API is not available to extensions)
 - The landlock fallback is partial enforcement on older kernel ABIs (the status output says so)

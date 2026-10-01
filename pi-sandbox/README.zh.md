@@ -18,7 +18,7 @@ bash 命令被包装进平台沙箱 runner 后在本地 spawn（**路径透明**
 
 | 平台 | Runner | 机制 |
 |---|---|---|
-| Linux | `bwrap`（首选） | `--ro-bind / /` 全盘只读 + 工作区 rw bind + `--tmpfs /tmp` |
+| Linux | `bwrap`（首选） | `--ro-bind / /` 全盘只读 + 工作区与宿主 `/tmp` 的 rw bind |
 | Linux | `landlock-run`（回退，随包分发预编译二进制） | Landlock LSM 允许清单：`/` 只读，工作区 + `/tmp` 可写 |
 | macOS | `sandbox-exec`（系统内置） | Seatbelt SBPL：`deny file-write*` + 工作区/临时区例外 |
 | 其他 | 无 | **fail-closed**：受约束命令一律拒绝执行，绝不静默裸跑 |
@@ -65,7 +65,7 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 ## 安全说明
 
 - 受约束进程可**读取**宿主上你有权读的一切（包括 `~/.ssh` 等）——这是本沙箱的设计语义（与 deepseek harness 一致）；root 专属文件受文件权限保护
-- bwrap 下 bash 内部的 `/tmp` 是**每条命令重建的私有 tmpfs**：宿主 `/tmp` 的内容在沙箱内不可见，写在其中的文件命令一结束就消失——需要跨命令（或给 read/write 工具）用的暂存请放在工作区
+- bwrap 下 bash 的 `/tmp` **就是宿主 /tmp**（rw bind，与 write/edit 围栏及 landlock/macOS 一致）：沙箱内命令可以直接修改/删除宿主的临时文件（含会话 socket 与 pi 自己的临时文件），宿主 `/tmp` 的权限原样生效；宿主 `/tmp` 不可写时沙箱内也随之不可写
 - 受限子进程强制 `LC_MESSAGES=C`（保证拒绝诊断可分类），不改动你的 `LANG`/`LC_CTYPE`
 - 受限 bash 在独立进程组中运行（detached）：timeout/abort 会杀掉整个进程组；但若 pi 自身被硬杀（如 SIGKILL），命令派生的后台孙进程可能存活（pi 内部的子进程追踪 API 不对扩展开放）
 - landlock 回退在旧内核 ABI 上为 partial enforcement（状态里会标注）

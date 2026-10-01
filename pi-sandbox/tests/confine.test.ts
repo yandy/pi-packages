@@ -10,7 +10,7 @@ describe("confine", () => {
 		});
 		expect(result.argv).toEqual([
 			"bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--unshare-pid", "--proc", "/proc", "--die-with-parent",
-			"--tmpfs", "/tmp", "--bind", "/ws", "/ws", "--", "bash", "-c", "true",
+			"--bind", "/tmp", "/tmp", "--bind", "/ws", "/ws", "--", "bash", "-c", "true",
 		]);
 		expect(result.denialSignatures).toEqual(["read-only file system"]);
 		expect(result.runnerFailureRules).toEqual(RUNNER_FAILURE_RULES.bwrap);
@@ -38,7 +38,7 @@ describe("confine", () => {
 		expect(result.argv).toEqual([
 			"myrunner", "--flag",
 			"--ro-bind", "/", "/", "--dev", "/dev", "--unshare-pid", "--proc", "/proc", "--die-with-parent",
-			"--tmpfs", "/tmp", "--bind", "/ws", "/ws", "--", "true",
+			"--bind", "/tmp", "/tmp", "--bind", "/ws", "/ws", "--", "true",
 		]);
 		expect(result.enforcement).toBe("full");
 		expect(result.denialSignatures).toEqual(["read-only file system", "permission denied"]);

@@ -79,15 +79,13 @@ describe("createSandboxTools schemas", () => {
 			expect(tool.description).not.toContain("Writes outside the permitted roots are denied");
 			expect(tool.description).not.toContain("Pass justification:");
 		}
-		// bash 专属事实（bwrap --tmpfs /tmp 语义）只写进 bash，不摊给 write/edit。
-		expect(bash.description).toContain("private tmpfs emptied after every command");
-		expect(write.description).not.toContain("private tmpfs");
-		expect(edit.description).not.toContain("private tmpfs");
-		// 预算回归闸（β′）：三个工具的常驻增量合计 ≤ 700 chars（当前 636，改前 1281）。
+		// /tmp 已 bind 宿主（2026-10-01 决策）→ 常驻面不再需要任何 /tmp 专属措辞。
+		for (const tool of [bash, write, edit]) expect(tool.description).not.toContain("tmpfs");
+		// 预算回归闸（β′）：三个工具的常驻增量合计 ≤ 560 chars（当前 510，改前 1281）。
 		const added = [bash, write, edit].flatMap((t) =>
-			t.description.split("\n").filter((l) => l.startsWith("Sandbox:") || l.startsWith("bash's")),
+			t.description.split("\n").filter((l) => l.startsWith("Sandbox:")),
 		);
-		expect(added.join("").length).toBeLessThanOrEqual(700);
+		expect(added.join("").length).toBeLessThanOrEqual(560);
 	});
 	it("keeps base promptSnippet/promptGuidelines and schema options (Ruling 15)", () => {
 		const { deps } = makeDeps();
