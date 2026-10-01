@@ -322,3 +322,101 @@ describe("进程内逻辑锁", () => {
 		expect(parseEntryIndex(await store.readIndex()).entries).toHaveLength(3);
 	});
 });
+
+// ── Plan B（运行时接入）新增：skipSnapshot / created / 逻辑锁的超时与 try 形态 ────────────────
+describe("WriteOptions.skipSnapshot", () => {
+	it("writes the entry and the index without creating .backups", async () => {
+		const { file } = await store.addEntry({ name: "A", body: "正文" }, { skipSnapshot: true });
+
+		expect(file).toBe("A.md");
+		expect(parseEntryFile(await readFile(join(dir, file), "utf8"))?.body).toBe("正文");
+		expect(parseEntryIndex(await indexOf()).entries).toHaveLength(1);
+		expect(await readdir(join(dir, ".backups")).then(() => true, () => false)).toBe(false);
+	});
+
+	it("applies to replace / rebuildIndex / remove as well", async () => {
+		await store.addEntry({ name: "A", body: "正文" }, { skipSnapshot: true });
+		await store.replaceEntry("A", { body: "新正文" }, { skipSnapshot: true });
+		await store.rebuildIndex({ skipSnapshot: true });
+		await store.removeEntry("A", { skipSnapshot: true });
+
+		expect(await readdir(join(dir, ".backups")).then(() => true, () => false)).toBe(false);
+		expect(await store.listEntries()).toEqual([]);
+		expect(parseEntryIndex(await indexOf()).entries).toHaveLength(0);
+	});
+
+	it("still snapshots when the option is absent", async () => {
+		await store.addEntry({ name: "A", body: "正文" });
+		expect(await readdir(join(dir, ".backups"))).toHaveLength(1);
+	});
+});
+
+describe("addEntry 的 created 入参（迁移用）", () => {
+	it("uses the caller-supplied created date", async () => {
+		const { file } = await store.addEntry({ name: "A", body: "正文", created: "2025-01-02" });
+		expect(parseEntryFile(await readFile(join(dir, file), "utf8"))?.meta.created).toBe("2025-01-02");
+	});
+
+	it("keeps the existing created date when the same name is added again", async () => {
+		await store.addEntry({ name: "A", body: "第一版", created: "2025-01-02" });
+		await store.addEntry({ name: "A", body: "第二版", created: "2026-09-09" });
+
+		expect((await store.readEntry("A"))?.created).toBe("2025-01-02");
+		expect((await store.readEntry("A"))?.body).toBe("第二版");
+		expect(parseEntryIndex(await indexOf()).entries).toHaveLength(1);
+	});
+
+	it("defaults created to today", async () => {
+		await store.addEntry({ name: "A", body: "正文" });
+		expect((await store.readEntry("A"))?.created).toBe(new Date().toISOString().slice(0, 10));
+	});
+
+	it("rejects a created value that is not YYYY-MM-DD and writes nothing", async () => {
+		await expect(store.addEntry({ name: "A", body: "正文", created: "昨天" })).rejects.toThrow(
+			"created must be YYYY-MM-DD",
+		);
+		await expect(
+			store.addEntry({ name: "A", body: "正文", created: "2025-01-02T03:04:05.000Z" }),
+		).rejects.toThrow("created must be YYYY-MM-DD");
+
+		expect(await store.listEntries()).toEqual([]);
+		expect(await readdir(dir)).not.toContain("A.md");
+	});
+});
+
+describe("逻辑锁的超时与 try 形态", () => {
+	it("honours an explicit timeout instead of the configured default", async () => {
+		const started = Date.now();
+		// store 的默认 timeoutMs 是 5000：若参数被忽略，内层会等满 5s 才抛错。
+		await store.withLogicalLock(async () => {
+			await expect(store.withLogicalLock(async () => "inner", 30)).rejects.toThrow(ProcessLockTimeoutError);
+		});
+		expect(Date.now() - started).toBeLessThan(2000);
+	});
+
+	it("runs the callback when the logical lock is free", async () => {
+		expect(await store.tryWithLogicalLock(async () => "ok")).toBe("ok");
+		expect(store.logicalLockActive()).toBe(false);
+	});
+
+	it("returns null without running the callback when the lock is held", async () => {
+		let ran = false;
+		await store.withLogicalLock(async () => {
+			const out = await store.tryWithLogicalLock(async () => {
+				ran = true;
+				return "inner";
+			});
+			expect(out).toBeNull();
+		});
+		expect(ran).toBe(false);
+	});
+
+	// Review Focus #1：锁冲突必须是「可向用户交代的明确失败」，不能是一句看不懂的 EBUSY。
+	it("reports a readable, actionable error naming the directory", async () => {
+		await store.withLogicalLock(async () => {
+			await expect(store.withLogicalLock(async () => "inner", 20)).rejects.toThrow(
+				`Memory operations for ${join(dir, "MEMORY.md")} are already running in this process`,
+			);
+		});
+	});
+});

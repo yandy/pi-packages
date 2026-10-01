@@ -5,7 +5,7 @@ import { deriveDescription, type EntryType, parseEntryFile, serializeEntryFile }
 import { formatIndexLine, indexCapacity, parseEntryIndex, removeIndexLine, upsertIndexLine } from "./entry-index";
 import { entryFileName, resolveUniqueFileName } from "./filename";
 import { withLock } from "./fs-lock";
-import { isProcessLockActive, withProcessLock } from "./process-lock";
+import { isProcessLockActive, tryWithProcessLock, withProcessLock } from "./process-lock";
 import { createSnapshot } from "./snapshot";
 
 export const INDEX_FILE = "MEMORY.md";
@@ -45,9 +45,15 @@ export async function sameFile(a: string, b: string): Promise<boolean> {
  * `skipLogicalLock` 供**整轮持有者**使用：dream / 迁移先用 `withLogicalLock()` 包住整轮，
  * 它内部再调用原语时若还去抢同一把进程内锁就会自锁。默认值（不传）= 自己拿锁，这对
  * 「一次调用一个作用域」的调用方（主 agent 工具、extract）是安全的默认。
+ *
+ * `skipSnapshot` 供「整轮已经自己拍过一次全目录快照」的持有者使用：dream 进入时快照整个目录
+ * （spec §6）、迁移自建 `.backups/migrate-<ts>/`（spec §15.3）。它们内部每个原语再各拍一次，
+ * 会让同一批变更产生 N 份重复备份，并把 `snapshotKeep`（默认 5）的名额挤光 —— 用户还想用来做
+ * 崩溃恢复的 `write` 快照会被 `pruneSnapshots` 删掉。
  */
 export interface WriteOptions {
 	skipLogicalLock?: boolean;
+	skipSnapshot?: boolean;
 }
 
 export interface StoreConfig {
@@ -182,9 +188,23 @@ export class MemoryStore {
 	 *
 	 * 整轮互斥放进程内、而不是让跨进程 `.lock` 持整轮，是刻意的：`.lock` 只承担毫秒级的物理写入，
 	 * 因而不需要 TTL / 续约 / 接管（见 fs-lock.ts）；而 dream 自己的原语调用也不会撞上自己的锁。
+	 *
+	 * `timeoutMs` 缺省为 `cfg.lock.timeoutMs`（5s）。整轮持有者可以显式放宽 —— 迁移用 30s
+	 * （spec §15.3 步骤 1），因为它要在锁内逐条重写整个目录。
 	 */
-	async withLogicalLock<T>(fn: () => Promise<T>): Promise<T> {
-		return withProcessLock(this.#logicalKey, this.cfg.lock.timeoutMs, fn);
+	async withLogicalLock<T>(fn: () => Promise<T>, timeoutMs?: number): Promise<T> {
+		return withProcessLock(this.#logicalKey, timeoutMs ?? this.cfg.lock.timeoutMs, fn);
+	}
+
+	/**
+	 * 只在逻辑锁空闲时执行 `fn`；有人持有或排队则**立刻**返回 `null`，绝不等待。
+	 *
+	 * extract 用它实现「锁忙就跳过本轮」（spec §5.2）：extract 在每次 `agent_end` 都触发，
+	 * 若让它排队等 dream（分钟级），一批又一批的提取会堆在进程内队列里，等 dream 结束后
+	 * 依次重放早已过时的对话。跳过是无损的 —— 下一轮 `agent_end` 会再来。
+	 */
+	async tryWithLogicalLock<T>(fn: () => Promise<T>): Promise<T | null> {
+		return tryWithProcessLock(this.#logicalKey, fn);
 	}
 
 	/** 整轮持有者启动前的自检：忘了包 `withLogicalLock` 会静默失去整轮互斥。 */
@@ -196,6 +216,12 @@ export class MemoryStore {
 		await createSnapshot(join(this.cfg.memoryDir, BACKUP_DIR), label, files, this.cfg.memoryDir, {
 			keep: this.cfg.lock.snapshotKeep,
 		});
+	}
+
+	/** `skipSnapshot` 的门。四个写原语的快照调用一律走它，避免「某一个原语漏改」。 */
+	async #maybeSnapshot(options: WriteOptions | undefined, label: string, files: string[]): Promise<void> {
+		if (options?.skipSnapshot) return;
+		await this.#snapshot(label, files);
 	}
 
 	#capacityWarning(raw: string): string | undefined {
@@ -294,14 +320,23 @@ export class MemoryStore {
 		if (value && /[\r\n]/.test(value)) throw new Error("description must be a single line");
 	}
 
+	/** `created` 只接受 `YYYY-MM-DD`（spec §3.1）。迁移会把旧 frontmatter 的 `updated` 归一到这个
+	 *  形状再传进来；非法值写出去会让 `parseEntryFile` 返回 null，整条记忆对 store 静默不可见。 */
+	#validateCreated(value: string | undefined): void {
+		if (value === undefined) return;
+		if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error("created must be YYYY-MM-DD");
+	}
+
 	async addEntry(
-		input: { name: string; description?: string; type?: EntryType; body: string },
+		input: { name: string; description?: string; type?: EntryType; body: string; created?: string },
 		options?: WriteOptions,
 	): Promise<{ file: string; capacityWarning?: string }> {
 		const name = input.name.trim();
 		this.#validateName(name);
 		const requestedDescription = input.description?.trim();
 		this.#validateDescription(requestedDescription);
+		const requestedCreated = input.created?.trim();
+		this.#validateCreated(requestedCreated);
 		const body = input.body.trim();
 		if (!body) throw new Error("body is required");
 
@@ -309,12 +344,16 @@ export class MemoryStore {
 				const summaries = await this.listEntries();
 				const existing = summaries.find((s) => s.name === name);
 				const file = existing?.file ?? (await this.#resolveTargetFile(name));
-				const created = existing ? ((await this.readEntry(existing.file))?.created ?? isoDate(new Date())) : isoDate(new Date());
+				// 覆盖同名 entry 时**永远**保留磁盘上的 created（迁移重跑幂等的关键）；
+				// 只有新建时才接受调用方传入的值，缺省是今天。
+				const created = existing
+					? ((await this.readEntry(existing.file))?.created ?? isoDate(new Date()))
+					: (requestedCreated || isoDate(new Date()));
 				// `|| name` 是必需的：deriveDescription 可能返回 ""，而空 description 会让该 entry 对侧查询不可见。
 				const description = requestedDescription || deriveDescription(body) || name;
 				const now = new Date();
 
-				await this.#snapshot("write", [INDEX_FILE, file]);
+				await this.#maybeSnapshot(options, "write", [INDEX_FILE, file]);
 				await writeFile(
 					join(this.cfg.memoryDir, file),
 					serializeEntryFile(
@@ -368,7 +407,7 @@ export class MemoryStore {
 				// 自碰撞（如 "A B" → "A-B" 派生出同一个文件名）由 #resolveTargetFile 的 exclude 参数复用原文件
 				const file = name === current.name ? current.file : await this.#resolveTargetFile(name, current.file);
 
-				await this.#snapshot("write", [INDEX_FILE, current.file, file]);
+				await this.#maybeSnapshot(options, "write", [INDEX_FILE, current.file, file]);
 				await writeFile(
 					join(this.cfg.memoryDir, file),
 					serializeEntryFile(
@@ -417,7 +456,7 @@ export class MemoryStore {
 				const current = await this.readEntry(ref);
 				if (!current) throw new Error(`Entry "${ref}" not found`);
 
-				await this.#snapshot("write", [INDEX_FILE, current.file]);
+				await this.#maybeSnapshot(options, "write", [INDEX_FILE, current.file]);
 				await unlinkStrict(join(this.cfg.memoryDir, current.file));
 				await writeFile(this.#indexPath(), removeIndexLine(await this.readIndex(), current.file), "utf8");
 				this.#cache.delete(current.file);
@@ -432,7 +471,7 @@ export class MemoryStore {
 	/** 从磁盘全量重建索引；保留第一条索引行之前的手写块，其余无法识别行丢弃。 */
 	async rebuildIndex(options?: WriteOptions): Promise<{ entries: number; headerLines: number }> {
 		return this.#pipeline("rebuild", options, async () => {
-				await this.#snapshot("index", [INDEX_FILE]);
+				await this.#maybeSnapshot(options, "index", [INDEX_FILE]);
 
 				const summaries = await this.listEntries();
 				const { lines, entries } = parseEntryIndex(await this.readIndex());
