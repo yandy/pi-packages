@@ -118,10 +118,22 @@ function sanitizeName(title: string): string {
 	return title.replace(/[\r\n]+/g, " ").replaceAll("](", "] (").trim();
 }
 
-/** `name` 在目录内必须唯一（`remove` / `replace` 靠它定位）：跨文件重复时追加 ` (2)`、` (3)`（spec §15.3）。 */
-function uniqueName(used: Set<string>, base: string): string {
+/**
+ * 给一条 legacy 段落挑一个不与其它记忆冲突的 `name`（spec §15.3 的后缀规则）。
+ *
+ * 候选按 `base`、`base (2)`、`base (3)`…… 依次探测（`name` 精确匹配，与 store 的语义一致）：
+ * - 未被占用 → 采用。
+ * - 已被占用，但磁盘上同名条目的正文与这一段相同 → **复用**这个名字：`addEntry` 对同名条目
+ *   是幂等覆盖，且保留磁盘上的 `created`。迁移中途失败后重跑时，上一轮已经写成功的条目走的正是
+ *   这条路 —— 不会产出 ` (2)` 影子副本（spec §15.4 的重跑安全）。
+ * - 已被占用、正文不同 → 试下一个后缀：迁移前就存在的同名用户条目必须被保护。
+ */
+function pickName(used: Set<string>, bodies: Map<string, string>, base: string, body: string): string {
+	const wanted = body.trim();
 	let candidate = base;
-	for (let n = 2; used.has(candidate); n++) candidate = `${base} (${n})`;
+	for (let n = 2; used.has(candidate) && bodies.get(candidate)?.trim() !== wanted; n++) {
+		candidate = `${base} (${n})`;
+	}
 	return candidate;
 }
 
@@ -178,7 +190,8 @@ async function writeMarker(path: string, marker: MigrationMarker): Promise<void>
  *
  * 返回 `null` 表示「本次没有迁移任何东西」（已迁移过、目录不存在、或没有 legacy 文件）。
  * 失败时**不写** `.migrated`、保留备份、把错误原样上抛（spec §15.4）：下次 session_start 重试，
- * 而重跑是安全的 —— `addEntry` 对同名条目幂等，且 `usedNames` 的初值来自磁盘。
+ * 而重跑是安全的 —— `addEntry` 对同名条目幂等，且候选名只在「磁盘上同名条目的正文与当前段落不同」
+ * 时才追加后缀（正文相同即复用，见 `pickName`）。
  */
 export async function migrateIfNeeded(
 	store: MemoryStore,
@@ -219,14 +232,22 @@ export async function migrateIfNeeded(
 		const backupDir = await createRollbackPoint(memoryDir, legacyFiles, now);
 
 		// `name` 唯一性集合的初值来自磁盘：这让「迁移中途失败后重跑」不会产出 ` (2)` 影子副本 ——
-		// 上一轮已经写成功的条目会在 listEntries 里，同名的 legacy 条目会覆盖它们（addEntry 幂等）。
-		const usedNames = new Set((await store.listEntries()).map((summary) => summary.name));
+		// 上一轮已经写成功的条目会在 listEntries 里，正文与当前段落相同的候选会被复用（addEntry 幂等）。
+		const summaries = await store.listEntries();
+		const usedNames = new Set(summaries.map((summary) => summary.name));
+		// 候选探测还需要「同名的正文」：只从这次已经扫描到的 entries 里读一遍建成 Map，避免在候选
+		// 循环里反复扫目录。同名但正文不同的条目（迁移前就存在的用户记忆）因此会在它旁边加后缀。
+		const bodies = new Map<string, string>();
+		for (const summary of summaries) {
+			const entry = await store.readEntry(summary.file);
+			if (entry) bodies.set(entry.name, entry.body);
+		}
 		let entries = 0;
 
 		for (const file of legacyFiles) {
 			const raw = await readFile(join(memoryDir, file), "utf8");
 			for (const legacy of parseLegacyEntries(raw)) {
-				const name = uniqueName(usedNames, sanitizeName(legacy.title));
+				const name = pickName(usedNames, bodies, sanitizeName(legacy.title), legacy.content);
 				// 空标题或空正文的段落不生成 entry：store 会拒绝（"name is required" / "body is required"），
 				// 而让整轮迁移因为一个空 `## ` 段失败是更差的取舍。原文件在 originals/ 里，信息没有丢。
 				if (!name || !legacy.content) continue;

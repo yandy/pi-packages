@@ -395,6 +395,55 @@ describe("migrateIfNeeded", () => {
 		expect(await marker()).toMatchObject({ entries: 2, files: 2 });
 	});
 
+	// 重跑安全（spec §15.4）：上一轮已经写成功的条目不得在重跑时变成 `A (2)` 影子副本。
+	it("reuses an entry left by a previous partial run instead of creating a (2) shadow", async () => {
+		await seedLegacy({
+			"a.md": topicFile("a", "project", "2026-01-02", [["A", "正文 A"]]),
+			"b.md": topicFile("b", "feedback", "2026-01-03", [["B", "正文 B"]]),
+		});
+		// 模拟「上一轮迁移已经写成功 A 之后才失败」：磁盘上已有一条同名同正文的 v2 entry。
+		await store.addEntry({ name: "A", description: "A", type: "project", body: "正文 A", created: "2020-05-06" });
+
+		const result = await migrateIfNeeded(store);
+
+		expect(result).toMatchObject({ files: 2, entries: 2 });
+		const names = (await store.listEntries()).map((e) => e.name).sort();
+		expect(names).toEqual(["A", "B"]);
+		const a = await store.readEntry("A");
+		expect(a?.body).toBe("正文 A");
+		// 同名复用走 addEntry 的幂等覆盖：磁盘上的 created 必须保留，不能被旧 updated 覆盖
+		expect(a?.created).toBe("2020-05-06");
+		expect(parseEntryIndex(await store.readIndex()).entries).toHaveLength(2);
+	});
+
+	// 部分写入后重跑：第一轮在第二条写入处失败，A 已落盘；重跑必须复用 A 而不是产出 A (2)。
+	it("re-running after a failed migration does not duplicate entries", async () => {
+		await seedLegacy({
+			"a.md": topicFile("a", "feedback", "2026-01-02", [["A", "正文 A"]]),
+			"b.md": topicFile("b", "feedback", "2026-01-03", [["B", "正文 B"]]),
+		});
+		const real = store.addEntry.bind(store);
+		const spy = vi
+			.spyOn(store, "addEntry")
+			.mockImplementationOnce((input, options) => real(input, options))
+			.mockRejectedValueOnce(new Error("boom"));
+
+		await expect(migrateIfNeeded(store)).rejects.toThrow("boom");
+
+		expect(await marker()).toBeNull();
+		// 第一轮确实部分写入了：A 落盘、B 未写（失败发生在第二次 addEntry）
+		expect((await store.listEntries()).map((e) => e.name)).toEqual(["A"]);
+
+		spy.mockRestore();
+		const result = await migrateIfNeeded(store);
+
+		expect(result).toMatchObject({ files: 2, entries: 2 });
+		const names = (await store.listEntries()).map((e) => e.name).sort();
+		expect(names).toEqual(["A", "B"]);
+		expect(parseEntryIndex(await store.readIndex()).entries).toHaveLength(2);
+		expect(await marker()).toMatchObject({ entries: 2, files: 2 });
+	});
+
 	it("takes the logical lock for the whole run with a 30s timeout", async () => {
 		await seedLegacy({ "a.md": topicFile("a", "feedback", "2026-01-02", [["A", "正文 A"]]) });
 		const withLogicalLock = vi.spyOn(store, "withLogicalLock");
