@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { assertWriteAllowed, canonicalizeTarget, FenceDenialError, isWithinRoots } from "../src/fence";
+import { escalationHintMarker } from "../src/escalation";
 
 let dir: string;
 let ws: string;
@@ -71,7 +72,7 @@ describe("assertWriteAllowed", () => {
 		expect(err).toBeInstanceOf(FenceDenialError);
 		const msg = (err as Error).message;
 		expect(msg).toContain("[sandbox: file access denied under workspace-write mode]");
-		expect(msg).toContain("[sandbox: escalation available — retry this exact operation once");
+		expect(msg).toContain(escalationHintMarker("operation"));
 	});
 	it("denies a dangling final-component symlink pointing outside (Ruling 7: P1 escape)", () => {
 		symlinkSync(join(realpathSync.native("/etc"), `sbx-dangling-probe-${process.pid}`), join(ws, "dangling"));

@@ -159,17 +159,28 @@ bash / write / edit 各增加可选参数：
 
 参数描述与 `promptGuidelines` 写明提权规则（deepseek `sandboxPermissionsDescription` 语义）："被沙箱拒绝后，用最小够用的更宽模式把**原调用原样重试一次**，会弹用户审批"。
 
+落地形态按"提示预算"分面（2026-10-01 调整）：`tool.description` 与参数 schema 是**按工具**进每次请求的（同一句写进 bash/write/edit 就付 3 份），`promptGuidelines` 进 system prompt 的 rules 且 pi 按字符串去重（只付 1 份）。因此常驻面只保留两句：跨工具规则 `SANDBOX_NOTE`（正常调用两个提权字段都不传、workspace-write 已包含工作区与 /tmp）与 bash 专属 `BASH_TMP_NOTE`（`--tmpfs /tmp` 语义，`src/tools.ts`）；协议细节一律放按需面——拒绍标记、畸形参数报错、批准后标记（`src/escalation.ts`）。
+
 ### 拒绝时给模型的标记（两处来源：fs 围栏拒绝、bash denial 分类命中）
 
 ```
 [sandbox: file access denied under <effective-mode> mode]
-[sandbox: escalation available — retry this exact command once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]
+[sandbox: escalation available — writable here: the workspace + a private per-command /tmp; retry this exact command once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]
 ```
-（fs 工具的 subject 用 `operation`，bash 用 `command`。）
+（fs 工具的 subject 用 `operation`，bash 用 `command`。前半句先给"不用提权的出路"：实际拒绝多发于 `~/.cache`、`/var/tmp`、`/run/user/<uid>` 这类落到围栏外的路径，换到可写根内即可完成，无需打扰用户。）
+
+批准后另发一条按需标记（随该次工具结果下发）：
+
+```
+[sandbox: this call ran with a one-shot escalation to <mode>; the approval covered this call only — later calls are confined again]
+```
+
+实测依据（2026-10-01 子代理事故复盘）：批准后模型拿到的只是普通输出，会把"批准过"当成"档位已放宽"，于是对后续每条命令（包括只读的 `ls`）继续带 `danger-full-access`——该次任务 46 条工具调用里 35 条提权，等于 35 个用户弹窗。
 
 ### approveEscalation 校验顺序（执行前；无可解析通道时全部 fail-closed）
 
 1. 配对校验：`sandbox_permissions` 与 `justification` 必须同时出现，justification 非空，否则 malformed 错误
+   - 文案契约（按需面）：`invalid escalation: this call was rejected before execution (nothing ran).` + `Cause: ...` + `Fix: to run without escalation, omit BOTH fields (never null / "null" / ""); ...`。动机是实际事故：模型把 malformed 错误误判为"沙箱拒绝"，进而要求最大档；错误必须自报"什么都没执行"并给出精确重试配方。
 2. 目标 == effective mode → 免审批，按当前模式执行
 3. 目标不在 `WIDER_MODES[effective]` 中（更窄或非法）→ 抛错 "not strictly wider than this call's current <mode> mode"
    - `WIDER_MODES = { 'read-only': ['workspace-write','danger-full-access'], 'workspace-write': ['danger-full-access'] }`

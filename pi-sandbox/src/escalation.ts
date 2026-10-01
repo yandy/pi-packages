@@ -15,15 +15,23 @@ export const ESCALATION_TARGETS = ["workspace-write", "danger-full-access"] as c
 
 export const ESCALATION_OPTIONS = ["Allow once", "Deny"] as const;
 
+/**
+ * 畸形提权参数的错误文案（按需付费：只在模型发了畸形参数时进上下文）。三要素缺一不可——
+ * ① 是否执行（nothing ran：模型当时据此误判为"沙箱拒绝"，进而滥用最大档）② 原因 ③ 可自我修复的配方。
+ */
+const MALFORMED_ESCALATION = "invalid escalation: this call was rejected before execution (nothing ran).";
+const ESCALATION_FIX =
+	'Fix: to run without escalation, omit BOTH fields (never null / "null" / ""); to escalate, send sandbox_permissions ("workspace-write" | "danger-full-access") with a one-sentence justification.';
+
 export function validateEscalationArgs(sandboxPermissions: string | undefined, justification: string | undefined): void {
 	if (sandboxPermissions !== undefined && justification === undefined) {
-		throw new Error("invalid escalation: sandbox_permissions requires a justification");
+		throw new Error(`${MALFORMED_ESCALATION} Cause: sandbox_permissions was sent without justification. ${ESCALATION_FIX}`);
 	}
 	if (justification !== undefined && sandboxPermissions === undefined) {
-		throw new Error("invalid escalation: justification is only valid together with sandbox_permissions");
+		throw new Error(`${MALFORMED_ESCALATION} Cause: justification was sent without sandbox_permissions. ${ESCALATION_FIX}`);
 	}
 	if (justification !== undefined && justification.trim().length === 0) {
-		throw new Error("invalid justification: expected a non-empty sentence");
+		throw new Error(`${MALFORMED_ESCALATION} Cause: justification was empty. ${ESCALATION_FIX}`);
 	}
 }
 
@@ -32,14 +40,20 @@ export function sandboxDenialMarker(mode: SandboxMode): string {
 	return `[sandbox: file access denied under ${mode} mode]`;
 }
 
-/** 随拒绝下发的同轮提权提示——nudge 放在决策点，不依赖模型回忆工具描述。 */
+/**
+ * 随拒绝下发的同轮提示（按需付费）：先给"不用提权的出路"（可写根），再给提权配方——
+ * nudge 放在决策点，不依赖模型回忆工具描述（常态提示预算见 tools.ts 的提示预算说明）。
+ */
 export function escalationHintMarker(subject: "command" | "operation"): string {
-	return `[sandbox: escalation available — retry this exact ${subject} once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]`;
+	return `[sandbox: escalation available — writable here: the workspace + a private per-command /tmp; retry this exact ${subject} once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]`;
 }
 
-/** sandbox_permissions 参数的 schema 描述（模型可见的提权规则常驻声明）。 */
-export function sandboxPermissionsDescription(subject: "command" | "operation"): string {
-	return `The narrowest wider sandbox mode for a one-shot retry of the exact ${subject} the sandbox just denied; the retry asks the user for approval.`;
+/**
+ * 批准后随结果下发的提示：一次性提权到下一次调用即失效。缺了这一句，模型会把"批准过"
+ * 当成"档位已放宽"，于是对后续每条命令（哪怕是只读的 ls）都带上同一个提权参数。
+ */
+export function escalationAppliedMarker(mode: SandboxMode): string {
+	return `[sandbox: this call ran with a one-shot escalation to "${mode}"; the approval covered this call only — later calls are confined again]`;
 }
 
 /**
@@ -70,10 +84,14 @@ export async function approveEscalation(request: EscalationRequest, ui: Escalati
 	const { requestedMode, justification, effectiveMode, subject, summary } = request;
 	if (requestedMode === effectiveMode) return effectiveMode;
 	if (!(WIDER_MODES[effectiveMode] ?? []).includes(requestedMode as SandboxMode)) {
-		throw new Error(`sandbox escalation to "${requestedMode}" is not strictly wider than this call's current "${effectiveMode}" mode`);
+		throw new Error(
+			`sandbox escalation to "${requestedMode}" is not strictly wider than this call's current "${effectiveMode}" mode — nothing was executed. Run the call as-is, or escalate to "danger-full-access".`,
+		);
 	}
 	if (!ui.hasUI) {
-		throw new Error(`sandbox escalation to "${requestedMode}" requires approval, but no approval channel is available`);
+		throw new Error(
+			`sandbox escalation to "${requestedMode}" requires approval, but no approval channel is available — nothing was executed. This happens in headless and cross-process subagents: do the work inside the writable roots, or ask the user to run /permission ${requestedMode} in their main session and retry.`,
+		);
 	}
 	const choice = await ui.select(
 		[
@@ -85,10 +103,12 @@ export async function approveEscalation(request: EscalationRequest, ui: Escalati
 		[...ESCALATION_OPTIONS],
 	);
 	if (choice === undefined) {
-		throw new Error(`approval for escalating to "${requestedMode}" was cancelled`);
+		throw new Error(`approval for escalating to "${requestedMode}" was cancelled — nothing was executed`);
 	}
 	if (choice === "Deny") {
-		throw new Error(`the user rejected escalating this ${subject} to "${requestedMode}"; it stays denied, so stop and explain instead of working around it`);
+		throw new Error(
+			`the user rejected escalating this ${subject} to "${requestedMode}"; it stays denied, so stop and explain instead of working around it — do not retry with a different mode or a rewritten command`,
+		);
 	}
 	return requestedMode as SandboxMode;
 }
