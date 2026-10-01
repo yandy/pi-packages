@@ -326,6 +326,11 @@ describe("index wiring (integration)", () => {
 		runExtractMock.mockClear();
 		mockConfigValue.extractMemories.enabled = true;
 
+		const agentMessages = [
+			{ role: "user", content: "hello" },
+			{ role: "assistant", content: "hi" },
+		];
+
 		const { pi, handlers } = createFakePi();
 		memoryFactory(pi as any);
 
@@ -353,10 +358,7 @@ describe("index wiring (integration)", () => {
 
 		await handlers["agent_end"]?.[0]?.(
 			{
-				messages: [
-					{ role: "user", content: "hello" },
-					{ role: "assistant", content: "hi" },
-				],
+				messages: agentMessages,
 			},
 			fakeCtx as any,
 		);
@@ -366,6 +368,19 @@ describe("index wiring (integration)", () => {
 		expect(callArgs.agentsMdBlocks.length).toBe(2);
 		expect(callArgs.agentsMdBlocks[0]).toContain("global: use Chinese");
 		expect(callArgs.agentsMdBlocks[1]).toContain("project: never skip tests");
+		// spec §11.1：消息**原样**透传，不再被压成 {role, content} 字符串。
+		expect(callArgs.messages).toBe(agentMessages);
+		expect(callArgs.maxToolResultChars).toBe(500);
+		expect(callArgs.maxAssistantChars).toBe(2000);
+		expect(callArgs.customTools).toHaveLength(1);
+		expect(callArgs.customTools[0].parameters.properties.action.enum).toEqual([
+			"add",
+			"replace",
+			"remove",
+			"list",
+			"search",
+		]);
+		expect(callArgs.store).toBeDefined();
 
 		mockConfigValue.extractMemories.enabled = false;
 	});

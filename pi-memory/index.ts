@@ -190,39 +190,34 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("agent_end", async (event, ctx) => {
-		if (!config?.enabled || !memoryDir) return;
+		// 先拷到 const：`store` / `memoryDir` 是工厂作用域的 let，在异步回调里 TS 不保留外层收窄。
+		const activeStore = store;
+		const dir = memoryDir;
+		if (!config?.enabled || !dir || !activeStore) return;
 		const extractConfig = config.extractMemories;
 		if (!extractConfig?.enabled) return;
 		if (!event.messages || event.messages.length === 0) return;
-		runExtract({
+		void runExtract({
 			agentsMdBlocks: extractAgentsMdBlocks(lastSystemPrompt),
 			model: resolveDefault(config, "extractMemories", "model"),
 			thinkLevel: extractConfig.thinkLevel,
-			memoryDir,
+			memoryDir: dir,
+			store: activeStore,
+			// **不再**把消息压成 `{role, content}` 字符串（那是提取失真的根因，spec §11.1）：
+			// 原样交给 extract，由 toExtractMessages 保留角色 / tool_call / tool_result。
+			messages: event.messages,
+			maxContextTokens: extractConfig.maxContextTokens,
+			maxToolResultChars: extractConfig.maxToolResultChars,
+			maxAssistantChars: extractConfig.maxAssistantChars,
 			modelRegistry: ctx.modelRegistry,
 			parentModel: ctx.model,
 			// extract 的工具集与主 agent 相同（5 个 action，D12），且**只**注入它自己的 headless session。
-			// skipLogicalLock: extract 整轮持锁的语义在 Task 6 落地（runExtract 内部用 tryWithLogicalLock）。
+			// 不开 skipSnapshot：extract 没有整轮快照，它的每次写入都该留下自己的回滚点。
 			customTools: [createMemoryTool(toolDeps, { actions: MAIN_AGENT_ACTIONS, skipLogicalLock: true })],
 			sessionPersistence: resolveDefault(config, "extractMemories", "sessionPersistence"),
-			messages: event.messages.map((m) => ({
-				// biome-ignore lint/suspicious/noExplicitAny: pi event message union type
-				role: String((m as any).role ?? ""),
-				content:
-					// biome-ignore lint/suspicious/noExplicitAny: pi event message union type
-					typeof (m as any).content === "string"
-						? // biome-ignore lint/suspicious/noExplicitAny: pi event message union type
-							(m as any).content
-						: // biome-ignore lint/suspicious/noExplicitAny: pi event message union type
-							typeof (m as any).output === "string"
-							? // biome-ignore lint/suspicious/noExplicitAny: pi event message union type
-								(m as any).output
-							: // biome-ignore lint/suspicious/noExplicitAny: pi event message union type
-								JSON.stringify((m as any).content ?? ""),
-			})),
-			maxContextTokens: extractConfig.maxContextTokens,
 		}).catch(() => {
-			/* silently ignore extract errors */
+			// Plan C 会把这里换成限流的用户可见通知（spec §14：「extract 失败 → 通知错误」）。
+			// Plan B 先保持静默：runExtract 自己已经不再吞错，这里只是避免未处理的 rejection 撕下整个进程。
 		});
 	});
 
