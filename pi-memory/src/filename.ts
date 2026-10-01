@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 /** 文件系统不安全字符与控制字符。 */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: 控制字符是故意列入的（Global Constraints 要求剥离 U+0000–U+001F 与 U+007F）
 const UNSAFE = /[/\\:*?"<>|\u0000-\u001f\u007f]/g;
 /** 首尾空白与句点（句点会让 "." / ".." 变成非法文件名）。 */
 const EDGE = /^[\s.]+|[\s.]+$/g;
