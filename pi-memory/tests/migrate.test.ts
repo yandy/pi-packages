@@ -2,7 +2,6 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { parseEntryFile } from "../src/entry-file";
 import { parseEntryIndex } from "../src/entry-index";
 import { MemoryStore, type StoreConfig } from "../src/memory-store";
 import { isLegacyTopicFile, migrateIfNeeded, MIGRATED_FILE, parseLegacyEntries } from "../src/migrate";
@@ -63,6 +62,7 @@ function failingStore(real: MemoryStore): MemoryStore {
 		cfg: real.cfg,
 		withLogicalLock: (fn: () => Promise<unknown>) => fn(),
 		listEntries: async () => [],
+		searchEntries: async () => [],
 		addEntry: async () => {
 			throw new Error("boom");
 		},
@@ -244,6 +244,25 @@ describe("migrateIfNeeded", () => {
 		expect(result).toMatchObject({ files: 1, entries: 2 });
 		expect((await store.readEntry("甲"))?.type).toBe("feedback");
 		expect((await store.readEntry("甲"))?.created).toBe("2026-10-02");
+	});
+
+	// Finding I1：正文里的一行 `---` 不是 frontmatter 分隔符。v1 的宽松解析器会把 inFrontmatter
+	// 切回去，吞掉其后的全部内容（包括下一个 `## B`），而迁移随后还要 unlink 原文件 → 数据静默丢失。
+	it("keeps every section when the body itself contains a '---' line", async () => {
+		const raw = topicFile("a", "project", "2026-01-02", [
+			["A", "正文 A"],
+			["B", "正文 B"],
+		]).replace("## B", "---\n\n## B");
+		await seedLegacy({ "a.md": raw });
+
+		const result = await migrateIfNeeded(store, { now: new Date("2026-10-02T00:00:00.000Z") });
+
+		expect(result).toMatchObject({ files: 1, entries: 2 });
+		// `---` 是 A 段的正文（markdown 分隔线），必须保留而不是被当成 frontmatter 开关。
+		expect((await store.readEntry("A"))?.body).toBe("正文 A\n\n---");
+		expect((await store.readEntry("B"))?.body).toBe("正文 B");
+		expect(await readdir(dir)).not.toContain("a.md");
+		expect(await readFile(join(result?.backupDir as string, "originals", "a.md"), "utf8")).toBe(raw);
 	});
 
 	it("leaves a single-section file without frontmatter untouched", async () => {

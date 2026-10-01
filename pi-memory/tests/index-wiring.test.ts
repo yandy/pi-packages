@@ -278,7 +278,13 @@ describe("index wiring (integration)", () => {
 		scanEntriesMock.mockResolvedValue([
 			{ file: "ssh.md", name: "SSH", description: "d", type: "project", modified: "2026-01-01T00:00:00.000Z" },
 		]);
-		runSideQueryMock.mockResolvedValue(["ssh.md"]);
+		// Finding Minor 5：injectedFiles 是活 Set，同一引用会在后续轮次被改写 —— 断言必须在
+		// 调用瞬间深拷贝，否则「第二轮已含 ssh.md」是拿断言时的集合比它自己，永远成立。
+		const injectedAtCall: Array<Set<string>> = [];
+		runSideQueryMock.mockImplementation(async (...args: any[]) => {
+			injectedAtCall.push(new Set(args[2]));
+			return ["ssh.md"];
+		});
 		injectSurfacedContentMock.mockResolvedValue("<relevant_memories>x</relevant_memories>");
 
 		const event = { prompt: "ssh?", systemPrompt: "sp" };
@@ -286,7 +292,9 @@ describe("index wiring (integration)", () => {
 		// 第二轮：runSideQuery 收到的 injectedFiles 里已经有 ssh.md
 		await handlers["before_agent_start"][0](event, uiCtx());
 
-		expect(runSideQueryMock.mock.calls[1][2]).toEqual(new Set(["ssh.md"]));
+		expect(injectedAtCall).toHaveLength(2);
+		expect(injectedAtCall[0]).toEqual(new Set());
+		expect(injectedAtCall[1]).toEqual(new Set(["ssh.md"]));
 	});
 
 	it("skips auto-surfacing for subagents", async () => {

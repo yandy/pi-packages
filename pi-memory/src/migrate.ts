@@ -37,35 +37,48 @@ function normalizeEol(raw: string): string {
 
 const FIELD_RE = /^([A-Za-z_][A-Za-z0-9_]*):[ \t]*(.*)$/;
 
-/** 取 frontmatter 的字段表；没有 frontmatter 时返回空对象（不返回 null —— 无 frontmatter 的
- *  legacy 文件同样合法，spec §15.2 的第二个触发条件是「≥2 个 `## ` 段」）。 */
-function parseLegacyFrontmatter(text: string): Record<string, string> {
-	if (!text.startsWith("---\n")) return {};
-	const end = text.indexOf("\n---", 4);
-	if (end === -1) return {};
+/**
+ * 拆分文件开头的 frontmatter：返回字段表与正文。
+ *
+ * v1 的 `parseEntries` 把每一行 `---` 都当作 frontmatter 开关：正文里只要出现一行 `---`
+ * （markdown 常见的分隔线），其后所有内容（包括下一个 `## ` 段）都会被当成 frontmatter 静默
+ * 吞掉。这里**有意收紧**：frontmatter 只在文件开头识别一次，找到第一个闭合的 `---` 行后，
+ * 其后整体视为正文，正文扫描期间不再切换状态。理由：迁移会 `unlink` 原文件（只留 `.backups/`
+ * 里的副本），宽松解析吞掉的数据用户不会再看见。
+ *
+ * 没有 frontmatter（不以 `---\n` 开头）或没有闭合行时 `fields` 为空、`body` 为原文 ——
+ * 无 frontmatter 的 legacy 文件同样合法（spec §15.2 的第二个触发条件是「≥2 个 `## ` 段」）。
+ */
+function splitFrontmatter(text: string): { fields: Record<string, string>; body: string } {
+	if (!text.startsWith("---\n")) return { fields: {}, body: text };
+	const lines = text.split("\n");
+	let end = -1;
+	for (let i = 1; i < lines.length; i++) {
+		if (lines[i] === "---") {
+			end = i;
+			break;
+		}
+	}
+	if (end === -1) return { fields: {}, body: text };
 	const fields: Record<string, string> = {};
-	for (const line of text.slice(4, end).split("\n")) {
+	for (const line of lines.slice(1, end)) {
 		const m = line.match(FIELD_RE);
 		if (m) fields[m[1]] = m[2].trim();
 	}
-	return fields;
+	return { fields, body: lines.slice(end + 1).join("\n") };
 }
 
-/** 按 `## ` 切段（v1 `topic-file.ts#parseEntries` 的算法，逐字迁过来）。 */
-function parseLegacySections(text: string): Array<{ title: string; content: string }> {
+/**
+ * 按 `## ` 切段（算法迁自 v1 `topic-file.ts#parseEntries`，但按 Finding I1 收紧：调用方必须
+ * 先用 `splitFrontmatter` 剥掉开头的 frontmatter，正文里的 `---` 不再是分隔符）。
+ */
+function parseLegacySections(body: string): Array<{ title: string; content: string }> {
 	const entries: Array<{ title: string; content: string }> = [];
 	let currentTitle = "";
 	let currentContent: string[] = [];
 	let inEntry = false;
-	let inFrontmatter = false;
 
-	for (const line of text.split("\n")) {
-		if (line === "---") {
-			inFrontmatter = !inFrontmatter;
-			continue;
-		}
-		if (inFrontmatter) continue;
-
+	for (const line of body.split("\n")) {
 		const h2 = line.match(/^## (.+)$/);
 		if (h2) {
 			if (inEntry) entries.push({ title: currentTitle, content: currentContent.join("\n").trim() });
@@ -89,18 +102,16 @@ function parseLegacySections(text: string): Array<{ title: string; content: stri
  * 若不排除，一条正常的 v2 记忆会被当成 legacy topic 再拆一次 —— 正文被切碎、原文件被删。
  */
 export function isLegacyTopicFile(raw: string): boolean {
-	const text = normalizeEol(raw);
-	const fields = parseLegacyFrontmatter(text);
+	const { fields, body } = splitFrontmatter(normalizeEol(raw));
 	if (fields.modified !== undefined) return false;
 	if (fields.updated !== undefined) return true;
-	return parseLegacySections(text).length >= 2;
+	return parseLegacySections(body).length >= 2;
 }
 
 /** 拆出 legacy topic 文件里的全部 `## ` 段，并把该文件 frontmatter 的 `type` / `updated` 附到每一段上。 */
 export function parseLegacyEntries(raw: string): LegacyEntry[] {
-	const text = normalizeEol(raw);
-	const fields = parseLegacyFrontmatter(text);
-	return parseLegacySections(text).map((section) => ({
+	const { fields, body } = splitFrontmatter(normalizeEol(raw));
+	return parseLegacySections(body).map((section) => ({
 		title: section.title,
 		content: section.content,
 		type: fields.type ?? "",
@@ -115,7 +126,10 @@ export function parseLegacyEntries(raw: string): LegacyEntry[] {
  * 而迁移**不能**因为一条标题里有个 markdown 链接就整轮失败。替换成 `] (` 保住可读性。
  */
 function sanitizeName(title: string): string {
-	return title.replace(/[\r\n]+/g, " ").replaceAll("](", "] (").trim();
+	return title
+		.replace(/[\r\n]+/g, " ")
+		.replaceAll("](", "] (")
+		.trim();
 }
 
 /**
@@ -205,10 +219,7 @@ async function writeMarker(path: string, marker: MigrationMarker): Promise<void>
  * 而重跑是安全的 —— `addEntry` 对同名条目幂等，且候选名只在「磁盘上同名条目的正文与当前段落不同」
  * 时才追加后缀（正文相同即复用，见 `pickName`）。
  */
-export async function migrateIfNeeded(
-	store: MemoryStore,
-	options?: { now?: Date },
-): Promise<MigrationResult | null> {
+export async function migrateIfNeeded(store: MemoryStore, options?: { now?: Date }): Promise<MigrationResult | null> {
 	const memoryDir = store.cfg.memoryDir;
 	const markerPath = join(memoryDir, MIGRATED_FILE);
 	if (await isFile(markerPath)) return null;
@@ -227,9 +238,7 @@ export async function migrateIfNeeded(
 		return null;
 	}
 
-	const candidates = names
-		.filter((n) => n.endsWith(".md") && n !== INDEX_FILE && !n.startsWith("."))
-		.sort();
+	const candidates = names.filter((n) => n.endsWith(".md") && n !== INDEX_FILE && !n.startsWith(".")).sort();
 	const legacyFiles: string[] = [];
 	for (const file of candidates) {
 		// 只容忍 ENOENT（readdir 与 read 之间文件消失 → 当作非 legacy）。EISDIR/EACCES/EIO 必须上抛：
@@ -249,13 +258,11 @@ export async function migrateIfNeeded(
 		// 上一轮已经写成功的条目会在 listEntries 里，正文与当前段落相同的候选会被复用（addEntry 幂等）。
 		const summaries = await store.listEntries();
 		const usedNames = new Set(summaries.map((summary) => summary.name));
-		// 候选探测还需要「同名的正文」：只从这次已经扫描到的 entries 里读一遍建成 Map，避免在候选
-		// 循环里反复扫目录。同名但正文不同的条目（迁移前就存在的用户记忆）因此会在它旁边加后缀。
+		// 候选探测还需要「同名的正文」。一次 `searchEntries("")` 拿走全部正文（空 needle 对
+		// 任何字符串都是 includes 命中），避免旧实现里在摘要循环内反复 `readEntry`（每次都重扫
+		// 目录 → O(N²)）。同名多条目时以 listEntries 的顺序为准（后者覆盖前者），与现状一致。
 		const bodies = new Map<string, string>();
-		for (const summary of summaries) {
-			const entry = await store.readEntry(summary.file);
-			if (entry) bodies.set(entry.name, entry.body);
-		}
+		for (const entry of await store.searchEntries("")) bodies.set(entry.name, entry.body);
 		let entries = 0;
 
 		for (const file of legacyFiles) {

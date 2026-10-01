@@ -141,7 +141,7 @@ describe("runDream", () => {
 		expect(shortStore.logicalLockActive()).toBe(false);
 	});
 
-	it("passes tools=[] plus the dream-only customTools through to the headless agent", async () => {
+	it("passes noTools='builtin' plus the dream-only customTools through to the headless agent", async () => {
 		runHeadlessAgentMock.mockResolvedValueOnce("ok");
 		const customTools = [{ name: "memory" } as unknown as ToolDefinition];
 
@@ -153,12 +153,14 @@ describe("runDream", () => {
 				thinkLevel: "high",
 				maxTurns: undefined,
 				timeoutMs: 600_000,
-				tools: [],
+				// `tools: []` 会把 customTools 一起过滤掉（Finding C1），必须用 noTools 关 builtin。
+				noTools: "builtin",
 				customTools,
 				model: "deepseek/deepseek-v4-flash",
 				parentModel: { id: "p" },
 			}),
 		);
+		expect(runHeadlessAgentMock.mock.calls[0][0].tools).toBeUndefined();
 		expect(runHeadlessAgentMock.mock.calls[0][0].task).toContain("hard limit of 200 lines");
 	});
 

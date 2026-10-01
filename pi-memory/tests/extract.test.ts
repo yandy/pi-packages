@@ -152,6 +152,23 @@ describe("toExtractMessages", () => {
 		]);
 	});
 
+	// Minor（复核者点名）：memory-auto-surfacing 是 pi-memory 自己注入的 <relevant_memories>。
+	// 把它渲染成 assistant 文本会再次进入 extract prompt，等于让 extract 从自己的记忆里反复提取。
+	it("skips the memory-auto-surfacing self-injection but keeps other custom messages", () => {
+		const out = toExtractMessages([
+			{
+				role: "custom",
+				customType: "memory-auto-surfacing",
+				content: "<relevant_memories>\n## SSH\n2222\n</relevant_memories>",
+				display: false,
+				timestamp: 1,
+			},
+			{ role: "custom", customType: "note", content: "kept", display: true, timestamp: 2 },
+		]);
+
+		expect(out).toEqual([{ role: "assistant", text: "kept" }]);
+	});
+
 	it("maps bash executions to bash tool results and honours excludeFromContext", () => {
 		const out = toExtractMessages([
 			{
@@ -459,7 +476,7 @@ describe("runExtract", () => {
 		expect(runHeadlessAgentMock).not.toHaveBeenCalled();
 	});
 
-	it("runs the headless agent with no built-in tools, maxTurns=5 and the custom tools", async () => {
+	it("runs the headless agent with no built-in tools (noTools, not tools:[]), maxTurns=5 and the custom tools", async () => {
 		const customTools = [{ name: "memory" } as unknown as ToolDefinition];
 		const out = await runExtract(
 			opts({
@@ -472,13 +489,15 @@ describe("runExtract", () => {
 
 		expect(out).toEqual({ skipped: false, result: "saved 2 memories" });
 		expect(runHeadlessAgentMock).toHaveBeenCalledTimes(1);
+		expect(runHeadlessAgentMock.mock.calls[0][0].tools).toBeUndefined();
 		expect(runHeadlessAgentMock).toHaveBeenCalledWith(
 			expect.objectContaining({
 				cwd: dir,
 				thinkLevel: "high",
 				maxTurns: 5,
 				timeoutMs: 120_000,
-				tools: [],
+				// `tools: []` 会把 customTools 一起过滤掉（Finding C1），必须用 noTools 关 builtin。
+				noTools: "builtin",
 				customTools,
 				model: "deepseek/deepseek-v4-flash",
 				parentModel: { id: "parent" },

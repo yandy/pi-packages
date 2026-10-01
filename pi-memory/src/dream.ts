@@ -117,7 +117,8 @@ export async function runDream(opts: RunDreamOpts): Promise<string> {
 			maxTurns: undefined,
 			timeoutMs: 600_000,
 			// 没有裸写权限（spec §12.1）：dream 的重构能力边界由 7 个原语定义，因此首次可被单测覆盖。
-			tools: [],
+			// 必须用 noTools 而不是 tools: [] —— 后者是白名单，会把 customTools（memory 工具）一起滤掉。
+			noTools: "builtin",
 			customTools: opts.customTools,
 			sessionPersistence: opts.sessionPersistence,
 		});

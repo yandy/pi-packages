@@ -61,12 +61,20 @@ export interface EntryManifest {
 export const SIDE_QUERY_MANIFEST_CHARS = 4000;
 /** 均分的下限：清单再长，每条也至少留 80 字符，否则侧查询没有判别依据。 */
 export const SIDE_QUERY_MIN_DESC_CHARS = 80;
+/**
+ * 清单条数上限。恢复了 v1 的界：v1 的候选集合就是 MEMORY.md 索引本身，而索引有
+ * `memIndexMaxLines`（默认 200）行上限，所以侧查询看到的条目天然有界。v2 改成扫描目录后
+ * 清单会随目录无限增长，而 `buildSideQueryTask` 每行都要带 description —— 不封顶会把 prompt
+ * 和每轮迭代开销一起拉爆。200 与索引上限同量级。
+ */
+export const SIDE_QUERY_MAX_ENTRIES = 200;
 
 /**
  * 从 store 取清单。**不逐文件 readFile** —— mtime 缓存由 store 持有（spec §9.2），
  * 于是每轮只付一次 `readdir` + 每文件一次 `stat`，而不是最多 200 次 `readFile`。
  *
- * 排序为 `modified` **降序**：新记忆优先给侧查询看（`listEntries` 是升序，这里翻过来）。
+ * 排序为 `modified` **降序**：新记忆优先给侧查询看（`listEntries` 是升序，这里翻过来），
+ * 然后截到 `SIDE_QUERY_MAX_ENTRIES`（Finding I2）。
  */
 export async function scanEntries(store: MemoryStore): Promise<EntryManifest[]> {
 	const summaries = await store.listEntries();
@@ -74,7 +82,8 @@ export async function scanEntries(store: MemoryStore): Promise<EntryManifest[]> 
 		.map((s) => ({ file: s.file, name: s.name, description: s.description, type: s.type, modified: s.modified }))
 		.sort((a, b) =>
 			a.modified === b.modified ? a.file.localeCompare(b.file) : b.modified.localeCompare(a.modified),
-		);
+		)
+		.slice(0, SIDE_QUERY_MAX_ENTRIES);
 }
 
 export async function injectSurfacedContent(
@@ -165,6 +174,8 @@ export async function runSideQuery(
 			thinkLevel,
 			maxTurns: 1,
 			timeoutMs: 30_000,
+			// 侧查询没有任何 customTools，零工具就是意图：tools: []（白名单）把 builtin 也关掉。
+			// 若以后要给它加 customTools，必须改成 noTools: "builtin"（见 agent-runner.ts 的警告）。
 			tools: [],
 			sessionPersistence,
 		});

@@ -9,6 +9,7 @@ import {
 	injectSurfacedContent,
 	loadIndexSnapshot,
 	runSideQuery,
+	SIDE_QUERY_MAX_ENTRIES,
 	scanEntries,
 	truncateForInjection,
 } from "../src/inject";
@@ -162,6 +163,24 @@ describe("scanEntries", () => {
 		const entries = await scanEntries(store);
 		expect(entries).toHaveLength(1);
 		expect(entries[0]).toMatchObject({ file, name: "A", description: "摘要 A", type: "feedback" });
+	});
+
+	// Finding I2：清单无界。v1 的候选集合就是索引本身（有上限），v2 必须同样恢复界。
+	it("caps the manifest at 200 entries, keeping the newest", async () => {
+		for (let i = 0; i < 201; i++) {
+			const modified = new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString();
+			await writeFile(
+				join(dir, `e${String(i).padStart(3, "0")}.md`),
+				entryFile(`E${i}`, `d${i}`, "project", modified, `正文 ${i}`),
+			);
+		}
+
+		const entries = await scanEntries(store);
+
+		expect(entries).toHaveLength(SIDE_QUERY_MAX_ENTRIES);
+		expect(entries[0].name).toBe("E200");
+		expect(entries[entries.length - 1].name).toBe("E1");
+		expect(entries.some((e) => e.name === "E0")).toBe(false);
 	});
 
 	it("re-reads a file whose mtime changed and keeps the cached one untouched", async () => {

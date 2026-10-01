@@ -26,8 +26,21 @@ export interface HeadlessAgentOpts {
 	timeoutMs?: number;
 	/** Session persistence config. When enabled, sessions are written to disk. */
 	sessionPersistence?: SessionPersistenceConfig;
-	/** Built-in tool name allowlist. Defaults to FILE_IO_TOOLS. Pass [] for no built-in tools. */
+	/**
+	 * Built-in tool name allowlist. Defaults to FILE_IO_TOOLS.
+	 *
+	 * **警告：这是白名单，会把 `customTools` 一起过滤掉**（`createAgentSession` 的
+	 * `allowedToolNames` 与 `agent-session` 的 `isAllowedTool` 同时作用于 builtin 与 custom tools）。
+	 * 要「关 builtin、只留 custom tools」必须用 `noTools: "builtin"`，不要传 `tools: []` ——
+	 * `tools: []` 会把 customTools 也滤掉，dream 一个原语都调不到却会「成功」返回。
+	 */
 	tools?: string[];
+	/**
+	 * Default tool suppression mode when no explicit allowlist is provided.
+	 * - `"all"`: 连 customTools 也不启用（零工具）。
+	 * - `"builtin"`: 关掉默认 builtin 工具（read/write/edit/ls），但保留 customTools。
+	 */
+	noTools?: "all" | "builtin";
 	/** Custom tool definitions. Defaults to []. */
 	customTools?: ToolDefinition[];
 }
@@ -72,7 +85,9 @@ export async function runHeadlessAgent(opts: HeadlessAgentOpts): Promise<string>
 
 	const created = await createAgentSession({
 		cwd: opts.cwd,
-		tools: opts.tools ?? [...FILE_IO_TOOLS],
+		// `noTools` 时不注入默认白名单：白名单会把 customTools 一起滤掉（见 HeadlessAgentOpts.tools）。
+		tools: opts.tools ?? (opts.noTools ? undefined : [...FILE_IO_TOOLS]),
+		noTools: opts.noTools,
 		customTools: opts.customTools ?? [],
 		model: resolvedModel as any,
 		thinkingLevel: opts.thinkLevel as any,

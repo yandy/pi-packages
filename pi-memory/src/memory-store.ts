@@ -17,8 +17,9 @@ export const BACKUP_DIR = ".backups";
  *
  * 吞错会让调用方拿到「删除成功」的假信号：removeEntry 已删索引行、已失效缓存但文件还在，
  * 下次 rebuildIndex（dream 会常规调用）会把它加回来 —— 删除被静默回滚。
- * 导出仅为测试：这条语义无法在 Linux 上经由 MemoryStore 的公开 API 触发（锁的临时文件与
- * entry 文件同目录，目录不可写时会在获取锁阶段先失败）。
+ * 生产调用点：`MemoryStore` 的 removeEntry / replaceEntry，以及 `migrate.ts` 删除已迁移的
+ * legacy topic 文件。导出也供测试直接覆盖：这条语义无法在 Linux 上经由 MemoryStore 的公开
+ * API 触发（锁的临时文件与 entry 文件同目录，目录不可写时会在获取锁阶段先失败）。
  */
 export async function unlinkStrict(path: string): Promise<void> {
 	try {

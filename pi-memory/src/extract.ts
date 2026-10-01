@@ -120,7 +120,9 @@ function toolCallsOf(content: unknown): Array<{ name: string; args: string }> {
  * - `bashExecution` → `toolResult`（`!!` 前缀即 `excludeFromContext` 的则整条跳过），
  *   这样 `command`/`exitCode` 不再丢失，且自动受 `maxToolResultChars` 与 `[error] ` 前缀约束；
  * - `branchSummary` / `compactionSummary` → `assistant`（带标签），受 `maxAssistantChars` 约束；
- * - `custom` → `assistant`。
+ * - `custom` → `assistant`；唯一例外是 `customType === "memory-auto-surfacing"`（pi-memory
+ *   自己注入的 `<relevant_memories>`）—— 把记忆正文当 assistant 文本再喂给 extract 等于让
+ *   extract 从自己的记忆里反复提取，因此整条跳过。
  *
  * 未知 role **绝不**当作 user（user 文本不截断，且 prompt 会把它当规则/纠正）：按 assistant
  * 尽力保留文本（`content` → `output` → `text` → `summary`），抠不出来才跳过。
@@ -179,6 +181,9 @@ export function toExtractMessages(messages: unknown[]): ExtractMessage[] {
 			continue;
 		}
 		if (role === "custom") {
+			// pi-memory 自己注入的 <relevant_memories> 是「记忆正文的渲染」，不是本轮对话内容。
+			// 其他 customType（插件通知等）保持渲染为 assistant。
+			if (m.customType === "memory-auto-surfacing") continue;
 			const text = textOf(m.content, { joiner: " ", images: false });
 			if (text) out.push({ role: "assistant", text });
 			continue;
@@ -354,8 +359,9 @@ export async function runExtract(opts: RunExtractOpts): Promise<{ skipped: boole
 			thinkLevel: opts.thinkLevel,
 			maxTurns: 5,
 			timeoutMs: 120_000,
-			// 没有文件工具：extract 只能通过 memory 原语写（spec §11.2）
-			tools: [],
+			// 没有文件工具：extract 只能通过 memory 原语写（spec §11.2）。
+			// 必须用 noTools 而不是 tools: [] —— 后者是白名单，会把 customTools（memory 工具）一起滤掉。
+			noTools: "builtin",
 			customTools: opts.customTools,
 			sessionPersistence: opts.sessionPersistence,
 		}),
