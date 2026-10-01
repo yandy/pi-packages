@@ -292,7 +292,7 @@ pi.on("session_shutdown", () => {
 
 时序保证：事件由**父实例**的 `pi.events.emit` 发出，且在子会话 `bindExtensions()` 之前**同步** emit（`create-subagent-session.ts:219-228`），因此 link 必然早于子会话的第一次工具调用。
 
-`disposed` **不在 run 结束时发**，而在子会话记录被拆除时发（`cleanup()` 清扫 / `clearCompleted()` / manager `dispose()`）——因此 link 会在**整个会话期间保留**：这正是所需语义（子会话被 `resume` 后仍能转发；若改成 run 结束即 unlink，被 resume 的子会话会失去转发能力）。代价是 `links` 随子会话数增长、随会话拆除清空；每条仅两个字符串，且 `resolveChannel` 仍要过 `hasUI()` 与注册校验，故残留条目方向安全（fail-closed）。本设计的 FIFO 车道不受影响。
+`disposed` **不在 run 结束时发**，而在子会话记录被拆除时发（`cleanup()` 清扫 / `clearCompleted()` / manager `dispose()`）——因此 link 会在**整个会话期间保留**：这正是所需语义（子会话被 `resume` 后仍能转发；若改成 run 结束即 unlink，被 resume 的子会话会失去转发能力）。代价是 `links` 只随**子会话被拆除**而减少；而且父会话 `session_shutdown` 时我们**先退订**，会错过 pi-subagents 在它自己的 shutdown handler（`handlers/lifecycle.ts:71-77` 的 `manager.dispose()`）里发出的 `disposed`——真机验证（2026-10-01）即如此：`session_shutdown` 与 `unregisterParent{parents:0}` 都有，但无 `unlinkChild`。因此残留 link 条目会随进程存活；它们无害：每条仅两个字符串、子会话 id 全局唯一，且 `resolveChannel` 仍要过 `hasUI()` 与注册校验，方向安全（fail-closed）。**若要确定性清理**，可在父会话 shutdown 时清掉该父的全部 link（需新增 broker 方法），但那会牺牲"同 id 子会话被 `resume` 后仍能转发"的现有能力，收益不足，故不做。本设计的 FIFO 车道不受影响。
 
 退订：两个 `pi.events.on` 的 disposer 存入 activate 闭包，并在 `session_shutdown` 里调用——宿主每次 `/reload` 复用同一 event bus 且重新调用扩展 factory，不退订会无上限累积监听器（超过 Node 默认 `maxListeners` 后打印 `MaxListenersExceededWarning` 污染用户终端）。
 
