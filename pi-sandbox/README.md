@@ -40,7 +40,7 @@ Network is always allowed (no network isolation).
 
 ## Escalation approval (model-initiated)
 
-bash/write/edit take two optional parameters: `sandbox_permissions` (`workspace-write` or `danger-full-access`) + `justification` (a one-sentence reason). After an operation is denied by the sandbox, the model may retry the exact same call once with these two parameters, which opens an approval prompt (Allow once / Deny); approval applies to that one call only. With no UI channel (headless, background subagent), escalation is always refused (fail-closed).
+bash/write/edit take two optional parameters: `sandbox_permissions` (`workspace-write` or `danger-full-access`) + `justification` (a one-sentence reason). After an operation is denied by the sandbox, the model may retry the exact same call once with these two parameters, which opens an approval prompt (Allow once / Deny); approval applies to that one call only. A subagent child session's escalation (foreground or background) is forwarded to the parent session's prompt (in-process pi-subagents, and the parent must have UI); with no parent channel available (headless, cross-process subagents) escalation is always refused (fail-closed) — widen the process mode with `/permission` to unblock it.
 
 ## Configuration
 
@@ -83,6 +83,20 @@ npm test              # unit + integration (integration auto-skips without a run
 npm run typecheck
 ./tests/e2e.sh
 ```
+
+### Verifying escalation forwarding with a local build
+
+The parent session can load a local pi-sandbox via `pi -e <path>`, but **`-e` only affects the parent**: pi-subagents builds a separate resource loader for each child session, so the child **re-discovers** extensions from `agentDir` and the project `.pi/`. If `~/.pi/agent/settings.json` still declares `npm:@yandy0725/pi-sandbox`, the child loads the published build and forwarding **fails silently** (the child only reports `requires approval, but no approval channel is available`). Make both sides discover the same build:
+
+```bash
+AG=$(mktemp -d); cp ~/.pi/agent/auth.json "$AG/" 2>/dev/null || true
+cat > "$AG/settings.json" <<EOF
+{ "packages": ["<repo>/pi-sandbox", "<repo>/pi-subagents"] }
+EOF
+cd <writable project dir> && PI_CODING_AGENT_DIR="$AG" pi
+```
+
+Observations and the verification record live in `docs/superpowers/specs/2026-09-30-escalation-approval-forwarding-design.md` §11.
 
 ## License
 

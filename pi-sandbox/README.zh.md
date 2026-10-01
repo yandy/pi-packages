@@ -40,7 +40,7 @@ bash 命令被包装进平台沙箱 runner 后在本地 spawn（**路径透明**
 
 ## 提权审批（模型发起）
 
-bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write` 或 `danger-full-access`）+ `justification`（一句话理由）。操作被沙箱拒绝后，模型可带这两个参数原样重试一次，会弹出审批（Allow once / Deny）；批准只对那一次调用生效。无 UI 通道（headless、后台 subagent）时提权一律拒绝（fail-closed）。
+bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write` 或 `danger-full-access`）+ `justification`（一句话理由）。操作被沙箱拒绝后，模型可带这两个参数原样重试一次，会弹出审批（Allow once / Deny）；批准只对那一次调用生效。subagent 子会话（前台与后台都算）的提权会转发到父会话弹窗（同进程 pi-subagents，且父会话需有 UI）；无父通道时（headless、跨进程子代理）提权一律拒绝（fail-closed），此时用 `/permission` 放宽进程档位解救。
 
 ## 配置
 
@@ -83,6 +83,20 @@ npm test              # 单元 + 集成（无 runner 环境集成自动 skip）
 npm run typecheck
 ./tests/e2e.sh
 ```
+
+### 用本地构建验证提权转发
+
+父会话可以用 `pi -e <path>` 直接加载本地 pi-sandbox，但 **`-e` 只影响父会话**：pi-subagents 为子会话另建资源加载器，子会话按 `agentDir` 与项目 `.pi/` **重新发现**扩展。若 `~/.pi/agent/settings.json` 里仍声明 `npm:@yandy0725/pi-sandbox`，子会话会加载发布版，转发会**静默失效**（子会话只报 `requires approval, but no approval channel is available`）。让父子两侧发现同一份构建：
+
+```bash
+AG=$(mktemp -d); cp ~/.pi/agent/auth.json "$AG/" 2>/dev/null || true
+cat > "$AG/settings.json" <<EOF
+{ "packages": ["<repo>/pi-sandbox", "<repo>/pi-subagents"] }
+EOF
+cd <可写项目目录> && PI_CODING_AGENT_DIR="$AG" pi
+```
+
+观察点与验证记录见 `docs/superpowers/specs/2026-09-30-escalation-approval-forwarding-design.md` §11。
 
 ## License
 
