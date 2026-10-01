@@ -24,7 +24,12 @@ export interface AutoSurfacingConfig {
 	model?: string;
 	thinkLevel: ThinkLevel;
 	maxFiles: number;
-	maxTopicBytes: number;
+	/**
+	 * 单条 entry 注入正文的字节上限。
+	 * v1 叫 `maxTopicBytes`（一个 topic 文件含多个 `##` 条目）；v2 一个 entry 一个文件，故改名。
+	 * **旧键不再生效**（`deepMerge` 会把它挂到对象上，但没有任何代码读它）。
+	 */
+	maxEntryBytes: number;
 	maxInjectionBytes: number;
 }
 
@@ -33,6 +38,10 @@ export interface ExtractMemoriesConfig {
 	model?: string;
 	thinkLevel: ThinkLevel;
 	maxContextTokens: number;
+	/** 渲染进 extract prompt 时，单条 tool_result 的字符上限（spec §11.2）。 */
+	maxToolResultChars: number;
+	/** 渲染进 extract prompt 时，单条 assistant 文本的字符上限（spec §11.2）。 */
+	maxAssistantChars: number;
 }
 
 export interface MemoryConfig {
@@ -48,6 +57,12 @@ export interface MemoryConfig {
 	memIndexInjectMaxLines: number;
 	/** Injection truncation: max bytes of MEMORY.md injected into system prompt. */
 	memIndexInjectMaxBytes: number;
+	/**
+	 * 两级锁的参数（spec §5.2）。结构与 `StoreConfig["lock"]` 逐字一致，因此可以原样传给
+	 * `new MemoryStore({ ..., lock: config.lock })`。
+	 * **没有** ttl / 心跳 / 接管字段：跨进程 `.lock` 永远只持毫秒且永不自动回收。
+	 */
+	lock: { timeoutMs: number; snapshotKeep: number };
 	dream: {
 		nudgeAfterSessions: number;
 		nudgeAfterHours: number;
@@ -66,24 +81,30 @@ export interface MemoryConfig {
 
 export const DEFAULT_CONFIG: MemoryConfig = {
 	enabled: true,
+	// headless 子会话默认只在内存里跑：extract / dream / 侧查询都不该往用户的 sessions 目录里落盘。
+	defaults: { sessionPersistence: { enabled: false } },
 	memoryDir: join(homedir(), CONFIG_DIR_NAME, "memory"),
 	memIndexMaxLines: 200,
 	memIndexMaxBytes: 25600,
+	// 注入口径（20 / 3072）在 Plan B 保持不变：改成 200 / 25600 属 D3，与 sections 注入一起在 Plan C 落地。
 	memIndexInjectMaxLines: 20,
 	memIndexInjectMaxBytes: 3072,
+	lock: { timeoutMs: 5000, snapshotKeep: 5 },
 	dream: { nudgeAfterSessions: 5, nudgeAfterHours: 24, thinkLevel: "high" },
 	sessionSearch: { maxSessions: 10, maxMatches: 5 },
 	autoSurfacing: {
 		enabled: true,
 		thinkLevel: "off",
 		maxFiles: 3,
-		maxTopicBytes: 3072,
+		maxEntryBytes: 3072,
 		maxInjectionBytes: 10240,
 	},
 	extractMemories: {
 		enabled: true,
 		thinkLevel: "high",
 		maxContextTokens: 2000,
+		maxToolResultChars: 500,
+		maxAssistantChars: 2000,
 	},
 };
 

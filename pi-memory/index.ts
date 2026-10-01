@@ -133,7 +133,7 @@ export default function (pi: ExtensionAPI) {
 						const content = await injectSurfacedContent(
 							memoryDir,
 							selected,
-							autoSurfacing.maxTopicBytes,
+							autoSurfacing.maxEntryBytes,
 							autoSurfacing.maxInjectionBytes,
 						);
 						if (content) {

@@ -14,13 +14,15 @@ const { MOCK_BASE, mockConfigValue } = vi.hoisted(() => {
 		autoSurfacing: {
 			enabled: true,
 			maxFiles: 5,
-			maxTopicBytes: 4096,
+			maxEntryBytes: 4096,
 			maxInjectionBytes: 20480,
 			thinkLevel: "off" as const,
 		},
 		extractMemories: {
 			enabled: false,
 			maxContextTokens: 2000,
+			maxToolResultChars: 500,
+			maxAssistantChars: 2000,
 			thinkLevel: "high" as const,
 		},
 	};

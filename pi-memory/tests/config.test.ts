@@ -9,10 +9,16 @@ describe("DEFAULT_CONFIG", () => {
 		expect(DEFAULT_CONFIG.enabled).toBe(true);
 		expect(DEFAULT_CONFIG.memIndexMaxLines).toBe(200);
 		expect(DEFAULT_CONFIG.memIndexMaxBytes).toBe(25600);
+		// Plan B 不动注入口径（20 / 3072）：改成 200 / 25600 是 D3 = Plan C 的事。
 		expect(DEFAULT_CONFIG.memIndexInjectMaxLines).toBe(20);
 		expect(DEFAULT_CONFIG.memIndexInjectMaxBytes).toBe(3072);
+		expect(DEFAULT_CONFIG.lock).toEqual({ timeoutMs: 5000, snapshotKeep: 5 });
+		expect(DEFAULT_CONFIG.defaults).toEqual({ sessionPersistence: { enabled: false } });
 		expect(DEFAULT_CONFIG.dream.model).toBeUndefined();
 		expect(DEFAULT_CONFIG.sessionSearch.maxSessions).toBe(10);
+		expect(DEFAULT_CONFIG.autoSurfacing.maxEntryBytes).toBe(3072);
+		expect(DEFAULT_CONFIG.extractMemories.maxToolResultChars).toBe(500);
+		expect(DEFAULT_CONFIG.extractMemories.maxAssistantChars).toBe(2000);
 	});
 });
 
@@ -82,7 +88,7 @@ describe("loadConfig", () => {
 			enabled: true,
 			thinkLevel: "off",
 			maxFiles: 3,
-			maxTopicBytes: 3072,
+			maxEntryBytes: 3072,
 			maxInjectionBytes: 10240,
 		});
 	});
@@ -93,6 +99,8 @@ describe("loadConfig", () => {
 			enabled: true,
 			thinkLevel: "high",
 			maxContextTokens: 2000,
+			maxToolResultChars: 500,
+			maxAssistantChars: 2000,
 		});
 	});
 
@@ -189,15 +197,69 @@ describe("loadConfig", () => {
 		expect(cfg.dream.model).toBe("tencent/glm");
 	});
 
-	it("backward compatible: no defaults, no sessionPersistence in config", async () => {
+	it("ships defaults.sessionPersistence disabled so headless sessions stay in memory", async () => {
 		const cfg = await loadConfig({
 			cwd: projectDir,
 			isProjectTrusted: () => true,
 			_globalDir: globalDir,
 			_configDirName: ".pi",
 		});
-		expect(cfg.defaults).toBeUndefined();
+		expect(cfg.defaults).toEqual({ sessionPersistence: { enabled: false } });
 		expect(cfg.dream.thinkLevel).toBe("high");
 		expect(cfg.dream.sessionPersistence).toBeUndefined();
+	});
+
+	it("has lock defaults", async () => {
+		const cfg = await loadConfig({
+			cwd: projectDir,
+			isProjectTrusted: () => false,
+			_globalDir: globalDir,
+			_configDirName: ".pi",
+		});
+		expect(cfg.lock).toEqual({ timeoutMs: 5000, snapshotKeep: 5 });
+	});
+
+	it("deep-merges the lock section, keeping the untouched sibling", async () => {
+		await writeFile(join(globalDir, "memory.json"), JSON.stringify({ lock: { timeoutMs: 1000 } }));
+		const cfg = await loadConfig({
+			cwd: projectDir,
+			isProjectTrusted: () => true,
+			_globalDir: globalDir,
+			_configDirName: ".pi",
+		});
+		expect(cfg.lock).toEqual({ timeoutMs: 1000, snapshotKeep: 5 });
+	});
+
+	// v1 的 autoSurfacing.maxTopicBytes 语义是「一个 topic 文件的注入上限」，v2 的 maxEntryBytes 是
+	// 「一条 entry 的注入上限」。旧键必须彻底失效：若它还生效，用户配置里的旧值会静默改变 v2 的注入预算。
+	it("ignores the legacy autoSurfacing.maxTopicBytes key", async () => {
+		await writeFile(join(globalDir, "memory.json"), JSON.stringify({ autoSurfacing: { maxTopicBytes: 999 } }));
+		const cfg = await loadConfig({
+			cwd: projectDir,
+			isProjectTrusted: () => true,
+			_globalDir: globalDir,
+			_configDirName: ".pi",
+		});
+		expect(cfg.autoSurfacing.maxEntryBytes).toBe(3072);
+	});
+
+	it("deep-merges the new extractMemories char limits", async () => {
+		await writeFile(
+			join(globalDir, "memory.json"),
+			JSON.stringify({ extractMemories: { maxToolResultChars: 200 } }),
+		);
+		const cfg = await loadConfig({
+			cwd: projectDir,
+			isProjectTrusted: () => true,
+			_globalDir: globalDir,
+			_configDirName: ".pi",
+		});
+		expect(cfg.extractMemories).toEqual({
+			enabled: true,
+			thinkLevel: "high",
+			maxContextTokens: 2000,
+			maxToolResultChars: 200,
+			maxAssistantChars: 2000,
+		});
 	});
 });

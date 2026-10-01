@@ -65,7 +65,7 @@ export async function scanTopics(memoryDir: string): Promise<TopicManifest[]> {
 export async function injectSurfacedContent(
 	memoryDir: string,
 	selectedFiles: string[],
-	maxTopicBytes: number,
+	maxEntryBytes: number,
 	maxInjectionBytes: number,
 ): Promise<string> {
 	const blocks: string[] = [];
@@ -74,7 +74,7 @@ export async function injectSurfacedContent(
 	for (const f of selectedFiles) {
 		try {
 			const raw = await readFile(join(memoryDir, f), "utf8");
-			const { content } = truncateForInjection(raw, 999999, maxTopicBytes);
+			const { content } = truncateForInjection(raw, 999999, maxEntryBytes);
 			const block = `## ${f}\n${content}`;
 			const blockBytes = Buffer.byteLength(block, "utf8");
 			if (totalBytes + blockBytes > maxInjectionBytes) break;
