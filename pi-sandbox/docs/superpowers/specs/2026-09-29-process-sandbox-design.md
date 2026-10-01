@@ -111,9 +111,10 @@ type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
 **writable 根在四个后端的映射**（`/tmp` 一处为 2026-10-01 的有意偏离）：bwrap 把宿主 `/tmp` rw bind 进沙箱（`--bind /tmp /tmp`，原路径透明），landlock 用 `--rw /tmp` 放行宿主 `/tmp`，seatbelt 与 fs 围栏共用 `writableRoots()`——四处对 `/tmp` 的语义一致（都是宿主 /tmp），并有测试钉住 argv/白名单，防止"write 工具能写 /tmp 但 bash 不能"式漂移。
 
 > **决策（2026-10-01，用户拍板）**：原实现沿用 deepseek profile 的 `--tmpfs /tmp`，后果是 bash 里的 `/tmp` 是**每条命令重建的空私有 tmpfs**——宿主 /tmp 不可见、跨命令不持久、与 write 工具/landlock/seatbelt 三处语义漂移，还必须在模型提示里常驻一句 /tmp 说明（`BASH_TMP_NOTE`）。改为 `--bind /tmp /tmp` 后四处一致、提示可删、README 的"路径透明"对 /tmp 也成立。
-> 已知并接受的代价：① 沙箱内命令的 /tmp 写入落到宿主——`rm -rf /tmp/*` 这类破坏不再被限制在命令内（宿主 /tmp 常有会话 socket 与 pi 自己的临时文件）；② 宿主 /tmp 不可写时沙箱内 /tmp 也随之不可写（旧实现由 tmpfs 兑底）；③ 偏离 deepseek `profiles.ts` 的拼写。
+> 已知并接受的代价：① 沙箱内命令的 /tmp 写入落到宿主——`rm -rf /tmp/*` 这类破坏不再被限制在命令内（宿主 /tmp 常有会话 socket 与 pi 自己的临时文件）；② 宿主 /tmp 不可写时沙箱内 /tmp 也随之不可写（旧实现由 tmpfs 兜底）；③ 偏离 deepseek `profiles.ts` 的拼写；④ **并发 bash 调用之间不再有 /tmp 隔离**：旧实现每次工具调用一个新 bwrap 进程 → 新 mount namespace → 新 tmpfs（同名路径互不干扰，是并发安全的来源），现在共享宿主 /tmp，两个并发命令落在同一路径名会互相覆盖（与它们本来就共享 workspace 属同类风险）。
 > 残留差集（未对齐，未决）：`os.tmpdir()`——`TMPDIR` 指向非 /tmp 路径时，只有 seatbelt 与 fs 围栏放行，bwrap 与 landlock 仍拒；对齐需把 runtime dir（wayland/dbus/pulse/gpg-agent socket）也 bind 进沙箱，风险更大，故不做。
-> bwrap 的 `--dev`/`--proc` 另给沙箱两个私有挂载：`/dev` 是 uid=自己、mode=755 的新 tmpfs（所以 `/dev/shm` 与 /dev 下新建文件可写，但仅命令内有效），`/proc` 是新建 procfs。
+> bwrap 的 `--dev`/`--proc` 另给沙箱两个私有挂载：`/dev` 是 uid=自己、mode=755 的新 tmpfs（所以 `/dev/shm` 与 /dev 下新建文件可写，但仅命令内有效），`/proc` 是新建 procfs。因此改动后 bwrap 沙箱内**命令内有效**的私有可写区仍有两处：`/dev` 与匿名内存。
+> 另一个旧实现带来的具体痛点（本次治理的动机之一）：pi 把被截断的完整输出写在**宿主** `os.tmpdir()`（`dist/core/bash-executor.js` 的 `pi-bash-<id>.log`）并在结果里告知模型路径，但旧 profile 下沙箱内的 bash 读不到它（`No such file or directory`），只有非沙箱的 read/grep 工具读得到。
 
 ## 5. 配置 schema v2
 
