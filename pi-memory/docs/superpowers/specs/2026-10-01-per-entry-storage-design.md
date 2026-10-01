@@ -191,12 +191,14 @@ dream **不再**拥有 `write` / `edit` / `ls` / `bash`。它的重构能力边�
 { "pid": 12345, "hostname": "h", "startedAt": "2026-10-01T09:12:33.123Z", "op": "dream" }
 ```
 
-- 获取：`fs.open(path, "wx")`（`O_CREAT|O_EXCL`）。
-- 失败时读取持有者信息：
-  - 同 host 且 `pid` 不存活 → stale；
+- 获取（**必须原子**）：先把持有者信息写进同目录的唯一临时文件 `${lockPath}.<pid>.<n>.tmp`，再 `link(temp, lockPath)`；`EEXIST` 即未获取，`finally` 清理临时文件。
+  **不得**用 `open(lockPath, "wx")` 后紧接着单独写内容 —— 那会让锁路径出现「存在但 0 字节」的中间态，而 `readLockInfo` 读到空文件会返回 null、`isStale(null)` 恒为 true（pid 与 TTL 检查根本不会执行），并发等待者恰好采样到这个窗口就会删掉刚被正确获取的锁并据为己有。
+- 失败时读取持有者信息（**必须做形状校验**：合法 JSON 但不是锁记录、如 `123` / `{}`，一律当作无法解释的锁 → 可回收；否则 `isStale` 会因 hostname 非字符串而跳过 pid 检查、又因 `Date.parse(undefined)` 是 NaN 而跳过 TTL 检查，锁永远不会变 stale）：
+  - 同 host 且 `pid` 不存活 → stale（只有 `ESRCH` 算死亡；`EPERM` 与意外 errno 一律按存活 —— 「误判为存活」最多等到 TTL 兜底，「误判为死亡」却会删掉活持有者的锁）；
   - 或 `now - startedAt > lock.ttlMs`（默认 10 分钟）→ stale；
   - stale 则删除并重试一次；仍失败则按等待策略处理。
-- 释放：`finally` 中删除。进程被 kill 时靠 stale 检测回收。
+- **续约（心跳）**：持有期间每 `max(1000, ttlMs / 2)` 毫秒以「临时文件 + `rename`」原子刷新 `startedAt`（同样不得直接 `writeFile` 覆盖）。这样上面的 TTL 只对**不再续约**的持有者（崩溃、挂死）生效 —— 否则一个健康但耗时超过 TTL 的长任务（dream 跑满 10 分钟）会被别的写者抢锁，而抢锁者的锁又会被原持有者的 `finally` 删掉，级联出两个写者同时进临界区。
+- 释放：`finally` 中删除，但**仅当锁仍是自己持有的才删**（比对持有记录的 pid / hostname），否则留给真正的持有者；在途的续约不得在释放之后再落回。进程被 kill 时靠 stale 检测回收。
 
 ### 5.2 等待策略
 
@@ -620,11 +622,14 @@ session_shutdown
 | `sections` 注入方式依赖 pi 内部行为 | 已核对源码与类型：`systemPromptOptions` 可变、section 名约束、`resolveTranscript` 的折叠分叉均已验证；退路是回 `forceSystemPrompt`（功能不受损，仅缓存变差） |
 | 自实现的 section 重放与 pi 语义漂移 | 重放逻辑极小（`null` 删除 / 否则覆盖、保留首次位置）；重放失败或拿不到 `memory_index` 时**回退为从磁盘读**，不会因此丢失索引 |
 | 文件身份以字符串比较为准（大小写不敏感 / Unicode 规范化的文件系统上，两个不同的文件名可能指向同一 inode → 可能写穿别人的文件或改名后自删刚写入的文件） | 取名前对磁盘做一次存在性探测（`MemoryStore.#resolveTargetFile`）；删除前比较 inode（`sameFile`），同一 inode 则不删；`unlinkStrict` 使删除失败 fail-closed。但**跨平台语义未在 CI 覆盖**（Linux 上无法构造出该派生路径） |
-| `.lock` 的 stale 回收竞态：两个等待者同时判定 stale 时会互相 `rm` | §5.1 的「删除并重试一次」是已批准设计；持有期心跳续约（`renewIntervalMs` = TTL/2，至少 1s）使健康持有者不再被判 stale，续约与释放前均校验所有权（pid）以切断级联删除；候选的彻底修法是 rename 接管 |
+| `.lock` 的 stale 回收竞态：两个等待者同时判定 stale 时会互相 `rm` | §5.1 的「删除并重试一次」是已批准设计；持有期心跳续约（`renewIntervalMs` = TTL/2，至少 1s）使健康持有者不再被判 stale，续约与释放前均校验所有权（比对 pid；未比 hostname —— NFS 共享 `memoryDir` 且两 host 出现相同 pid 时仍可能删错锁，`memoryDir` 目前是每 host 一份）以切断级联删除；候选的彻底修法是 rename 接管 |
 | 迁移的回滚点可能被快照保留策略裁掉 | `createSnapshot` 恒产出 `<ts>-<label>`，**不可能**以 `migrate-` 开头，而 `pruneSnapshots` 永不裁剪 `migrate-` 前缀 —— 因此迁移必须自己建 `.backups/migrate-<ts>/` 作为回滚点 |
 | `rebuildIndex` 不返回 `capacityWarning`（与 `addEntry` / `replaceEntry` 不同），尽管它最可能在膨胀目录上运行 | 已知的 API 不一致：调用方（dream / 迁移）在 `rebuildIndex` 之后需自行做容量检查；若要返回值对齐需扩展其签名 |
 | `.lock` 不可重入；dream / 迁移需要「全程持锁」时会自锁到 `timeoutMs` 后抛 MemoryLockedError | Plan B 必须先为 `MemoryStore` 补一个公开且可重入的 `withLock(op, fn)`（§4.2 已列为原语、§4.3 指派给迁移），而不是直接用 `fs-lock.withLock` 包住写原语；详见 `MemoryStore` 类注释的「锁契约」 |
 | `removeEntry` / `replaceEntry` 的 `unlink` 失败现在会抛错（fail-closed），不再静默当作删除成功 | 调用方必须把「保存失败」当作用户可见的错误处理（工具层不得吞掉 rejection）；失败时索引与文件保持一致，且写前快照可从 `.backups/` 回滚 |
+| **CRLF 的 `MEMORY.md` 对索引层不可见** | entry 文件侧的 CRLF 已在 `parseEntryFile` 入口归一化；但 `entry-index` 的 `LINE_RE` 尾组 `(.*)$` 匹配不到以 `\r` 结尾的行，于是整个索引都被计成 `unrecognized`、`removeIndexLine` 空操作（删除会留下死链）、`upsertIndexLine` 追加重复行、`rebuildIndex` 把整块当作「手写头部」保留。用户用 Windows 编辑器手改 `MEMORY.md` 时触发 |
+| 续约心跳的在途请求可能在释放之后落回 | 会留下一个没有持有者的 `.lock`，后续同进程写入会超时抛错直到 TTL（≤ 600s）自愈，无数据丢失。概率约 1e-6/长任务。硬化方向：释放前 await 在途续约 |
+| `ttlMs ≤ 2000` 时续约间隔的 1s 下限会破坏「已续约即不 stale」不变量 | 生产路径传 `ttlMs: 600000`，无实际影响；仅影响把 TTL 调得极短的测试或用例 |
 
 ---
 
