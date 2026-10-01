@@ -61,7 +61,7 @@
 | pi-subagents 子会话在**同一 Node 进程**内：`createAgentSession` 库调用创建，`await session.prompt()` 驱动，`session.subscribe()` 观察 | `pi-subagents/src/index.ts:96`；`src/lifecycle/subagent-session.ts:110,134,88`；`subagent-manager.ts:216` |
 | 父/子**不共享模块实例**（pi 对每个会话重新调用扩展 factory），但共享 `globalThis` | `pi-sandbox/src/permission.ts` 的 `processPermissionState`（PR #143 后挂 `globalThis` 而非模块级变量，即为该事实的直接应用） |
 | 子会话 `hasUI === false` 的原因是 `bindExtensions({})` 未传 uiContext，与进程边界无关 | `pi-subagents/src/lifecycle/create-subagent-session.ts:228` |
-| 生命周期事件契约：`subagents:child:session-created { sessionId, parentSessionId }` 在 `bindExtensions()` **之前同步** emit；`subagents:child:disposed { sessionId }` 在 run 的 `finally` 必发 | `pi-subagents/src/lifecycle/child-lifecycle.ts`；emit 点 `create-subagent-session.ts:224`；契约由其 `tests/lifecycle/child-lifecycle.test.ts` 钉住 |
+| 生命周期事件契约：`subagents:child:session-created { sessionId, parentSessionId }` 在 `bindExtensions()` **之前同步** emit；`subagents:child:disposed { sessionId }` 在**子会话记录被拆除**时发（`subagent-manager.ts` 的 `cleanup()` 清扫 / `clearCompleted()` / manager `dispose()`），**不是**每次 run 结束时发——真机验证（2026-10-01）确认背景子代理跑完后不会立刻发 `disposed` | `pi-subagents/src/lifecycle/child-lifecycle.ts`；emit 点 `create-subagent-session.ts:224`（session-created）与 `subagent-session.ts:187`（disposed）；契约由其 `tests/lifecycle/child-lifecycle.test.ts` 钉住 |
 | 取消链路：父 TUI 按 ESC → `InterruptHandler.abortAll()` → 子 `session.abort()` → 子会话工具 `execute` 的 `signal` 触发 | `pi-subagents/src/handlers/interrupt.ts`；`subagent-session.ts:225-232`；`pi-sandbox/src/tools.ts` 三个工具的 `execute`（当前 `:201`/`:232`/`:249`，第 3 参已是 `signal`） |
 | `ui.select` 的第三参 `ExtensionUIDialogOptions { signal?: AbortSignal; timeout?: number }`：传入后（a）**弹窗前**发现 `signal.aborted` → 直接 resolve `undefined`、不显示；（b）**弹窗开着时** abort → `hideExtensionSelector()` 关闭弹窗 + resolve `undefined` | pi `dist/core/extensions/types.d.ts` 的 `ExtensionUIDialogOptions` 与 `ExtensionUIContext.select`；实现 `dist/modes/interactive/interactive-mode.js` 的 `showExtensionSelector`；RPC 模式同理 `dist/modes/rpc/rpc-mode.js` 的 `createDialogPromise`（不引 dist 行号：本机 pi 与 peer floor 0.80.2 的同一符号行号不同，Ruling 3） |
 | 弹窗显示时抢走焦点（`setFocus(extensionSelector)`），而 `tui.select.cancel` 默认绑 `escape` / `ctrl+c` → **用户在弹窗上按 ESC 已经能取消它**（不依赖 signal） | `interactive-mode.js` 的 `showExtensionSelector` 内的 `setFocus(extensionSelector)`；pi `docs/keybindings.md:96`（`app.interrupt` 也是 `escape`，:123，但焦点在弹窗时归 `tui.select.cancel`） |
@@ -290,7 +290,9 @@ pi.on("session_shutdown", () => {
 });
 ```
 
-时序保证：事件由**父实例**的 `pi.events.emit` 发出，且在子会话 `bindExtensions()` 之前**同步** emit（`create-subagent-session.ts:219-228`），因此 link 必然早于子会话的第一次工具调用；`disposed` 在 run 的 `finally` 必发，link 不会泄漏。
+时序保证：事件由**父实例**的 `pi.events.emit` 发出，且在子会话 `bindExtensions()` 之前**同步** emit（`create-subagent-session.ts:219-228`），因此 link 必然早于子会话的第一次工具调用。
+
+`disposed` **不在 run 结束时发**，而在子会话记录被拆除时发（`cleanup()` 清扫 / `clearCompleted()` / manager `dispose()`）——因此 link 会在**整个会话期间保留**：这正是所需语义（子会话被 `resume` 后仍能转发；若改成 run 结束即 unlink，被 resume 的子会话会失去转发能力）。代价是 `links` 随子会话数增长、随会话拆除清空；每条仅两个字符串，且 `resolveChannel` 仍要过 `hasUI()` 与注册校验，故残留条目方向安全（fail-closed）。本设计的 FIFO 车道不受影响。
 
 退订：两个 `pi.events.on` 的 disposer 存入 activate 闭包，并在 `session_shutdown` 里调用——宿主每次 `/reload` 复用同一 event bus 且重新调用扩展 factory，不退订会无上限累积监听器（超过 Node 默认 `maxListeners` 后打印 `MaxListenersExceededWarning` 污染用户终端）。
 
