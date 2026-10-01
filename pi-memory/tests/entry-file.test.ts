@@ -47,6 +47,17 @@ describe("serializeEntryFile / parseEntryFile", () => {
 			expect(parseEntryFile(serializeEntryFile({ ...META, type }, "b"))?.meta.type).toBe(type);
 		}
 	});
+
+	it("round-trips an empty description", () => {
+		const parsed = parseEntryFile(serializeEntryFile({ ...META, description: "" }, "body"));
+		expect(parsed?.meta.description).toBe("");
+		expect(parsed?.body).toBe("body");
+	});
+
+	it("returns null when the description line is absent entirely", () => {
+		const raw = "---\nname: A\ntype: user\ncreated: 2026-10-01\nmodified: 2026-10-01T00:00:00.000Z\n---\nbody\n";
+		expect(parseEntryFile(raw)).toBeNull();
+	});
 });
 
 function sign(type: string): string {

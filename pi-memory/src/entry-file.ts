@@ -53,9 +53,14 @@ export function parseEntryFile(raw: string): ParsedEntryFile | null {
 		if (m) fields[m[1]] = m[2].trim();
 	}
 
-	const { name, description, created, modified } = fields;
+	const name = fields.name ?? "";
+	const description = fields.description ?? "";
 	const type = fields.type ?? "";
-	if (!name || !description || !created || !modified || !isEntryType(type)) return null;
+	const created = fields.created ?? "";
+	const modified = fields.modified ?? "";
+	// description 必须「存在」但允许为空。deriveDescription 对「首行只有 markdown 标记」的正文会返回 ""，
+	// 若把空值当成缺字段，写出的文件将永远解析不了（对 store 静默不可见）。
+	if (!name || !created || !modified || !isEntryType(type) || !("description" in fields)) return null;
 
 	const bodyStart = raw.indexOf("\n", end + 1);
 	const body = bodyStart === -1 ? "" : raw.slice(bodyStart + 1).trim();
