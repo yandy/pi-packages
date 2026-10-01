@@ -415,6 +415,44 @@ describe("index wiring (integration)", () => {
 		mockConfigValue.extractMemories.enabled = false;
 	});
 
+	it("runs the v1→v2 migration during session_start and notifies the user", async () => {
+		await writeFile(
+			`${MOCK_BASE}/debugging.md`,
+			[
+				"---",
+				"name: debugging",
+				"description: SSH",
+				"type: project",
+				"updated: 2026-07-03",
+				"---",
+				"",
+				"## SSH Gotcha",
+				"",
+				"staging 用 2222",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+		const notify = vi.fn();
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		await handlers["session_start"][0](
+			{},
+			{
+				cwd: tmpDir,
+				hasUI: true,
+				isProjectTrusted: () => true,
+				ui: { notify, confirm: vi.fn(), setStatus: vi.fn() },
+			} as any,
+		);
+
+		expect(notify).toHaveBeenCalledTimes(1);
+		expect(notify.mock.calls[0][0]).toContain("Migrated 1 memories from 1 topic files");
+		expect(notify.mock.calls[0][0]).toContain(".backups");
+		expect(notify.mock.calls[0][1]).toBe("info");
+	});
+
 	it("tool execute throws when config.enabled is false", async () => {
 		const { createMemoryTool } = await import("../src/memory-tool");
 		const tool = createMemoryTool({

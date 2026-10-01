@@ -13,6 +13,7 @@ import {
 	type MemoryToolDeps,
 } from "./src/memory-tool";
 import { MemoryStore } from "./src/memory-store";
+import { migrateIfNeeded } from "./src/migrate";
 import { readDreamMeta, shouldNudge, writeDreamMeta } from "./src/nudge";
 import { resolveMemoryDir } from "./src/paths";
 import { searchSessions } from "./src/session-search";
@@ -71,6 +72,26 @@ export default function (pi: ExtensionAPI) {
 			indexMaxBytes: config.memIndexMaxBytes,
 			lock: config.lock,
 		});
+
+		// v1 → v2 的自动迁移（spec §15 / D10）。必须在读 indexSnapshot **之前**：
+		// 否则本会话注入的是迁移前的旧索引。
+		// 失败不能拖垮 session_start：记忆迁移不了也比整个会话起不来好，而且 `.migrated`
+		// 未写 → 下次 session_start 会重试（spec §15.4）。
+		try {
+			const migration = await migrateIfNeeded(store);
+			if (migration && ctx.hasUI) {
+				ctx.ui.notify(
+					`Migrated ${migration.entries} memories from ${migration.files} topic files. Backup at ${migration.backupDir}`,
+					"info",
+				);
+			}
+		} catch (e) {
+			if (ctx.hasUI) {
+				// biome-ignore lint/suspicious/noExplicitAny: error catch
+				ctx.ui.notify(`Memory migration failed: ${(e as any).message}`, "error");
+			}
+		}
+
 		indexSnapshot = await loadIndexSnapshot(memoryDir, config.memIndexInjectMaxLines, config.memIndexInjectMaxBytes);
 
 		// register memory tool once
