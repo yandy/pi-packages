@@ -125,19 +125,111 @@ describe("toExtractMessages", () => {
 		expect(out).toEqual([{ role: "toolResult", text: "exit 1", toolName: "bash", isError: true }]);
 	});
 
-	it("keeps text from an unknown shape and drops messages that have none", () => {
+	it("maps a custom message to assistant text", () => {
 		const out = toExtractMessages([
-			{ role: "custom", content: "preserved" },
-			{ role: "custom", output: "from output" },
-			null,
-			42,
-			{},
-			{ role: "user", content: [] },
+			{ role: "custom", customType: "note", content: "preserved", display: true, timestamp: 1 },
+			{
+				role: "custom",
+				customType: "note",
+				content: [
+					{ type: "text", text: "part one" },
+					{ type: "text", text: "part two" },
+				],
+				display: false,
+				timestamp: 2,
+			},
+			{
+				role: "custom",
+				customType: "note",
+				content: [{ type: "image", data: "AAAA", mimeType: "image/png" }],
+				display: false,
+				timestamp: 3,
+			},
 		]);
 		expect(out).toEqual([
-			{ role: "user", text: "preserved" },
-			{ role: "user", text: "from output" },
+			{ role: "assistant", text: "preserved" },
+			{ role: "assistant", text: "part one part two" },
 		]);
+	});
+
+	it("maps bash executions to bash tool results and honours excludeFromContext", () => {
+		const out = toExtractMessages([
+			{
+				role: "bashExecution",
+				command: "npm test",
+				output: "boom",
+				exitCode: 1,
+				cancelled: false,
+				truncated: false,
+				timestamp: 1,
+			},
+			{
+				role: "bashExecution",
+				command: "ls",
+				output: "a b",
+				exitCode: 0,
+				cancelled: false,
+				truncated: false,
+				timestamp: 2,
+			},
+			{
+				role: "bashExecution",
+				command: "sleep 10",
+				output: "killed",
+				exitCode: undefined,
+				cancelled: true,
+				truncated: false,
+				timestamp: 3,
+			},
+			{
+				role: "bashExecution",
+				command: "cat secret",
+				output: "hidden",
+				exitCode: 0,
+				cancelled: false,
+				truncated: false,
+				excludeFromContext: true,
+				timestamp: 4,
+			},
+		]);
+		expect(out).toEqual([
+			{ role: "toolResult", toolName: "bash", text: "$ npm test\nboom", isError: true },
+			{ role: "toolResult", toolName: "bash", text: "$ ls\na b", isError: false },
+			{ role: "toolResult", toolName: "bash", text: "$ sleep 10\nkilled", isError: false },
+		]);
+	});
+
+	it("maps branch and compaction summaries to assistant context", () => {
+		const out = toExtractMessages([
+			{ role: "branchSummary", summary: "back from the refactor branch", fromId: "e12", timestamp: 1 },
+			{ role: "compactionSummary", summary: "the compacted history", tokensBefore: 90_000, timestamp: 2 },
+			{ role: "compactionSummary", tokensBefore: 90_000, timestamp: 3 },
+		]);
+		expect(out).toEqual([
+			{ role: "assistant", text: "[branch summary] back from the refactor branch" },
+			{ role: "assistant", text: "[compaction summary] the compacted history" },
+		]);
+	});
+
+	it("keeps an unknown role as assistant text and never as a user rule", () => {
+		const out = toExtractMessages([
+			{ role: "system", content: "from content" },
+			{ role: "mystery", output: "from output" },
+			{ role: "mystery", text: "from text" },
+			{ role: "mystery", summary: "from summary" },
+			{ role: "mystery", content: [{ type: "text", text: "from array" }] },
+		]);
+		expect(out).toEqual([
+			{ role: "assistant", text: "from content" },
+			{ role: "assistant", text: "from output" },
+			{ role: "assistant", text: "from text" },
+			{ role: "assistant", text: "from summary" },
+			{ role: "assistant", text: "from array" },
+		]);
+	});
+
+	it("drops messages that have no text at all", () => {
+		expect(toExtractMessages([null, 42, {}, { role: "mystery" }, { role: "user", content: [] }])).toEqual([]);
 	});
 });
 
@@ -187,6 +279,25 @@ describe("renderConversation", () => {
 		expect(out).toContain("[2] tool_result: [error] boom");
 	});
 
+	it("makes mapped bash output obey maxToolResultChars", () => {
+		const out = renderConversation(
+			toExtractMessages([
+				{
+					role: "bashExecution",
+					command: "run",
+					output: "x".repeat(80),
+					exitCode: 0,
+					cancelled: false,
+					truncated: false,
+					timestamp: 1,
+				},
+			]),
+			{ ...LIMITS, maxToolResultChars: 20 },
+		);
+		expect(out).toContain("[1] tool_result: $ run\n");
+		expect(out).toContain("[truncated: 66 chars omitted]");
+	});
+
 	it("clips the middle when the total exceeds maxContextTokens * 4", () => {
 		const messages: ExtractMessage[] = [
 			{ role: "user", text: `HEAD${"a".repeat(300)}` },
@@ -200,6 +311,35 @@ describe("renderConversation", () => {
 		expect(out).toContain("chars omitted from the middle");
 		expect(out).not.toContain("MID");
 		expect(out.length).toBeLessThan(600);
+	});
+
+	// spec §11.2「优先保留全部 user 消息」：中段裁减只丢非 user 块，中间的纠正必须留下。
+	it("keeps a mid-turn user correction when the budget is exceeded", () => {
+		const messages: ExtractMessage[] = [
+			{ role: "assistant", text: `LEFT${"a".repeat(300)}` },
+			{ role: "user", text: "no, the port is 2222" },
+			{ role: "toolResult", toolName: "bash", text: `RIGHT${"r".repeat(300)}` },
+		];
+		const out = renderConversation(messages, { ...LIMITS, maxContextTokens: 95 });
+
+		expect(out).toContain("[2] user: no, the port is 2222");
+		expect(out).toContain("chars omitted from the middle");
+		expect(out).not.toContain("LEFT");
+		expect(out).not.toContain("RIGHT");
+		expect(out.length).toBeLessThanOrEqual(380);
+	});
+
+	it("falls back to the string middle clip when only user blocks exceed the budget", () => {
+		const messages: ExtractMessage[] = [
+			{ role: "user", text: `HEAD${"u".repeat(300)}` },
+			{ role: "user", text: `${"v".repeat(300)}TAIL` },
+		];
+		const out = renderConversation(messages, { ...LIMITS, maxContextTokens: 100 });
+
+		expect(out).toContain("[1] user: HEAD");
+		expect(out).toContain("TAIL");
+		expect(out).toContain("chars omitted from the middle");
+		expect(out.length).toBeLessThanOrEqual(400);
 	});
 
 	it("leaves a short conversation untouched", () => {

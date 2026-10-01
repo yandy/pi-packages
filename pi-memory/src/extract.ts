@@ -51,11 +51,14 @@ function clip(text: string, max: number): string {
 	return `${text.slice(0, max)}\n[truncated: ${text.length - max} chars omitted]`;
 }
 
+/** 中段裁减的标记行本体（与字符串回退共用，保证两种路径逐字相同）。 */
+const middleMarkerLabel = (omitted: number): string => `[truncated: ${omitted} chars omitted from the middle]`;
+
 /**
  * 总预算超限时的**中段**裁减：首尾优先保留（spec §11.2）。
  * 开头是用户的原始诉求、结尾是最终的结论与纠正，中段大多是可以牺牲的工具输出。
  */
-const middleMarker = (omitted: number): string => `\n[truncated: ${omitted} chars omitted from the middle]\n`;
+const middleMarker = (omitted: number): string => `\n${middleMarkerLabel(omitted)}\n`;
 
 function clipMiddle(text: string, maxChars: number): string {
 	if (maxChars <= 0 || text.length <= maxChars) return text;
@@ -67,17 +70,29 @@ function clipMiddle(text: string, maxChars: number): string {
 	return `${text.slice(0, head)}${middleMarker(omitted)}${text.slice(text.length - tail)}`;
 }
 
-function textOf(content: unknown): string {
+/** 从字符串或内容块数组里抠出文本。`joiner`/`images` 供 custom 消息（空格连接、不要图片占位）使用。 */
+function textOf(content: unknown, opts: { joiner?: string; images?: boolean } = {}): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
+	const joiner = opts.joiner ?? "\n";
+	const keepImages = opts.images ?? true;
 	const parts: string[] = [];
 	for (const block of content) {
 		if (!block || typeof block !== "object") continue;
 		const part = block as Record<string, unknown>;
 		if (part.type === "text" && typeof part.text === "string") parts.push(part.text);
-		else if (part.type === "image") parts.push("[image]");
+		else if (keepImages && part.type === "image") parts.push("[image]");
 	}
-	return parts.join("\n");
+	return parts.join(joiner);
+}
+
+/** 未知 role 的兜底：按常见字段顺序尽力取文本（`content` → `output` → `text` → `summary`）。 */
+function bestEffortText(m: Record<string, unknown>): string {
+	for (const field of [m.content, m.output, m.text, m.summary]) {
+		const text = textOf(field);
+		if (text) return text;
+	}
+	return "";
 }
 
 function toolCallsOf(content: unknown): Array<{ name: string; args: string }> {
@@ -99,10 +114,16 @@ function toolCallsOf(content: unknown): Array<{ name: string; args: string }> {
 }
 
 /**
- * 把 pi 的消息序列（`UserMessage` / `AssistantMessage` / `ToolResultMessage`）转成渲染用的结构。
+ * 把 pi 的消息序列（`AgentMessage` 联合类型）转成渲染用的结构。
  *
- * 未知形状**不静默丢弃**：能抠出文本就按 user 文本保留（宁可多给一点上下文，也不要让整轮对话
- * 因为 pi 的消息类型演进而消失）；抠不出文本（null / 数字 / 空对象）才跳过。
+ * 除了 user / assistant / toolResult，还要认领 pi 的机器消息：
+ * - `bashExecution` → `toolResult`（`!!` 前缀即 `excludeFromContext` 的则整条跳过），
+ *   这样 `command`/`exitCode` 不再丢失，且自动受 `maxToolResultChars` 与 `[error] ` 前缀约束；
+ * - `branchSummary` / `compactionSummary` → `assistant`（带标签），受 `maxAssistantChars` 约束；
+ * - `custom` → `assistant`。
+ *
+ * 未知 role **绝不**当作 user（user 文本不截断，且 prompt 会把它当规则/纠正）：按 assistant
+ * 尽力保留文本（`content` → `output` → `text` → `summary`），抠不出来才跳过。
  */
 export function toExtractMessages(messages: unknown[]): ExtractMessage[] {
 	const out: ExtractMessage[] = [];
@@ -136,11 +157,51 @@ export function toExtractMessages(messages: unknown[]): ExtractMessage[] {
 			});
 			continue;
 		}
+		if (role === "bashExecution") {
+			// `!!` 前缀（excludeFromContext）明确不进 LLM 上下文，extract 也不该看到。
+			if (m.excludeFromContext === true) continue;
+			const command = typeof m.command === "string" ? m.command : "";
+			const output = typeof m.output === "string" ? m.output : "";
+			const exitCode = typeof m.exitCode === "number" ? m.exitCode : undefined;
+			out.push({
+				role: "toolResult",
+				toolName: "bash",
+				text: `$ ${command}\n${output}`,
+				isError: exitCode !== undefined && exitCode !== 0,
+			});
+			continue;
+		}
+		if (role === "branchSummary" || role === "compactionSummary") {
+			const summary = typeof m.summary === "string" ? m.summary : "";
+			if (!summary) continue;
+			const label = role === "branchSummary" ? "[branch summary]" : "[compaction summary]";
+			out.push({ role: "assistant", text: `${label} ${summary}` });
+			continue;
+		}
+		if (role === "custom") {
+			const text = textOf(m.content, { joiner: " ", images: false });
+			if (text) out.push({ role: "assistant", text });
+			continue;
+		}
 
-		const text = textOf(m.content) || (typeof m.output === "string" ? m.output : "");
-		if (text) out.push({ role: "user", text });
+		const text = bestEffortText(m);
+		if (text) out.push({ role: "assistant", text });
 	}
 	return out;
+}
+
+/** 单条消息的渲染块（块之间以 `\n` 连接，块内不含分隔换行）。 */
+function renderBlock(m: ExtractMessage, index: number, limits: ConversationLimits): string {
+	const n = index + 1;
+	if (m.role === "user") return `[${n}] user: ${m.text ?? ""}`;
+	if (m.role === "assistant") {
+		const parts: string[] = [];
+		if (m.text) parts.push(clip(m.text, limits.maxAssistantChars));
+		for (const call of m.toolCalls ?? []) parts.push(`tool_call: ${call.name}(${clip(call.args, 120)})`);
+		return `[${n}] assistant: ${parts.join(" | ")}`;
+	}
+	const body = m.isError ? `[error] ${m.text ?? ""}` : (m.text ?? "");
+	return `[${n}] tool_result: ${clip(body, limits.maxToolResultChars)}`;
 }
 
 /**
@@ -150,28 +211,59 @@ export function toExtractMessages(messages: unknown[]): ExtractMessage[] {
  *     [2] assistant: <文本> | tool_call: memory({"action":"list"})
  *     [3] tool_result: <摘要>            // isError 时以 [error] 开头
  *
- * user 文本不截断；assistant 文本按 `maxAssistantChars`；tool_result 按 `maxToolResultChars`；
- * 总长超过 `maxContextTokens * 4` 字符时从中段裁减。
+ * user 文本不截断；assistant 文本按 `maxAssistantChars`；tool_result 按 `maxToolResultChars`。
+ * 总长超过 `maxContextTokens * 4` 字符时做**块级中段裁减**：先按单条上限把每条消息渲染成块，
+ * 再从中段向外逐块丢弃**非 user** 块（每次丢离中心最近的那块，tie 取靠后的），直到回到预算内，
+ * 或只剩 user 块（此时回退到字符串中段裁减）。user 块绝不因丢非 user 块而消失。
  */
 export function renderConversation(messages: ExtractMessage[], limits: ConversationLimits): string {
-	const lines: string[] = [];
-	messages.forEach((m, i) => {
-		const n = i + 1;
-		if (m.role === "user") {
-			lines.push(`[${n}] user: ${m.text ?? ""}`);
-			return;
+	const blocks = messages.map((m, i) => renderBlock(m, i, limits));
+	const maxChars = limits.maxContextTokens * 4;
+	if (maxChars <= 0) return blocks.join("\n");
+
+	const remaining = blocks.map((block, index) => ({ block, index, user: messages[index].role === "user" }));
+	let omitted = 0;
+	let firstDropped = -1;
+
+	// 标记插在首个被丢块的位置（块之间仍以 `\n` 连接，序号沿用原始下标，允许跳号）。
+	const assemble = (): string => {
+		const lines: string[] = [];
+		let markerInserted = false;
+		for (const entry of remaining) {
+			if (!markerInserted && firstDropped >= 0 && entry.index > firstDropped) {
+				lines.push(middleMarkerLabel(omitted));
+				markerInserted = true;
+			}
+			lines.push(entry.block);
 		}
-		if (m.role === "assistant") {
-			const parts: string[] = [];
-			if (m.text) parts.push(clip(m.text, limits.maxAssistantChars));
-			for (const call of m.toolCalls ?? []) parts.push(`tool_call: ${call.name}(${clip(call.args, 120)})`);
-			lines.push(`[${n}] assistant: ${parts.join(" | ")}`);
-			return;
+		if (firstDropped >= 0 && !markerInserted) lines.push(middleMarkerLabel(omitted));
+		return lines.join("\n");
+	};
+
+	let text = assemble();
+	while (text.length > maxChars) {
+		const center = (remaining.length - 1) / 2;
+		let target = -1;
+		let best = Number.POSITIVE_INFINITY;
+		for (let i = 0; i < remaining.length; i++) {
+			if (remaining[i].user) continue;
+			const distance = Math.abs(i - center);
+			// `<=` + 升序扫描：距离相同时取靠后的那一块。
+			if (distance <= best) {
+				best = distance;
+				target = i;
+			}
 		}
-		const body = m.isError ? `[error] ${m.text ?? ""}` : (m.text ?? "");
-		lines.push(`[${n}] tool_result: ${clip(body, limits.maxToolResultChars)}`);
-	});
-	return clipMiddle(lines.join("\n"), limits.maxContextTokens * 4);
+		// 只剩 user 块：回退到字符串中段裁减（首尾各约一半并预留标记长度）。
+		if (target === -1) return clipMiddle(text, maxChars);
+
+		const [dropped] = remaining.splice(target, 1);
+		// N 含被丢块的换行（spec §11.2 的逐字格式）。
+		omitted += dropped.block.length + 1;
+		if (firstDropped === -1) firstDropped = dropped.index;
+		text = assemble();
+	}
+	return text;
 }
 
 /** Build the extraction task prompt. */
