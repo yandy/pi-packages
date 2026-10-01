@@ -36,7 +36,7 @@ Network is always allowed (no network isolation).
 ## /permission command
 
 - `/permission` — show the current status (mode and source, selected runner and enforcement, workspace)
-- `/permission <read-only|workspace-write|danger-full-access>` — switch mode, **process-wide**: the next tool call in the parent session and in every subagent child session adopts it immediately (known limitation: when a child session's cwd differs from the parent's, the host's extension-module cache is keyed by cwd and re-imports the extension, so the override may not reach that child)
+- `/permission <read-only|workspace-write|danger-full-access>` — switch mode, **process-wide**: the next tool call in the parent session and in every subagent child session adopts it immediately
 
 ## Escalation approval (model-initiated)
 

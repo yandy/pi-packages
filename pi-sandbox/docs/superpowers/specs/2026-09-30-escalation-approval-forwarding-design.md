@@ -41,7 +41,7 @@
 | 审批延迟 | 立即（一次函数调用） | 平均 125ms、最坏 250ms，父侧再叠一轮轮询 |
 | 持久状态 | 无（进程退出即消失） | 磁盘残留 `requests/`、`responses/`、`*.tmp`，需清理逻辑 |
 | 竞态风险 | 单进程 Map + Promise 链 | 实证：`permission-forwarder.ts:227-231` 注释记录 issue #398 的 ENOENT 写循环（cleanup 与 write 抢目录） |
-| 与包基调一致性 | 一致（已有 `processPermissionState` 模块级进程单例） | 引入本包第一份磁盘可变状态与目录约定 |
+| 与包基调一致性 | 一致（已有 `processPermissionState` 进程级单例；PR #143 后同样挂 `globalThis`） | 引入本包第一份磁盘可变状态与目录约定 |
 | 伪造批准攻击面 | 需同进程代码执行 | 任何能写 `~/.pi/agent/...` 的本地进程都能写 "approved" 回执 |
 
 （表中体量与 #398 引用取自被删除的包，可用 `git show c62f0944^:pi-permission-system/src/forwarded-permissions/permission-forwarder.ts` 等命令复核。）
@@ -59,7 +59,7 @@
 | 事实 | 出处 |
 |---|---|
 | pi-subagents 子会话在**同一 Node 进程**内：`createAgentSession` 库调用创建，`await session.prompt()` 驱动，`session.subscribe()` 观察 | `pi-subagents/src/index.ts:96`；`src/lifecycle/subagent-session.ts:110,134,88`；`subagent-manager.ts:216` |
-| 父/子**不共享模块实例**（pi 对每个会话重新调用扩展 factory），但共享 `globalThis` | `pi-sandbox/src/permission.ts:16-18`（本包已依赖此事实做 `/permission` 进程级覆盖） |
+| 父/子**不共享模块实例**（pi 对每个会话重新调用扩展 factory），但共享 `globalThis` | `pi-sandbox/src/permission.ts` 的 `processPermissionState`（PR #143 后挂 `globalThis` 而非模块级变量，即为该事实的直接应用） |
 | 子会话 `hasUI === false` 的原因是 `bindExtensions({})` 未传 uiContext，与进程边界无关 | `pi-subagents/src/lifecycle/create-subagent-session.ts:228` |
 | 生命周期事件契约：`subagents:child:session-created { sessionId, parentSessionId }` 在 `bindExtensions()` **之前同步** emit；`subagents:child:disposed { sessionId }` 在 run 的 `finally` 必发 | `pi-subagents/src/lifecycle/child-lifecycle.ts`；emit 点 `create-subagent-session.ts:224`；契约由其 `tests/lifecycle/child-lifecycle.test.ts` 钉住 |
 | 取消链路：父 TUI 按 ESC → `InterruptHandler.abortAll()` → 子 `session.abort()` → 子会话工具 `execute` 的 `signal` 触发 | `pi-subagents/src/handlers/interrupt.ts`；`subagent-session.ts:225-232`；`pi-sandbox/src/tools.ts` 三个工具的 `execute`（当前 `:201`/`:232`/`:249`，第 3 参已是 `signal`） |
@@ -358,7 +358,7 @@ abort 的两种时机：
 
 **依赖 pi-subagents 的事件契约（非稳定 API）**：`subagents:child:session-created` / `:disposed` 的通道名与载荷形状是约定而非编译期契约（两包刻意不相互依赖）。上游改名或改形状的后果是**退回今天的 fail-closed 行为**（link 缺失 → 抛错），不会造成误放行——失败方向安全。契约当前由 `pi-subagents/tests/lifecycle/child-lifecycle.test.ts` 钉住。
 
-**`/permission` 覆盖在异 cwd 子会话下可能失效（既有缺陷，非本设计引入）**：`processPermissionState` 是模块级单例，而宿主的扩展模块缓存以 cwd + generation 为令牌（pi `dist/core/extensions/loader.js` 的 `useExtensionCacheCwd` / `loadExtensionModule`：令牌变化即用 `createJiti({ moduleCache: false })` 重新导入 → 新模块实例）。pi-subagents 的子会话 cwd 为 `params.cwd ?? snapshot.cwd`（`create-subagent-session.ts:148`），可与父不同；此时父会话设的 `/permission` 覆盖对子会话不可见，"放宽进程档位解救"在该配置下不成立。broker 挂 `globalThis` 正是为了不受此影响。修法（把 `processPermissionState` 同样挂 `globalThis`）超出本设计范围，应作为独立后续分支处理（Ruling 19）。
+**`/permission` 的进程级覆盖（背景事实，该缺陷已修复）**：本设计立项时 `processPermissionState` 还是模块级变量，而宿主的扩展模块缓存以 cwd + generation 为令牌（pi `dist/core/extensions/loader.js` 的 `useExtensionCacheCwd` / `loadExtensionModule`：令牌变化即 `createJiti({ moduleCache: false })` 重新导入 → 新模块实例）。pi-subagents 的子会话 cwd 为 `params.cwd ?? snapshot.cwd`（`create-subagent-session.ts:148`），可与父不同；`/reload` 同样清缓存——两种情形下父会话设的覆盖对子会话（或 reload 后的新实例）都不可见。该缺陷已由 `fix/pi-sandbox-permission-state-global`（PR #143，已合并）修复：`processPermissionState` 现与 broker 一样挂 `globalThis[Symbol.for(...)]` 单例，同进程所有模块实例共享同一份状态。**本设计的 broker 从一开始就用 `globalThis`（§4.2）正是基于同一条事实，故不受该缺陷影响。**
 
 ## 9. 未来扩展点
 
@@ -376,7 +376,7 @@ abort 的两种时机：
 | `README.zh.md` / `README.md` 的提权审批一节 | "无 UI 通道（headless、后台 subagent）时提权一律拒绝" → "后台 subagent 的提权会转发到父会话弹窗（同进程 pi-subagents，且父会话需有 UI）；无父通道时（headless、跨进程子代理）仍一律拒绝（fail-closed），此时用 `/permission` 放宽进程档位解救"（双语语义对等） |
 | `/permission` 状态块 | **不改**（D5） |
 | 本文件 §4.2/§4.3/§4.6/§6 | Ruling 17 落地后同步：新增 resolveOwnChannel、direct 路径改为经 FIFO 车道、并发与 hasUI() 抛错两行矩阵 |
-| 双语 README 的 /permission 一节 | 追加"异 cwd 子会话下覆盖可能不及"的已知限制（Ruling 19）|
+| 双语 README 的 /permission 一节 | 曾按 Ruling 19 追加"异 cwd 子会话下覆盖可能不及"的已知限制；该缺陷已由 PR #143 修复，据此删除该限制表述 |
 
 ## 11. 测试计划
 

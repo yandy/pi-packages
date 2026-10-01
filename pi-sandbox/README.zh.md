@@ -36,7 +36,7 @@ bash 命令被包装进平台沙箱 runner 后在本地 spawn（**路径透明**
 ## /permission 命令
 
 - `/permission` —— 显示当前状态（模式及来源、选中 runner 与 enforcement、工作区）
-- `/permission <read-only|workspace-write|danger-full-access>` —— 切换模式，**进程级**生效：父会话与所有 subagent 子会话的下一次工具调用立即采用（已知限制：子会话 cwd 与父不同时，宿主的扩展模块缓存会按 cwd 失效并重新导入，覆盖可能不及于该子会话）
+- `/permission <read-only|workspace-write|danger-full-access>` —— 切换模式，**进程级**生效：父会话与所有 subagent 子会话的下一次工具调用立即采用
 
 ## 提权审批（模型发起）
 
