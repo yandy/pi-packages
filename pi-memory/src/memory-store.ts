@@ -2,7 +2,7 @@ import { readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { deriveDescription, type EntryType, parseEntryFile, serializeEntryFile } from "./entry-file";
-import { indexCapacity, parseEntryIndex, removeIndexLine, upsertIndexLine } from "./entry-index";
+import { formatIndexLine, indexCapacity, parseEntryIndex, removeIndexLine, upsertIndexLine } from "./entry-index";
 import { entryFileName, resolveUniqueFileName } from "./filename";
 import { withLock } from "./fs-lock";
 import { createSnapshot } from "./snapshot";
@@ -279,6 +279,50 @@ export class MemoryStore {
 				this.#cache.delete(file);
 
 				return { file, capacityWarning: this.#capacityWarning(next) };
+			}),
+		);
+	}
+
+	async removeEntry(ref: string): Promise<void> {
+		await this.#savingQueue(() =>
+			this.#locked("remove", this.cfg.lock.timeoutMs, async () => {
+				const current = await this.readEntry(ref);
+				if (!current) throw new Error(`Entry "${ref}" not found`);
+
+				await this.#snapshot("write", [INDEX_FILE, current.file]);
+				await unlink(join(this.cfg.memoryDir, current.file)).catch(() => {});
+				await writeFile(this.#indexPath(), removeIndexLine(await this.readIndex(), current.file), "utf8");
+				this.#cache.delete(current.file);
+			}),
+		);
+	}
+
+	async renameEntry(ref: string, newName: string): Promise<{ file: string }> {
+		const { file } = await this.replaceEntry(ref, { name: newName });
+		return { file };
+	}
+
+	/** 从磁盘全量重建索引；保留第一条索引行之前的手写块，其余无法识别行丢弃。 */
+	async rebuildIndex(): Promise<{ entries: number; headerLines: number }> {
+		return this.#savingQueue(() =>
+			this.#locked("rebuild", this.cfg.lock.dreamTimeoutMs, async () => {
+				await this.#snapshot("index", [INDEX_FILE]);
+
+				const summaries = await this.listEntries();
+				const { lines, entries } = parseEntryIndex(await this.readIndex());
+
+				const header = lines.slice(0, entries[0]?.lineNo ?? lines.length);
+				while (header.length > 0 && header[header.length - 1].trim() === "") header.pop();
+				const effectiveHeader = header.length > 0 ? header : ["# Memory Index", ""];
+
+				const rebuilt = [
+					...effectiveHeader,
+					...summaries.map((s) => formatIndexLine(s.name, s.file, s.description)),
+				];
+				await writeFile(this.#indexPath(), rebuilt.length === 0 ? "" : `${rebuilt.join("\n")}\n`, "utf8");
+				this.#cache.clear();
+
+				return { entries: summaries.length, headerLines: effectiveHeader.length };
 			}),
 		);
 	}
