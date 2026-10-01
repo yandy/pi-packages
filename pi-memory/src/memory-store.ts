@@ -2,7 +2,7 @@ import { readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { deriveDescription, type EntryType, parseEntryFile, serializeEntryFile } from "./entry-file";
-import { indexCapacity, parseEntryIndex, upsertIndexLine } from "./entry-index";
+import { indexCapacity, parseEntryIndex, removeIndexLine, upsertIndexLine } from "./entry-index";
 import { entryFileName, resolveUniqueFileName } from "./filename";
 import { withLock } from "./fs-lock";
 import { createSnapshot } from "./snapshot";
@@ -40,7 +40,14 @@ function compareSummaries(a: EntrySummary, b: EntrySummary): number {
 	return a.modified === b.modified ? a.file.localeCompare(b.file) : a.modified.localeCompare(b.modified);
 }
 
-/** 进程级唯一写入通道。所有对 memory 目录的修改必须经它。 */
+/**
+ * 进程级唯一写入通道。所有对 memory 目录的修改必须经它。
+ *
+ * 已知崩溃窗口（由写前快照兜底，消费方属 Plan B 的恢复/迁移工具）：`replaceEntry` 改名时
+ * 先写新文件、再删旧文件、最后重写索引；若在「删旧文件」与「重写索引」之间进程退出，
+ * `MEMORY.md` 会残留一条指向已删文件的死链。`upsertIndexLine` 以 file 为键，因此这条死链
+ * 不会被后续写入自动覆盖 —— 只能从 `.backups/` 快照恢复。
+ */
 export class MemoryStore {
 	readonly #cache = new Map<string, CacheRow>();
 
@@ -224,10 +231,18 @@ export class MemoryStore {
 					(patch.body === undefined ? current.description : deriveDescription(body)) ||
 					current.description ||
 					name;
-				const file =
-					name === current.name
-						? current.file
-						: resolveUniqueFileName(new Set(await this.#entryFiles()), entryFileName(name));
+				// 改名不得撞名。`resolveUniqueFileName` 只防**文件名**冲突，所以不在这里拦下的话，
+				// rename 到已存在的 name 会写出第二个同名 entry（索引里两行都写着 [A]），之后 readEntry /
+				// addEntry 都会命中其中较旧的那个 —— 「精确同名即幂等」的硬约束就断了。
+				// 选择报错而不是合并或自动加后缀：合并会静默覆盖对方的内容，加后缀则会篡改调用方给的 name，
+				// 两者都在用户没要求的地方动记忆。
+				if (name !== current.name && (await this.listEntries()).some((s) => s.name === name)) {
+					throw new Error(`Entry "${name}" already exists`);
+				}
+				const used = new Set(await this.#entryFiles());
+				// 自碰撞（如 "A B" → "A-B" 派生出同一个文件名）应复用原文件，而不是产生 A-B-2.md
+				used.delete(current.file);
+				const file = name === current.name ? current.file : resolveUniqueFileName(used, entryFileName(name));
 
 				await this.#snapshot("write", [INDEX_FILE, current.file, file]);
 				await writeFile(
@@ -247,9 +262,15 @@ export class MemoryStore {
 				if (file !== current.file) await unlink(join(this.cfg.memoryDir, current.file)).catch(() => {});
 
 				const raw = await this.readIndex();
-				const line = parseEntryIndex(raw).entries.find((e) => e.file === current.file);
+				// 目标文件名可能残留一条陈旧索引行（手工删了文件却没删行）。不先清掉的话，
+				// 下面的 atLineNo 覆盖会与它并存 → 同一个 file 出现两条索引行。
+				// 必须先清再重新解析行号：删除会让后面的行号前移。
+				// 仅在真正换文件时清理：未改名（含 "A B" → "A-B" 派生同名文件）时 file === current.file，
+				// removeIndexLine 会删掉我们要保留位置的那一行，它会被 upsert 追加到索引末尾。
+				const cleaned = file === current.file ? raw : removeIndexLine(raw, file);
+				const line = parseEntryIndex(cleaned).entries.find((e) => e.file === current.file);
 				const next = upsertIndexLine(
-					raw,
+					cleaned,
 					{ name, file, description },
 					line ? { atLineNo: line.lineNo } : undefined,
 				);

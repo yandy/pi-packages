@@ -175,4 +175,34 @@ describe("replaceEntry", () => {
 	it("throws for an unknown ref", async () => {
 		await expect(store.replaceEntry("nope", { body: "x" })).rejects.toThrow('Entry "nope" not found');
 	});
+
+	it("rejects a rename onto an existing name, leaving both entries intact", async () => {
+		await store.addEntry({ name: "A", body: "A 正文" });
+		await store.addEntry({ name: "B", body: "B 正文" });
+		await expect(store.replaceEntry("B", { name: "A" })).rejects.toThrow('Entry "A" already exists');
+
+		expect(parseEntryIndex(await store.readIndex()).entries.map((e) => e.file).sort()).toEqual(["A.md", "B.md"]);
+		expect((await store.readEntry("A"))?.body).toBe("A 正文");
+		expect((await store.readEntry("B"))?.body).toBe("B 正文");
+		expect(await readdir(dir)).not.toContain("A-2.md");
+	});
+
+	it("reuses the same file when a rename only changes the derived file name", async () => {
+		const first = await store.addEntry({ name: "A B", body: "正文" });
+		const renamed = await store.replaceEntry("A B", { name: "A-B" });
+
+		expect(renamed.file).toBe(first.file);
+		expect(await readdir(dir)).not.toContain("A-B-2.md");
+		expect(parseEntryIndex(await store.readIndex()).entries).toHaveLength(1);
+		expect((await store.readEntry("A-B"))?.file).toBe("A-B.md");
+	});
+
+	it("drops a stale index line for the target file when renaming", async () => {
+		await store.addEntry({ name: "B", body: "正文" });
+		// 手工制造「文件已删、索引行还在」的陈旧状态
+		await writeFile(join(dir, "MEMORY.md"), `${await store.readIndex()}- [Old](Old.md) — 陈旧\n`, "utf8");
+		await store.replaceEntry("B", { name: "Old" });
+
+		expect(parseEntryIndex(await store.readIndex()).entries.filter((e) => e.file === "Old.md")).toHaveLength(1);
+	});
 });
