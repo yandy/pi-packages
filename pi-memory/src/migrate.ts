@@ -1,7 +1,7 @@
-import { cp, mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isEntryType } from "./entry-file";
-import { BACKUP_DIR, INDEX_FILE, LOCK_FILE, type MemoryStore } from "./memory-store";
+import { BACKUP_DIR, INDEX_FILE, LOCK_FILE, unlinkStrict, type MemoryStore } from "./memory-store";
 
 /** 迁移完成标记。写在**最后一步** —— 中途失败时它不存在，下次 session_start 会重试（spec §15.4）。 */
 export const MIGRATED_FILE = ".migrated";
@@ -153,6 +153,16 @@ async function isFile(path: string): Promise<boolean> {
 	);
 }
 
+/** 只把 ENOENT 当作「文件不在了」；其余读取错误（EISDIR/EACCES/EIO）一律上抛（spec §15.4）。 */
+async function readIfExists(path: string): Promise<string | null> {
+	try {
+		return await readFile(path, "utf8");
+	} catch (e) {
+		if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
+		throw e;
+	}
+}
+
 /**
  * 自建回滚点 `.backups/migrate-<ts>/`（spec §15.3 步骤 2）。
  *
@@ -168,7 +178,9 @@ async function createRollbackPoint(memoryDir: string, legacyFiles: string[], now
 	const backupDir = join(memoryDir, BACKUP_DIR, `migrate-${stamp}`);
 	await mkdir(join(backupDir, "originals"), { recursive: true });
 
-	const entries = await readdir(memoryDir, { withFileTypes: true }).catch(() => []);
+	// memoryDir 的存在性已在调用前检查过；列表失败（EACCES/EIO）不能吞：那会返回一个只有
+	// `originals/` 的不完整回滚点，而它随后就被写进 `.migrated` —— 用户再也回不去（spec §15.4）。
+	const entries = await readdir(memoryDir, { withFileTypes: true });
 	for (const entry of entries) {
 		// 只复制普通文件、跳过锁记录；`.backups` 与 `sessions/` 是目录，天然被排除。
 		// `.migrated` 此刻还不存在（它在最后一步才写），所以不需要显式排除。
@@ -220,8 +232,10 @@ export async function migrateIfNeeded(
 		.sort();
 	const legacyFiles: string[] = [];
 	for (const file of candidates) {
-		const raw = await readFile(join(memoryDir, file), "utf8").catch(() => "");
-		if (raw && isLegacyTopicFile(raw)) legacyFiles.push(file);
+		// 只容忍 ENOENT（readdir 与 read 之间文件消失 → 当作非 legacy）。EISDIR/EACCES/EIO 必须上抛：
+		// 把不可读的候选归为「非 legacy」会在它是唯一候选时写下 0/0 标记，重试永久不再发生（spec §15.4）。
+		const raw = await readIfExists(join(memoryDir, file));
+		if (raw !== null && isLegacyTopicFile(raw)) legacyFiles.push(file);
 	}
 	if (legacyFiles.length === 0) {
 		await writeMarker(markerPath, nothing);
@@ -270,8 +284,10 @@ export async function migrateIfNeeded(
 
 		// 原 topic 文件从 memory 目录移除，否则 rebuildIndex 之后它们还会作为「无法解析的 .md」
 		// 留在目录里（spec §15.3 步骤 5）。它们已经保留在 migrate-<ts>/originals/。
+		// 删除失败必须上抛（只有 ENOENT 视为已删除）：吞掉的话 `.migrated` 会在文件仍留在目录里的
+		// 情况下被写下，重试永久不再发生（spec §15.4）。
 		for (const file of legacyFiles) {
-			await unlink(join(memoryDir, file)).catch(() => {});
+			await unlinkStrict(join(memoryDir, file));
 		}
 
 		await writeMarker(markerPath, { migratedAt: now.toISOString(), entries, files: legacyFiles.length, backupDir });

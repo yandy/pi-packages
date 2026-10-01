@@ -257,6 +257,18 @@ describe("migrateIfNeeded", () => {
 		expect(await marker()).toMatchObject({ entries: 0, files: 0 });
 	});
 
+	// spec §15.4：不可读的 legacy 候选不能当作「非 legacy」。若它是目录里唯一的候选，
+	// 吞掉错误会写下 0/0 标记 → 重试永久不再发生，内容静默丢失。
+	it("fails without writing .migrated when a legacy candidate cannot be read", async () => {
+		await seedLegacy({});
+		// readdir 会列出 bad.md，readFile 会以 EISDIR 失败
+		await mkdir(join(dir, "bad.md"));
+
+		await expect(migrateIfNeeded(store)).rejects.toThrow();
+
+		expect(await readdir(dir)).not.toContain(MIGRATED_FILE);
+	});
+
 	// Review Focus #2：标题里的 `](` 会伪造索引行的 name/file 分组，store 会拒绝它 ——
 	// 迁移不能因为一条标题里有个 markdown 链接就整轮失败。
 	it("neutralises '](' in a legacy title so it cannot forge an index key", async () => {
@@ -377,6 +389,25 @@ describe("migrateIfNeeded", () => {
 		const backups = await backupDirs();
 		expect(backups).toHaveLength(1);
 		expect(await readdir(join(dir, ".backups", backups[0], "originals"))).toEqual(["a.md"]);
+	});
+
+	// spec §15.4：删除失败（EISDIR/EACCES/EIO）不能吞掉 —— 否则 `.migrated` 会在 topic 文件
+	// 仍留在目录里的情况下被写下，重试永久不再发生（文件只能从手工回滚点找回）。
+	it("does not write .migrated when a legacy topic file cannot be removed", async () => {
+		await seedLegacy({ "a.md": topicFile("a", "feedback", "2026-01-02", [["A", "正文 A"]]) });
+		const legacyPath = join(dir, "a.md");
+		const original = store.rebuildIndex.bind(store);
+		// 在 unlink 之前把 legacy 文件替换成同名目录 → unlinkStrict 以 EISDIR 上抛
+		vi.spyOn(store, "rebuildIndex").mockImplementationOnce(async (options) => {
+			await rm(legacyPath);
+			await mkdir(legacyPath);
+			return original(options);
+		});
+
+		await expect(migrateIfNeeded(store)).rejects.toThrow();
+
+		expect(await readdir(dir)).not.toContain(MIGRATED_FILE);
+		expect(await backupDirs()).toHaveLength(1);
 	});
 
 	// Review Focus #4：失败后重跑必须干净 —— usedNames 的初值来自磁盘，addEntry 对同名幂等。
