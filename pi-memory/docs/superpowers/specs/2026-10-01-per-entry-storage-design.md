@@ -348,7 +348,11 @@ function resolveTranscript(context, supportsMidConvoSystemMessages){
 | `reload` | **录制值**（同上） | 扩展重载不应改写 system prompt |
 | `session_compact` | 从磁盘**重读**并覆盖 | compaction 已重写对话中段，边际缓存损失最小；长会话到中期往往已积累新记忆，刷新收益最大 |
 
-实现要点：读录制值需重放 transcript 的 system 消息。`ctx.sessionManager` 暴露 `getEntries` / `getLeafId` / `buildContextEntries`，包根另导出 `sessionEntryToContextMessages`；据此按 pi 的 patch 语义（`null` = 删除；否则覆盖，保留首次插入位置）重放即可得到 `sections["memory_index"]`。**若重放得不到该键**（例如更早版本的 session），回退为从磁盘读。
+实现要点：读录制值需重放 transcript 的 system 消息。`ctx.sessionManager` 暴露 `getEntries` / `getLeafId` / `buildContextEntries`，包根另导出 `sessionEntryToContextMessages`；据此按 pi 的 patch 语义重放即可得到 `sections["memory_index"]`。重放规则：逐条 system 消息遍历其 `sections`，`value === null` 表示**删除该 section**（`Map.delete`），否则覆盖其值并保留首次插入位置。
+
+**必须避开的陷阱（`null` 语义）**：pi 用 `null` 表示「该 section 不存在」，`diffSystemPromptSections` 在「上一状态有、当前状态没有」时会生成 `patch[name] = null`，重放时 `sections.delete(name)`。因此在 `before_agent_start` 中**必须无条件把 `memory_index` 放进 `event.systemPromptOptions.sections`**（值为冻结值），**不得**因为「本次是 resume/fork，不想动它」而省略这个键 —— 省略等于声明「该 section 不应存在」，后果是索引被从 system prompt 中**静默删除**。「不想改」只能靠「喂回与录制值逐字节相同的值」实现。同理，重放中遇到 `null` 时按「拿不到该键」处理并回退磁盘读，不得将 `null` 当作录制值回填。
+
+**若重放拿不到该键**（例如更早版本的 session），回退为从磁盘读。
 
 语义代价（有意接受）：同一会话内看不到本轮新增的记忆（extract / `memory add` 服务的是未来会话，工具返回值已确认写入）；后果是 compaction 之后视图会刷新一次。
 
@@ -581,7 +585,8 @@ session_shutdown
 | 容量 | 超 200 行：写入成功且返回可操作错误 |
 | 净化 | 零宽字符、bidi 控制符、≥5 种仿冒标签；磁盘内容不被修改 |
 | 注入 | `event.systemPromptOptions.sections["memory_index"]` 被设置；未设置 `forceSystemPrompt`；**同一 session 内多轮之间内容恒等**（磁盘 MEMORY.md 被并发修改后仍恒等） |
-| 索引来源 | `startup`/`new`：从磁盘读；`resume`/`fork`/`reload`：重放 transcript 取录制值（**不读磁盘**）；重放得不到该键时回退磁盘；重放遵循 `null` = 删除、否则覆盖 |
+| 索引来源 | `startup`/`new`：从磁盘读；`resume`/`fork`/`reload`：重放 transcript 取录制值（**不读磁盘**）；重放得不到该键或遇到 `null` 时回退磁盘；重放遵循 `null` = 删除、否则覆盖 |
+| `null` 陷阱 | `before_agent_start` 在多轮中**始终**设置 `sections["memory_index"]`（含 resume/fork/reload）；断言省略该键时 diff 会生成 `{memory_index: null}` 并导致索引被删除 |
 | 工具注册范围 | 主 agent 的 `memory` schema 只含 5 个 action；`rename` / `rebuild_index` 不出现在主 agent 与 extract 的工具集中；dream 的工具集含 7 个 |
 | 生命周期 | `session_compact` 后 `injectedTopics` 为空；且 `session_compact` 后 `indexSnapshot` **被磁盘值覆盖**；其余事件后 `indexSnapshot` 不变 |
 | 提取 | prompt 含全部 user 消息与 tool_result 摘要；中段裁减策略；单条上限生效 |
