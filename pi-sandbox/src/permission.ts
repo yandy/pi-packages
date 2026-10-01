@@ -13,11 +13,33 @@ export function createPermissionState(): PermissionState {
 	return { override: null };
 }
 
+/** 进程全局槽位键：带包名前缀，避免与其他扩展的 globalThis 使用相撞。 */
+const PERMISSION_STATE_KEY = Symbol.for("@yandy0725/pi-sandbox:permission-state");
+
+function getOrCreatePermissionState(): PermissionState {
+	const store = globalThis as Record<symbol, unknown>;
+	const existing = store[PERMISSION_STATE_KEY] as PermissionState | undefined;
+	if (existing !== undefined) return existing;
+	const state = createPermissionState();
+	store[PERMISSION_STATE_KEY] = state;
+	return state;
+}
+
 /**
- * 进程级单例（spec §9）：pi 对每个会话重新调用扩展 factory，activate 闭包不跨会话；
- * /permission 覆盖必须挂模块级才能覆盖父/子全部会话——这是被卡子 agent 的唯一解救杠杆。
+ * 进程级单例（spec §9），必须挂 **globalThis** 而不是模块级变量：宿主的扩展模块缓存以
+ * (cwd, generation) 为令牌（`dist/core/extensions/loader.js` 的 `useExtensionCacheCwd` /
+ * `loadExtensionModule`），令牌变化即 `clearExtensionCache()` + `createJiti({ moduleCache: false })`
+ * 重新 import 整个扩展——pi-subagents 的子会话 cwd 为 `params.cwd ?? snapshot.cwd`（可与父不同），
+ * `/reload` 也会清缓存。模块级变量在这些情形下会重新初始化成 `{ override: null }`，父会话设的
+ * `/permission` 覆盖对子会话（或 reload 后的新实例）不可见：表现为"我明明放宽了，它还是被拒"。
+ * globalThis 槽位在同进程内被所有模块实例共享，因此先设/后设、同 cwd/异 cwd 都能看到同一份状态。
  */
-export const processPermissionState: PermissionState = createPermissionState();
+export const processPermissionState: PermissionState = getOrCreatePermissionState();
+
+/** 仅供测试复位全局槽位（生产代码不得调用）。 */
+export function resetPermissionStateForTests(): void {
+	delete (globalThis as Record<symbol, unknown>)[PERMISSION_STATE_KEY];
+}
 
 export interface PermissionCommandDeps {
 	state: PermissionState;

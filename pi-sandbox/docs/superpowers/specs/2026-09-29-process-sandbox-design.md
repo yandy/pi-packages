@@ -212,7 +212,7 @@ bash / write / edit 各增加可选参数：
 用户也可通过 session-navigation 实时观察子会话拒绝并主动放宽。若未来 pi-subagents 给子会话接入 uiContext，本设计在每次调用时检查 `ctx.hasUI`，子会话 escalation 自动恢复弹窗，无需改代码。
 
 **状态归属**（最终 review 后修正机制表述：pi 对每个会话的 bindExtensions 都会**重新调用扩展 factory**，activate 闭包不跨会话共享；且 pi 从不 chdir，会话 cwd 只经工具 execute 的 `ctx.cwd` 可达，`process.cwd()` 恒为启动目录）：
-- 进程级（模块单例）：runner 链探测结论、`/permission` 用户覆盖（**必须**模块级才能覆盖父/子全部会话）、按 cwd 键控的 config 与 workspace root 缓存
+- 进程级：runner 链探测结论与按 cwd 键控的 config / workspace root 缓存（每实例一份即可，重复探测无害）；`/permission` 用户覆盖**必须挂 `globalThis` 单例**（模块级变量不行：宿主按 (cwd, generation) 缓存扩展模块，令牌变化即重新 import，模块级变量会重新初始化成默认值，父会话的覆盖对异 cwd 子会话或 reload 后的新实例不可见）
 - 逐调用派生：workspace root = canonicalPath(ctx.cwd ?? activate 时 cwd)；项目级配置按 ctx.cwd 惰性加载
 - 不再有任何模块级沙箱**会话实例**单例（1.x `session.ts` 的 `sandboxInstance` 模式废除——该禁令针对容器实例状态，不针对上述进程级覆盖/缓存单例）
 
