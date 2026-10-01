@@ -1,9 +1,16 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createPermissionCommand, createPermissionState } from "../src/permission";
 
 function makeCtx() {
 	return { ui: { notify: vi.fn() } };
 }
+
+afterEach(async () => {
+	// processPermissionState 现在是进程级 globalThis 单例：跨用例/跨文件必须复位
+	const { resetPermissionStateForTests } = await import("../src/permission");
+	resetPermissionStateForTests();
+	vi.resetModules();
+});
 
 describe("createPermissionCommand", () => {
 	it("no args: notifies the status text (describeStatus gets \"\" when ctx has no cwd)", async () => {
@@ -47,5 +54,33 @@ describe("createPermissionCommand", () => {
 		const cmd = createPermissionCommand({ state: createPermissionState(), describeStatus: () => "" });
 		expect(cmd.getArgumentCompletions("w")).toEqual([{ value: "workspace-write", label: "workspace-write" }]);
 		expect(cmd.getArgumentCompletions("")).toHaveLength(3);
+	});
+});
+
+describe("processPermissionState 跨模块实例共享（异 cwd 子会话 / reload 会重新 import 扩展）", () => {
+	it("模块被重新 import 后仍是同一对象，且能看到已设的覆盖", async () => {
+		const { processPermissionState } = await import("../src/permission");
+		processPermissionState.override = "danger-full-access";
+
+		// 模拟宿主的扩展模块缓存失效：loader 以 (cwd, generation) 为令牌，令牌变化即
+		// clearExtensionCache() + createJiti({ moduleCache: false }) 重新 import
+		//（pi dist/core/extensions/loader.js）；vitest 的 resetModules 等价于此。
+		vi.resetModules();
+		const { processPermissionState: reimported } = await import("../src/permission");
+
+		expect(reimported).toBe(processPermissionState); // 必须是同一个 globalThis 单例
+		expect(reimported.override).toBe("danger-full-access"); // 父会话设的覆盖对“新 import 的实例”可见
+	});
+
+	it("resetPermissionStateForTests 清掉全局槽位，下一次 import 回到默认状态", async () => {
+		const mod = await import("../src/permission");
+		mod.processPermissionState.override = "read-only";
+		mod.resetPermissionStateForTests();
+
+		vi.resetModules();
+		const { processPermissionState: fresh } = await import("../src/permission");
+
+		expect(fresh).not.toBe(mod.processPermissionState); // 旧引用已脱离全局槽位
+		expect(fresh.override).toBeNull();
 	});
 });
