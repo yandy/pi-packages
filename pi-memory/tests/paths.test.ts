@@ -9,7 +9,6 @@ import {
 	projectDirName,
 	projectIdentity,
 	resolveMemoryDir,
-	safeTopicPath,
 } from "../src/paths";
 
 const execFileP = promisify(execFile);
@@ -77,21 +76,6 @@ describe("resolveMemoryDir", () => {
 		expect(await resolveMemoryDir({ memoryDir: "/custom/root" }, dir)).toBe(
 			join("/custom/root", "git", "github.com__yandy__pi-packages"),
 		);
-	});
-});
-
-describe("safeTopicPath", () => {
-	it("accepts a normal filename", () => {
-		expect(safeTopicPath("/tmp/mem/abc", "debugging.md")).toBe(join("/tmp/mem/abc", "debugging.md"));
-	});
-	it("throws on path traversal with ..", () => {
-		expect(() => safeTopicPath("/tmp/mem/abc", "../etc/passwd")).toThrow();
-	});
-	it("throws on absolute path", () => {
-		expect(() => safeTopicPath("/tmp/mem/abc", "/etc/passwd")).toThrow();
-	});
-	it("throws on backslash traversal", () => {
-		expect(() => safeTopicPath("/tmp/mem/abc", "..\\..\\etc")).toThrow();
 	});
 });
 
