@@ -8,13 +8,13 @@ export interface VisionConfig {
 	/** "provider/modelId" or a fuzzy model name (e.g. "haiku", "qwen vl"). */
 	model?: string;
 	enabled: VisionEnabledState;
-	defaultReasoning?: ThinkingLevel | "off";
+	defaultThinkLevel?: ThinkingLevel | "off";
 }
 
 export const DEFAULT_CONFIG: VisionConfig = { enabled: "auto" };
 
 const ENABLED_STATES = ["auto", "on", "off"] as const;
-const REASONING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+export const THINK_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 
 export function configPath(agentDir: string): string {
 	return join(agentDir, "vision-tools.json");
@@ -40,14 +40,14 @@ export function parseConfig(raw: unknown): VisionConfig {
 		cfg.enabled = obj.enabled as VisionEnabledState;
 	}
 
-	if (obj.defaultReasoning !== undefined) {
+	if (obj.defaultThinkLevel !== undefined) {
 		if (
-			typeof obj.defaultReasoning !== "string" ||
-			!REASONING_LEVELS.includes(obj.defaultReasoning as (typeof REASONING_LEVELS)[number])
+			typeof obj.defaultThinkLevel !== "string" ||
+			!THINK_LEVELS.includes(obj.defaultThinkLevel as (typeof THINK_LEVELS)[number])
 		) {
-			throw new Error(`vision-tools config: defaultReasoning must be one of ${REASONING_LEVELS.join(", ")}`);
+			throw new Error(`vision-tools config: defaultThinkLevel must be one of ${THINK_LEVELS.join(", ")}`);
 		}
-		cfg.defaultReasoning = obj.defaultReasoning as ThinkingLevel | "off";
+		cfg.defaultThinkLevel = obj.defaultThinkLevel as ThinkingLevel | "off";
 	}
 
 	return cfg;

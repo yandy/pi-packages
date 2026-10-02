@@ -4,9 +4,9 @@ import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { compressImage, readCompressionSettings } from "./src/compress.js";
-import { loadConfig, saveConfig, type VisionConfig } from "./src/config.js";
+import { loadConfig, saveConfig, THINK_LEVELS, type VisionConfig } from "./src/config.js";
 import { type DecodedImage, decodeImage } from "./src/image.js";
-import { effectiveReasoning, reasoningToOptions, type VisionReasoning } from "./src/reasoning.js";
+import { effectiveThinkLevel, thinkLevelToOptions, type VisionThinkLevel } from "./src/think-level.js";
 import { callingModelHasVision, effectiveEnabled, footerLabel } from "./src/state.js";
 import { callVision, resolveVisionModel } from "./src/vision.js";
 
@@ -97,7 +97,7 @@ export default function (pi: ExtensionAPI) {
 					isError: true,
 				};
 			}
-			const p = params as { image_path: string; prompt: string; compress?: boolean; reasoning?: VisionReasoning };
+			const p = params as { image_path: string; prompt: string; compress?: boolean; reasoning?: VisionThinkLevel };
 
 			const resolved = resolveVisionModel(ctx.modelRegistry, config);
 			if (!resolved.ok) {
@@ -133,15 +133,15 @@ export default function (pi: ExtensionAPI) {
 
 			onUpdate?.({ content: [{ type: "text", text: "Analyzing image..." }], details: {} });
 
-			const reasoningLevel = effectiveReasoning(p.reasoning, config.defaultReasoning);
-			const reasoning = reasoningToOptions(reasoningLevel);
+			const thinkLevel = effectiveThinkLevel(p.reasoning, config.defaultThinkLevel);
+			const thinkLevelOptions = thinkLevelToOptions(thinkLevel);
 			const result = await callVision(
 				{
 					model: resolved.model,
 					auth: { apiKey: auth.apiKey, headers: auth.headers },
 					prompt: p.prompt,
 					images: [image],
-					reasoning,
+					reasoning: thinkLevelOptions,
 					signal: signal ?? undefined,
 				},
 				complete,
@@ -162,7 +162,7 @@ export default function (pi: ExtensionAPI) {
 					usage: result.usage,
 					compressed,
 					mimeType,
-					reasoning: reasoningLevel,
+					reasoning: thinkLevel,
 				},
 			};
 		},
@@ -207,10 +207,16 @@ export default function (pi: ExtensionAPI) {
 			if (sub === "config") {
 				const key = parts[1];
 				const val = parts.slice(2).join(" ") || undefined;
-				if (key === "model" && val) config = { ...config, model: val };
-				else if (key === "default-reasoning" && val) config = { ...config, defaultReasoning: val as VisionReasoning };
-				else {
-					ctx.ui.notify("Usage: /vision config model <m> | default-reasoning <level>", "warning");
+				if (key === "model" && val) {
+					config = { ...config, model: val };
+				} else if (key === "default-think-level" && val) {
+					if (!(THINK_LEVELS as readonly string[]).includes(val)) {
+						ctx.ui.notify(`Invalid think level "${val}". Valid: ${THINK_LEVELS.join(", ")}`, "warning");
+						return;
+					}
+					config = { ...config, defaultThinkLevel: val as VisionThinkLevel };
+				} else {
+					ctx.ui.notify("Usage: /vision config model <m> | default-think-level <level>", "warning");
 					return;
 				}
 				await saveConfig(getAgentDir(), config);
@@ -220,7 +226,7 @@ export default function (pi: ExtensionAPI) {
 					if (resolved.ok) ctx.ui.notify(`vision model = ${resolved.model.provider}/${resolved.model.id}`, "info");
 					else ctx.ui.notify(resolved.error, "warning");
 				} else {
-					ctx.ui.notify(`vision ${key} = ${val}`, "info");
+					ctx.ui.notify(`vision default-think-level = ${val}`, "info");
 				}
 				return;
 			}

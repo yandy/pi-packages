@@ -12,7 +12,7 @@ describe("parseConfig", () => {
 	});
 
 	it("accepts a fully valid config", () => {
-		const raw = { model: "openai/gpt-4o", enabled: "on", defaultReasoning: "high" };
+		const raw = { model: "openai/gpt-4o", enabled: "on", defaultThinkLevel: "high" };
 		expect(parseConfig(raw)).toEqual(raw);
 	});
 
@@ -35,8 +35,12 @@ describe("parseConfig", () => {
 		expect(() => parseConfig({ model: false })).toThrow(/model/);
 	});
 
-	it("rejects an invalid defaultReasoning", () => {
-		expect(() => parseConfig({ defaultReasoning: "ultra" })).toThrow(/defaultReasoning/);
+	it("rejects an invalid defaultThinkLevel", () => {
+		expect(() => parseConfig({ defaultThinkLevel: "ultra" })).toThrow(/defaultThinkLevel/);
+	});
+
+	it("ignores the legacy defaultReasoning key", () => {
+		expect(parseConfig({ model: "x", defaultReasoning: "high" })).toEqual({ model: "x", enabled: "auto" });
 	});
 
 	it("strips unknown keys", () => {
@@ -68,8 +72,13 @@ describe("loadConfig / saveConfig (filesystem)", () => {
 		expect(await loadConfig(dir)).toEqual(DEFAULT_CONFIG);
 	});
 
+	it("falls back to DEFAULT_CONFIG when a hand-written think level is invalid", async () => {
+		await writeFile(configPath(dir), JSON.stringify({ model: "haiku", defaultThinkLevel: "ultra" }));
+		expect(await loadConfig(dir)).toEqual(DEFAULT_CONFIG);
+	});
+
 	it("round-trips a config through save then load", async () => {
-		const cfg: VisionConfig = { model: "openai/gpt-4o", enabled: "off", defaultReasoning: "low" };
+		const cfg: VisionConfig = { model: "openai/gpt-4o", enabled: "off", defaultThinkLevel: "low" };
 		await saveConfig(dir, cfg);
 		expect(await loadConfig(dir)).toEqual(cfg);
 	});
