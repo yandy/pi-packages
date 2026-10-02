@@ -4,9 +4,10 @@ import { PassThrough } from "node:stream";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createSandboxTools, resolveCall, resolveCallMode } from "../src/tools";
+import { createSandboxTools, ESCALATION_PROPS, resolveCall, resolveCallMode } from "../src/tools";
 import { createPermissionState } from "../src/permission";
 import { DEFAULT_SANDBOX_CONFIG } from "../src/config";
+import { PLACEHOLDER_KEYS } from "../src/escalation";
 import { getEscalationBroker, resetEscalationBrokerForTests } from "../src/escalation-broker";
 import { getDenialLedger, resetDenialLedgerForTests } from "../src/denial-ledger";
 
@@ -138,6 +139,61 @@ describe("createSandboxTools schemas", () => {
 		// write 钉 base 原样（undefined）；裁决原文假设 write 也为 false，与 dist 不符，按事实钉住。
 		expect((write.parameters as { additionalProperties?: boolean }).additionalProperties).toBeUndefined();
 		expect((edit.parameters as { additionalProperties?: boolean }).additionalProperties).toBe(false);
+	});
+});
+
+describe("prepareArguments（pi 校验前的占位符剥离；edit 必须串联 base 钩子）", () => {
+	it("三个工具都挂了 prepareArguments", () => {
+		const { deps } = makeDeps();
+		const { bash, write, edit } = createSandboxTools(deps);
+		for (const tool of [bash, write, edit]) expect(typeof tool.prepareArguments).toBe("function");
+	});
+
+	it("键名单一来源：ESCALATION_PROPS 的键 == escalation.ts 的 PLACEHOLDER_KEYS（重命名时不得静默漂移）", () => {
+		expect(Object.keys(ESCALATION_PROPS)).toEqual([...PLACEHOLDER_KEYS]);
+	});
+
+	it('bash：字符串 "null" 被剥掉（pi ≥0.80.2 校验期不再硬拒；0.80.2 实测同拒），command/timeout 原样保留', () => {
+		const { deps } = makeDeps();
+		const { bash } = createSandboxTools(deps);
+		expect(bash.prepareArguments?.({ command: "ls", timeout: null, sandbox_permissions: "null", justification: "null" }))
+			.toEqual({ command: "ls", timeout: null });
+	});
+
+	it("write：占位符剥掉，path/content 原样保留", () => {
+		const { deps } = makeDeps();
+		const { write } = createSandboxTools(deps);
+		expect(write.prepareArguments?.({ path: "/ws/a.txt", content: "hi", sandbox_permissions: "NULL", justification: "   " }))
+			.toEqual({ path: "/ws/a.txt", content: "hi" });
+	});
+
+	it("edit：串联 base 的 prepareEditArguments —— legacy oldText/newText 仍规整成 edits，占位符同时剥掉", () => {
+		const { deps } = makeDeps();
+		const { edit } = createSandboxTools(deps);
+		expect(edit.prepareArguments?.({ path: "a.txt", oldText: "a", newText: "b", sandbox_permissions: "null", justification: "null" }))
+			.toEqual({ path: "a.txt", edits: [{ oldText: "a", newText: "b" }] });
+	});
+
+	it("edit：新式 edits 数组与真提权参数穿过钩子不变", () => {
+		const { deps } = makeDeps();
+		const { edit } = createSandboxTools(deps);
+		const args = {
+			path: "a.txt",
+			edits: [{ oldText: "a", newText: "b" }],
+			sandbox_permissions: "danger-full-access",
+			justification: "need /etc write",
+		};
+		expect(edit.prepareArguments?.(args)).toEqual(args);
+	});
+
+	it("剥后的参数走 resolveCall：普通调用、不弹窗、不报 malformed（噪声源头被掐断）", async () => {
+		const { deps } = makeDeps();
+		const { bash } = createSandboxTools(deps);
+		const ctx = toolCtx(true, "Allow once") as { ui: { select: ReturnType<typeof vi.fn> } };
+		const prepared = bash.prepareArguments?.({ command: "ls", sandbox_permissions: "null", justification: "null" }) as never;
+		expect(await resolveCall(prepared, ctx as never, deps, "command", () => "ls"))
+			.toEqual({ mode: "workspace-write", escalated: false, ignoredEscalation: false });
+		expect(ctx.ui.select).not.toHaveBeenCalled();
 	});
 });
 
@@ -561,9 +617,9 @@ describe("denial-first 硬门禁（未经真实拒绝不提权）", () => {
 		// JSON null：strict 提供商在声明 Type.Null() 后会原样送达 execute（不再被 pi 剥掉）→ 视作未提供。
 		expect(await resolveCall({ sandbox_permissions: null, justification: null }, toolCtx(), deps, "command", () => "x"))
 			.toEqual(plain);
-		// justification 的字符串臂是 Type.String()（字段本身为 string | null）：字符串 "null"/"" 能过 pi 的参数校验、
-		// 真的会到达 execute → 必须是未提供，否则一笔普通调用会被判成 MALFORMED
-		// （"justification was sent without sandbox_permissions"）。
+		// justification 的字符串臂是 Type.String()（字段本身为 string | null）：字符串 "null"/"" 在未走钩子的
+		// resolveCall 直调路径下会到达 execute → 必须是未提供，否则一笔普通调用会被判成 MALFORMED
+		// （"justification was sent without sandbox_permissions"）。真实工具链上 prepareArguments 已先剥掉（见 prepareArguments 判例）。
 		expect(await resolveCall({ justification: "null" }, toolCtx(), deps, "command", () => "x")).toEqual(plain);
 		expect(await resolveCall({ justification: "  NULL  " }, toolCtx(), deps, "command", () => "x")).toEqual(plain);
 	});

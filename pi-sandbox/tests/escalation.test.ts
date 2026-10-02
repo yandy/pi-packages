@@ -9,6 +9,7 @@ import {
 	normalizeEscalationValue,
 	sandboxDenialMarker,
 	sanitizeDenialReason,
+	stripEscalationPlaceholders,
 	validateEscalationArgs,
 	WIDER_MODES,
 } from "../src/escalation";
@@ -56,28 +57,70 @@ describe("validateEscalationArgs", () => {
 
 describe('normalizeEscalationValue（占位符归一化，按字段可达性定生死）', () => {
 	// pi ≥1.0.0 实测：execute 之前有 validateToolArguments（针对 declared schema）。
+	// 2026-10-02 三次修订：工具侧 prepareArguments（stripEscalationPlaceholders）在校验前剥掉字符串占位符，
+	// 真实工具链上 "null" / "" 到不了这里；本函数是 resolveCall 层的兑底，承重于未走钩子的调用路径
+	//（子代理转发、未来新增的工具入口）。
 	// - justification 的字符串臂是 Type.String()（字段本身为 string | null）："null" / "NULL" / "" 都是合法字符串
-	//   → **真的会到达 execute**，归一化是 load-bearing 的（否则普通调用会被误判 MALFORMED，或带着 Reason: null 弹审批）；
-	// - sandbox_permissions 是两个字面量枚举：字符串形态在校验期就被拒（execute 不会跑），只有 JSON null
-	//   （schema 已显式声明）和“省略”能到达 —— 这两个分支同样由本函数处理。
+	//   → 钩子一旦缺席就会真的到达 execute，归一化是 load-bearing 的（否则普通调用会被误判 MALFORMED，
+	//   或带着 Reason: null 弹审批）；
+	// - sandbox_permissions 是两个字面量枚举：字符串形态若不剥就在校验期被拒（execute 不会跑），只有 JSON null
+	//   （schema 已显式声明）和“省略”能到 —— 这两个分支同样由本函数处理。
 	it("null / 非字符串（含 JSON null）→ 未提供", () => {
 		expect(normalizeEscalationValue(null)).toBeUndefined();
 		expect(normalizeEscalationValue(undefined)).toBeUndefined();
 		expect(normalizeEscalationValue(42)).toBeUndefined();
 		expect(normalizeEscalationValue({})).toBeUndefined();
 	});
-	it('字符串 "null"（大小写与包裹空白）→ 未提供（justification 上真实可达）', () => {
+	it('字符串 "null"（大小写与包裹空白）→ 未提供', () => {
 		expect(normalizeEscalationValue("null")).toBeUndefined();
 		expect(normalizeEscalationValue("NULL")).toBeUndefined();
 		expect(normalizeEscalationValue("  Null  ")).toBeUndefined();
 	});
-	it("空串 / 纯空白 → 未提供（justification 上真实可达）", () => {
+	it("空串 / 纯空白 → 未提供", () => {
 		expect(normalizeEscalationValue("")).toBeUndefined();
 		expect(normalizeEscalationValue("   ")).toBeUndefined();
 	});
 	it("真实值 → trim 后原样返回", () => {
 		expect(normalizeEscalationValue("danger-full-access")).toBe("danger-full-access");
 		expect(normalizeEscalationValue("  workspace-write  ")).toBe("workspace-write");
+	});
+});
+
+describe('stripEscalationPlaceholders（pi 校验前的占位符剥离，挂在工具 prepareArguments 上）', () => {
+	it('两个占位符字符串都剥掉（主导场景：模型把可选字段填成 "null"）', () => {
+		expect(stripEscalationPlaceholders({ command: "ls", sandbox_permissions: "null", justification: "null" }))
+			.toEqual({ command: "ls" });
+	});
+	it("大小写无关 + 包裹空白 + 空串 / 纯空白都是占位符", () => {
+		expect(stripEscalationPlaceholders({ sandbox_permissions: "NULL" })).toEqual({});
+		expect(stripEscalationPlaceholders({ sandbox_permissions: "  Null  " })).toEqual({});
+		expect(stripEscalationPlaceholders({ justification: "" })).toEqual({});
+		expect(stripEscalationPlaceholders({ justification: "   " })).toEqual({});
+	});
+	it("JSON null 原样保留：Type.Null() 声明的合法取值仍走 resolveCall 的归一化，本钩子不改这条路径", () => {
+		const args = { sandbox_permissions: null, justification: null };
+		expect(stripEscalationPlaceholders(args)).toEqual({ sandbox_permissions: null, justification: null });
+	});
+	it("真提权原样保留（不误剥）；非法值原样保留（交给 pi 校验报错）", () => {
+		const real = { sandbox_permissions: "danger-full-access", justification: "need /etc write" };
+		expect(stripEscalationPlaceholders(real)).toBe(real);
+		expect(stripEscalationPlaceholders({ sandbox_permissions: "read-only" })).toEqual({ sandbox_permissions: "read-only" });
+		expect(stripEscalationPlaceholders({ justification: 42 })).toEqual({ justification: 42 });
+	});
+	it("非对象输入原样返回（防御模型输出 null / 数组 / 标量）", () => {
+		expect(stripEscalationPlaceholders(null)).toBeNull();
+		expect(stripEscalationPlaceholders([1, 2])).toEqual([1, 2]);
+		expect(stripEscalationPlaceholders('"null"')).toBe('"null"');
+		expect(stripEscalationPlaceholders(undefined)).toBeUndefined();
+	});
+	it("不 mutation 原对象：会话记录与 UI 里保留模型的原始输出", () => {
+		const args = { command: "ls", sandbox_permissions: "null", justification: "null" };
+		stripEscalationPlaceholders(args);
+		expect(args).toEqual({ command: "ls", sandbox_permissions: "null", justification: "null" });
+	});
+	it("无占位符时返回同一引用：pi 的 prepareToolCallArguments 据此跳过替换（零扰动）", () => {
+		const args = { command: "ls" };
+		expect(stripEscalationPlaceholders(args)).toBe(args);
 	});
 });
 
