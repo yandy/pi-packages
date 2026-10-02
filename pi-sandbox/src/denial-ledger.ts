@@ -4,7 +4,7 @@
  * 语义：bash/write/edit 被沙箱真正拒绝时记一笔；模型对同一会话、同一工具类
  * （command ↔ bash，operation ↔ write/edit）的下一次提权请求消费这笔记录。
  * 没有未消费记录时的提权参数被 resolveCall 忽略——这是"未经拒绝不提权"的硬约束，
- * 消除模型先发制人带提权参数导致的审批轰炸（2026-10-02 决策）。
+ * 消除模型先发制人带提权参数导致的审批轰炸（spec 2026-10-02 §4.2）。
  *
  * 跨 jiti 实例：父子会话是各自独立的模块实例，globalThis 是唯一共享点
  * （与 permission.ts / escalation-broker.ts 同构）；按 sessionId 隔离，子会话各记各的。

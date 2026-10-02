@@ -162,8 +162,8 @@ export async function resolveCall(
 	const config = configForCall(deps, ctx.cwd ?? deps.cwd);
 	const effective = resolveEffectiveMode(deps.permission.override, config.mode);
 	if (requested === undefined) return { mode: effective, escalated: false, ignoredEscalation: false };
-	// denial-first 硬门禁：严格更宽的请求必须有本会话、同工具类的未消费拒绝记录，否则忽略提权参数、
-	// 按当前档位执行。同档请求与非法请求不进门禁：前者免审批（approveEscalation 首行），
+	// denial-first 硬门禁（spec 2026-10-02 §4.3）：严格更宽的请求必须有本会话、同工具类的未消费拒绝记录，
+	// 否则忽略提权参数、按当前档位执行。同档请求与非法请求不进门禁：前者免审批（approveEscalation 首行），
 	// 后者由 approveEscalation 报既有"not strictly wider"错误（不能把非法请求静默降成普通执行）。
 	if (isStrictlyWider(effective, requested)) {
 		const sessionId = readSessionId(ctx);
