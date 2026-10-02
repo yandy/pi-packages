@@ -1334,53 +1334,6 @@ describe("index wiring (integration)", () => {
 		expect(runExtractMock).not.toHaveBeenCalled();
 	});
 
-	it("migrates a legacy directory during session_start and notifies the user", async () => {
-		await writeFile(join(dir, "debugging.md"), LEGACY_TOPIC, "utf8");
-		const notify = vi.fn();
-		const { pi, handlers } = createFakePi();
-		memoryFactory(pi as any);
-
-		await handlers["session_start"][0]({}, uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } }));
-
-		expect(notify).toHaveBeenCalledTimes(1);
-		expect(notify.mock.calls[0][0]).toContain("Migrated 1 memories from 1 topic files");
-		expect(notify.mock.calls[0][0]).toContain(join(dir, ".backups", "migrate-"));
-		expect(notify.mock.calls[0][1]).toBe("info");
-		// 迁移发生在读 indexSnapshot 之前：注入的是迁移后的索引
-		expect(await readFile(join(dir, "MEMORY.md"), "utf8")).toContain("- [SSH Gotcha](SSH-Gotcha.md)");
-		expect(await readdir(dir)).not.toContain("debugging.md");
-	});
-
-	it("does not notify about migration when there is nothing to migrate", async () => {
-		const notify = vi.fn();
-		const { pi, handlers } = createFakePi();
-		memoryFactory(pi as any);
-
-		await handlers["session_start"][0]({}, uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } }));
-
-		expect(notify).not.toHaveBeenCalled();
-		expect(await readFile(join(dir, ".migrated"), "utf8")).toContain('"entries": 0');
-	});
-
-	it("reports a migration failure without killing session_start", async () => {
-		await writeFile(join(dir, "debugging.md"), LEGACY_TOPIC, "utf8");
-		// .backups 是普通文件 → 建回滚点时 mkdir 抛错 → 迁移失败
-		await writeFile(join(dir, ".backups"), "not a directory", "utf8");
-		const notify = vi.fn();
-		const { pi, tools, handlers } = createFakePi();
-		memoryFactory(pi as any);
-
-		await handlers["session_start"][0]({}, uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } }));
-
-		expect(notify).toHaveBeenCalledTimes(1);
-		expect(notify.mock.calls[0][0]).toContain("Memory migration failed:");
-		expect(notify.mock.calls[0][1]).toBe("error");
-		// session_start 没有中断：工具照常注册，`.migrated` 没写（下次重试）
-		expect(tools).toHaveLength(1);
-		expect(await readdir(dir)).not.toContain(".migrated");
-		expect(await readdir(dir)).toContain("debugging.md");
-	});
-
 	it("/dream hands the store, the line limit and the 7-action tool set to runDream", async () => {
 		const confirm = vi.fn().mockResolvedValue(true);
 		const { pi, commands, handlers } = createFakePi();
@@ -1450,11 +1403,6 @@ describe("index wiring (integration)", () => {
 		const index = await readFile(join(dir, "MEMORY.md"), "utf8");
 		await writeFile(join(dir, "MEMORY.md"), `# Memory Index\n\n${index}手写的一行\n`, "utf8");
 		await writeFile(
-			join(dir, ".migrated"),
-			JSON.stringify({ migratedAt: "2026-09-30T00:00:00.000Z", entries: 4, files: 2, backupDir: "/x" }),
-			"utf8",
-		);
-		await writeFile(
 			join(dir, ".lock"),
 			JSON.stringify({ pid: process.pid, hostname: "h", startedAt: "2026-10-02T01:02:03.000Z", op: "dream" }),
 			"utf8",
@@ -1465,14 +1413,13 @@ describe("index wiring (integration)", () => {
 		expect(notify).toHaveBeenCalledTimes(1);
 		expect(notify.mock.calls[0][1]).toBe("info");
 		const lines = notify.mock.calls[0][0].split("\n");
-		expect(lines).toHaveLength(7);
+		expect(lines).toHaveLength(6);
 		expect(lines[0]).toBe("Memory: enabled");
 		expect(lines[1]).toBe(`Dir: ${dir}`);
 		expect(lines[2]).toMatch(/^Index: 4\/200 lines, \d+\/25600 bytes, 2 unrecognized lines$/);
 		expect(lines[3]).toBe("Entries: 1");
 		expect(lines[4]).toBe("Last dream: 2026-10-01T00:00:00.000Z");
-		expect(lines[5]).toBe("Migration: migrated at 2026-09-30T00:00:00.000Z (4 entries from 2 files)");
-		expect(lines[6]).toBe(`Lock: held by dream (pid ${process.pid} on h, started 2026-10-02T01:02:03.000Z)`);
+		expect(lines[5]).toBe(`Lock: held by dream (pid ${process.pid} on h, started 2026-10-02T01:02:03.000Z)`);
 	});
 
 	it("/memory reports a fresh directory as free / never / not needed", async () => {
@@ -1489,25 +1436,57 @@ describe("index wiring (integration)", () => {
 		);
 		expect(lines[3]).toBe("Entries: 0");
 		expect(lines[4]).toBe("Last dream: never");
-		expect(lines[5]).toBe("Migration: not needed");
-		expect(lines[6]).toBe("Lock: free");
+		expect(lines[5]).toBe("Lock: free");
 	});
 
-	// 迁移标记缺失（上一次迁移失败）或读不懂 → 都按「还没迁移」报告，下次 session_start 会重试。
-	it("/memory reports a pending migration when the marker is missing or unreadable", async () => {
+	it("leaves legacy 1.x topic files untouched and reports no migration", async () => {
+		await writeFile(join(dir, "debugging.md"), LEGACY_TOPIC, "utf8");
 		const notify = vi.fn();
-		const { pi, commands, handlers } = createFakePi();
+		const { pi, tools, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		await handlers["session_start"][0]({}, uiCtx(uiWith(notify)));
+
+		expect(notify).not.toHaveBeenCalled();
+		expect(await readdir(dir)).toContain("debugging.md");
+		expect(await readdir(dir)).not.toContain(".migrated");
+
+		await commands["memory"].handler("", uiCtx(uiWith(notify)));
+		expect(notify.mock.calls[0][0].split("\n")).toHaveLength(6);
+
+		// legacy 文件对记忆视图不可见：list 返回空清单文案（src/memory-tool.ts:262）
+		const listed = await tools[0].execute("c1", { action: "list" }, undefined, undefined, undefined);
+		expect(listed.content[0].text).toBe("No memories yet.");
+	});
+
+	it("keeps a valid v2 entry with several ## sections visible", async () => {
+		await writeFile(
+			join(dir, "v2.md"),
+			[
+				"---",
+				"name: v2",
+				"description: v2 entry",
+				"type: project",
+				"created: 2026-01-01",
+				"modified: 2026-01-02T00:00:00.000Z",
+				"---",
+				"",
+				"## 小节一",
+				"",
+				"正文一",
+				"",
+				"## 小节二",
+				"",
+				"正文二",
+			].join("\n"),
+			"utf8",
+		);
+		const { pi, tools, handlers } = createFakePi();
 		memoryFactory(pi as any);
 		await handlers["session_start"][0]({}, uiCtx());
-		const ctx = () => uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } });
 
-		await rm(join(dir, ".migrated"));
-		await commands["memory"].handler("", ctx());
-		await writeFile(join(dir, ".migrated"), "{oops", "utf8");
-		await commands["memory"].handler("", ctx());
-
-		expect(notify.mock.calls[0][0].split("\n")[5]).toBe("Migration: pending");
-		expect(notify.mock.calls[1][0].split("\n")[5]).toBe("Migration: pending");
+		const listed = await tools[0].execute("c1", { action: "list" }, undefined, undefined, undefined);
+		expect(listed.content[0].text).toBe("- v2 (project, modified 2026-01-02T00:00:00.000Z) — v2 entry [v2.md]");
 	});
 
 	it("/memory points at /memory unlock when the lock record is unreadable", async () => {
@@ -1519,7 +1498,7 @@ describe("index wiring (integration)", () => {
 
 		await commands["memory"].handler("", uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } }));
 
-		expect(notify.mock.calls[0][0].split("\n")[6]).toBe("Lock: unreadable — run /memory unlock");
+		expect(notify.mock.calls[0][0].split("\n")[5]).toBe("Lock: unreadable — run /memory unlock");
 	});
 
 	it("/memory on and /memory off are no longer subcommands", async () => {

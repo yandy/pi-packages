@@ -1,4 +1,4 @@
-import { readFile, unlink } from "node:fs/promises";
+import { unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -16,7 +16,6 @@ import {
 	type MemoryToolDeps,
 } from "./src/memory-tool";
 import { LOCK_FILE, MemoryStore } from "./src/memory-store";
-import { MIGRATED_FILE, migrateIfNeeded } from "./src/migrate";
 import { resolveModel } from "./src/model-resolver";
 import { readDreamMeta, shouldNudge, writeDreamMeta } from "./src/nudge";
 import { resolveMemoryDir } from "./src/paths";
@@ -67,33 +66,6 @@ function dreamFailureMessage(e: unknown): string {
  */
 function countInjectedBlocks(content: string): number {
 	return Math.max(0, content.split("\n## ").length - 1);
-}
-
-/**
- * `/memory` 的迁移状态行（spec §14）。`.migrated` 由迁移在**最后一步**写（§15.3 步骤 6），
- * 所以「标记不在」= 还没迁完 = `pending`（下次 session_start 会重试）；
- * 标记读不懂也按 `pending` 报 —— 宁可让用户多看到一次重试，不可假装已经迁完。
- * `files`/`entries` 都是 0 则是「扫过了、根本没东西要迁」= `not needed`。
- */
-async function readMigrationStatus(memoryDir: string): Promise<string> {
-	try {
-		const marker = JSON.parse(await readFile(join(memoryDir, MIGRATED_FILE), "utf8")) as {
-			migratedAt?: unknown;
-			entries?: unknown;
-			files?: unknown;
-		};
-		if (
-			typeof marker.migratedAt !== "string" ||
-			typeof marker.entries !== "number" ||
-			typeof marker.files !== "number"
-		) {
-			return "pending";
-		}
-		if (marker.files === 0 && marker.entries === 0) return "not needed";
-		return `migrated at ${marker.migratedAt} (${marker.entries} entries from ${marker.files} files)`;
-	} catch {
-		return "pending";
-	}
 }
 
 /** `<op> (pid N on <hostname>, started <ISO>)` —— `/memory` 的 Lock 行与 unlock 确认框共用同一份描述。 */
@@ -212,7 +184,7 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	/**
-	 * 建立本 session 的记忆运行时：目录 → store → 迁移 → 索引来源 → 注册工具。
+	 * 建立本 session 的记忆运行时：目录 → store → 索引来源 → 注册工具。
 	 *
 	 * 只在 `session_start` 调用，且调用方已确认 `config.enabled`（中途启用路径已随 `/memory on` 删除）。
 	 * 抛错 = 初始化失败，由调用方转成配置错误态（`configError`）。
@@ -231,24 +203,6 @@ export default function (pi: ExtensionAPI) {
 		});
 		memoryDir = dir;
 		store = activeStore;
-
-		// v1 → v2 的自动迁移（spec §15 / D10）。必须在算 indexSnapshot **之前**：
-		// 否则本会话注入的是迁移前的旧索引。
-		// 失败不能拖垮会话启动：记忆迁移不了也比整个会话起不来好，而且 `.migrated`
-		// 未写 → 下次 session_start 会重试（spec §15.4）。
-		try {
-			const migration = await migrateIfNeeded(activeStore);
-			if (migration && ctx.hasUI) {
-				ctx.ui.notify(
-					`Migrated ${migration.entries} memories from ${migration.files} topic files. Backup at ${migration.backupDir}`,
-					"info",
-				);
-			}
-		} catch (e) {
-			if (ctx.hasUI) {
-				ctx.ui.notify(`Memory migration failed: ${e instanceof Error ? e.message : String(e)}`, "error");
-			}
-		}
 
 		// D13 / D14：索引值在整个 session 内**冻结**。resume / fork / reload 必须用 transcript 里的
 		// 录制值 —— 否则被恢复会话的 system prompt 头部会被改写，而 memory_index 是头部的最后一段，
@@ -572,7 +526,6 @@ export default function (pi: ExtensionAPI) {
 				`Index: ${cap.lineCount}/${config.memIndexMaxLines} lines, ${cap.byteLength}/${config.memIndexMaxBytes} bytes, ${parseEntryIndex(indexRaw).unrecognized} unrecognized lines`,
 				`Entries: ${(await activeStore.listEntries()).length}`,
 				`Last dream: ${(await readDreamMeta(dir))?.lastDreamAt ?? "never"}`,
-				`Migration: ${await readMigrationStatus(dir)}`,
 				`Lock: ${await lockStatusLine(dir)}`,
 			].join("\n");
 			ctx.ui.notify(summary, "info");

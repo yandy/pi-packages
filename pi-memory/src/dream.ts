@@ -71,7 +71,7 @@ export interface RunDreamOpts {
  * - `.backups`（目录）跳过 —— 快照不套快照；不带 `withFileTypes` 时它会被 `cp` 递归复制。
  * - `sessions/`（目录，`sessionPersistence.enabled` 时存在）跳过 —— 同理，而且它可能很大。
  *   `createSnapshot` 的 `cp` 遇到目录会抛 `ERR_FS_EISDIR`（非 ENOENT → fail-closed 上抛 → dream 直接失败）。
- * - `.lock` / `.migrated` / `.dream-meta.json` 跳过（都是 dotfile）：锁记录与标记不属于记忆内容。
+ * - `.lock` / `.dream-meta.json` 跳过（都是 dotfile）：锁记录与元数据不属于记忆内容。
  * - 其余全部 `*.md`（entry 文件 + `MEMORY.md`）都会被快照。
  */
 async function snapshotFiles(memoryDir: string): Promise<string[]> {

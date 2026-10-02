@@ -17,9 +17,8 @@ export const BACKUP_DIR = ".backups";
  *
  * 吞错会让调用方拿到「删除成功」的假信号：removeEntry 已删索引行、已失效缓存但文件还在，
  * 下次 rebuildIndex（dream 会常规调用）会把它加回来 —— 删除被静默回滚。
- * 生产调用点：`MemoryStore` 的 removeEntry / replaceEntry，以及 `migrate.ts` 删除已迁移的
- * legacy topic 文件。导出也供测试直接覆盖：这条语义无法在 Linux 上经由 MemoryStore 的公开
- * API 触发（锁的临时文件与 entry 文件同目录，目录不可写时会在获取锁阶段先失败）。
+ * 生产调用点：`MemoryStore` 的 removeEntry / replaceEntry。导出也供测试直接覆盖：这条语义无法在
+ * Linux 上经由 MemoryStore 的公开 API 触发（锁的临时文件与 entry 文件同目录，目录不可写时会在获取锁阶段先失败）。
  */
 export async function unlinkStrict(path: string): Promise<void> {
 	try {
@@ -43,12 +42,12 @@ export async function sameFile(a: string, b: string): Promise<boolean> {
 /**
  * 写原语的调用选项。
  *
- * `skipLogicalLock` 供**整轮持有者**使用：dream / 迁移先用 `withLogicalLock()` 包住整轮，
+ * `skipLogicalLock` 供**整轮持有者**使用：dream 先用 `withLogicalLock()` 包住整轮，
  * 它内部再调用原语时若还去抢同一把进程内锁就会自锁。默认值（不传）= 自己拿锁，这对
  * 「一次调用一个作用域」的调用方（主 agent 工具、extract）是安全的默认。
  *
  * `skipSnapshot` 供「整轮已经自己拍过一次全目录快照」的持有者使用：dream 进入时快照整个目录
- * （spec §6）、迁移自建 `.backups/migrate-<ts>/`（spec §15.3）。它们内部每个原语再各拍一次，
+ * （spec §6）。它内部每个原语再各拍一次，
  * 会让同一批变更产生 N 份重复备份，并把 `snapshotKeep`（默认 5）的名额挤光 —— 用户还想用来做
  * 崩溃恢复的 `write` 快照会被 `pruneSnapshots` 删掉。
  */
