@@ -2020,9 +2020,10 @@ describe("index wiring (integration)", () => {
 		expect(tools).toHaveLength(1);
 	});
 
-	// loadConfig 本身抛错时 session_start 仍然 reject（契约不变），但复位已经在它**之前**跑完 ——
-	// 把 `resetSessionState()` 挪回 `await loadConfig(ctx)` 之后，本用例就变红。
-	it("clears the previous session's state when loadConfig itself throws", async () => {
+	// loadConfig 本身抛错时也不再冒给宿主（spec §2.4）：转成配置错误态。复位由两处共同保证 ——
+	// `session_start` 开头（在任何可抛调用之前）与 `failConfig` 自身；本用例钉的是**可观测结果**：
+	// 工具与 /memory 都报真实原因，且不再显示上一会话的 dir。
+	it("turns a loadConfig failure into the config error state without rejecting", async () => {
 		const notify = vi.fn();
 		const ctxUI = () => uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } });
 		const { pi, tools, commands, handlers } = createFakePi();
@@ -2035,14 +2036,44 @@ describe("index wiring (integration)", () => {
 		vi.mocked(loadConfig).mockImplementationOnce(async () => {
 			throw new Error("getAgentDir failed");
 		});
-		await expect(handlers["session_start"][0]({}, ctxUI())).rejects.toThrow("getAgentDir failed");
+		// 不再把裸 reject 冒给宿主（spec §2.4）：转成配置错误态
+		await expect(handlers["session_start"][0]({}, ctxUI())).resolves.toBeUndefined();
+		expect(notify.mock.calls[0][1]).toBe("error");
+		expect(notify.mock.calls[0][0]).toBe(
+			"pi-memory config error:\n- Failed to load memory config: getAgentDir failed",
+		);
 
+		// 已注册的工具报真实原因，而不是笼统的「未初始化」
 		await expect(
 			tools[0].execute("c1", { action: "list" }, undefined, undefined, undefined),
-		).rejects.toThrow(/Memory not initialized/);
+		).rejects.toThrow(
+			"Memory not initialized — Failed to load memory config: getAgentDir failed; run /memory for details",
+		);
+
+		// 复位仍然生效：/memory 不显示上一会话的 dir
 		await commands["memory"].handler("", ctxUI());
-		expect(notify.mock.calls[0][0].split("\n")[1]).toMatch(/^Dir: not initialized/);
-		expect(notify.mock.calls[0][0]).not.toContain(dir);
+		const lines = notify.mock.calls[1][0].split("\n");
+		expect(lines.slice(0, 2)).toEqual(["Memory: misconfigured", "Dir: not initialized"]);
+		expect(lines[2]).toBe("- Failed to load memory config: getAgentDir failed");
+		expect(notify.mock.calls[1][0]).not.toContain(dir);
+	});
+
+	it("reports the config error on /memory even when the very first loadConfig fails", async () => {
+		vi.mocked(loadConfig).mockImplementationOnce(async () => {
+			throw new Error("no agent dir");
+		});
+		const notify = vi.fn();
+		const { pi, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		await handlers["session_start"][0]({}, uiCtx());
+
+		await commands["memory"].handler("", uiCtx(uiWith(notify)));
+		expect(notify.mock.calls[0][0].split("\n")).toEqual([
+			"Memory: misconfigured",
+			"Dir: not initialized",
+			"- Failed to load memory config: no agent dir",
+		]);
 	});
 
 	it("tells the tool caller the real reason when a later session is misconfigured", async () => {
