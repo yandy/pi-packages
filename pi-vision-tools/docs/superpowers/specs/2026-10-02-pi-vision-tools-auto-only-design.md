@@ -52,7 +52,7 @@ export interface VisionConfig {
 
 export const DEFAULT_CONFIG: VisionConfig = {};
 
-export const THINK_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+export const THINK_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const satisfies readonly VisionThinkLevel[];
 ```
 
 - 删除 `VisionEnabledState` 类型与 `ENABLED_STATES` 常量。
@@ -87,7 +87,7 @@ export const THINK_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"]
 ### 状态输出
 
 ```
-vision: <解析后 provider/id>                  # 未配置 → "(unconfigured)"；解析失败 → "<name> (unresolved)" + 追加错误行
+vision: <解析后 provider/id>                  # 未配置 → "(unconfigured)" + 追加引导行；解析失败 → "<name> (unresolved)" + 追加错误行
 default think level: <defaultThinkLevel|off (built-in)>
 active: yes|no (calling model has vision: yes|no)
 ```
@@ -118,7 +118,7 @@ const refresh = (ctx: ExtensionContext) => {
 - `src/state.ts` 的 `effectiveEnabled` 删除（唯一调用点即此处）；`callingModelHasVision`、`footerLabel` 保留。
 - 局部变量 `enabled` → `toolActive`（避免与刚删除的配置字段同名而误导），`pi.getActiveTools()` 的局部名 `active` → `current`。
 - 生命周期不变：`session_start` 加载配置后 `refresh`，`model_select` 时 `refresh`。
-- `execute()` 守卫保留（可拦住排队中的陈旧调用），文案改为不再指向已删除命令：`describe_image is inactive: the calling model can see images itself.`
+- `execute()` 守卫保留（可拦住排队中的陈旧调用），文案不再指向已删除命令：`describe_image is inactive: <reason>.`，其中 `<reason>` 按**实时** `ctx.model` 取 `the calling model can see images itself` 或 `the tool is not active for the current model`
 
 ## 工具接口变更
 
