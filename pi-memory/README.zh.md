@@ -184,7 +184,7 @@ headless 会话默认落在 `<项目记忆目录>/sessions/` —— 在项目记
 | `extractMemories` | `extractMemories.enabled` 为真时 |
 | `autoSurfacing` | `autoSurfacing.enabled` 为真时 |
 
-`enabled: false` 时什么都不跑（`/dream` 与提醒也被挡住），因此不需要任何模型。`session_start` 会把每个必需模型拿到注册表里解析；只要有缺失或解析不出的，就**不初始化任何东西**：弹一条 error 通知 `pi-memory config error:` + 每个问题一行 `- <error>`，`/memory` 则报 `Memory: misconfigured` + 同样的行。两条错误文案：
+`enabled: false` 时什么都不跑（`/dream` 与提醒也被挡住），因此不需要任何模型。`session_start` 会把每个必需模型拿到注册表里解析；只要有缺失或解析不出的，就**不初始化任何东西**：弹一条 error 通知 `pi-memory config error:` + 每个问题一行 `- <error>`，`/memory` 则报 `Memory: misconfigured` + `Dir: not initialized` + 同样的行。两条错误文案：
 
 - `no model for <task> — set "<task>.model" or "defaults.model" in memory.json`
 - `model "<value>" for <task> is not resolvable (unknown id or missing credentials)`
@@ -303,7 +303,7 @@ Lock: free
 - `Index` 用**写入**口径（`memIndexMax*`），并报告索引里有多少非空行解析不出（`# Memory Index` 头行与手写标题会计入）。CRLF（以及单独的 CR）行尾在解析前就被归一为 LF，下一次写入也一律输出 LF，因此被 Windows 编辑器改过行尾的 `MEMORY.md` **不会**推高这个计数。
 - `Lock` 有三种：`free`、`held by <op> (pid N on <hostname>, started <ISO>)`、`unreadable — run /memory unlock`。`/memory unlock` 的确认框会显示同一行持有者信息。
 - 以 `enabled: false` 启动的会话在启动时不初始化任何东西：`/memory` 报两行（`Memory: disabled` + `Dir: not initialized — set "enabled": true in memory.json and restart`）；会话中途无法开启；`/memory unlock` 不需要 store 也能用。
-- 必需模型缺失或解析不出时不初始化任何东西，`/memory` 报 `Memory: misconfigured` + 每行一条 `- <error>`；同样的错误在 session_start 时以 error 通知出现。
+- 必需模型缺失或解析不出时不初始化任何东西，`/memory` 报 `Memory: misconfigured` + `Dir: not initialized` + 每行一条 `- <error>`；同样的错误在 session_start 时以 error 通知出现。
 
 ### `/dream`
 
@@ -318,7 +318,7 @@ Lock: free
 
 ## 1.x 数据
 
-1.x → 2.0 的自动迁移已被删除。legacy topic 文件（frontmatter 带 `updated` 而没有 `created`/`modified`，或正文含多个 `## ` 段的文件）原样留在磁盘上，且**对记忆系统不可见** —— `parseEntryFile` 要求 v2 的五个 frontmatter 字段，所以这类文件不会出现在索引、注入、`list`/`read`/`search` 里，`/dream` 也看不到它们（dream 只有 `memory` 工具）。要人工恢复内容，把每个 `## ` 段拆成带 v2 frontmatter（`name`、`description`、`type`、`created`、`modified`）的独立文件。旧版迁移建过的目录（`.backups/migrate-*/originals/` 下的 `MEMORY.md` 备份）仍然永不被裁剪，2.0 之前的正文还在里面。
+1.x → 2.0 的自动迁移已被删除。legacy topic 文件（frontmatter 带 `updated` 而缺 `created`/`modified`，过不了 v2 的五字段 frontmatter 校验）原样留在磁盘上，且**对记忆系统不可见** —— `parseEntryFile` 要求 v2 的五个 frontmatter 字段，所以这类文件不会出现在索引、注入、`list`/`read`/`search` 里，`/dream` 也看不到它们（dream 只有 `memory` 工具）。要人工恢复内容，把每个 `## ` 段拆成带 v2 frontmatter（`name`、`description`、`type`、`created`、`modified`）的独立文件。旧版迁移建过的目录（`.backups/migrate-*/originals/` 下的 `MEMORY.md` 备份）仍然永不被裁剪，2.0 之前的正文还在里面。
 
 ## 文件布局
 

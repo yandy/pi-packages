@@ -90,7 +90,7 @@ function compareSummaries(a: EntrySummary, b: EntrySummary): number {
 /**
  * 进程级唯一写入通道。所有对 memory 目录的修改必须经它。
  *
- * 已知崩溃窗口（由写前快照兜底，消费方是恢复工具）：`replaceEntry` 改名时
+ * 已知崩溃窗口（由写前快照兜底；快照保存在 `.backups/`，恢复靠手工取用）：`replaceEntry` 改名时
  * 先写新文件、再删旧文件、最后重写索引；若在「删旧文件」与「重写索引」之间进程退出，
  * `MEMORY.md` 会残留一条指向已删文件的死链。`upsertIndexLine` 以 file 为键，因此这条死链
  * 不会被后续写入自动覆盖 —— 只能从 `.backups/` 快照恢复。

@@ -184,7 +184,7 @@ Every task that will run must resolve a model — **there is no shipped default 
 | `extractMemories` | `extractMemories.enabled` is true |
 | `autoSurfacing` | `autoSurfacing.enabled` is true |
 
-With `enabled: false` nothing runs — not even `/dream` or the nudge — so no model is required. At `session_start` pi-memory resolves every required model against the model registry. If one is missing or cannot be resolved, it initialises **nothing**: it shows an error notification `pi-memory config error:` followed by one `- <error>` line per problem, and `/memory` reports `Memory: misconfigured` followed by the same lines. The two possible messages are:
+With `enabled: false` nothing runs — not even `/dream` or the nudge — so no model is required. At `session_start` pi-memory resolves every required model against the model registry. If one is missing or cannot be resolved, it initialises **nothing**: it shows an error notification `pi-memory config error:` followed by one `- <error>` line per problem, and `/memory` reports `Memory: misconfigured` and `Dir: not initialized`, followed by the same lines. The two possible messages are:
 
 - `no model for <task> — set "<task>.model" or "defaults.model" in memory.json`
 - `model "<value>" for <task> is not resolvable (unknown id or missing credentials)`
@@ -303,7 +303,7 @@ Lock: free
 - `Index` uses the **write** capacity (`memIndexMax*`) and reports how many non-empty lines could not be parsed as index lines (the `# Memory Index` header and hand-written headings count). CRLF (or lone CR) line endings are normalised to LF before parsing, and the next write emits LF too, so a `MEMORY.md` re-saved by a Windows editor does **not** raise this count.
 - `Lock` is `free`, `held by <op> (pid N on <hostname>, started <ISO>)`, or `unreadable — run /memory unlock`. `/memory unlock` shows the same holder line in its confirmation prompt.
 - In a session started with `enabled: false`, nothing is initialized at boot: `/memory` reports `Memory: disabled` plus `Dir: not initialized — set "enabled": true in memory.json and restart`, there is no way to enable it mid-session, and `/memory unlock` still works without a store.
-- If a required model is missing or cannot be resolved, nothing is initialized and `/memory` reports `Memory: misconfigured` followed by one `- <error>` line per problem. The same errors are shown as an error notification at session start.
+- If a required model is missing or cannot be resolved, nothing is initialized and `/memory` reports `Memory: misconfigured` and `Dir: not initialized`, followed by one `- <error>` line per problem. The same errors are shown as an error notification at session start.
 
 ### `/dream`
 
@@ -318,7 +318,7 @@ It cannot touch files directly: it only has the seven `memory` actions. A summar
 
 ## 1.x data
 
-Automatic 1.x → 2.0 migration has been removed. Legacy topic files (frontmatter with `updated` and no `created`/`modified`, or a body with several `## ` sections) stay on disk untouched and are **invisible to the memory system** — `parseEntryFile` requires the five v2 frontmatter fields, so such files never appear in the index, injections, `list`/`read`/`search`, and `/dream` cannot see them either (dream only has the `memory` tool). To recover their content by hand, split each `## ` section into its own file with v2 frontmatter (`name`, `description`, `type`, `created`, `modified`). Directories created by an earlier migration (`MEMORY.md` backups under `.backups/migrate-*/originals/`) are still never pruned and keep the pre-2.0 text.
+Automatic 1.x → 2.0 migration has been removed. Legacy topic files (frontmatter with `updated` and without `created`/`modified`, so they fail the five-field v2 frontmatter check) stay on disk untouched and are **invisible to the memory system** — `parseEntryFile` requires the five v2 frontmatter fields, so such files never appear in the index, injections, `list`/`read`/`search`, and `/dream` cannot see them either (dream only has the `memory` tool). To recover their content by hand, split each `## ` section into its own file with v2 frontmatter (`name`, `description`, `type`, `created`, `modified`). Directories created by an earlier migration (`MEMORY.md` backups under `.backups/migrate-*/originals/`) are still never pruned and keep the pre-2.0 text.
 
 ## File layout
 
