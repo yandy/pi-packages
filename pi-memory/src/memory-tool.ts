@@ -67,6 +67,11 @@ export interface MemoryToolDeps {
 	/** `session_start` 之后才有值；为 null 时工具报「未初始化」而不是崩。 */
 	getStore: () => MemoryStore | null;
 	getConfig: () => MemoryToolConfig;
+	/**
+	 * 配置错误态（模型校验失败 / 初始化失败）。非 null 时，`getStore()` 为 null 的工具调用报
+	 * **真实原因**并指向 `/memory`，而不是笼统的「还没 session_start」—— `/memory` 是重读它的唯一入口。
+	 */
+	getInitError: () => string | null;
 	searchSessions: (cwd: string, query: string, cfg: { maxSessions: number; maxMatches: number }) => Promise<string>;
 	cwd: () => string;
 }
@@ -194,7 +199,16 @@ export function createMemoryTool(deps: MemoryToolDeps, options: MemoryToolOption
 		// biome-ignore lint/suspicious/noExplicitAny: execute params
 		async execute(_id: string, params: any, _signal: AbortSignal | undefined, _onUpdate: any, ctx: any) {
 			const store = deps.getStore();
-			if (!store) throw new Error("Memory not initialized (no session_start yet)");
+			if (!store) {
+				// 配置错误的会话里工具仍可能注册着（健康会话之后同一进程内又起了一个错误会话，pi 没有
+				// unregister API）：此时「no session_start yet」是假话，把真实原因与 `/memory` 指出来。
+				const initError = deps.getInitError();
+				throw new Error(
+					initError
+						? `Memory not initialized — ${initError.split("\n")[0]}; run /memory for details`
+						: "Memory not initialized (no session_start yet)",
+				);
+			}
 			const cfg = deps.getConfig();
 			const p = params as MemoryParams;
 			// schema 的 action 枚举已经按 session 收窄过（D12）；这里是第二道门，防止模型硬编一个

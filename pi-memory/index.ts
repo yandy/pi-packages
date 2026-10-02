@@ -179,6 +179,7 @@ export default function (pi: ExtensionAPI) {
 		getStore: () => store,
 		// biome-ignore lint/style/noNonNullAssertion: config 在 session_start 里赋值，工具执行必然晚于它
 		getConfig: () => config!,
+		getInitError: () => configError,
 		searchSessions,
 		cwd: () => currentCwd,
 	};

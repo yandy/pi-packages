@@ -33,6 +33,7 @@ function deps(over: Partial<MemoryToolDeps> = {}): MemoryToolDeps {
 			memIndexMaxBytes: store.cfg.indexMaxBytes,
 			sessionSearch: { maxSessions: 10, maxMatches: 5 },
 		}),
+		getInitError: () => null,
 		searchSessions: async () => "session hits",
 		cwd: () => dir,
 		...over,
@@ -364,6 +365,18 @@ describe("guards 与写选项透传", () => {
 	it("throws when the store is not initialized yet", async () => {
 		const tool = createMemoryTool(deps({ getStore: () => null }));
 		await expect(run(tool, { action: "list" })).rejects.toThrow("Memory not initialized (no session_start yet)");
+	});
+
+	it("reports the config error instead of the generic message when initialisation failed", async () => {
+		const tool = createMemoryTool(
+			deps({
+				getStore: () => null,
+				getInitError: () => 'no model for dream — set "dream.model" or "defaults.model" in memory.json',
+			}),
+		);
+		await expect(run(tool, { action: "list" })).rejects.toThrow(
+			'Memory not initialized — no model for dream — set "dream.model" or "defaults.model" in memory.json; run /memory for details',
+		);
 	});
 
 	it("passes skipLogicalLock and skipSnapshot through to the store", async () => {
