@@ -26,7 +26,7 @@ export const ESCALATION_OPTIONS = ["Allow once", "Deny"] as const;
  */
 const MALFORMED_ESCALATION = "invalid escalation: this call was rejected before execution (nothing ran).";
 const ESCALATION_FIX =
-	'Fix: to run without escalation, omit BOTH fields or send JSON null (never the string "null" or ""); to escalate, send sandbox_permissions ("workspace-write" | "danger-full-access") with a one-sentence justification.';
+	'Fix: to run without escalation, omit BOTH fields or send JSON null for BOTH (never the string "null" or ""); to escalate, send sandbox_permissions ("workspace-write" | "danger-full-access") with a one-sentence justification.';
 
 export function validateEscalationArgs(sandboxPermissions: string | undefined, justification: string | undefined): void {
 	if (sandboxPermissions !== undefined && justification === undefined) {
@@ -45,7 +45,8 @@ export function validateEscalationArgs(sandboxPermissions: string | undefined, j
  * 归一化成 undefined 后走无提权路径：报 MALFORMED 会让模型误判为“沙箱拒绝了我”，转而升级成真正的最大档提权。
  *
  * 可达性按字段不同（pi ≥1.0.0 实测，execute 之前有 `validateToolArguments`，校验对象是 declared schema）：
- * - `justification` 是 `Type.String()`：字符串占位符（`"null"` / `""`）是合法值，**会真的到达 execute**，
+ * - `justification` 的字符串臂是 `Type.String()`（字段本身为 `string | null`）：字符串占位符（`"null"` / `""`）是合法值，
+ *   **会真的到达 execute**，
  *   所以这几个分支是 load-bearing 的（否则一笔普通调用会被误判成 MALFORMED，真提权还会带着
  *   `Reason: null` 进审批弹窗）；
  * - `sandbox_permissions` 是两个字面量枚举：字符串占位符在 pi 的参数校验期就被拒（execute 不会跑），

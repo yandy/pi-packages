@@ -120,7 +120,7 @@ describe("createSandboxTools schemas", () => {
 		}
 		// /tmp 已 bind 宿主（2026-10-01 决策）→ 常驻面不再需要任何 /tmp 专属措辞。
 		for (const tool of [bash, write, edit]) expect(tool.description).not.toContain("tmpfs");
-		// 预算回归闸（β′）：三个工具的常驻增量合计 ≤ 560 chars（当前 510，改前 1281）。
+		// 预算回归闸（β′）：三个工具的常驻增量合计 ≤ 560 chars（当前 546，改前 1281 / 改稿前 510）。
 		const added = [bash, write, edit].flatMap((t) =>
 			t.description.split("\n").filter((l) => l.startsWith("Sandbox:")),
 		);
@@ -560,18 +560,21 @@ describe("denial-first 硬门禁（未经真实拒绝不提权）", () => {
 		// JSON null：strict 提供商在声明 Type.Null() 后会原样送达 execute（不再被 pi 剥掉）→ 视作未提供。
 		expect(await resolveCall({ sandbox_permissions: null, justification: null }, toolCtx(), deps, "command", () => "x"))
 			.toEqual(plain);
-		// justification 是 Type.String()：字符串 "null"/"" 能过 pi 的参数校验、真的会到达 execute → 必须是未提供，
-		// 否则一笔普通调用会被判成 MALFORMED（"justification was sent without sandbox_permissions"）。
+		// justification 的字符串臂是 Type.String()（字段本身为 string | null）：字符串 "null"/"" 能过 pi 的参数校验、
+		// 真的会到达 execute → 必须是未提供，否则一笔普通调用会被判成 MALFORMED
+		// （"justification was sent without sandbox_permissions"）。
 		expect(await resolveCall({ justification: "null" }, toolCtx(), deps, "command", () => "x")).toEqual(plain);
 		expect(await resolveCall({ justification: "  NULL  " }, toolCtx(), deps, "command", () => "x")).toEqual(plain);
 	});
 
 	it("占位理由不是理由：真提权 + justification 占位符 → MALFORMED，且不弹审批", async () => {
 		const { deps } = makeDeps();
+		// 播种前置拒绝，让“不弹审批”的断言真正承重：无归一化时这笔请求会通过配对校验、命中门禁、
+		// 带着 Reason: null 进审批弹窗（弹窗本身就是故障信号）。
+		seedDenial("command");
 		const ctx = toolCtx(true, "Allow once") as { ui: { select: ReturnType<typeof vi.fn> } };
 		await expect(resolveCall({ sandbox_permissions: "danger-full-access", justification: "null" }, ctx as never, deps, "command", () => "x"))
 			.rejects.toThrow(/nothing ran.*sent without justification/s);
-		// 无归一化时这笔请求会带着 Reason: null 进审批弹窗——弹窗本身就是故障信号。
 		expect(ctx.ui.select).not.toHaveBeenCalled();
 	});
 

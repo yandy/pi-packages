@@ -54,8 +54,8 @@ describe("validateEscalationArgs", () => {
 
 describe('normalizeEscalationValue（占位符归一化，按字段可达性定生死）', () => {
 	// pi ≥1.0.0 实测：execute 之前有 validateToolArguments（针对 declared schema）。
-	// - justification 是 Type.String()："null" / "NULL" / "" 都是合法字符串 → **真的会到达 execute**，
-	//   归一化是 load-bearing 的（否则普通调用会被误判 MALFORMED，或带着 Reason: null 弹审批）；
+	// - justification 的字符串臂是 Type.String()（字段本身为 string | null）："null" / "NULL" / "" 都是合法字符串
+	//   → **真的会到达 execute**，归一化是 load-bearing 的（否则普通调用会被误判 MALFORMED，或带着 Reason: null 弹审批）；
 	// - sandbox_permissions 是两个字面量枚举：字符串形态在校验期就被拒（execute 不会跑），只有 JSON null
 	//   （schema 已显式声明）和“省略”能到达 —— 这两个分支同样由本函数处理。
 	it("null / 非字符串（含 JSON null）→ 未提供", () => {
