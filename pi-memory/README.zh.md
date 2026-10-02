@@ -1,24 +1,33 @@
 # pi-memory
 
-基于文件系统的持久化记忆层，为 pi 编程代理提供跨会话的项目记忆。事实、偏好、调试历史等知识以纯 Markdown 文件形式存储在 `~/.pi/memory/<git|local>/<项目>/` 下。
+pi coding agent 的文件系统持久记忆层。把项目知识（事实、偏好、调试历史）以纯 Markdown 文件的形式存在 `~/.pi/memory/<git|local>/<project>/` 下，跨会话可用。
 
-对齐 Claude Code 的 auto memory 机制：每 topic 一行的 MEMORY.md 紧凑索引、基于相关性的 topic 文件自动注入、per-turn 记忆自动提取、类型化记忆分类。
+对齐 Claude Code 的自动记忆机制：**一条记忆 = 一个文件**、`MEMORY.md` 索引一行一条记忆、按相关性自动浮现、每轮自动提取、记忆分类。
+
+> ## ⚠️ 2.0.0 是破坏性的存储变更
+>
+> - 索引现在**一行一条记忆**（1.x 是一行一个 topic 文件，文件里塞很多 `## entry`）。
+> - 每条记忆**独占一个文件**，frontmatter 五个字段：`name`、`description`、`type`、`created`、`modified`（1.x 用的是 `updated`）。
+> - 索引改为以 **system prompt section**（`memory_index`）注入，并在整个会话内冻结，而不是拼到 system prompt 字符串末尾。
+>
+> 升级后第一次 `session_start` 会**自动迁移**已有的 1.x 目录：先把整个目录快照到 `.backups/migrate-<ts>/`，把原 topic 文件复制到 `originals/`，再把每个 `## entry` 拆成独立文件、重建索引，**最后一步**才写 `.migrated` 标记。任一步失败就不写标记、保留备份，下次会话重试。详见[从 1.x 迁移](#从-1x-迁移)。
 
 ## 功能
 
-- **一个 `memory` 工具**，三种操作：`add`（追加条目）、`remove`（按标题删除条目）、`search`（查询记忆或会话历史）
-- **基于主题的文件组织**：每次 `memory add` 向指定名称的 `.md` 文件写入 `## 条目` 区块
-- **`MEMORY.md` 索引**：每个 topic 文件一行紧凑指针 `- [名称](文件.md) — 摘要`，同 topic 自动合并
-- **记忆类型系统**：四种分类 — `user`（用户）、`feedback`（反馈，默认）、`project`（项目）、`reference`（引用）— 存储在 topic 文件 frontmatter 中
-- **Auto-surfacing** ⭐：每次用户发消息时，side-query LLM 自动选出最多 N 个相关 topic 文件并将其内容注入 agent context。无需手动 `read` — 用内置 `read` 工具即可查看记忆文件。Session 内去重防止同一 topic 重复注入
-- **Extract memories** ⭐：每次 agent 运行结束后，异步无头子 agent 分析对话内容，用 `ls`/`read` 检查已有 topic 文件，再用 `memory_add` 写入新记忆 — 偏好、约定、调试心法等
-- **快照注入**：每个新会话启动时，MEMORY.md 索引追加到系统提示中
-- **`/dream` 命令**：四阶段（Orient → Gather → Consolidate → Prune）无头代理整理，去重、合并、重建全部记忆文件
-- **梦醒提醒**：经过 N 个会话或 N 小时后，温和通知建议运行 `/dream`
-- **`/memory` 命令**：查看状态、开关记忆、检查索引和主题文件
-- **会话搜索**：`memory search scope=sessions` 操作可检索过往对话历史
-- **可读且 clone 安全**：有 http(s)/ssh/git remote（含 scp 式与 `git+ssh`/`git+https`）的仓库记忆存放在 `~/.pi/memory/git/<host__owner__repo>/`，其余项目存放在 `~/.pi/memory/local/<绝对路径>/` — 同一仓库的 clone、worktree 共享记忆（fork 有自己的 remote，因此拥有独立目录）
-- **路径穿越防护**：主题文件路径会验证是否逃逸记忆目录
+- **一个 `memory` 工具，主 agent 五个 action**：`add`、`replace`、`remove`、`list`、`search`。另外两个 —— `rename` 与 `rebuild_index` —— **只存在于 `/dream` 自己的 headless 会话里**，绝不出现在主 agent 或 extract 的 schema 中。
+- **一条记忆 = 一个文件** —— 不再有多条目 `## section` 块；`name` 是定位键，`add` 一个已存在的 `name` 就是幂等覆盖。
+- **`MEMORY.md` 索引** —— 一行一条记忆：`- [Name](file.md) — description`。分隔符是 **em dash**（`—`，U+2014），两侧各一个半角空格。
+- **`memory_index` section，会话内冻结** ⭐ —— 索引写进 `event.systemPromptOptions.sections["memory_index"]`，其值在**整个会话内不再变化**，只有 compaction 会从磁盘重读。pi 对 sections 做 diff，值没变就一条消息都不追加，于是 system prompt 逐轮逐字节相同，provider 的 prefix cache 一直命中。`resume` / `fork` / `reload` 用 transcript 里的**录制值**重放，而不是读磁盘，因此恢复会话不会改写它的头部。
+- **注入净化** —— 所有注入内容（索引行、浮现的 entry 正文与 name）都会剥离不可见/bidi 字符并转义 `<` `>`，因此记忆无法伪造 `</relevant_memories>`、`<system>`、`<project_instructions>`、`<active_agent …>` 或 `<memory_index>`。净化**只发生在注入时**：磁盘上的文件永远不会被改写（保持可读、可手工编辑）。
+- **自动浮现（auto-surfacing）** ⭐ —— 每个用户回合由一次轻量侧查询挑出至多 `maxFiles` 条 **entry**（只看 `description`），把正文注入 `<relevant_memories>`。同一会话内按文件名去重；清单来自进程内的 `mtime` 缓存，每回合只付一次 `readdir` + 每文件一次 `stat`。子 agent 中不启用。
+- **自动提取（extract memories）** ⭐ —— 每轮结束后一个异步 headless agent 拿到的是**整轮对话的结构化渲染**（user 消息全文、assistant 文本与 tool_call、tool_result 及其错误标记），而不是两条消息。它经同一套 `memory` 原语写入，并且**从不排队等锁**：dream 或迁移正在整轮持锁时，本回合直接跳过。
+- **`/dream`** —— headless 整理 agent（Orient → Gather Signal → Consolidate → Prune & Index），合并重复、消解矛盾、改名、重建索引。它**没有裸文件权限**：只有七个 `memory` action，整轮持有逻辑锁，进入时先对整个目录拍一次快照。
+- **Dream 提醒** —— 距上次 dream 超过 N 个会话或 N 小时后提示 `/dream`。
+- **`/memory`** —— 完整状态（开关、目录、索引容量、entry 数、上次 dream、迁移状态、锁状态含持有者），以及 `on` / `off` / `unlock`。
+- **两级锁** —— 进程内逻辑锁承担**逻辑作用域**（单次原语，或 dream / 迁移的整轮）；跨进程 `.lock` **只持毫秒**且**永不自动回收**。没有 TTL、没有心跳、没有接管，所以互斥是硬保证；代价是崩溃遗留的锁必须**人工**清除（`/memory unlock`）。
+- **快照** —— 每次写入都在 `.backups/<ts>-<label>/` 留下回滚点，保留最近 `lock.snapshotKeep` 份（迁移备份以 `migrate-` 开头，永不裁剪）。
+- **会话检索** —— `memory search scope=sessions` 查历史会话。
+- **可读、clone 友好的布局** —— git 仓库（http(s)/ssh/git remote，含 scp 写法与 `git+ssh`/`git+https`）存在 `~/.pi/memory/git/<host__owner__repo>/`，其余存在 `~/.pi/memory/local/<absolute-path>/`；同一仓库的 clone 与 worktree 共享记忆（fork 有自己的 remote，因此有独立目录）。
 
 ## 安装
 
@@ -26,7 +35,7 @@
 pi install npm:@yandy0725/pi-memory
 ```
 
-或在 `~/.pi/agent/settings.json` 中添加：
+或加入 `~/.pi/agent/settings.json`：
 
 ```json
 {
@@ -34,9 +43,71 @@ pi install npm:@yandy0725/pi-memory
 }
 ```
 
+## 存储布局
+
+```
+~/.pi/memory/git/github.com__owner__repo/
+  MEMORY.md            — 索引：一行一条记忆（em dash 分隔）
+  SSH-port-on-staging.md
+  Test-command.md      — 一条记忆一个文件
+  .lock                — 跨进程写锁（只持毫秒，永不自动回收）
+  .backups/            — 回滚点：<ISO-ts>-<label>/，升级迁移是 migrate-<ts>/
+  .migrated            — 1.x → 2.x 迁移的完成标记（最后一步才写）
+  .dream-meta.json     — 上次 dream 的时间与会话数（提醒逻辑用它）
+  sessions/            — headless 会话落盘目录，仅在开启 sessionPersistence 时使用
+```
+
+### Entry 文件
+
+```yaml
+---
+name: SSH port on staging
+description: staging SSH listens on 2222, not 22; key at ~/.ssh/staging
+type: project
+created: 2026-07-13
+modified: 2026-10-02T08:14:03.120Z
+---
+
+staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
+```
+
+- `name` —— 唯一、可读的标题；`replace` / `remove` / `rename` 的定位键。再次 `add` 同名记忆是**覆盖**，不会产生第二条。
+- `description` —— **一行自包含的说明**。侧查询判断相关性时**只看得到它**，所以它必须脱离正文也能读懂。反例：`Debugging tips`；正例：`staging SSH listens on 2222, not 22`。
+- `type` —— `user` | `feedback`（默认）| `project` | `reference`。
+- `created` —— `YYYY-MM-DD`，只在新建时写入，覆盖时保留。
+- `modified` —— ISO 8601，**一律由 store 写入**，调用方传不进来。
+
+文件名由 `name` 派生（不安全字符替换、100 字节上限，只有**文件名**冲突时才追加 `-2` / `-3`）。任何 `name` 都写不到 `MEMORY.md` 上。
+
+### MEMORY.md 索引
+
+```
+# Memory Index
+
+- [SSH port on staging](SSH-port-on-staging.md) — staging SSH listens on 2222, not 22
+- [Test command](Test-command.md) — run npm test, not npm run test
+```
+
+写入是**外科式**的：只改目标行，手写的标题、分组、注释逐字保留，行序稳定。
+
+### 记忆类型
+
+| 类型 | 含义 | 示例 |
+|------|------|------|
+| `user` | 用户角色、偏好、知识背景 | "用户是聚焦可观测性的数据科学家" |
+| `feedback` | 经验、纠正、确认（默认） | "集成测试用真库不要 mock —— 上季度栽过" |
+| `project` | 项目状态、时间点、事故 | "移动端 2026-03-05 起封版" |
+| `reference` | 外部系统的指针 | "缺陷跟踪 = Linear 的 INGEST 项目" |
+
+### 容量：200 行 = 200 条记忆
+
+索引上限是 `memIndexMaxLines`（200）个非空行与 `memIndexMaxBytes`（25600）字节。因为一行一条记忆，**这就是每个项目目录 200 条记忆的硬上限**。超限时写入**不会失败**：写入照样成功，工具把一条可操作的警告回给模型，让它去合并或删除条目（超出上限的部分下次加载时不可见）。
+
+这也是 `/dream` 不再是「可选的整理」而是**容量管理必需**的原因。在撞到 200 之前跑一次（或者接受提醒）。
+
 ## 配置
 
-在代理目录（`~/.pi/agent/memory.json`）或项目的 `.pi/` 目录（需受信任）中创建 `memory.json`：
+在 agent 目录（`~/.pi/agent/memory.json`）或项目 `.pi/` 目录（仅在项目被信任时）创建 `memory.json`：
 
 ```json
 {
@@ -44,187 +115,216 @@ pi install npm:@yandy0725/pi-memory
   "memoryDir": "~/.pi/memory",
   "memIndexMaxLines": 200,
   "memIndexMaxBytes": 25600,
-  "defaults": {
-    "model": "deepseek/deepseek-v4-flash",
-    "sessionPersistence": { "enabled": false }
-  },
-  "dream": {
-    "nudgeAfterSessions": 5,
-    "nudgeAfterHours": 24,
-    "model": "auto",
-    "thinkLevel": "high",
-    "sessionPersistence": { "enabled": false }
-  },
-  "sessionSearch": {
-    "maxSessions": 10,
-    "maxMatches": 5
-  },
+  "memIndexInjectMaxLines": 200,
+  "memIndexInjectMaxBytes": 25600,
+  "lock": { "timeoutMs": 5000, "snapshotKeep": 5 },
+  "defaults": { "sessionPersistence": { "enabled": false } },
+  "dream": { "nudgeAfterSessions": 5, "nudgeAfterHours": 24, "thinkLevel": "high" },
+  "sessionSearch": { "maxSessions": 10, "maxMatches": 5 },
   "autoSurfacing": {
     "enabled": true,
-    "model": "auto",
     "thinkLevel": "off",
-    "maxFiles": 5,
-    "maxTopicBytes": 4096,
-    "maxInjectionBytes": 20480,
-    "sessionPersistence": { "enabled": false }
+    "maxFiles": 3,
+    "maxEntryBytes": 3072,
+    "maxInjectionBytes": 10240
   },
   "extractMemories": {
     "enabled": true,
-    "model": "auto",
     "thinkLevel": "high",
     "maxContextTokens": 2000,
-    "sessionPersistence": { "enabled": false }
+    "maxToolResultChars": 500,
+    "maxAssistantChars": 2000
   }
 }
 ```
 
-| 配置项 | 默认值 | 说明 |
-|--------|--------|------|
-| `enabled` | `true` | 开关整个记忆系统 |
+| 键 | 默认值 | 说明 |
+|-----|---------|------|
+| `enabled` | `true` | 整个记忆系统的总开关 |
 | `memoryDir` | `~/.pi/memory` | 所有记忆数据的根目录 |
-| `memIndexMaxLines` | `200` | `MEMORY.md` 最大行数 |
-| `memIndexMaxBytes` | `25600` | `MEMORY.md` 最大字节数 |
-| `defaults.model` | — | 所有子任务共享的模型回退值。per-task `model` 会覆盖 |
-| `defaults.sessionPersistence.enabled` | `false` | 共享的 session 持久化回退（默认不持久化）。per-task 可覆盖 |
-| `defaults.sessionPersistence.sessionDir` | `<项目记忆目录>/sessions/` | 自定义持久化目录 |
-| `dream.nudgeAfterSessions` | `5` | 触发提醒需经过的会话数 |
-| `dream.nudgeAfterHours` | `24` | 触发提醒需经过的小时数 |
-| `dream.model` | — | 整理使用的模型（`"provider/id"`）。回退链：per-task → `defaults.model` → 父模型 |
-| `dream.thinkLevel` | `"high"` | 整理子 agent 的思考深度：`"off"` / `"minimal"` / `"low"` / `"medium"` / `"high"` / `"xhigh"` |
-| `dream.sessionPersistence.enabled` | `false` | 持久化 dream agent 的 session 到磁盘（调试/审计）。回退到 `defaults.sessionPersistence.enabled` |
-| `dream.sessionPersistence.sessionDir` | `<项目记忆目录>/sessions/` | dream session 自定义目录 |
-| `sessionSearch.maxSessions` | `10` | 搜索历史时最多扫描的会话数 |
-| `sessionSearch.maxMatches` | `5` | 历史搜索最多返回的匹配数 |
-| `autoSurfacing.enabled` | `true` | ⭐ 启用 per-turn topic 文件自动注入 |
-| `autoSurfacing.model` | — | ⭐ side-query 相关性选择模型。回退链：per-task → `defaults.model` → 父模型 |
-| `autoSurfacing.thinkLevel` | `"off"` | ⭐ side-query 思考深度（推荐 `"off"`，轻量选择任务） |
-| `autoSurfacing.sessionPersistence.enabled` | `false` | 持久化 side-query agent 的 session。回退到 `defaults.sessionPersistence.enabled` |
-| `autoSurfacing.maxFiles` | `5` | ⭐ 每轮最多注入的 topic 文件数 |
-| `autoSurfacing.maxTopicBytes` | `4096` | ⭐ 单个注入 topic 文件最大字节数（截断） |
-| `autoSurfacing.maxInjectionBytes` | `20480` | ⭐ 每轮注入内容总字节数上限 |
-| `extractMemories.enabled` | `true` | ⭐ 启用 per-turn 记忆自动提取 |
-| `extractMemories.model` | — | ⭐ 提取子 agent 使用的模型。回退链：per-task → `defaults.model` → 父模型 |
-| `extractMemories.thinkLevel` | `"high"` | ⭐ 提取的思考深度：`"off"` / `"minimal"` / `"low"` / `"medium"` / `"high"` / `"xhigh"` |
-| `extractMemories.sessionPersistence.enabled` | `false` | 持久化 extract agent 的 session。回退到 `defaults.sessionPersistence.enabled` |
-| `extractMemories.maxContextTokens` | `2000` | ⭐ 分析对话的最大 token 数 |
+| `memIndexMaxLines` | `200` | 写入口径：`MEMORY.md` 的最大非空行数（= 最大记忆条数） |
+| `memIndexMaxBytes` | `25600` | 写入口径：`MEMORY.md` 的最大字节数 |
+| `memIndexInjectMaxLines` | `200` | 注入口径：放进 `memory_index` section 的最大行数。**刻意与写入口径同量级** —— 预算更小会让「已经写成功」的记忆看不见 |
+| `memIndexInjectMaxBytes` | `25600` | 注入口径：section 的最大字节数（超出则截断并带 `[truncated: …]` 标记） |
+| `lock.timeoutMs` | `5000` | 单次原语等逻辑锁 / 等跨进程 `.lock` 的上限。迁移固定用 30s（它要在锁内重写整个目录）。同时也是 `session_shutdown` 等在途写入的上限 |
+| `lock.snapshotKeep` | `5` | `.backups/` 保留的回滚点数量（`migrate-` 前缀的目录永不裁剪） |
+| `defaults.model` | — | 所有子任务共享的模型回退；各任务自己的 `model` 优先，都没配则回退父会话模型 |
+| `defaults.sessionPersistence.enabled` | `false` | 共享回退：headless 子会话（extract / dream / 侧查询）默认只在内存里跑 |
+| `defaults.sessionPersistence.sessionDir` | `<项目记忆目录>/sessions/` | headless 会话的自定义落盘目录 |
+| `dream.nudgeAfterSessions` | `5` | 距上次 dream 多少个会话后开始提醒 |
+| `dream.nudgeAfterHours` | `24` | 距上次 dream 多少小时后开始提醒 |
+| `dream.model` | — | dream 用的模型（`"provider/id"`）。回退 `defaults.model` → 父会话模型 |
+| `dream.thinkLevel` | `"high"` | dream 的思考强度：`off` / `minimal` / `low` / `medium` / `high` / `xhigh` |
+| `dream.sessionPersistence.*` | 继承 `defaults` | 把 dream 会话落盘（调试/审计用） |
+| `sessionSearch.maxSessions` | `10` | `search scope=sessions` 扫描的最大会话数 |
+| `sessionSearch.maxMatches` | `5` | 历史检索返回的最大命中数 |
+| `autoSurfacing.enabled` | `true` | ⭐ 开启每回合的 entry 自动注入 |
+| `autoSurfacing.model` | — | ⭐ 相关性侧查询用的模型。回退 `defaults.model` → 父会话模型 |
+| `autoSurfacing.thinkLevel` | `"off"` | ⭐ 侧查询的思考强度（`"off"` 最省） |
+| `autoSurfacing.maxFiles` | `3` | ⭐ 每回合最多注入几条 entry |
+| `autoSurfacing.maxEntryBytes` | `3072` | ⭐ 单条 entry 正文的注入字节上限（超出截断）。取代 1.x 的 `maxTopicBytes`（旧键已失效） |
+| `autoSurfacing.maxInjectionBytes` | `10240` | ⭐ 每回合注入内容的总字节上限 |
+| `autoSurfacing.sessionPersistence.*` | 继承 `defaults` | 把侧查询会话落盘 |
+| `extractMemories.enabled` | `true` | ⭐ 开启每轮自动提取 |
+| `extractMemories.model` | — | ⭐ 提取 agent 用的模型。回退 `defaults.model` → 父会话模型 |
+| `extractMemories.thinkLevel` | `"high"` | ⭐ 提取的思考强度 |
+| `extractMemories.maxContextTokens` | `2000` | ⭐ 渲染后对话的预算（`× 4` 个字符；超出时先裁中段、首尾优先保留，user 消息最后才动） |
+| `extractMemories.maxToolResultChars` | `500` | ⭐ 单条 `tool_result` 渲染的字符上限 |
+| `extractMemories.maxAssistantChars` | `2000` | ⭐ 单条 assistant 文本渲染的字符上限（user 消息从不截断） |
+| `extractMemories.sessionPersistence.*` | 继承 `defaults` | 把 extract 会话落盘 |
 
-持久化的无头 agent session 默认落在 `<项目记忆目录>/sessions/` —— 位于项目的记忆目录内，而非你的代码工作目录，例如 `~/.pi/memory/git/github.com__owner__repo/sessions/`。
-
-项目级配置（`.pi/memory.json`）仅在项目受信任时加载。
+headless 会话默认落在 `<项目记忆目录>/sessions/` —— 在项目记忆目录里，不在你的工作副本里。
 
 ## 工作原理
 
-### MEMORY.md 索引
+### 会话生命周期
 
-MEMORY.md 是一个**紧凑指针索引** — 每个 topic 文件一行，而非每个条目一行：
+| 事件 | pi-memory 做什么 |
+|---|---|
+| `session_start` | 加载配置 → 解析记忆目录 → 需要则执行 1.x 迁移 → **确定索引值并冻结**（`startup`/`new` 读磁盘；`resume`/`fork`/`reload` 重放 transcript 取录制值）→ 注册 `memory` 工具（仅首次，5 个 action）→ 重建清单缓存 → dream 提醒检查 |
+| `before_agent_start` | 把冻结值写进 `sections["memory_index"]`（**每一轮、无条件**），然后做 auto-surfacing（主会话且非子 agent） |
+| `agent_end` | 触发异步 extract；写入成功通知 `Extracted N memories.`，失败通知 `Extract failed: …`（每会话一次） |
+| `session_compact` | 清空已注入集合，**并从磁盘重读索引** —— 会话内唯一的刷新点 |
+| `session_shutdown` | 等在途写入收尾（上限 `lock.timeoutMs`），避免退出时留下 stale 的 `.lock` |
+
+### 为什么索引要冻结
+
+pi 用有序的 sections 构建 system prompt，只对**值发生变化**的 section 追加一条 patch 消息；全部没变时一条都不追加。自定义 section 插在**最后**，所以 `memory_index` 是 system prompt 的最后一段，其后紧跟整段对话。一旦它的值在会话中途变化，折叠后的头部就会被改写，其后的全部内容失去 prefix cache。因此：一个会话一个值，只有 compaction 才刷新（那时对话中段本来就要被重写）。
+
+有意接受的代价：**本会话内写入的记忆不会出现在本会话的索引里**。工具返回值已经确认写入，下一个会话立刻可见。
+
+如果宿主的 pi 还没有 sections API，pi-memory 回退为把索引拼到 system prompt 字符串末尾 —— 功能不变，只是缓存变差。
+
+### 自动浮现
+
+1. 从 store 的 `mtime` 缓存构建清单：`[type] file.md — description`，按 `modified` 降序，最多 200 条、4000 字符（description 预算按条数均分，每条不低于 80 字符）。
+2. 侧查询（`maxTurns: 1`、零工具）从清单里返回至多 `maxFiles` 个文件名；不在清单里的一律丢弃。
+3. 选中 entry 的**正文**（不含 frontmatter）按 `maxEntryBytes` 截断、净化，作为一条 `display: false` 的 custom 消息注入，外面包 `<relevant_memories>`；总量到 `maxInjectionBytes` 就停。
+4. 注入过的文件名在本会话内记住，compaction 时清空。你会看到 `Recalled: N entries` 通知。
+
+### 自动提取
+
+extract 拿到的是结构化渲染，而不是有损的两条消息摘要：
 
 ```
-- [Debugging](debugging.md) — SSH 使用 2222 端口；MySQL staging 上 30s 超时
-- [API Conventions](api.md) — REST handlers 在 src/api/handlers/；使用标准错误格式
+=== Conversation ===
+[1] user: <全文>
+[2] assistant: <文本> | tool_call: memory({"action":"list"})
+[3] tool_result: <摘要，按 maxToolResultChars 截断>
+[4] user: <纠正>
 ```
 
-每次会话只有索引被注入系统提示（前 200 行 / 25KB）。Topic 文件内容**不会**在启动时加载 — 通过 auto-surfacing 按需注入或内置 `read` 工具显式加载。
+它只有主 agent 的五个 action（永远拿不到 `rename` / `rebuild_index`）、没有文件工具、`maxTurns: 5`、超时 120s。逻辑锁被占用时（dream 或迁移正在整轮持有）它**跳过本回合**而不是排队 —— 下一次 `agent_end` 还会来。
 
-### Topic 文件格式
+### 锁
 
-每个 topic 文件使用四字段 YAML frontmatter：
+| 层级 | 作用域 | 行为 |
+|---|---|---|
+| 进程内逻辑锁（按记忆目录分键） | 单次原语；或 dream / 迁移的整轮 | 最多等 `lock.timeoutMs`（迁移 30s），超时抛一条写明目录的可读错误。`extract` 用不等待的形态，直接跳过本回合 |
+| 跨进程 `.lock` | 毫秒级，只包住物理写入 | 用 `link` 原子获取，**永不自动回收**：没有 TTL、没有心跳、没有接管 |
 
-```yaml
----
-name: 调试技巧
-description: 常见调试模式、SSH 端口、MySQL 超时配置
-type: feedback
-updated: 2026-07-13
----
-
-## SSH 踩坑
-staging 使用 2222 端口，密钥在 ~/.ssh/staging
-
-## MySQL 超时
-staging 上连接超时 30s
-```
-
-`description` 字段至关重要 — auto-surfacing 的 side-query 根据它判断相关性。描述要具体。
-
-### 记忆类型
-
-| 类型 | 含义 | 示例 |
-|------|------|------|
-| `user` | 用户角色、偏好、知识背景 | "用户是数据科学家，关注可观测性" |
-| `feedback` | 教训/纠正/确认（默认） | "用真实 DB 不用 mock—上次踩过坑" |
-| `project` | 项目状态、deadline、incident | "merge freeze 从 3 月 5 日开始" |
-| `reference` | 外部系统指针 | "bug tracker = Linear INGEST project" |
-
-### Auto-surfacing
-
-每次用户发消息时（`before_agent_start` hook）：
-1. 扫描所有 topic 文件，提取 frontmatter 元数据
-2. Side-query LLM 根据用户问题选出最多 `maxFiles` 个相关 topic 文件
-3. 已注入过的 topic 跳过（session 内去重）
-4. 选中文件内容注入 context — agent 自动看到相关记忆
-
-### Extract memories
-
-每次 agent 运行结束后（`agent_end` hook）：
-1. 异步 fork 子 agent，传入本轮对话内容
-2. 分析是否有值得持久化的 learnings
-3. 如有，直接写入 memory 文件 — 偏好、约定、调试心法等
-4. 子 agent 独立运行，结果为未来会话所用
-
-记忆提取有选择性：忽略一次性任务、可从项目推导的代码、已在 CLAUDE.md 中的内容。
+因此写入中途崩溃可能留下一个 `.lock`，而且**没有任何进程会替你删掉它** —— 这是「互斥是硬保证」的刻意代价。错误文案会写明 pid、op、开始时间与路径；`/memory unlock` 是唯一被认可的清除方式。
 
 ## 工具参考
 
 ```
-memory(action: "add" | "remove" | "search",
-        content?, topic?, title?, type?,
-        entry?, query?, scope?)
+memory(action: "add" | "replace" | "remove" | "list" | "search",
+       name?, description?, content?, type?, query?, scope?)
 ```
+
+`description` 是未来会话唯一能拿到的相关性信号 —— `add` 与 `replace` 请务必带上自包含的一行。
 
 ### `add`
 
-向 topic 文件追加 `## 条目` 区块。若该 topic 已在索引中存在，则更新 MEMORY.md 的 hook 摘要。新建 topic 时在索引中新增一行。
+新建一条记忆，或**覆盖 `name` 完全相同的那一条**（幂等；`created` 保留）。
 
-- **`content`**（必填）— 要持久化的知识文本
-- **`topic`**（必填）— 目标文件名，如 `"debugging.md"`，不存在则自动创建
-- **`title`**（必填）— 描述性、自包含的条目标题。只有 MEMORY.md 索引行被注入未来 prompt（topic 文件内容不会），所以标题必须自成一体地传达信息
-- **`type`**（可选）— 记忆分类：`"user"`、`"feedback"`（默认）、`"project"`、`"reference"`
+- `name`（必填）—— 唯一、可读的标题
+- `content`（必填）—— 记忆正文，它会成为整个 entry 文件
+- `description`（可选）—— 一行自包含说明；缺省取 `content` 的第一句
+- `type`（可选）—— `user` / `feedback`（默认）/ `project` / `reference`
+
+### `replace`
+
+重写已有记忆的 `content` / `description` / `type`，按 `name` 定位。改名是 `rename`，dream 专属。
 
 ### `remove`
 
-按标题删除条目。遍历所有 topic 文件查找匹配的 `##` 区块。更新受影响 topic 的 MEMORY.md hook。当 topic 文件中最后一条被删除后，topic 文件及其索引行均被清理。
+删除 `name` 匹配的记忆 —— 文件、索引行一起删。找不到条目或删不掉文件时**明确报错**，不会假装删成功。
 
-- **`entry`**（必填）— 要删除的条目标题
+### `list`
+
+每条记忆一行：`- name (type, modified …) — description [file]`。
 
 ### `search`
 
-查询记忆文件或会话历史。记忆搜索返回匹配条目的完整区块（整个 `##` 区域）。
+- `query`（必填）
+- `scope`（可选）—— `memory`（默认：在所有 entry 的 name / description / 正文里找）或 `sessions`（查历史会话）
 
-- **`query`**（必填）— 搜索关键词
-- **`scope`**（可选）— `"memory"`（默认，扫描 topic 文件）或 `"sessions"`（扫描会话历史）
+### dream 专属 action
+
+`rename`（`name` + `new_name`；文件名与索引行跟着走，并保持索引行的位置）与 `rebuild_index`（从磁盘全量重建，保留手写头部）。它们**只**注册在 `/dream` 的 headless 会话里，主 agent 与 extract 都调不到。
 
 ## 命令
 
 ### `/memory`
 
-显示记忆状态（启用/禁用、目录、索引行数、topic 文件、上次整理时间戳）。
+```
+/memory          — 查看状态
+/memory on       — 开启
+/memory off      — 关闭
+/memory unlock   — 清除遗留的 .lock（会先要求确认）
+```
+
+状态输出：
 
 ```
-/memory        — 显示状态
-/memory on     — 启用记忆
-/memory off    — 禁用记忆
+Memory: enabled
+Dir: /home/you/.pi/memory/git/github.com__owner__repo
+Index: 37/200 lines, 2841/25600 bytes, 1 unrecognized lines
+Entries: 37
+Last dream: 2026-10-01T22:10:04.882Z
+Migration: migrated at 2026-09-30T09:12:44.120Z (18 entries from 4 files)
+Lock: free
 ```
+
+- `Index` 用**写入**口径（`memIndexMax*`），并报告索引里有多少非空行解析不出（手写标题会计入；被 Windows 编辑器改成 CRLF 行尾的 `MEMORY.md` 也会在这里露出来）。
+- `Migration` 有三种：`migrated at …`、`not needed`（标记显示当时没东西要迁）、`pending`（没有标记或标记读不懂 → 下次 `session_start` 重试）。
+- `Lock` 有三种：`free`、`held by <op> (pid N, started <ISO>)`、`unreadable — run /memory unlock`。
 
 ### `/dream`
 
-启动无头代理，四阶段整理全部记忆文件：
+先要求确认，然后对整个目录拍快照，再跑一个 headless agent 走完四个阶段：
 
-1. **Orient** — 列出文件、读取 MEMORY.md、浏览 topic 文件
-2. **Gather Signal** — 发现重复、矛盾、过时条目
-3. **Consolidate** — 合并重复、解决矛盾、更新日期
-4. **Prune & Index** — 重建 frontmatter、生成 hook、重建 MEMORY.md
+1. **Orient** —— `list`，读相关 entry
+2. **Gather Signal** —— 找重复（同一事实的多条 entry）、矛盾、过时内容
+3. **Consolidate** —— 用 `replace` + `remove` 合并，用 `rename` 改名
+4. **Prune & Index** —— 用 `rebuild_index` 兜底重建
 
-使用的模型通过 `memory.json` 的 `dream.model` 配置。开始前弹出确认对话框，完成时通知摘要。
+它碰不到文件：只有七个 `memory` action。完成时通知摘要，失败时通知 `Dream failed: …`。模型可用 `dream.model` 配置。
+
+## 从 1.x 迁移
+
+升级后第一次 `session_start` 自动执行：
+
+1. 整轮取逻辑锁（30s）；
+2. 把整个目录快照到 `.backups/migrate-<ts>/`，并把原 topic 文件复制到 `.backups/migrate-<ts>/originals/`；
+3. 对每个 legacy 文件（含 ≥ 2 个 `## ` 段，或 frontmatter 里有旧字段 `updated`）：把每个 `## entry` 拆成独立文件，沿用 `type`，把 `updated` 归一成 `created` / `modified`；跨文件重名的第二条起追加 ` (2)`、` (3)`；
+4. `rebuildIndex()`；
+5. 删除原 topic 文件（它们仍在 `originals/` 里）；
+6. 写 `.migrated`；
+7. 通知 `Migrated N memories from M topic files. Backup at <path>`。
+
+重跑是安全的：标记只在最后写，而**同名且同正文**的条目会被复用而不是复制一份。任一步失败就不写标记、保留备份、上报错误 —— 下次会话重试。
+
+**手工回滚：**
+
+```bash
+cd ~/.pi/memory/git/github.com__owner__repo        # /memory 打印的那个目录
+ls .backups/migrate-*/originals/                   # 找到要撤销的那一次
+cp .backups/migrate-<ts>/originals/*.md .           # 恢复 1.x 的 topic 文件
+rm .migrated                                       # 让迁移可以重新跑
+rm <生成的 entry 文件>                              # 即 /memory 的 Entries 列出、但不在 originals/ 里的那些
+```
 
 ## 文件布局
 
@@ -232,31 +332,38 @@ memory(action: "add" | "remove" | "search",
 ~/.pi/memory/
   git/
     github.com__yandy__pi-packages/    ← https://github.com/yandy/pi-packages.git
-      MEMORY.md            — 紧凑索引：每个 topic 文件一行
-      .dream-meta.json     — 上次整理的时间戳和会话计数
-      debugging.md         — topic 文件（frontmatter + ## 条目）
-      preferences.md
-      ...
+      MEMORY.md            — 索引：一行一条记忆
+      SSH-port-on-staging.md
+      Test-command.md      — 一条记忆一个文件
+      .lock  .backups/  .migrated  .dream-meta.json
   local/
     home__yandy__workspace__scratch/   ← 非 git 目录 /home/yandy/workspace/scratch
 ```
 
-目录名的派生规则：
+目录名的推导规则：
 
-- remote 为 http(s)、ssh（含 scp 式 `[user@]host:owner/repo`，user 可省略）或 `git://`，以及 `git+ssh://` / `git+https://` 别名的 git 仓库 → `git/<host>__<owner>__<repo>`；端口、认证信息、尾部 `/` 与 `.git` 均被剥离，host 转小写
-- remote URL 读取自原始 git 配置（`remote.<name>.url`；`origin` 优先，其余按字母序，取首个可归一化者），因此 `url.*.insteadOf` 重写不会改变映射结果
-- scheme 形式经 WHATWG URL 归一化（IDN host 转 punycode、应用百分号编码与 `.`/`..` 折叠、凭据/query/fragment 被剔除），scp 形式则保留原样路径 —— 因此同一仓库的不同写法可能落到不同目录
-- 其余情况 —— 非 git 目录、无 remote 的 git 仓库、`file://` 或本地路径 remote → `local/<绝对路径>`（git 仓库取仓库根目录；Windows 风格盘符 remote 如 `C:/repos/foo.git` 在 POSIX 上按 scp 式远端处理，与 git 行为一致）
-- `/` 转为 `__`；文件名不安全的字符（`<>:"|?*`、控制字符）转为 `_XX` 十六进制转义
-- 目录名超过 120 UTF-8 字节时按码点截取前 100 字节并追加 `__<hash8>` 后缀
-- 命名面向 POSIX 文件系统：反斜杠视为普通字符，不做 Windows 设备名或结尾点/空格处理
+- remote 是 http(s)、ssh（含 scp 写法 `[user@]host:owner/repo`，user 可省略）或 `git://`，以及 `git+ssh://` / `git+https://` 别名的 git 仓库 → `git/<host>__<owner>__<repo>`；端口、凭据、结尾的 `/` 与 `.git` 会被剥掉，host 转小写
+- remote URL 从原始 git config 读取（`remote.<name>.url`；先 `origin`，再按字母序，第一个可用的胜出），所以 `url.*.insteadOf` 重写不会影响映射
+- scheme 形式走 WHATWG URL 规范化（IDN host 转 punycode，百分号编码与 `.`/`..` 折叠生效，凭据/query/fragment 被丢弃），scp 形式保留原样路径 —— 等价但写法不同的 remote 可能映射到不同目录
+- 其余情况 —— 非 git 目录、没有 remote 的 git 仓库、`file://` 或本地路径 remote → `local/<absolute-path>`（git 仓库用仓库根；Windows 盘符形式的 remote 如 `C:/repos/foo.git` 在 POSIX 上按 scp 写法处理，与 git 一致）
+- `/` 变成 `__`；文件名里不可移植的字符（`<>:"|?*`、控制字符）变成 `_XX` 十六进制转义
+- 超过 120 UTF-8 字节的名字在码点边界截断到 100 字节，再加 `__<hash8>` 后缀
+- 名字面向 POSIX 文件系统：反斜杠是普通字符，不做 Windows 设备名与结尾句点处理
 
-该映射不是单射：下划线保持原样，因此 `/home/a__b` 与 `/home/a/b` 都会映射为 `home__a__b`（共享同一记忆目录）。修改或重命名 remote、新增一个排序在当前使用的 remote 之前的 remote、或移动本地目录，都会改变记忆目录，旧目录将成为孤儿。
+映射不是单射：下划线原样保留，所以 `/home/a__b` 与 `/home/a/b` 都映射到 `home__a__b`（共享同一个记忆目录）。改动或重命名 remote、新增一个排序更靠前的 remote、移动本地目录，都会改变记忆目录，旧目录会被孤立。
 
-**旧版布局**：早期版本把记忆存放在 `~/.pi/memory/<12位sha256>/` 下，这些目录不再被读取或写入。如需手动迁移，用 `printf '%s' "$(git rev-parse --show-toplevel)" | sha256sum | cut -c1-12` 计算旧哈希（非 git 项目改用 `$PWD`），把对应目录 `mv` 到新路径（在项目里执行 `/memory` 可查看新路径）。
+**更老的布局：** 1.x 之前的版本把记忆存在 `~/.pi/memory/<12-char-sha256>/`；这些目录不再被读写。要手工迁移，用 `printf '%s' "$(git rev-parse --show-toplevel)" | sha256sum | cut -c1-12` 算出旧 hash（不在 git 仓库里就用 `$PWD`），把那个目录 `mv` 到新位置（在项目里跑 `/memory` 可以看到新路径），然后让 1.x → 2.x 的迁移去拆它的 topic 文件。
 
-## 快照语义
+## 通知
 
-每次 `session_start` 读取 `MEMORY.md` 索引，通过 `before_agent_start` 追加到系统提示中。超限则截断并标记 `[truncated]`。此快照是会话开始时的静态副本。
+| 时机 | 通知 |
+|---|---|
+| `memory add` 成功（有 UI 的会话） | `Saved: <name>` |
+| 自动浮现注入了 entry | `Recalled: <N> entries` |
+| extract 写入了记忆 | `Extracted <N> memory.` / `Extracted <N> memories.` |
+| extract 失败 | `Extract failed: <message>` —— 每会话最多一次 |
+| 1.x 迁移完成 | `Migrated <N> memories from <M> topic files. Backup at <path>` |
+| 迁移失败 | `Memory migration failed: <message>` |
+| `/dream` 结束 / 失败 | headless agent 的摘要 / `Dream failed: <message>` |
 
-Topic 文件内容通过 **auto-surfacing**（自动、per-turn、基于相关性）或内置 `read` 工具按需加载。
+headless 会话（`hasUI === false`）不发任何通知。
