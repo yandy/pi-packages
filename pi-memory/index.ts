@@ -5,7 +5,8 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { loadConfig, type MemoryConfig, type SessionPersistenceConfig } from "./src/config";
 import { runDream } from "./src/dream";
 import { runExtract } from "./src/extract";
-import { buildInjection, injectSurfacedContent, loadIndexSnapshot, runSideQuery, scanEntries } from "./src/inject";
+import { readRecordedMemoryIndex } from "./src/index-source";
+import { applyIndexSection, buildIndexSection, buildInjection, injectSurfacedContent, runSideQuery, scanEntries } from "./src/inject";
 import {
 	createMemoryTool,
 	DREAM_ACTIONS,
@@ -27,6 +28,10 @@ function extractAgentsMdBlocks(systemPrompt: string): string[] {
 	return blocks;
 }
 
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function resolveDefault(cfg: MemoryConfig, task: "dream" | "autoSurfacing" | "extractMemories", key: "model"): string | undefined;
 function resolveDefault(cfg: MemoryConfig, task: "dream" | "autoSurfacing" | "extractMemories", key: "sessionPersistence"): SessionPersistenceConfig | undefined;
 function resolveDefault(cfg: MemoryConfig, task: "dream" | "autoSurfacing" | "extractMemories", key: "model" | "sessionPersistence"): string | SessionPersistenceConfig | undefined {
@@ -43,9 +48,21 @@ export default function (pi: ExtensionAPI) {
 	let indexSnapshot = "";
 	let toolRegistered = false;
 	let currentCwd = "";
-	/** 本 session 已注入过的 entry **文件名**（spec §9.3）。session_compact 会清空它 —— Plan C。 */
+	/** 本 session 已注入过的 entry **文件名**（spec §9.3）。session_compact 会清空它。 */
 	const injectedFiles = new Set<string>();
 	let lastSystemPrompt = "";
+	/**
+	 * 在途的后台写操作（dream / extract）。`session_shutdown` 等它们收尾，上限
+	 * `lock.timeoutMs`（spec §10）—— 进程在写入中途被杀会留下永远没人释放的 `.lock`。
+	 */
+	const inFlight = new Set<Promise<unknown>>();
+
+	/** 登记一个后台 promise，settle 后自动摘掉；返回同一个 promise 以便调用方继续链式处理。 */
+	function track<T>(promise: Promise<T>): Promise<T> {
+		inFlight.add(promise);
+		promise.catch(() => undefined).finally(() => inFlight.delete(promise));
+		return promise;
+	}
 
 	/**
 	 * 主 agent、extract、dream 共用同一份依赖，三者只差 `actions` 与锁/快照选项（D12）。
@@ -61,7 +78,7 @@ export default function (pi: ExtensionAPI) {
 		cwd: () => currentCwd,
 	};
 
-	pi.on("session_start", async (_event, ctx) => {
+	pi.on("session_start", async (event, ctx) => {
 		config = await loadConfig(ctx);
 		if (!config.enabled) return;
 		currentCwd = ctx.cwd;
@@ -92,7 +109,17 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 
-		indexSnapshot = await loadIndexSnapshot(memoryDir, config.memIndexInjectMaxLines, config.memIndexInjectMaxBytes);
+		// D13 / D14：索引值在整个 session 内**冻结**。resume / fork / reload 必须用 transcript 里的
+		// 录制值 —— 否则被恢复会话的 system prompt 头部会被改写，而 memory_index 是头部的最后一段，
+		// 折叠路径下其后的整段对话全部失去缓存。录制值拿不到（更老的 session、旧 SDK 没有
+		// sessionEntryToContextMessages）才回退磁盘读。
+		// 录制值**不再 re-sanitize**：写入当年已经净化过，而 sanitizeForInjection 是幂等的 ——
+		// 保持字节恒等更利于缓存。
+		const reason = (event as { reason?: string }).reason ?? "startup";
+		const useRecorded = reason === "resume" || reason === "fork" || reason === "reload";
+		const recorded = useRecorded ? readRecordedMemoryIndex(ctx.sessionManager) : null;
+		indexSnapshot =
+			recorded ?? (await buildIndexSection(store, config.memIndexInjectMaxLines, config.memIndexInjectMaxBytes));
 
 		// register memory tool once
 		if (!toolRegistered) {
@@ -117,7 +144,7 @@ export default function (pi: ExtensionAPI) {
 					const dreamThinkLevel = config.dream.thinkLevel;
 					const dir = memoryDir;
 					ctx.ui.setStatus("dream", "Consolidating memory...");
-					runDream({
+					const dreamRun = runDream({
 						model: dreamModel,
 						thinkLevel: dreamThinkLevel,
 						memoryDir: dir,
@@ -135,7 +162,9 @@ export default function (pi: ExtensionAPI) {
 								skipSnapshot: true,
 							}),
 						],
-					})
+					});
+					track(dreamRun);
+					dreamRun
 						.then(async (summary) => {
 							await writeDreamMeta(dir, sessions);
 							ctx.ui.notify(summary, "info");
@@ -156,7 +185,7 @@ export default function (pi: ExtensionAPI) {
 		lastSystemPrompt = event.systemPrompt;
 		// 先拷到 const：`store` 是工厂作用域的 let，在异步回调里 TS 不会保留它的外层收窄。
 		const activeStore = store;
-		if (!config?.enabled || !indexSnapshot || !memoryDir || !activeStore) return;
+		if (!config?.enabled || !memoryDir || !activeStore) return;
 
 		const autoSurfacing = config.autoSurfacing;
 		// Skip auto-surfacing in subagent sessions: pi-subagents injects an
@@ -203,11 +232,35 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 
-		// MEMORY.md index injection (always last after auto-surfacing)
+		// 索引 section：**每一轮无条件**写入冻结值（含 resume / fork / reload）。
+		// 省略这个键 = pi 的 diffSystemPromptSections 生成 { memory_index: null } = 把索引从
+		// system prompt 里静默删掉（spec §9.1 的 null 陷阱）。「不想改」只能靠喂回同一个值。
+		const applied = applyIndexSection(event.systemPromptOptions, indexSnapshot);
 		return {
-			systemPrompt: buildInjection(event.systemPrompt, indexSnapshot),
+			// 旧 SDK（没有 sections，本地类型就是 0.80.2）的退路：功能不受损，只是缓存变差。
+			...(applied ? {} : { systemPrompt: buildInjection(event.systemPrompt, indexSnapshot) }),
 			...(injectedMessage ? { message: injectedMessage } : {}),
 		};
+	});
+
+	// D14：compaction 是**唯一**的会话内刷新点。compaction 已经重写了对话中段，头部再变一次
+	// 的边际缓存损失最小，而长会话到这时候往往已经攒下了新记忆（spec §9.1(c) / §10）。
+	pi.on("session_compact", async () => {
+		const activeStore = store;
+		if (!config?.enabled || !activeStore) return;
+		// compaction 会把已注入的内容挤出上下文：不清空，这些 entry 本会话再也不会浮现。
+		injectedFiles.clear();
+		indexSnapshot = await buildIndexSection(
+			activeStore,
+			config.memIndexInjectMaxLines,
+			config.memIndexInjectMaxBytes,
+		);
+	});
+
+	// spec §10：退出前等在途写操作收尾（上限 lock.timeoutMs），避免留下 stale 锁。
+	pi.on("session_shutdown", async () => {
+		if (inFlight.size === 0) return;
+		await Promise.race([Promise.allSettled([...inFlight]), sleep(config?.lock.timeoutMs ?? 5000)]);
 	});
 
 	pi.on("agent_end", async (event, ctx) => {
@@ -218,7 +271,7 @@ export default function (pi: ExtensionAPI) {
 		const extractConfig = config.extractMemories;
 		if (!extractConfig?.enabled) return;
 		if (!event.messages || event.messages.length === 0) return;
-		void runExtract({
+		const extractRun = runExtract({
 			agentsMdBlocks: extractAgentsMdBlocks(lastSystemPrompt),
 			model: resolveDefault(config, "extractMemories", "model"),
 			thinkLevel: extractConfig.thinkLevel,
@@ -236,7 +289,9 @@ export default function (pi: ExtensionAPI) {
 			// 不开 skipSnapshot：extract 没有整轮快照，它的每次写入都该留下自己的回滚点。
 			customTools: [createMemoryTool(toolDeps, { actions: MAIN_AGENT_ACTIONS, skipLogicalLock: true })],
 			sessionPersistence: resolveDefault(config, "extractMemories", "sessionPersistence"),
-		}).catch(() => {
+		});
+		track(extractRun);
+		void extractRun.catch(() => {
 			// Plan C 会把这里换成限流的用户可见通知（spec §14：「extract 失败 → 通知错误」）。
 			// Plan B 先保持静默：runExtract 自己已经不再吞错，这里只是避免未处理的 rejection 撕下整个进程。
 		});
@@ -281,7 +336,7 @@ export default function (pi: ExtensionAPI) {
 			if (!ok) return;
 			const dir = memoryDir;
 			ctx.ui.setStatus("dream", "Consolidating memory...");
-			runDream({
+			const dreamRun = runDream({
 				model: resolveDefault(config, "dream", "model"),
 				thinkLevel: config.dream.thinkLevel,
 				memoryDir,
@@ -297,7 +352,9 @@ export default function (pi: ExtensionAPI) {
 						skipSnapshot: true,
 					}),
 				],
-			})
+			});
+			track(dreamRun);
+			dreamRun
 				.then(async (summary) => {
 					const sessions = (await SessionManager.list(ctx.cwd)).length;
 					await writeDreamMeta(dir, sessions);

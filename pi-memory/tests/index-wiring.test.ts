@@ -34,7 +34,7 @@ const { mockConfigValue, dirRef } = vi.hoisted(() => ({
 	dirRef: { current: "" },
 }));
 
-const { scanEntriesMock, runSideQueryMock, injectSurfacedContentMock, runExtractMock, runDreamMock, shouldNudgeMock } =
+const { scanEntriesMock, runSideQueryMock, injectSurfacedContentMock, runExtractMock, runDreamMock, shouldNudgeMock, readRecordedMemoryIndexMock } =
 	vi.hoisted(() => ({
 		scanEntriesMock: vi.fn(),
 		runSideQueryMock: vi.fn(),
@@ -42,6 +42,7 @@ const { scanEntriesMock, runSideQueryMock, injectSurfacedContentMock, runExtract
 		runExtractMock: vi.fn().mockResolvedValue({ skipped: false, result: "saved 1" }),
 		runDreamMock: vi.fn().mockResolvedValue("consolidated"),
 		shouldNudgeMock: vi.fn(),
+		readRecordedMemoryIndexMock: vi.fn(),
 	}));
 
 vi.mock("../src/config", () => ({
@@ -72,8 +73,8 @@ vi.mock("../src/extract", async (importOriginal) => {
 	return { ...actual, runExtract: runExtractMock };
 });
 
-// 只替换 auto-surfacing 的三个函数：loadIndexSnapshot / buildInjection 走真实实现，
-// 这样「索引注入在 Plan B 保持现状」这件事本身也被钉住。
+// 只替换 auto-surfacing 的三个函数：buildIndexSection / applyIndexSection / buildInjection
+// 走真实实现，这样「sections 注入 + 冻结」这件事本身也被钉住。
 vi.mock("../src/inject", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../src/inject")>();
 	return {
@@ -82,6 +83,14 @@ vi.mock("../src/inject", async (importOriginal) => {
 		runSideQuery: runSideQueryMock,
 		injectSurfacedContent: injectSurfacedContentMock,
 	};
+});
+
+// 录制值重放的真实现由 tests/index-source.test.ts 覆盖（本地 SDK 是 0.80.2，没有
+// sessionEntryToContextMessages 导出，真实路径在这里永远拿不到录制值）—— 接线层只钉
+// 「哪个 reason 走录制值、拿到/拿不到分别怎么办」。
+vi.mock("../src/index-source", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../src/index-source")>();
+	return { ...actual, readRecordedMemoryIndex: readRecordedMemoryIndexMock };
 });
 
 import memoryFactory from "../index";
@@ -131,9 +140,26 @@ function uiCtx(over: Record<string, unknown> = {}) {
 		isProjectTrusted: () => true,
 		modelRegistry: {},
 		model: undefined,
+		sessionManager: { getEntries: () => [], getLeafId: () => null },
 		...over,
 	} as any;
 }
+
+/** 0.99.2 宿主的 fake 事件：`systemPromptOptions.sections` 是可变对象，注入就地写进去。 */
+function sectionsEvent(prompt = "q") {
+	return {
+		prompt,
+		systemPrompt: "BASE_PROMPT",
+		systemPromptOptions: { sections: {} as Record<string, string | null> },
+	};
+}
+
+/** 旧 SDK（本地类型 0.80.2）的 fake 事件：根本没有 `sections`。 */
+function legacyEvent(prompt = "q") {
+	return { prompt, systemPrompt: "BASE_PROMPT", systemPromptOptions: {} };
+}
+
+const DISK_INDEX = "- [SSH](ssh.md) — staging ssh config\n";
 
 describe("index wiring (integration)", () => {
 	let dir: string;
@@ -142,15 +168,18 @@ describe("index wiring (integration)", () => {
 		dir = await mkdtemp(join(tmpdir(), "mem-wiring-"));
 		dirRef.current = dir;
 		await mkdir(dir, { recursive: true });
-		await writeFile(join(dir, "MEMORY.md"), "- [SSH](ssh.md) — staging ssh config\n", "utf8");
+		await writeFile(join(dir, "MEMORY.md"), DISK_INDEX, "utf8");
 
 		scanEntriesMock.mockReset();
 		runSideQueryMock.mockReset();
 		injectSurfacedContentMock.mockReset();
-		runExtractMock.mockClear();
+		runExtractMock.mockReset();
+		runExtractMock.mockResolvedValue({ skipped: false, result: "saved 1" });
 		runDreamMock.mockClear();
 		shouldNudgeMock.mockReset();
 		shouldNudgeMock.mockResolvedValue({ nudge: false, message: "", sessions: 0, newEntries: 0 });
+		readRecordedMemoryIndexMock.mockReset();
+		readRecordedMemoryIndexMock.mockReturnValue(null);
 	});
 
 	afterEach(async () => {
@@ -158,6 +187,7 @@ describe("index wiring (integration)", () => {
 		delete mockConfigValue.defaults;
 		delete (mockConfigValue.autoSurfacing as any).sessionPersistence;
 		mockConfigValue.extractMemories.enabled = false;
+		mockConfigValue.lock = { timeoutMs: 5000, snapshotKeep: 5 };
 	});
 
 	it("registers exactly one memory tool with the five main-agent actions", async () => {
@@ -218,21 +248,224 @@ describe("index wiring (integration)", () => {
 		expect(index).toContain("- [Use real DB in tests](Use-real-DB-in-tests.md) — 不要 mock");
 	});
 
-	it("freezes the index snapshot across before_agent_start calls", async () => {
+	it("writes the memory_index section on every turn and freezes it byte-for-byte", async () => {
 		const { pi, handlers } = createFakePi();
 		memoryFactory(pi as any);
 		await handlers["session_start"][0]({}, uiCtx());
 
-		const result1 = await handlers["before_agent_start"][0]({ systemPrompt: "BASE_PROMPT" }, uiCtx());
-		// 会话中途磁盘上的索引被改了（另一个 worktree 写入）：注入值必须不变
-		await writeFile(join(dir, "MEMORY.md"), "- [SSH](ssh.md) — changed\n", "utf8");
-		const result2 = await handlers["before_agent_start"][0]({ systemPrompt: "BASE_PROMPT" }, uiCtx());
+		const first = sectionsEvent();
+		await handlers["before_agent_start"][0](first, uiCtx());
+		expect(first.systemPromptOptions.sections["memory_index"]).toBe(DISK_INDEX);
 
-		expect(result1?.systemPrompt).toBe(
-			"BASE_PROMPT\n\n# Memory Index\n- [SSH](ssh.md) — staging ssh config\n",
+		// 会话中途磁盘上的索引被改了（另一个 worktree 写入）：注入值必须逐字节不变
+		await writeFile(join(dir, "MEMORY.md"), "- [SSH](ssh.md) — changed\n", "utf8");
+		const second = sectionsEvent();
+		const result = await handlers["before_agent_start"][0](second, uiCtx());
+
+		expect(second.systemPromptOptions.sections["memory_index"]).toBe(DISK_INDEX);
+		expect(second.systemPromptOptions.sections["memory_index"]).not.toContain("changed");
+		// 走 sections 路径时不再返回 systemPrompt（避免全量替换从 position 0 打断缓存）
+		expect(result?.systemPrompt).toBeUndefined();
+	});
+
+	// Review Focus #1：省略该键 = pi 生成 { memory_index: null } = 索引被静默删除。
+	// 三种「用录制值」的 reason 也必须每轮把键写回去。
+	it("sets the section for every session_start reason", async () => {
+		for (const reason of ["startup", "new", "resume", "fork", "reload", undefined]) {
+			const { pi, handlers } = createFakePi();
+			memoryFactory(pi as any);
+			await handlers["session_start"][0](reason ? { reason } : {}, uiCtx());
+
+			const first = sectionsEvent();
+			await handlers["before_agent_start"][0](first, uiCtx());
+			const second = sectionsEvent();
+			await handlers["before_agent_start"][0](second, uiCtx());
+
+			expect(Object.keys(first.systemPromptOptions.sections), reason).toEqual(["memory_index"]);
+			expect(Object.keys(second.systemPromptOptions.sections), reason).toEqual(["memory_index"]);
+			expect(second.systemPromptOptions.sections["memory_index"], reason).toBe(DISK_INDEX);
+		}
+	});
+
+	it("uses the recorded index for resume/fork/reload and never reads the disk", async () => {
+		for (const reason of ["resume", "fork", "reload"]) {
+			await writeFile(join(dir, "MEMORY.md"), "- [DISK](disk.md) — from disk\n", "utf8");
+			readRecordedMemoryIndexMock.mockReturnValue("- [SSH](ssh.md) — recorded\n");
+			const sessionManager = { getEntries: () => [], getLeafId: () => null };
+			const { pi, handlers } = createFakePi();
+			memoryFactory(pi as any);
+
+			await handlers["session_start"][0]({ reason }, uiCtx({ sessionManager }));
+			const event = sectionsEvent();
+			await handlers["before_agent_start"][0](event, uiCtx({ sessionManager }));
+
+			expect(readRecordedMemoryIndexMock, reason).toHaveBeenCalledWith(sessionManager);
+			expect(event.systemPromptOptions.sections["memory_index"], reason).toBe("- [SSH](ssh.md) — recorded\n");
+			expect(event.systemPromptOptions.sections["memory_index"], reason).not.toContain("DISK");
+			readRecordedMemoryIndexMock.mockReturnValue(null);
+		}
+	});
+
+	it("reads the disk for startup/new instead of replaying the transcript", async () => {
+		for (const reason of ["startup", "new", undefined]) {
+			const { pi, handlers } = createFakePi();
+			memoryFactory(pi as any);
+
+			await handlers["session_start"][0](reason ? { reason } : {}, uiCtx());
+
+			expect(readRecordedMemoryIndexMock, String(reason)).not.toHaveBeenCalled();
+		}
+	});
+
+	// Review Focus #3：重放拿不到录制值 → 回退磁盘，而不是把索引丢掉。
+	it("falls back to the disk index when no recorded value is available", async () => {
+		readRecordedMemoryIndexMock.mockReturnValue(null);
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		await handlers["session_start"][0]({ reason: "resume" }, uiCtx());
+		const event = sectionsEvent();
+		await handlers["before_agent_start"][0](event, uiCtx());
+
+		expect(readRecordedMemoryIndexMock).toHaveBeenCalledTimes(1);
+		expect(event.systemPromptOptions.sections["memory_index"]).toBe(DISK_INDEX);
+	});
+
+	it("falls back to { systemPrompt } when the host SDK exposes no sections", async () => {
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		const event = legacyEvent();
+		const result = await handlers["before_agent_start"][0](event, uiCtx());
+
+		expect(result?.systemPrompt).toBe(`BASE_PROMPT\n\n${DISK_INDEX}`);
+		expect((event.systemPromptOptions as any).sections).toBeUndefined();
+	});
+
+	it("injects an empty section value instead of dropping the key", async () => {
+		await writeFile(join(dir, "MEMORY.md"), "", "utf8");
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		const event = sectionsEvent();
+		const result = await handlers["before_agent_start"][0](event, uiCtx());
+
+		expect(Object.keys(event.systemPromptOptions.sections)).toEqual(["memory_index"]);
+		expect(event.systemPromptOptions.sections["memory_index"]).toBe("");
+		expect(result?.systemPrompt).toBeUndefined();
+	});
+
+	// D14：compaction 是唯一的会话内刷新点，同时清空已注入集合。
+	it("session_compact re-reads the index from disk and clears injectedFiles", async () => {
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		scanEntriesMock.mockResolvedValue([
+			{ file: "ssh.md", name: "SSH", description: "d", type: "project", modified: "2026-01-01T00:00:00.000Z" },
+		]);
+		const injectedAtCall: Array<Set<string>> = [];
+		runSideQueryMock.mockImplementation(async (...args: any[]) => {
+			injectedAtCall.push(new Set(args[2]));
+			return ["ssh.md"];
+		});
+		injectSurfacedContentMock.mockResolvedValue("<relevant_memories>\n## SSH\nx\n</relevant_memories>");
+
+		const first = sectionsEvent();
+		await handlers["before_agent_start"][0](first, uiCtx());
+		expect(injectedAtCall[0]).toEqual(new Set());
+
+		await writeFile(join(dir, "MEMORY.md"), "# Memory Index\n\n- [New](new.md) — after compact\n", "utf8");
+		await handlers["session_compact"][0]({ type: "session_compact", reason: "manual" }, uiCtx());
+
+		const second = sectionsEvent();
+		await handlers["before_agent_start"][0](second, uiCtx());
+
+		expect(second.systemPromptOptions.sections["memory_index"]).toBe(
+			"# Memory Index\n\n- [New](new.md) — after compact\n",
 		);
-		expect(result2?.systemPrompt).toBe(result1?.systemPrompt);
-		expect(result2?.systemPrompt).not.toContain("changed");
+		expect(injectedAtCall[1]).toEqual(new Set());
+	});
+
+	it("refreshes the index on session_compact only — no other event may", async () => {
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		const first = sectionsEvent();
+		await handlers["before_agent_start"][0](first, uiCtx());
+
+		await writeFile(join(dir, "MEMORY.md"), "- [Changed](c.md) — changed\n", "utf8");
+		await handlers["agent_end"][0]({ messages: [] }, uiCtx());
+		await handlers["session_shutdown"][0]({ type: "session_shutdown", reason: "quit" }, uiCtx());
+		const second = sectionsEvent();
+		await handlers["before_agent_start"][0](second, uiCtx());
+
+		expect(second.systemPromptOptions.sections["memory_index"]).toBe(DISK_INDEX);
+		expect(Object.keys(handlers).sort()).toEqual([
+			"agent_end",
+			"before_agent_start",
+			"session_compact",
+			"session_shutdown",
+			"session_start",
+		]);
+	});
+
+	it("session_shutdown waits for an in-flight extract", async () => {
+		mockConfigValue.extractMemories.enabled = true;
+		let release: (() => void) | undefined;
+		runExtractMock.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					release = () => resolve({ skipped: false, result: "ok" });
+				}),
+		);
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		await handlers["agent_end"][0]({ messages: [{ role: "user", content: "hi" }] }, uiCtx());
+
+		let settled = false;
+		const shutdown = handlers["session_shutdown"][0]({ type: "session_shutdown", reason: "quit" }, uiCtx()).then(
+			() => {
+				settled = true;
+			},
+		);
+		await Promise.resolve();
+		expect(settled).toBe(false);
+
+		release?.();
+		await shutdown;
+		expect(settled).toBe(true);
+	});
+
+	it("session_shutdown gives up after lock.timeoutMs rather than hanging", async () => {
+		mockConfigValue.extractMemories.enabled = true;
+		mockConfigValue.lock = { timeoutMs: 30, snapshotKeep: 5 };
+		runExtractMock.mockImplementationOnce(() => new Promise(() => {}));
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+		await handlers["agent_end"][0]({ messages: [{ role: "user", content: "hi" }] }, uiCtx());
+
+		const started = Date.now();
+		await handlers["session_shutdown"][0]({ type: "session_shutdown", reason: "quit" }, uiCtx());
+
+		expect(Date.now() - started).toBeLessThan(2000);
+	});
+
+	it("session_shutdown resolves immediately when nothing is in flight", async () => {
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		const started = Date.now();
+		await handlers["session_shutdown"][0]({ type: "session_shutdown", reason: "quit" }, uiCtx());
+
+		expect(Date.now() - started).toBeLessThan(500);
 	});
 
 	it("runs auto-surfacing through the store for main agents", async () => {
@@ -267,7 +500,7 @@ describe("index wiring (integration)", () => {
 			content: "<relevant_memories>\n## SSH\nssh config\n</relevant_memories>",
 			display: false,
 		});
-		expect(result?.systemPrompt).toContain("# Memory Index");
+		expect(result?.systemPrompt).toContain("- [SSH](ssh.md) — staging ssh config");
 	});
 
 	it("does not surface the same entry file twice in one session", async () => {
@@ -315,7 +548,7 @@ describe("index wiring (integration)", () => {
 
 		expect(scanEntriesMock).not.toHaveBeenCalled();
 		expect(runSideQueryMock).not.toHaveBeenCalled();
-		expect(result?.systemPrompt).toContain("# Memory Index");
+		expect(result?.systemPrompt).toContain("- [SSH](ssh.md) — staging ssh config");
 	});
 
 	it("resolveDefault: defaults.sessionPersistence flows through to runSideQuery", async () => {

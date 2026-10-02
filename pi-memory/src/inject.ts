@@ -5,7 +5,9 @@ import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { runHeadlessAgent } from "./agent-runner";
 import type { SessionPersistenceConfig, ThinkLevel } from "./config";
 import type { EntryType } from "./entry-file";
+import { MEMORY_INDEX_SECTION } from "./index-source";
 import type { MemoryStore } from "./memory-store";
+import { sanitizeForInjection } from "./sanitize";
 
 /**
  * 注入用的「按行 + 按字节」截断。原本住在 `index-file.ts`（topic 模型的索引层），
@@ -46,6 +48,39 @@ export async function loadIndexSnapshot(memoryDir: string, maxLines: number, max
 export function buildInjection(systemPrompt: string, snapshot: string): string {
 	if (!snapshot) return systemPrompt;
 	return `${systemPrompt}\n\n${snapshot}`;
+}
+
+/**
+ * `memory_index` section 的值（spec §9.1 / D13）：读索引 → 截断 → 净化。
+ *
+ * **不再自己加 `# Memory Index\n` 前缀**：v1 的 `loadIndexSnapshot` 会补一份头部，而 v2 的
+ * `MEMORY.md` 由 `rebuildIndex`（默认头部就是 `# Memory Index`）与迁移写入 —— 再补一次
+ * 注入文本里就有两份标题。
+ *
+ * 空索引返回 `""`（调用方仍要把 `""` 无条件写进 sections，见 `applyIndexSection`）。
+ */
+export async function buildIndexSection(store: MemoryStore, maxLines: number, maxBytes: number): Promise<string> {
+	const raw = await store.readIndex();
+	const { content } = truncateForInjection(raw, maxLines, maxBytes);
+	return sanitizeForInjection(content);
+}
+
+/**
+ * 把冻结的索引值写进 `event.systemPromptOptions.sections`（就地修改这个可变对象）。
+ *
+ * 返回 `false` 表示宿主 SDK 太旧、没有 `sections`（本地类型是 0.80.2），调用方必须回退
+ * `{ systemPrompt: buildInjection(…) }`（spec §19 的退路：功能不受损，只是缓存变差）。
+ *
+ * **无条件设置**，哪怕值是 `""`：省略这个键等于告诉 pi「该 section 不应存在」，
+ * `diffSystemPromptSections` 会生成 `{ memory_index: null }`，索引被从 system prompt 里
+ * **静默删除**（spec §9.1 的 null 陷阱）。「不想改」只能靠喂回逐字节相同的值实现。
+ */
+export function applyIndexSection(systemPromptOptions: unknown, value: string): boolean {
+	const options = systemPromptOptions as { sections?: unknown } | null | undefined;
+	const sections = options?.sections;
+	if (typeof sections !== "object" || sections === null) return false;
+	(sections as Record<string, string | null>)[MEMORY_INDEX_SECTION] = value;
+	return true;
 }
 
 /** 侧查询清单的一行 = 一条 entry（v1 是一个 topic 文件）。 */
@@ -100,7 +135,9 @@ export async function injectSurfacedContent(
 		const entry = await store.readEntry(file);
 		if (!entry) continue;
 		const { content } = truncateForInjection(entry.body, 999999, maxEntryBytes);
-		const block = `## ${entry.name}\n${content}`;
+		// spec §13：正文与 name 都要净化（用户/模型写进磁盘的内容可能含 `</relevant_memories>`
+		// 之类的仿冒标签）。包裹标签是我们自己生成的，不净化。
+		const block = `## ${sanitizeForInjection(entry.name)}\n${sanitizeForInjection(content)}`;
 		const blockBytes = Buffer.byteLength(block, "utf8");
 		if (totalBytes + blockBytes > maxInjectionBytes) break;
 		blocks.push(block);
