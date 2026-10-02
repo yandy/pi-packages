@@ -34,7 +34,7 @@
 | **D2** | **一次性消费**：进入审批对话前消费记录（Allow / Deny / 取消都算用掉）；一次拒绝 = 一笔提权重试机会 |
 | **D3** | **kind 隔离**：bash 的拒绝只放行 bash 提权（`command`），write/edit 的只放行其自身（`operation`） |
 | **D4** | 门禁**只作用于严格更宽的请求**；同档免审批与"非法目标报 not-strictly-wider 错误"逐字不变 |
-| **D5** | **参数归一化**：`null` / `"null"`（trim、大小写无关）/ 空串 / 纯空白 → 视为未提供、按普通调用执行；真正的畸形（如只给 justification）仍报既有 malformed 错误 |
+| **D5** | **参数归一化**：`null` / `"null"`（trim、大小写无关）/ 空串 / 纯空白 → 视为未提供、按普通调用执行；真正的畸形（如只给 justification）仍报既有 malformed 错误。**1.3.1 修订**：schema 层显式接受字符串 `"null"` 与 JSON `null` 占位符（否则被宿主 schema 校验拦在扩展之前，归一化没机会运行） |
 | **D6** | **Deny 可选理由**（用户追加）：两步式 `select → input`；理由可选（回车跳过）、sanitize（折叠空白、截断 500 字符）、随拒绝错误回传模型 |
 | **D7** | 忽略提权时**不弹窗、不报错**：按当前档位执行，结果附 `[sandbox: escalation fields were ignored …]`（原位反馈） |
 | **D8** | **无配置开关**：不引入 escalation policy 配置项（用户明确未选方案 3） |
@@ -97,6 +97,8 @@ interface DenialLedger {
 
 ### 4.3 `src/tools.ts`：归一化 + 门禁
 
+**schema 层占位符容错（1.3.1 修订）**：`ESCALATION_PROPS.sandbox_permissions` 的枚举显式包含 `Type.Literal("null")` 与 `Type.Null()`。原因是事实基础里的一条宿主行为：归一化只对"到达扩展"的参数生效，而 pi 宿主在扩展之前用 JSON Schema 校验工具参数（`anyOf` + `const` 字面量）——严格枚举会把字符串 `"null"` 直接拒绝（`Validation failed for tool "bash"`，扩展代码根本没运行，实测见 2026-10-02 真机测试）。放行两个占位符后：拼写错误（如 `"danger-full"`）仍被宿主拦，占位符由 `normalizeEscalationValue` 统一视为未提供。空串 / 纯空白仍是宿主拒绝（罕见，模型看到明确报错可自纠）。
+
 `resolveCall` 的新顺序（相对 09-29 §7 的 6 步流程）：
 
 1. `normalizeEscalationValue` × 2（占位符 → `undefined`）
@@ -147,7 +149,8 @@ interface DenialLedger {
 | 有记录 + 更宽请求 + 用户 Deny | 消费记录；错误文案含可选理由；再提权因无记录被忽略（模型被告知 stop and explain） |
 | 同档请求（含 `/permission` 已放宽） | 免审批，不触达门禁（不受记录影响） |
 | 非法目标（更窄 / 未知） | 既有 not-strictly-wider 错误（不进门禁、不静默降级） |
-| 占位符参数 | 视为未提供，普通调用 |
+| 占位符参数（`null` / `"null"`，到达扩展） | 视为未提供，普通调用 |
+| 宿主层占位符（1.3.1 已修） | `sandbox_permissions` 枚举显式放行字符串 `"null"` 与 JSON `null`；空串/纯空白仍被宿主拦（罕见，模型自纠成本低） |
 | 真畸形（只给一个字段 / 空 justification） | 既有 malformed 错误（nothing ran + 修复配方） |
 | 读不到 sessionId（窄 ctx / 异常宿主） | 无记录可证 → 忽略（不抛 TypeError，fail-closed 方向） |
 | headless（有会话身份、无通道） | 有记录时走既有 no approval channel 错误；无记录时忽略 |
@@ -198,6 +201,7 @@ interface DenialLedger {
 | kind 隔离（operation 记录不放行 command） | 同上 | 同上 |
 | 同档 / 非法请求不受门禁影响 | 免审批 / not-strictly-wider | 同上 |
 | 归一化（`null` / `"null"` / 空白） | 普通调用、不抛 malformed | 同上 |
+| schema 接受占位符且保留枚举防护（1.3.1） | `anyOf` 含两个档位字面量 + `const:"null"` + `type:"null"` | `tests/tools.test.ts` |
 | write 围栏内 + 无记录提权 | 落地成功 + ignored 标记 + 零弹窗 | 同上 |
 | 全链路：忽略 → fence 拒绝 → 重试弹窗 → 落盘 | 真实拒绝后恢复标准审批 | 同上 |
 | bash `onDenial` 记账（命中 / runner failure 不触发） | 调用次数断言 | `tests/bash-ops.test.ts` |

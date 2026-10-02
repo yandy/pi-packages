@@ -81,6 +81,20 @@ describe("createSandboxTools schemas", () => {
 		expect(props.sandbox_permissions).toBeDefined();
 		expect(props.justification).toBeDefined();
 	});
+	it("escalation schema 显式接受占位符（字符串 \"null\" / JSON null）——宿主不拦，交给归一化（1.3.1）", () => {
+		const { deps } = makeDeps();
+		const { bash, write, edit } = createSandboxTools(deps);
+		for (const tool of [bash, write, edit]) {
+			const props = (tool.parameters as { properties: Record<string, unknown> }).properties;
+			const schema = JSON.stringify(props.sandbox_permissions);
+			// 枚举保留原有两个档位（真正的拼写错误仍被宿主拦）
+			expect(schema).toContain('"const":"workspace-write"');
+			expect(schema).toContain('"const":"danger-full-access"');
+			// 占位符容错：字符串 "null" 与 JSON null 放行到扩展层归一化
+			expect(schema).toContain('"const":"null"');
+			expect(schema).toContain('"type":"null"');
+		}
+	});
 	it("description teaches the escalation contract within the per-tool budget (β′)", () => {
 		const { deps } = makeDeps();
 		const { bash, write, edit } = createSandboxTools(deps);

@@ -165,6 +165,7 @@ type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
 
 bash / write / edit 各增加可选参数：
 - `sandbox_permissions?: 'workspace-write' | 'danger-full-access'`（封闭目标词汇 `ESCALATION_TARGETS`；`read-only` 是底线，不可作为目标）
+  - **2026-10-02 修订（pi-sandbox 1.3.1）**：schema 层显式接受字符串 `"null"` 与 JSON `null` 占位符——LLM 常把"不填"表达成 `"null"`，严格枚举会把它拦在**宿主 schema 校验层**（扩展的归一化没机会运行）；放行后由 `normalizeEscalationValue` 视为"未提供"，真正的拼写错误仍被宿主拦。见 `2026-10-02-denial-first-escalation-design.md` §4.3
 - `justification?: string`
 
 参数描述与 `promptGuidelines` 写明提权规则（deepseek `sandboxPermissionsDescription` 语义）："被沙箱拒绝后，用最小够用的更宽模式把**原调用原样重试一次**，会弹用户审批"。

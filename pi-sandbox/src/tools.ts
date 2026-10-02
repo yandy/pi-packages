@@ -60,9 +60,24 @@ function configForCall(deps: SandboxToolDeps, sessionCwd: string): SandboxConfig
 	return deps.getConfig?.() ?? getSandboxConfig(sessionCwd);
 }
 
-/** 提权参数对（三个工具共用）。 */
+/**
+ * 提权参数对（三个工具共用）。
+ * 枚举显式接受占位符（字符串 "null" / JSON null）：LLM 常把"不填"表达成 "null"，
+ * 严格枚举会把它挡在宿主 schema 校验层——扩展的 normalizeEscalationValue 根本没机会运行。
+ * 放行后由归一化统一视为"未提供"；真正的档位拼写错误仍被宿主拦（枚举的防护不丢）。
+ * spec：`docs/superpowers/specs/2026-10-02-denial-first-escalation-design.md` §4.3。
+ */
 export const ESCALATION_PROPS = {
-	sandbox_permissions: Type.Optional(Type.Union([Type.Literal("workspace-write"), Type.Literal("danger-full-access")])),
+	sandbox_permissions: Type.Optional(
+		Type.Union([
+			Type.Literal("workspace-write"),
+			Type.Literal("danger-full-access"),
+			// 占位符容错（1.3.1）：值本身不合法，但它是"不填"的常见表达——
+			// 拦在宿主层只会浪费一次工具往返（模型看到 Validation failed 再自纠）。
+			Type.Literal("null"),
+			Type.Null(),
+		]),
+	),
 	justification: Type.Optional(Type.String()),
 };
 
