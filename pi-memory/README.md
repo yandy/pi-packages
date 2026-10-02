@@ -290,6 +290,7 @@ Lock: free
 - `Index` uses the **write** capacity (`memIndexMax*`) and reports how many non-empty lines could not be parsed as index lines (the `# Memory Index` header and hand-written headings count). CRLF (or lone CR) line endings are normalised to LF before parsing, and the next write emits LF too, so a `MEMORY.md` re-saved by a Windows editor does **not** raise this count.
 - `Migration` is `migrated at …`, `not needed` (the marker says nothing had to be moved) or `pending` (no marker / unreadable marker → the next `session_start` retries).
 - `Lock` is `free`, `held by <op> (pid N, started <ISO>)`, or `unreadable — run /memory unlock`.
+- In a session started with `enabled: false`, `/memory on` only flips the switch — the memory store is never initialized, so `/memory unlock` is unreachable in that session. Start a new session (or restart pi) to use it.
 
 ### `/dream`
 

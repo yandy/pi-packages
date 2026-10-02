@@ -895,6 +895,160 @@ describe("index wiring (integration)", () => {
 		}
 	});
 
+	// ── Review 修复轮（R47/R48/R49）：dream 两条链的 ctx 快照 / 定时器 / section 时机 ──
+	it("settles the nudge dream without touching a disposed ctx", async () => {
+		shouldNudgeMock.mockResolvedValue({ nudge: true, message: "💡 dream", sessions: 7, newEntries: 7 });
+		let resolveDream: ((summary: string) => void) | undefined;
+		runDreamMock.mockImplementationOnce(
+			() =>
+				new Promise<string>((resolve) => {
+					resolveDream = resolve;
+				}),
+		);
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		const session = disposableCtx();
+		session.ctx.ui.confirm.mockResolvedValue(true);
+		const caught = await captureUnhandledRejections(async () => {
+			await handlers["session_start"][0]({}, session.ctx);
+			// dream 是长时后台任务（600s timeout），用户先 /new 了：链 settle 时 ctx 已失效
+			session.dispose();
+			resolveDream?.("consolidated");
+			await flush();
+		});
+
+		expect(caught).toEqual([]);
+		// UI 来自同步段快照：dispose 之后链仍然能通知（通过快照对象，而不是 ctx 代理）
+		expect(session.notify).toHaveBeenCalledWith("consolidated", "info");
+	});
+
+	it("settles /dream without touching a disposed ctx", async () => {
+		let resolveDream: ((summary: string) => void) | undefined;
+		runDreamMock.mockImplementationOnce(
+			() =>
+				new Promise<string>((resolve) => {
+					resolveDream = resolve;
+				}),
+		);
+		const { pi, handlers, commands } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		const session = disposableCtx();
+		session.ctx.ui.confirm.mockResolvedValue(true);
+		// 完成回调里的 `SessionManager.list(cwd)` 会去 getAgentDir() 下建会话目录：
+		// 按 docs/guides/testing.md 隔离到本用例的 temp dir（并行/沙箱下不得碰真实 ~/.pi）。
+		vi.stubEnv("PI_CODING_AGENT_DIR", join(dir, "agent"));
+		try {
+			const caught = await captureUnhandledRejections(async () => {
+				await commands["dream"].handler("", session.ctx);
+				session.dispose();
+				resolveDream?.("consolidated");
+				await flush();
+			});
+
+			expect(caught).toEqual([]);
+			expect(session.notify).toHaveBeenCalledWith("consolidated", "info");
+		} finally {
+			vi.unstubAllEnvs();
+		}
+	});
+
+	it("does not reject unhandled when /dream fails after the session died", async () => {
+		let rejectDream: ((reason?: unknown) => void) | undefined;
+		runDreamMock.mockImplementationOnce(
+			() =>
+				new Promise<string>((_resolve, reject) => {
+					rejectDream = reject;
+				}),
+		);
+		const { pi, handlers, commands } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		const session = disposableCtx();
+		session.ctx.ui.confirm.mockResolvedValue(true);
+		const caught = await captureUnhandledRejections(async () => {
+			await commands["dream"].handler("", session.ctx);
+			session.dispose();
+			// rejected 的值不一定是 Error
+			rejectDream?.("model exploded");
+			await flush();
+		});
+
+		expect(caught).toEqual([]);
+		expect(session.notify).toHaveBeenCalledWith("Dream failed: model exploded", "error");
+	});
+
+	it("clears the shutdown give-up timer when the in-flight write finishes first", async () => {
+		mockConfigValue.extractMemories.enabled = true;
+		mockConfigValue.lock = { timeoutMs: 30, snapshotKeep: 5 };
+		let release: (() => void) | undefined;
+		runExtractMock.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					release = () => resolve({ skipped: true });
+				}),
+		);
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+		await handlers["agent_end"][0]({ messages: [{ role: "user", content: "hi" }] }, uiCtx());
+
+		vi.useFakeTimers();
+		try {
+			const shutdown = handlers["session_shutdown"][0]({ type: "session_shutdown", reason: "quit" }, uiCtx());
+			// 兜底定时器已挂上（在途任务还没收尾）
+			expect(vi.getTimerCount()).toBeGreaterThan(0);
+			release?.();
+			await shutdown;
+			// race 由 in-flight 胜出：定时器不能继续挂在事件循环上（会拖长进程退出）
+			expect(vi.getTimerCount()).toBe(0);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("writes the memory_index section before auto-surfacing can abort the turn", async () => {
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		scanEntriesMock.mockResolvedValue([
+			{ file: "ssh.md", name: "SSH", description: "d", type: "project", modified: "2026-01-01T00:00:00.000Z" },
+		]);
+		runSideQueryMock.mockResolvedValue(["ssh.md"]);
+		let resolveInject: ((value: string) => void) | undefined;
+		injectSurfacedContentMock.mockImplementationOnce(
+			() =>
+				new Promise<string>((resolve) => {
+					resolveInject = resolve;
+				}),
+		);
+
+		const session = disposableCtx();
+		const event = sectionsEvent("ssh?");
+		// auto-surfacing 的 finally 在 await 之后读 ctx.hasUI：session 在途中 dispose 会让 handler
+		// 从那里抛出。section 必须在**任何 await 之前**就已写好，否则宿主收到 { memory_index: null }
+		// 就把索引段删掉了（spec §9.1 的 null 陷阱）。
+		const handlerDone = handlers["before_agent_start"][0](event, session.ctx).catch(() => undefined);
+		await flush();
+		expect(resolveInject).toBeDefined();
+		session.dispose();
+		resolveInject?.("<relevant_memories>\n## SSH\nx\n</relevant_memories>");
+		await handlerDone;
+
+		expect(event.systemPromptOptions.sections["memory_index"]).toBe(DISK_INDEX);
+
+		// 下一轮（新 ctx）仍喂回冻结值，逐字节不变
+		scanEntriesMock.mockResolvedValue([]);
+		const next = sectionsEvent("again?");
+		await handlers["before_agent_start"][0](next, uiCtx());
+		expect(next.systemPromptOptions.sections["memory_index"]).toBe(DISK_INDEX);
+	});
+
 	it("runs auto-surfacing through the store for main agents", async () => {
 		const { pi, handlers } = createFakePi();
 		memoryFactory(pi as any);

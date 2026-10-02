@@ -30,8 +30,33 @@ function extractAgentsMdBlocks(systemPrompt: string): string[] {
 	return blocks;
 }
 
-function sleep(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * dream 的两条 fire-and-forget 链（session_start 的 nudge 与 `/dream`）共用的收尾工具。
+ * handler 在**同步段**把 `ctx.ui` 快照成 `ExtensionUIContext | undefined`，链里一律不再读 `ctx`：
+ * pi 的 `ExtensionContext` 是代理，`hasUI` / `ui` 的 getter 会 `assertActive()`，session dispose
+ * （/new、切换、fork、reload）之后读取即抛错。dream 走 600s timeout，而 `session_shutdown`
+ * 只等 `lock.timeoutMs`（默认 5s），所以「dream 在途 + session 已销毁」是常态路径；通知 / 清状态
+ * 自己抛错也不能逃逸成未处理 rejection（没有全局 handler 时 Node 会直接杀掉进程）。
+ */
+function notifyDream(ui: ExtensionUIContext | undefined, message: string, level: "info" | "error"): void {
+	try {
+		ui?.notify(message, level);
+	} catch {
+		/* UI 已失效：宿主不再收这条通知 */
+	}
+}
+
+function clearDreamStatus(ui: ExtensionUIContext | undefined): void {
+	try {
+		ui?.setStatus("dream", undefined);
+	} catch {
+		/* UI 已失效 */
+	}
+}
+
+/** rejected 的值不一定是 Error（pi 的模型层可能抛字符串 / 对象）。 */
+function dreamFailureMessage(e: unknown): string {
+	return `Dream failed: ${e instanceof Error ? e.message : String(e)}`;
 }
 
 /**
@@ -214,9 +239,11 @@ export default function (pi: ExtensionAPI) {
 
 		// nudge
 		if (ctx.hasUI) {
+			// 同步段快照：shouldNudge / confirm 之后的 fire-and-forget 链不再碰 ctx（见 notifyDream）。
+			const ui = ctx.ui;
 			const { nudge, message, sessions } = await shouldNudge(memoryDir, config, ctx.cwd);
 			if (nudge) {
-				const ok = await ctx.ui.confirm("Memory Consolidation", `${message}\n\nConsolidate memory files now?`);
+				const ok = await ui.confirm("Memory Consolidation", `${message}\n\nConsolidate memory files now?`);
 				// dream 需要 store（整轮逻辑锁 + 快照都挂在它上面）；这里必然非空，但 const 拷贝让 TS 也能看到。
 				const activeStore = store;
 				if (ok && activeStore) {
@@ -225,7 +252,7 @@ export default function (pi: ExtensionAPI) {
 					const dreamModel = resolveDefault(config, "dream", "model");
 					const dreamThinkLevel = config.dream.thinkLevel;
 					const dir = memoryDir;
-					ctx.ui.setStatus("dream", "Consolidating memory...");
+					ui.setStatus("dream", "Consolidating memory...");
 					const dreamRun = runDream({
 						model: dreamModel,
 						thinkLevel: dreamThinkLevel,
@@ -246,18 +273,22 @@ export default function (pi: ExtensionAPI) {
 						],
 					});
 					track(dreamRun);
-					dreamRun
-						.then(async (summary) => {
-							await writeDreamMeta(dir, sessions);
-							ctx.ui.notify(summary, "info");
-						})
-						// biome-ignore lint/suspicious/noExplicitAny: error catch
-						.catch((e: any) => {
-							ctx.ui.notify(`Dream failed: ${e.message}`, "error");
-						})
-						.finally(() => {
-							ctx.ui.setStatus("dream", undefined);
-						});
+					// 两参 `.then`（而不是 `.then().catch()`）：成功分支自己写 meta，两个分支都不再读 ctx；
+					// writeDreamMeta 的失败也必须在分支内兜住，否则它会变成无人接管的 rejection。
+					void dreamRun
+						.then(
+							async (summary) => {
+								try {
+									await writeDreamMeta(dir, sessions);
+								} catch (e) {
+									notifyDream(ui, dreamFailureMessage(e), "error");
+									return;
+								}
+								notifyDream(ui, summary, "info");
+							},
+							(e: unknown) => notifyDream(ui, dreamFailureMessage(e), "error"),
+						)
+						.finally(() => clearDreamStatus(ui));
 				}
 			}
 		}
@@ -268,6 +299,14 @@ export default function (pi: ExtensionAPI) {
 		// 先拷到 const：`store` 是工厂作用域的 let，在异步回调里 TS 不会保留它的外层收窄。
 		const activeStore = store;
 		if (!config?.enabled || !memoryDir || !activeStore) return;
+
+		// 索引 section：**每一轮无条件**写入冻结值（含 resume / fork / reload）。
+		// 省略这个键 = pi 的 diffSystemPromptSections 生成 { memory_index: null } = 把索引从
+		// system prompt 里静默删掉（spec §9.1 的 null 陷阱）。「不想改」只能靠喂回同一个值。
+		// 必须在 auto-surfacing **之前**：surfacing 的 `finally` 在 await 之后读 `ctx.hasUI`，
+		// session 在途中 dispose 会让 handler 从那里抛出（R49）——那时 section 已经被跳过，
+		// 这一轮就从「喂回冻结值」变成了「删段」。
+		const applied = applyIndexSection(event.systemPromptOptions, indexSnapshot);
 
 		const autoSurfacing = config.autoSurfacing;
 		// Skip auto-surfacing in subagent sessions: pi-subagents injects an
@@ -318,10 +357,6 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 
-		// 索引 section：**每一轮无条件**写入冻结值（含 resume / fork / reload）。
-		// 省略这个键 = pi 的 diffSystemPromptSections 生成 { memory_index: null } = 把索引从
-		// system prompt 里静默删掉（spec §9.1 的 null 陷阱）。「不想改」只能靠喂回同一个值。
-		const applied = applyIndexSection(event.systemPromptOptions, indexSnapshot);
 		return {
 			// 旧 SDK（没有 sections，本地类型就是 0.80.2）的退路：功能不受损，只是缓存变差。
 			...(applied ? {} : { systemPrompt: buildInjection(event.systemPrompt, indexSnapshot) }),
@@ -346,7 +381,19 @@ export default function (pi: ExtensionAPI) {
 	// spec §10：退出前等在途写操作收尾（上限 lock.timeoutMs），避免留下 stale 锁。
 	pi.on("session_shutdown", async () => {
 		if (inFlight.size === 0) return;
-		await Promise.race([Promise.allSettled([...inFlight]), sleep(config?.lock.timeoutMs ?? 5000)]);
+		// `Promise.race` 胜出后兜底定时器仍然挂在事件循环上（最长 lock.timeoutMs）：宿主从
+		// main() 返回后靠事件循环自然 drain 退出，漏一个定时器就把退出拖满超时。显式 clear +
+		// unref —— 这条路径必须不留下任何定时器。
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const giveUp = new Promise<void>((resolve) => {
+			timer = setTimeout(resolve, config?.lock.timeoutMs ?? 5000);
+			timer.unref?.();
+		});
+		try {
+			await Promise.race([Promise.allSettled([...inFlight]), giveUp]);
+		} finally {
+			if (timer !== undefined) clearTimeout(timer);
+		}
 	});
 
 	pi.on("agent_end", async (event, ctx) => {
@@ -462,10 +509,14 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify("Memory not initialized.", "info");
 				return;
 			}
+			// 同步段快照：dream 在途时用户可能 /new、切换、fork、reload。`cwd` 也要快照 ——
+			// 完成回调里的 `SessionManager.list` 在 await 之后才读它（见 notifyDream 的说明）。
+			const ui = ctx.hasUI ? ctx.ui : undefined;
+			const cwd = ctx.cwd;
 			const ok = await ctx.ui.confirm("Dream", "Consolidate all memory files? This rewrites them in-place.");
 			if (!ok) return;
 			const dir = memoryDir;
-			ctx.ui.setStatus("dream", "Consolidating memory...");
+			ui?.setStatus("dream", "Consolidating memory...");
 			const dreamRun = runDream({
 				model: resolveDefault(config, "dream", "model"),
 				thinkLevel: config.dream.thinkLevel,
@@ -484,19 +535,21 @@ export default function (pi: ExtensionAPI) {
 				],
 			});
 			track(dreamRun);
-			dreamRun
-				.then(async (summary) => {
-					const sessions = (await SessionManager.list(ctx.cwd)).length;
-					await writeDreamMeta(dir, sessions);
-					ctx.ui.notify(summary, "info");
-				})
-				// biome-ignore lint/suspicious/noExplicitAny: command handler ctx
-				.catch((e: any) => {
-					ctx.ui.notify(`Dream failed: ${e.message}`, "error");
-				})
-				.finally(() => {
-					ctx.ui.setStatus("dream", undefined);
-				});
+			void dreamRun
+				.then(
+					async (summary) => {
+						try {
+							const sessions = (await SessionManager.list(cwd)).length;
+							await writeDreamMeta(dir, sessions);
+						} catch (e) {
+							notifyDream(ui, dreamFailureMessage(e), "error");
+							return;
+						}
+						notifyDream(ui, summary, "info");
+					},
+					(e: unknown) => notifyDream(ui, dreamFailureMessage(e), "error"),
+				)
+				.finally(() => clearDreamStatus(ui));
 		},
 	});
 }

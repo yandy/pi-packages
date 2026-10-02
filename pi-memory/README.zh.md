@@ -290,6 +290,7 @@ Lock: free
 - `Index` 用**写入**口径（`memIndexMax*`），并报告索引里有多少非空行解析不出（`# Memory Index` 头行与手写标题会计入）。CRLF（以及单独的 CR）行尾在解析前就被归一为 LF，下一次写入也一律输出 LF，因此被 Windows 编辑器改过行尾的 `MEMORY.md` **不会**推高这个计数。
 - `Migration` 有三种：`migrated at …`、`not needed`（标记显示当时没东西要迁）、`pending`（没有标记或标记读不懂 → 下次 `session_start` 重试）。
 - `Lock` 有三种：`free`、`held by <op> (pid N, started <ISO>)`、`unreadable — run /memory unlock`。
+- 以 `enabled: false` 启动的会话里，`/memory on` 只翻开关 —— store 不会被初始化，所以本 session 的 `/memory unlock` 不可达。要重开会话（或重启 pi）后 unlock 才可用。
 
 ### `/dream`
 

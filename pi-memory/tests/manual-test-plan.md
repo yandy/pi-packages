@@ -105,6 +105,8 @@ Lock: free
 /memory on      → 通知 "Memory on"
 ```
 
+> 注意：以 `enabled: false` 启动的会话里，`/memory on` 只翻开关、不初始化 store，所以本 session 的 `/memory unlock` 不可达；需要重开会话（或重启 pi）后 unlock 才可用。
+
 ---
 
 ## 测试 3: `memory_index` section 与会话内冻结
