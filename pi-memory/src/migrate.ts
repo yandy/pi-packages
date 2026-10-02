@@ -1,6 +1,6 @@
 import { cp, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { isEntryType } from "./entry-file";
+import { isEntryType, parseEntryFile } from "./entry-file";
 import { BACKUP_DIR, INDEX_FILE, LOCK_FILE, unlinkStrict, type MemoryStore } from "./memory-store";
 
 /** 迁移完成标记。写在**最后一步** —— 中途失败时它不存在，下次 session_start 会重试（spec §15.4）。 */
@@ -98,12 +98,18 @@ function parseLegacySections(body: string): Array<{ title: string; content: stri
  *
  * 判据：`MEMORY.md` 之外的 `.md`，且（frontmatter 含旧字段 `updated` **或** 含 ≥2 个 `## ` 段）。
  *
- * **必须先排除含 `modified` 的文件**：v2 的 entry 文件正文里完全可能有多个 `## ` 小标题，
- * 若不排除，一条正常的 v2 记忆会被当成 legacy topic 再拆一次 —— 正文被切碎、原文件被删。
+ * **第一条判据是 `parseEntryFile(raw) !== null` → 不是 legacy**，即与「store 到底怎么读它」
+ * 完全同源（Plan B ledger R40）：v2 的 entry 正文里完全可能有多个 `## ` 小标题，一旦被误判成
+ * legacy topic 就会被再拆一次 —— 正文被切碎、原文件被删（只在 `migrate-` 备份里留着）。
+ * 早先这里用 `splitFrontmatter` 的 `fields.modified` 守卫，而它的闭合行要求逐字 `---`；
+ * `parseEntryFile` 用宽松的 `indexOf("\n---", 4)` —— 于是闭合行带尾随空格的**合法 v2 entry**
+ * 会绕过守卫被拆开。判据同源之后这类分叉不可能再出现。
+ *
+ * v1 文件（含 `updated`、没有 `modified`/`created`）解析必然失败，所以继续走下面两条 legacy 判据。
  */
 export function isLegacyTopicFile(raw: string): boolean {
+	if (parseEntryFile(raw) !== null) return false;
 	const { fields, body } = splitFrontmatter(normalizeEol(raw));
-	if (fields.modified !== undefined) return false;
 	if (fields.updated !== undefined) return true;
 	return parseLegacySections(body).length >= 2;
 }

@@ -101,7 +101,7 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
 
 ### 容量：200 行索引 ≈ 199 条记忆
 
-索引上限是 `memIndexMaxLines`（200）个非空行与 `memIndexMaxBytes`（25600）字节。这 200 行是**索引行，不是记忆条数**：`rebuildIndex` 总会写一行 `# Memory Index` 头，手写的标题、分组、注释同样占额度。因此重建后的索引最多约 **199 条记忆**（每个项目目录；若保留手写标题则更少）。超限时写入**不会失败**：写入照样成功，工具把一条可操作的警告回给模型，让它去合并或删除条目（超出上限的部分下次加载时不可见）。
+索引上限是 `memIndexMaxLines`（200）个非空行与 `memIndexMaxBytes`（25600）字节。这 200 行是**索引行，不是记忆条数**：`rebuildIndex` 至少保证一行头部（已有手写头部时原样保留，否则写 `# Memory Index`），手写的标题、分组、注释同样占额度。因此重建后的索引最多约 **199 条记忆**（每个项目目录；若保留手写标题则更少）。超限时写入**不会失败**：写入照样成功，工具把一条可操作的警告回给模型，让它去合并或删除条目（超出上限的部分下次加载时不可见）。
 
 这也是 `/dream` 不再是「可选的整理」而是**容量管理必需**的原因。在接近 199 条之前跑一次（或者接受提醒）。
 
@@ -118,7 +118,7 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
   "memIndexInjectMaxLines": 200,
   "memIndexInjectMaxBytes": 25600,
   "lock": { "timeoutMs": 5000, "snapshotKeep": 5 },
-  "defaults": { "sessionPersistence": { "enabled": false } },
+  "defaults": { "model": "deepseek/deepseek-flash", "sessionPersistence": { "enabled": false } },
   "dream": { "nudgeAfterSessions": 5, "nudgeAfterHours": 24, "thinkLevel": "high" },
   "sessionSearch": { "maxSessions": 10, "maxMatches": 5 },
   "autoSurfacing": {
@@ -148,7 +148,7 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
 | `memIndexInjectMaxBytes` | `25600` | 注入口径：section 的最大字节数（超出则截断并带 `[truncated: …]` 标记） |
 | `lock.timeoutMs` | `5000` | 单次原语等逻辑锁 / 等跨进程 `.lock` 的上限。迁移固定用 30s（它要在锁内重写整个目录）。同时也是 `session_shutdown` 等在途写入的上限 |
 | `lock.snapshotKeep` | `5` | `.backups/` 保留的回滚点数量（`migrate-` 前缀的目录永不裁剪） |
-| `defaults.model` | — | 所有子任务共享的模型回退；各任务自己的 `model` 优先，都没配则回退父会话模型 |
+| `defaults.model` | `"deepseek/deepseek-flash"` | 所有子任务（dream / extract / 侧查询）共享的模型；各任务自己的 `model` 优先，不可解析或未设置时回退父会话模型 |
 | `defaults.sessionPersistence.enabled` | `false` | 共享回退：headless 子会话（extract / dream / 侧查询）默认只在内存里跑 |
 | `defaults.sessionPersistence.sessionDir` | `<项目记忆目录>/sessions/` | headless 会话的自定义落盘目录 |
 | `dream.nudgeAfterSessions` | `5` | 距上次 dream 多少个会话后开始提醒 |
@@ -290,7 +290,7 @@ Lock: free
 - `Index` 用**写入**口径（`memIndexMax*`），并报告索引里有多少非空行解析不出（`# Memory Index` 头行与手写标题会计入）。CRLF（以及单独的 CR）行尾在解析前就被归一为 LF，下一次写入也一律输出 LF，因此被 Windows 编辑器改过行尾的 `MEMORY.md` **不会**推高这个计数。
 - `Migration` 有三种：`migrated at …`、`not needed`（标记显示当时没东西要迁）、`pending`（没有标记或标记读不懂 → 下次 `session_start` 重试）。
 - `Lock` 有三种：`free`、`held by <op> (pid N, started <ISO>)`、`unreadable — run /memory unlock`。
-- 以 `enabled: false` 启动的会话里，store 从未初始化，因此 `/memory on` 会回答 `Memory not initialized.`（并不会真的打开开关）—— 本 session 的 `/memory unlock` 也不可达。两者都需要重开会话（或重启 pi）后才可用。
+- 以 `enabled: false` 启动的会话在启动时不初始化任何东西：`/memory` 报两行（`Memory: disabled` + `Dir: not initialized (run /memory on)`），`/memory on` 会**当场**初始化 store（并为本次会话注册 `memory` 工具），`/memory unlock` 不需要 store 也能用。初始化失败时会明说（`Failed to initialize memory: …`）并把开关留在 off。
 
 ### `/dream`
 
@@ -305,7 +305,7 @@ Lock: free
 
 ## 从 1.x 迁移
 
-升级后第一次 `session_start` 自动执行：
+升级后第一次 `session_start` 自动执行（以 disabled 启动的会话则在第一次 `/memory on` 时执行）：
 
 1. 整轮取逻辑锁（30s）；
 2. 把整个目录快照到 `.backups/migrate-<ts>/`，并把原 topic 文件复制到 `.backups/migrate-<ts>/originals/`；
@@ -315,7 +315,7 @@ Lock: free
 6. 写 `.migrated`；
 7. 通知 `Migrated N memories from M topic files. Backup at <path>`。
 
-frontmatter 里已含 `modified` 字段的文件**永远不**会被当成 legacy topic 文件（即使正文里有多个 `## ` 小标题）—— 这道守卫正是为了避免正常的 v2 记忆被再次拆碎。
+能按 v2 entry 解析（`name`、`description`、合法 `type`、`created`、`modified`）的文件**永远不**会被当成 legacy topic 文件（即使正文里有多个 `## ` 小标题）—— 这道守卫正是为了避免正常的 v2 记忆被再次拆碎。只是「看起来像 v2」（例如 `type` 非法）的文件不在守卫范围内，若含 `updated` 或 ≥ 2 个 `## ` 段仍可能被迁移；原文件始终保留在 `.backups/migrate-<ts>/originals/`。
 
 重跑是安全的：标记只在最后写，而**同名且同正文**的条目会被复用而不是复制一份。任一步失败就不写标记、保留备份、上报错误 —— 下次会话重试。
 

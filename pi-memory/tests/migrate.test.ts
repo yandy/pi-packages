@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { parseEntryFile } from "../src/entry-file";
 import { parseEntryIndex } from "../src/entry-index";
 import { MemoryStore, type StoreConfig } from "../src/memory-store";
 import { isLegacyTopicFile, migrateIfNeeded, MIGRATED_FILE, parseLegacyEntries } from "../src/migrate";
@@ -36,6 +37,30 @@ function topicFile(
 		...sections.flatMap(([title, body]) => [`## ${title}`, "", body, ""]),
 	].join("\n");
 }
+
+/**
+ * 一个**合法的 v2 entry**，但闭合行带一个尾随空格（`--- `）：v2 解析器 `parseEntryFile`
+ * 用宽松的 `indexOf("\n---", 4)` 认它，而迁移自己的 `splitFrontmatter` 要求逐字 `---`。
+ * 手工编辑 / 某些编辑器保存时就会出现（Plan B ledger R40）。
+ */
+const V2_TRAILING_SPACE_CLOSE = [
+	"---",
+	"name: A",
+	"description: d",
+	"type: feedback",
+	"created: 2026-01-01",
+	"modified: 2026-01-02T00:00:00.000Z",
+	"--- ",
+	"",
+	"## 小节一",
+	"",
+	"正文一",
+	"",
+	"## 小节二",
+	"",
+	"正文二",
+	"",
+].join("\n");
 
 /** 铺一个「升级前」的 memory 目录，返回待迁移的 topic 文件名。 */
 async function seedLegacy(files: Record<string, string>, index = "# Memory Index\n"): Promise<string[]> {
@@ -112,6 +137,22 @@ describe("isLegacyTopicFile", () => {
 			"",
 		].join("\n");
 		expect(isLegacyTopicFile(v2)).toBe(false);
+	});
+
+	// Plan D（D3）：分类必须与「store 怎么读它」同源 —— parseEntryFile 接受的文件永不迁移。
+	it("never splits a v2 entry whose closing '---' carries trailing whitespace", () => {
+		expect(parseEntryFile(V2_TRAILING_SPACE_CLOSE)).not.toBeNull();
+		expect(isLegacyTopicFile(V2_TRAILING_SPACE_CLOSE)).toBe(false);
+	});
+
+	it("still treats a v1 file with the same trailing-space closing as legacy", () => {
+		const v1 = topicFile("debugging", "project", "2026-07-03", [
+			["SSH Gotcha", "staging 用 2222"],
+			["MySQL Timeout", "连接池 30s 超时"],
+		]).replace("\n---\n", "\n--- \n");
+		expect(parseEntryFile(v1)).toBeNull();
+		expect(isLegacyTopicFile(v1)).toBe(true);
+		expect(parseLegacyEntries(v1).map((e) => e.title)).toEqual(["SSH Gotcha", "MySQL Timeout"]);
 	});
 
 	it("handles CRLF", () => {
@@ -518,6 +559,21 @@ describe("migrateIfNeeded", () => {
 		expect(await store.listEntries()).toEqual(before);
 		// addEntry 自己会拍一份 write 快照；这里只需确认没有多出 migrate- 回滚点
 		expect((await backupDirs()).filter((n) => n.startsWith("migrate-"))).toEqual([]);
+	});
+
+	// Plan D（D3）：修复前这个文件会被当 legacy 拆成两条（有 migrate- 备份、正文不丢，
+	// 但原文件被删、多出两个影子条目）；修复后它一字不动地留在原地。
+	it("leaves a v2 entry with a trailing-space closing '---' completely alone", async () => {
+		await seedLegacy({ "A.md": V2_TRAILING_SPACE_CLOSE });
+		const before = await readFile(join(dir, "A.md"), "utf8");
+
+		expect(await migrateIfNeeded(store)).toBeNull();
+
+		expect(await readFile(join(dir, "A.md"), "utf8")).toBe(before);
+		expect(await backupDirs()).toEqual([]);
+		expect(await marker()).toMatchObject({ entries: 0, files: 0 });
+		// 同源的判据：store 把它读成**一条**完整 entry，而不是被拆开的两段
+		expect((await store.listEntries()).map((e) => e.name)).toEqual(["A"]);
 	});
 
 	it("returns null without touching anything when the memory directory does not exist", async () => {

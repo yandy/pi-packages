@@ -15,6 +15,7 @@ export interface SessionPersistenceConfig {
 
 /** Shared defaults that per-task configs inherit. Per-task fields override these. */
 export interface DefaultsConfig {
+	/** Shared model for dream / extract / the side query. Ships as `"deepseek/deepseek-flash"`; an unresolvable value falls back to the parent session's model. */
 	model?: string;
 	sessionPersistence?: SessionPersistenceConfig;
 }
@@ -86,7 +87,8 @@ export interface MemoryConfig {
 export const DEFAULT_CONFIG: MemoryConfig = {
 	enabled: true,
 	// headless 子会话默认只在内存里跑：extract / dream / 侧查询都不该往用户的 sessions 目录里落盘。
-	defaults: { sessionPersistence: { enabled: false } },
+	// 共享默认模型：dream / extract / 侧查询都继承它；不可用时 resolveModel(...) ?? parentModel 会回退父会话模型。
+	defaults: { model: "deepseek/deepseek-flash", sessionPersistence: { enabled: false } },
 	memoryDir: join(homedir(), CONFIG_DIR_NAME, "memory"),
 	memIndexMaxLines: 200,
 	memIndexMaxBytes: 25600,

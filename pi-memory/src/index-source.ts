@@ -17,6 +17,14 @@ export interface ReplayableSessionManager {
 	getEntries(): unknown[];
 	getLeafId(): string | null;
 	buildContextEntries?(entries: unknown[], leafId?: string | null): unknown[];
+	/**
+	 * 0.99.2 的实例方法（**无参**），返回 `{ entries, messages, thinkingLevel, model }`。
+	 * 宿主自己算 system 消息用的就是它（`session-manager.js:882`：
+	 * `getCurrentSystemMessage(this.buildSessionProjection().messages)`），所以它才是「模型当前
+	 * 看到哪些 system 消息」的权威来源。本地类型是 0.80.2（没有这个方法）—— 因此声明为可选 +
+	 * 运行时特性探测，不得 import SDK 的类型。
+	 */
+	buildSessionProjection?(): { messages?: unknown[] } | undefined;
 }
 
 /** 可注入的转换函数（测试用；生产路径从 SDK 包根动态取）。 */
@@ -83,21 +91,33 @@ function resolveConverter(): ((entry: unknown) => unknown[]) | null {
 }
 
 /**
- * 从 transcript 里取出**录制的**索引值（D14：resume / fork / reload 必须用它，
- * 否则被恢复会话的 system prompt 头部会被改写，折叠路径下其后的整段对话全部失去缓存）。
+ * 宿主投影里的 messages（0.99.2 的 `buildSessionProjection()`）。
  *
- * 任何一步不可得都返回 `null`，由调用方回退磁盘读：SDK 太旧（没有转换函数）、
- * sessionManager 形状不认识、entry 转换抛错、重放后没有这个键、或该键被 `null` patch 删除。
- * **绝不把 `null` 当录制值返回**（spec §9.1 的 null 陷阱）。
- *
- * 返回值是**裸值**：宿主把 section 渲染成 `<memory_index>…</memory_index>` 后才写进
- * transcript，所以这里要脱掉那一层再回写（R42 / `unwrapSectionValue`）。
+ * 不可用（没有该方法 / 抛错 / 返回值形状不对）时返回 `null`，调用方回落到下面的自实现重放。
+ * 与宿主同源很重要：双重 compaction 的保留边界、`context_edit` 的应用都由宿主决定，我们自己
+ * 复刻一份就会在极端会话上漂移（Plan C 终审 #4）。
  */
-export function readRecordedMemoryIndex(sessionManager: unknown, opts?: ReplayOpts): string | null {
+function projectionMessages(sm: Partial<ReplayableSessionManager>): unknown[] | null {
+	try {
+		// 特征探测也放进 try：宿主把该方法做成抛错的 getter / proxy 时同样只能回退，
+		// 不能让异常逃到 session_start。
+		if (typeof sm.buildSessionProjection !== "function") return null;
+		const messages = sm.buildSessionProjection()?.messages;
+		return Array.isArray(messages) ? messages : null;
+	} catch {
+		// 投影抛错（更老的 session 形状 / 宿主内部不变量不成立）：回落自实现重放
+		return null;
+	}
+}
+
+/**
+ * 自实现的 entry 重放（旧 SDK / 老 session 的退路）：`getEntries` → `buildContextEntries`
+ * → 逐条转成 context messages。任何一步不可得都返回 `null`：转换函数缺失（SDK 太旧）、
+ * sessionManager 形状不认识、`getEntries` 抛错。
+ */
+function replayEntryMessages(sm: Partial<ReplayableSessionManager>, opts?: ReplayOpts): unknown[] | null {
 	const toMessages = opts?.sessionEntryToContextMessages ?? resolveConverter();
 	if (!toMessages) return null;
-	if (!isRecord(sessionManager)) return null;
-	const sm = sessionManager as unknown as Partial<ReplayableSessionManager>;
 	if (typeof sm.getEntries !== "function" || typeof sm.getLeafId !== "function") return null;
 
 	let entries: unknown[] = [];
@@ -134,6 +154,29 @@ export function readRecordedMemoryIndex(sessionManager: unknown, opts?: ReplayOp
 			// 单条 entry 的形状不认识：跳过它，别让整次重放失败
 		}
 	}
+
+	return messages;
+}
+
+/**
+ * 从 transcript 里取出**录制的**索引值（D14：resume / fork / reload 必须用它，
+ * 否则被恢复会话的 system prompt 头部会被改写，折叠路径下其后的整段对话全部失去缓存）。
+ *
+ * **优先用宿主的 `buildSessionProjection()`** —— 与宿主算 `getCurrentSystemMessage` 同源；
+ * 拿不到（0.80.2 / 更老的 session / 投影抛错）才回落到自实现的 entry 重放（Plan C 终审 #4）。
+ *
+ * 两条路径都不可得时返回 `null`，由调用方回退磁盘读：SDK 太旧（既无投影也无转换函数）、
+ * sessionManager 形状不认识、entry 转换抛错、重放后没有这个键、或该键被 `null` patch 删除。
+ * **绝不把 `null` 当录制值返回**（spec §9.1 的 null 陷阱）。
+ *
+ * 返回值是**裸值**：宿主把 section 渲染成 `<memory_index>…</memory_index>` 后才写进
+ * transcript，所以这里要脱掉那一层再回写（R42 / `unwrapSectionValue`）。
+ */
+export function readRecordedMemoryIndex(sessionManager: unknown, opts?: ReplayOpts): string | null {
+	if (!isRecord(sessionManager)) return null;
+	const sm = sessionManager as unknown as Partial<ReplayableSessionManager>;
+	const messages = projectionMessages(sm) ?? replayEntryMessages(sm, opts);
+	if (messages === null) return null;
 
 	const recorded = replaySystemSections(messages).get(MEMORY_INDEX_SECTION);
 	return typeof recorded === "string" ? unwrapSectionValue(recorded) : null;

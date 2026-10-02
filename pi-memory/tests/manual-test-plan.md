@@ -105,7 +105,7 @@ Lock: free
 /memory on      → 通知 "Memory on"
 ```
 
-> 注意：以 `enabled: false` 启动的会话里 store 从未初始化，`/memory on` 会回 `Memory not initialized.`（并不会真的打开开关），本 session 的 `/memory unlock` 也不可达；两者都需要重开会话（或重启 pi）后才可用。
+> 注意：以 `enabled: false` 启动的会话在启动时不初始化 store，`/memory` 报两行（`Memory: disabled` + `Dir: not initialized (run /memory on)`）；`/memory on` 会**当场**初始化（并注册 `memory` 工具），`/memory unlock` 不需要 store 也能清锁。初始化失败时通知 `Failed to initialize memory: …` 并把开关回滚成 off。
 
 ---
 

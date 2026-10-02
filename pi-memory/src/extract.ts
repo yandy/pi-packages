@@ -61,19 +61,44 @@ const middleMarkerLabel = (omitted: number): string => `[truncated: ${omitted} c
 const middleMarker = (omitted: number): string => `\n${middleMarkerLabel(omitted)}\n`;
 
 /**
+ * 删掉 `needle` 的**最后一次**出现（连带它后面紧跟的一个 `\n`）；不存在就原样返回。
+ *
+ * **兜底路径（理论不可达）**：`clipMiddle` 的主路径按 `assemble` 给出的插入位置删除块级
+ * 标记；只有位置信息缺失或该位置上不是标记时才回退到这里做字符串搜索。回退也只删最后一次
+ * 出现（Plan C 终审 #9）：块级标记总在靠后的位置，而正文里可能有同一串。
+ */
+function removeLastOccurrence(text: string, needle: string): string {
+	const at = text.lastIndexOf(needle);
+	if (at === -1) return text;
+	const trailingNewline = text[at + needle.length] === "\n" ? 1 : 0;
+	return `${text.slice(0, at)}${text.slice(at + needle.length + trailingNewline)}`;
+}
+
+/**
  * 字符串级的中段裁减：只剩 user 块仍超预算时的回退。
  *
  * `alreadyOmitted` 是块级裁减已经丢掉的字符数，它并入标记里的 N，并且**不再插入第二个标记**
- * —— 输出里 `[truncated: …]` 恒为一个。旧实现直接对「已含块级标记的文本」再裁一次，
- * 于是极端预算下会出现两个标记，而且回退标记的 N 把旧标记自身的长度也算成「省略的正文」
- * （Plan B ledger 的 Minor）。
+ * —— 输出里 `[truncated: …]` 恒为一个。这一不变量现在真的成立：`markerAt` 是 `assemble`
+ * 拼接时算出的标记插入位置，`clipMiddle` 按它删掉**我们自己插进去的那一个**标记，而不是去
+ * 字符串里搜。user 正文里完全可能有一份与标记逐字相同的仿冒串（模型/用户抄了我们的截断
+ * 标记），它可能落在真标记之前、也可能之后，任何字符串搜索都可能删错那一份、把真标记留在
+ * 输出里，于是输出出现两个标记、N 与保留下来的首尾全部错位（Plan C 终审 #9 / Plan D R-D9）。
+ * 旧实现直接对「已含块级标记的文本」再裁一次，还额外把旧标记自身的长度算成「省略的正文」。
  */
-function clipMiddle(text: string, maxChars: number, alreadyOmitted = 0): string {
+function clipMiddle(text: string, maxChars: number, alreadyOmitted = 0, markerAt = -1): string {
 	if (maxChars <= 0 || text.length <= maxChars) return text;
 	// 块级标记自己占的字符既不是被省略的正文，也不该在输出里出现第二次。
 	// 它可能是独立一行（后面跟着 `\n`），也可能被 `assemble` 追加在末尾（后面没有 `\n`）。
 	const label = alreadyOmitted > 0 ? middleMarkerLabel(alreadyOmitted) : "";
-	const body = label === "" ? text : text.replace(`${label}\n`, "").replace(label, "");
+	// 主路径：按 `assemble` 给出的位置删除；只有位置缺失或那一段不是标记时才落回字符串搜索。
+	let body = text;
+	if (label !== "") {
+		body =
+			markerAt >= 0 && text.startsWith(label, markerAt)
+				? text.slice(0, markerAt) +
+					text.slice(markerAt + label.length + (text[markerAt + label.length] === "\n" ? 1 : 0))
+				: removeLastOccurrence(text, label);
+	}
 	// 给标记文本预留位置（按一个六位数省略量估算），避免「裁减之后反而更长」。
 	const budget = Math.max(0, maxChars - middleMarker(999999).length);
 	const head = Math.min(Math.ceil(budget / 2), body.length);
@@ -243,21 +268,35 @@ export function renderConversation(messages: ExtractMessage[], limits: Conversat
 	let firstDropped = -1;
 
 	// 标记插在首个被丢块的位置（块之间仍以 `\n` 连接，序号沿用原始下标，允许跳号）。
-	const assemble = (): string => {
+	// 除了文本，还要交出标记在文本里的**插入位置**：`clipMiddle` 只能按这个位置删除自己
+	// 插进去的那一个标记，不能去字符串里搜（正文里可能有一份逐字相同的仿冒串，D4/R-D9）。
+	const assemble = (): { text: string; markerAt: number } => {
 		const lines: string[] = [];
+		let markerLine = -1;
 		let markerInserted = false;
 		for (const entry of remaining) {
 			if (!markerInserted && firstDropped >= 0 && entry.index > firstDropped) {
+				markerLine = lines.length;
 				lines.push(middleMarkerLabel(omitted));
 				markerInserted = true;
 			}
 			lines.push(entry.block);
 		}
-		if (firstDropped >= 0 && !markerInserted) lines.push(middleMarkerLabel(omitted));
-		return lines.join("\n");
+		if (firstDropped >= 0 && !markerInserted) {
+			markerLine = lines.length;
+			lines.push(middleMarkerLabel(omitted));
+		}
+		// `join("\n")` 之后：标记前的每一行各占 `length + 1`（行间分隔符）。
+		// 从未丢块时没有标记，`markerAt = -1`。
+		let markerAt = -1;
+		if (markerLine >= 0) {
+			markerAt = 0;
+			for (let i = 0; i < markerLine; i++) markerAt += lines[i].length + 1;
+		}
+		return { text: lines.join("\n"), markerAt };
 	};
 
-	let text = assemble();
+	let { text, markerAt } = assemble();
 	while (text.length > maxChars) {
 		const center = (remaining.length - 1) / 2;
 		let target = -1;
@@ -273,13 +312,13 @@ export function renderConversation(messages: ExtractMessage[], limits: Conversat
 		}
 		// 只剩 user 块：回退到字符串中段裁减（首尾各约一半并预留标记长度）。
 		// 把块级已经省略的量交下去，输出里只会留一个标记。
-		if (target === -1) return clipMiddle(text, maxChars, omitted);
+		if (target === -1) return clipMiddle(text, maxChars, omitted, markerAt);
 
 		const [dropped] = remaining.splice(target, 1);
 		// N 含被丢块的换行（spec §11.2 的逐字格式）。
 		omitted += dropped.block.length + 1;
 		if (firstDropped === -1) firstDropped = dropped.index;
-		text = assemble();
+		({ text, markerAt } = assemble());
 	}
 	return text;
 }

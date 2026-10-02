@@ -101,7 +101,7 @@ Writes are **surgical**: only the target line changes, hand-written headings, gr
 
 ### Capacity: 200 index lines ≈ 199 memories
 
-The index holds at most `memIndexMaxLines` (200) non-empty lines and `memIndexMaxBytes` (25600) bytes. Those 200 lines are **index lines, not memories**: `rebuildIndex` always writes a `# Memory Index` header line, and hand-written headings, groups and comments count too. A rebuilt index therefore holds at most about **199 memories per project directory** (fewer if you keep hand-written headings). Exceeding the limit does **not** fail the write: the write succeeds and the tool returns an actionable warning telling the model to merge or drop entries (everything past the limit is invisible on the next load).
+The index holds at most `memIndexMaxLines` (200) non-empty lines and `memIndexMaxBytes` (25600) bytes. Those 200 lines are **index lines, not memories**: `rebuildIndex` guarantees at least one header line — a hand-written header is kept verbatim, otherwise it writes `# Memory Index` — and hand-written headings, groups and comments count too. A rebuilt index therefore holds at most about **199 memories per project directory** (fewer if you keep hand-written headings). Exceeding the limit does **not** fail the write: the write succeeds and the tool returns an actionable warning telling the model to merge or drop entries (everything past the limit is invisible on the next load).
 
 This is why `/dream` is no longer optional housekeeping — it is **capacity management**. Run it (or accept the nudge) before you approach 199 memories.
 
@@ -118,7 +118,7 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
   "memIndexInjectMaxLines": 200,
   "memIndexInjectMaxBytes": 25600,
   "lock": { "timeoutMs": 5000, "snapshotKeep": 5 },
-  "defaults": { "sessionPersistence": { "enabled": false } },
+  "defaults": { "model": "deepseek/deepseek-flash", "sessionPersistence": { "enabled": false } },
   "dream": { "nudgeAfterSessions": 5, "nudgeAfterHours": 24, "thinkLevel": "high" },
   "sessionSearch": { "maxSessions": 10, "maxMatches": 5 },
   "autoSurfacing": {
@@ -148,7 +148,7 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
 | `memIndexInjectMaxBytes` | `25600` | Injection budget: max bytes of the index section (truncated with a `[truncated: …]` marker) |
 | `lock.timeoutMs` | `5000` | How long a write waits for the logical lock (single primitive) or the cross-process `.lock`. Migration uses a fixed 30s because it rewrites the whole directory inside the lock. Also the upper bound `session_shutdown` waits for in-flight writes |
 | `lock.snapshotKeep` | `5` | Rollback points kept in `.backups/` (directories named `migrate-*` are never pruned) |
-| `defaults.model` | — | Shared model fallback for all sub-tasks; a per-task `model` overrides it, and an unset model falls back to the parent session's model |
+| `defaults.model` | `"deepseek/deepseek-flash"` | Shared model for all sub-tasks (dream / extract / side query); a per-task `model` overrides it, and an unresolvable or unset model falls back to the parent session's model |
 | `defaults.sessionPersistence.enabled` | `false` | Shared fallback: headless sub-sessions (extract / dream / side query) stay in memory by default |
 | `defaults.sessionPersistence.sessionDir` | `<project memory dir>/sessions/` | Custom directory for persisted headless sessions |
 | `dream.nudgeAfterSessions` | `5` | Sessions since the last dream before the nudge is shown |
@@ -290,7 +290,7 @@ Lock: free
 - `Index` uses the **write** capacity (`memIndexMax*`) and reports how many non-empty lines could not be parsed as index lines (the `# Memory Index` header and hand-written headings count). CRLF (or lone CR) line endings are normalised to LF before parsing, and the next write emits LF too, so a `MEMORY.md` re-saved by a Windows editor does **not** raise this count.
 - `Migration` is `migrated at …`, `not needed` (the marker says nothing had to be moved) or `pending` (no marker / unreadable marker → the next `session_start` retries).
 - `Lock` is `free`, `held by <op> (pid N, started <ISO>)`, or `unreadable — run /memory unlock`.
-- In a session started with `enabled: false`, the memory store is never initialized, so `/memory on` answers `Memory not initialized.` instead of switching anything on — and `/memory unlock` is unreachable in that session. Start a new session (or restart pi) to use either of them.
+- In a session started with `enabled: false`, nothing is initialized at boot: `/memory` reports `Memory: disabled` plus `Dir: not initialized (run /memory on)`, `/memory on` initializes the store on the spot (and registers the `memory` tool for this session), and `/memory unlock` works without a store. If initialization fails, `/memory on` says so (`Failed to initialize memory: …`) and leaves the switch off.
 
 ### `/dream`
 
@@ -305,7 +305,7 @@ It cannot touch files directly: it only has the seven `memory` actions. A summar
 
 ## Migration from 1.x
 
-Automatic, on the first `session_start` after the upgrade:
+Automatic, on the first `session_start` after the upgrade (or on the first `/memory on` in a session that booted with memory disabled):
 
 1. take the logical lock for the whole round (30s);
 2. snapshot the directory into `.backups/migrate-<ts>/` and copy the original topic files into `.backups/migrate-<ts>/originals/`;
@@ -315,7 +315,7 @@ Automatic, on the first `session_start` after the upgrade:
 6. write `.migrated`;
 7. notify `Migrated N memories from M topic files. Backup at <path>`.
 
-A file whose frontmatter already has a `modified` field is **never** treated as a legacy topic file, even when its body contains several `## ` headings — that guard is what keeps a normal v2 entry from being split apart.
+A file that parses as a v2 entry (`name`, `description`, a valid `type`, `created`, `modified`) is **never** treated as a legacy topic file, even when its body contains several `## ` headings — that guard is what keeps a normal v2 entry from being split apart. A file that only *looks* like v2 (for example an invalid `type`) is not covered by the guard and may be migrated if it has `updated` or ≥ 2 `##` sections; the original always stays in `.backups/migrate-<ts>/originals/`.
 
 A re-run is safe: the marker is only written at the very end, and an entry whose name **and** body already exist is reused instead of being duplicated. If a step fails, nothing is marked, the backup is kept, and the error is reported — the next session retries.
 

@@ -505,7 +505,7 @@ Map<filename, { mtimeMs: number; name: string; description: string; type: string
 
 ### 15.2 检测
 
-`MEMORY.md` 存在，且存在满足以下任一条件的 `.md` 文件（`MEMORY.md` 除外）：包含 ≥ 2 个 `## ` 段，或 frontmatter 含旧字段 `updated`（而非 `modified`）。
+`MEMORY.md` 存在，且存在满足以下任一条件的 `.md` 文件（`MEMORY.md` 除外）：包含 ≥ 2 个 `## ` 段，或 frontmatter 含旧字段 `updated`（`parseEntryFile` 能接受的文件永不视为 legacy）。
 
 ### 15.3 步骤
 
@@ -546,7 +546,7 @@ Map<filename, { mtimeMs: number; name: string; description: string; type: string
     "timeoutMs": 5000,
     "snapshotKeep": 5
   },
-  "defaults": { "sessionPersistence": { "enabled": false } },   // defaults.model 保留：缺省时回退父会话模型
+  "defaults": { "model": "deepseek/deepseek-flash", "sessionPersistence": { "enabled": false } },   // 共享默认 model；不可解析时回退父会话模型
   "dream": { "nudgeAfterSessions": 5, "nudgeAfterHours": 24, "model": "auto", "thinkLevel": "high" },
   "sessionSearch": { "maxSessions": 10, "maxMatches": 5 },
   "autoSurfacing": {
