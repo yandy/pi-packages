@@ -1,6 +1,6 @@
 import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { loadConfig, type MemoryConfig, type SessionPersistenceConfig } from "./src/config";
 import { runDream } from "./src/dream";
@@ -182,27 +182,38 @@ export default function (pi: ExtensionAPI) {
 		cwd: () => currentCwd,
 	};
 
-	pi.on("session_start", async (event, ctx) => {
-		// 先重置限流配额：本 session 若以 disabled 启动（下面提前 return），用户中途
-		// `/memory on` 之后仍应拿到一次失败通知 —— 否则上一 session 残留的 true 会一直吞掉它。
-		extractErrorNotified = false;
-		config = await loadConfig(ctx);
-		if (!config.enabled) return;
+	/**
+	 * 建立本 session 的记忆运行时：目录 → store → 迁移 → 索引来源 → 注册工具。
+	 *
+	 * `session_start` 与 `/memory on` 共用。以 `enabled: false` 启动的会话也必须能中途打开：
+	 * 否则本 session 的 `memory` 工具永远报 "Memory not initialized"，而 `/memory unlock`
+	 * （崩溃遗留 `.lock` 的**唯一**人工入口，spec §19）也不可达（Plan C ledger R50）。
+	 *
+	 * 返回 `false` 当且仅当 config 缺失或 `enabled` 为 false；抛错 = 初始化失败，由调用方决定
+	 * 怎么收拾（`/memory on` 必须回滚开关，不得留下「enabled=true 但没有 store」的半状态）。
+	 * `reason` 只有 `session_start` 会传：resume / fork / reload 用 transcript 的录制值（D14）。
+	 */
+	async function initMemory(ctx: ExtensionContext, reason?: string): Promise<boolean> {
+		// 先拷到 const：`config` 是工厂作用域的 let，异步回调里 TS 不保留外层收窄。
+		const cfg = config;
+		if (!cfg?.enabled) return false;
 		currentCwd = ctx.cwd;
-		memoryDir = await resolveMemoryDir(config, ctx.cwd);
-		store = new MemoryStore({
-			memoryDir,
-			indexMaxLines: config.memIndexMaxLines,
-			indexMaxBytes: config.memIndexMaxBytes,
-			lock: config.lock,
+		const dir = await resolveMemoryDir(cfg, ctx.cwd);
+		const activeStore = new MemoryStore({
+			memoryDir: dir,
+			indexMaxLines: cfg.memIndexMaxLines,
+			indexMaxBytes: cfg.memIndexMaxBytes,
+			lock: cfg.lock,
 		});
+		memoryDir = dir;
+		store = activeStore;
 
-		// v1 → v2 的自动迁移（spec §15 / D10）。必须在读 indexSnapshot **之前**：
+		// v1 → v2 的自动迁移（spec §15 / D10）。必须在算 indexSnapshot **之前**：
 		// 否则本会话注入的是迁移前的旧索引。
-		// 失败不能拖垮 session_start：记忆迁移不了也比整个会话起不来好，而且 `.migrated`
+		// 失败不能拖垮会话启动：记忆迁移不了也比整个会话起不来好，而且 `.migrated`
 		// 未写 → 下次 session_start 会重试（spec §15.4）。
 		try {
-			const migration = await migrateIfNeeded(store);
+			const migration = await migrateIfNeeded(activeStore);
 			if (migration && ctx.hasUI) {
 				ctx.ui.notify(
 					`Migrated ${migration.entries} memories from ${migration.files} topic files. Backup at ${migration.backupDir}`,
@@ -222,11 +233,11 @@ export default function (pi: ExtensionAPI) {
 		// sessionEntryToContextMessages）才回退磁盘读。
 		// 录制值**不再 re-sanitize**：写入当年已经净化过，而 sanitizeForInjection 是幂等的 ——
 		// 保持字节恒等更利于缓存。
-		const reason = (event as { reason?: string }).reason ?? "startup";
+		// `/memory on` 不传 reason：中途打开的会话没有可重放的录制值，从磁盘读。
 		const useRecorded = reason === "resume" || reason === "fork" || reason === "reload";
 		const recorded = useRecorded ? readRecordedMemoryIndex(ctx.sessionManager) : null;
 		indexSnapshot =
-			recorded ?? (await buildIndexSection(store, config.memIndexInjectMaxLines, config.memIndexInjectMaxBytes));
+			recorded ?? (await buildIndexSection(activeStore, cfg.memIndexInjectMaxLines, cfg.memIndexInjectMaxBytes));
 
 		// register memory tool once
 		if (!toolRegistered) {
@@ -236,12 +247,31 @@ export default function (pi: ExtensionAPI) {
 			);
 			toolRegistered = true;
 		}
+		return true;
+	}
+	pi.on("session_start", async (event, ctx) => {
+		// 先重置限流配额：本 session 若以 disabled 启动（下面提前 return），用户中途
+		// `/memory on` 之后仍应拿到一次失败通知 —— 否则上一 session 残留的 true 会一直吞掉它。
+		extractErrorNotified = false;
+		config = await loadConfig(ctx);
+		if (!config.enabled) {
+			// 跨 session 复位：上一个 session 可能是 enabled 的、甚至 cwd 不同。留着的话，
+			// 本 session 中途 `/memory on` 会拿上一个项目的 store 继续写（Plan C ledger R51）。
+			memoryDir = null;
+			store = null;
+			indexSnapshot = "";
+			injectedFiles.clear();
+			return;
+		}
+		await initMemory(ctx, (event as { reason?: string }).reason);
 
 		// nudge
-		if (ctx.hasUI) {
+		// 先拷到 const：initMemory 里赋的值，TS 在本函数的控制流里看不到收窄。
+		const nudgeDir = memoryDir;
+		if (ctx.hasUI && nudgeDir) {
 			// 同步段快照：shouldNudge / confirm 之后的 fire-and-forget 链不再碰 ctx（见 notifyDream）。
 			const ui = ctx.ui;
-			const { nudge, message, sessions } = await shouldNudge(memoryDir, config, ctx.cwd);
+			const { nudge, message, sessions } = await shouldNudge(nudgeDir, config, ctx.cwd);
 			if (nudge) {
 				const ok = await ui.confirm("Memory Consolidation", `${message}\n\nConsolidate memory files now?`);
 				// dream 需要 store（整轮逻辑锁 + 快照都挂在它上面）；这里必然非空，但 const 拷贝让 TS 也能看到。
@@ -251,7 +281,7 @@ export default function (pi: ExtensionAPI) {
 					// dream agent runs independently; completion notifies the user.
 					const dreamModel = resolveDefault(config, "dream", "model");
 					const dreamThinkLevel = config.dream.thinkLevel;
-					const dir = memoryDir;
+					const dir = nudgeDir;
 					ui.setStatus("dream", "Consolidating memory...");
 					const dreamRun = runDream({
 						model: dreamModel,
@@ -469,18 +499,41 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("memory", {
 		description: "Show memory status, toggle enabled, or remove a stale lock",
 		handler: async (args, ctx) => {
-			const activeStore = store;
-			if (!config || !memoryDir || !activeStore) {
+			if (!config) {
 				ctx.ui.notify("Memory not initialized.", "info");
 				return;
 			}
 			if (args === "off" || args === "on") {
 				config = { ...config, enabled: args === "on" };
+				if (args === "on") {
+					// 以 disabled 启动的会话在这里才真正建起 store / 注册工具（见 initMemory）。
+					try {
+						await initMemory(ctx);
+					} catch (e) {
+						// Review Focus #1：不得留下「enabled=true 但没有 store」的半状态。
+						config = { ...config, enabled: false };
+						ctx.ui.notify(`Failed to initialize memory: ${e instanceof Error ? e.message : String(e)}`, "error");
+						return;
+					}
+				}
+				// `off` 只翻开关、保留 state：状态命令仍能显示目录与条目数。
 				ctx.ui.notify(`Memory ${args}`, "info");
 				return;
 			}
 			if (args === "unlock") {
-				await unlockMemory(memoryDir, ctx.ui);
+				// `unlock` 只需要**目录**、不需要 store：以 disabled 启动的会话也要能清锁
+				//（它是崩溃遗留 `.lock` 的唯一人工入口，spec §19）。
+				await unlockMemory(memoryDir ?? (await resolveMemoryDir(config, ctx.cwd)), ctx.ui);
+				return;
+			}
+			// 先拷到 const：`store` / `memoryDir` 是工厂作用域的 let，异步回调里 TS 不保留外层收窄。
+			const activeStore = store;
+			const dir = memoryDir;
+			if (!dir || !activeStore) {
+				// 以 disabled 启动、还没 `/memory on`：报两行而不是一句笼统的 "not initialized" ——
+				// 开关状态本身就是诊断信息，第二行直接告诉用户下一步做什么。
+				const notReady = [`Memory: ${config.enabled ? "enabled" : "disabled"}`, "Dir: not initialized (run /memory on)"];
+				ctx.ui.notify(notReady.join("\n"), "info");
 				return;
 			}
 			// 容量用写入那一侧的口径（memIndexMax*）：用户要知道的是「还能不能写」，
@@ -490,12 +543,12 @@ export default function (pi: ExtensionAPI) {
 			const cap = indexCapacity(indexRaw, config.memIndexMaxLines, config.memIndexMaxBytes);
 			const summary = [
 				`Memory: ${config.enabled ? "enabled" : "disabled"}`,
-				`Dir: ${memoryDir}`,
+				`Dir: ${dir}`,
 				`Index: ${cap.lineCount}/${config.memIndexMaxLines} lines, ${cap.byteLength}/${config.memIndexMaxBytes} bytes, ${parseEntryIndex(indexRaw).unrecognized} unrecognized lines`,
 				`Entries: ${(await activeStore.listEntries()).length}`,
-				`Last dream: ${(await readDreamMeta(memoryDir))?.lastDreamAt ?? "never"}`,
-				`Migration: ${await readMigrationStatus(memoryDir)}`,
-				`Lock: ${await lockStatusLine(memoryDir)}`,
+				`Last dream: ${(await readDreamMeta(dir))?.lastDreamAt ?? "never"}`,
+				`Migration: ${await readMigrationStatus(dir)}`,
+				`Lock: ${await lockStatusLine(dir)}`,
 			].join("\n");
 			ctx.ui.notify(summary, "info");
 		},
