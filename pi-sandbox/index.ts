@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getSandboxConfig } from "./src/config";
+import { getDenialLedger } from "./src/denial-ledger";
 import { getEscalationBroker } from "./src/escalation-broker";
 import { createPermissionCommand, processPermissionState } from "./src/permission";
 import { canonicalPath } from "./src/policy";
@@ -86,6 +87,7 @@ export default function (pi: ExtensionAPI) {
 		const event = data as { sessionId?: unknown };
 		if (typeof event.sessionId !== "string") return;
 		broker.unlinkChild(event.sessionId);
+		getDenialLedger().forget(event.sessionId); // 子会话销毁：清掉未消费的拒绝记录（防 Map 泄漏）
 	});
 	pi.on("session_start", (_event, ctx) => {
 		if (!readHasUI(ctx)) return; // headless / 子会话 / ctx 已失效：都不是审批终点
@@ -105,6 +107,8 @@ export default function (pi: ExtensionAPI) {
 			// hasUI 现查而非快照：注册后父会话可能因 reload / 会话替换失去 UI，或使 ctx 失效
 			hasUI: () => readHasUI(ctx),
 			select: (title, options, opts) => ctx.ui.select(title, options, opts),
+			// 两步式的第二步：Deny 后的可选理由。旧宿主/异常 ctx 可能没有 input——缺失时 broker 跳过追问。
+			input: typeof ctx.ui.input === "function" ? (title, placeholder, opts) => ctx.ui.input(title, placeholder, opts) : undefined,
 		});
 	});
 	pi.on("session_shutdown", () => {
@@ -112,6 +116,7 @@ export default function (pi: ExtensionAPI) {
 		unsubscribeDisposed();
 		if (registeredSessionId === null) return;
 		broker.unregisterParent(registeredSessionId);
+		getDenialLedger().forget(registeredSessionId); // 会话销毁：清掉未消费的拒绝记录（防 Map 泄漏）
 		registeredSessionId = null;
 	});
 }

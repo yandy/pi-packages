@@ -38,9 +38,15 @@ bash 命令被包装进平台沙箱 runner 后在本地 spawn（**路径透明**
 - `/permission` —— 显示当前状态（模式及来源、选中 runner 与 enforcement、工作区）
 - `/permission <read-only|workspace-write|danger-full-access>` —— 切换模式，**进程级**生效：父会话与所有 subagent 子会话的下一次工具调用立即采用
 
-## 提权审批（模型发起）
+## 提权审批（模型发起，denial-first）
 
-bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write` 或 `danger-full-access`）+ `justification`（一句话理由）。操作被沙箱拒绝后，模型可带这两个参数原样重试一次，会弹出审批（Allow once / Deny）；批准只对那一次调用生效。subagent 子会话（前台与后台都算）的提权会转发到父会话弹窗（同进程 pi-subagents，且父会话需有 UI）；无父通道时（headless、跨进程子代理）提权一律拒绝（fail-closed），此时用 `/permission` 放宽进程档位解救。
+bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write` 或 `danger-full-access`）+ `justification`（一句话理由）。审批是 **denial-first** 的：
+
+- 严格更宽的请求只在**本会话真实发生过同类沙箱拒绝**后（bash ↔ `command`，write/edit ↔ `operation`）才会弹审批；没有前置拒绝时提权参数会被**忽略**，调用按当前档位正常执行，结果附一行 `[sandbox: escalation fields were ignored …]` 告诉模型参数没生效——这消除了模型"先发制人"带提权参数造成的弹窗轰炸；
+- 拒绝记录**一次性消费**：一次拒绝只放行一笔提权重试（批准仍只对那一次调用生效）；
+- 占位符参数（`null` / `"null"` / 空白）一律视为"未提供"，按普通调用执行（不再误报畸形参数错误）。
+
+弹窗提供 **Allow once / Deny**；选 Deny 后可再填一句**可选理由**（回车跳过），理由会随拒绝错误回传给模型，让它明白为什么被拒、不要换写法反复试探。subagent 子会话（前台与后台都算）的提权会转发到父会话弹窗（同进程 pi-subagents，且父会话需有 UI）；无父通道时（headless、跨进程子代理）提权一律拒绝（fail-closed），此时用 `/permission` 放宽进程档位解救。
 
 ## 配置
 

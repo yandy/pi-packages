@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getEscalationBroker, type ParentApprovalChannel, resetEscalationBrokerForTests } from "../src/escalation-broker";
 
-/** 造一个父通道假件：hasUI 可切换，select 记录调用并返回固定选择。 */
+/** 造一个父通道假件：hasUI 可切换，select/input 记录调用并返回固定值。 */
 function fakeChannel(sessionId: string, hasUI = true, choice: string | undefined = "Allow once") {
 	const select = vi.fn(async () => choice);
-	const channel: ParentApprovalChannel = { sessionId, hasUI: () => hasUI, select };
-	return { channel, select };
+	const input = vi.fn(async (_title: string, _placeholder?: string) => "because");
+	const channel: ParentApprovalChannel = { sessionId, hasUI: () => hasUI, select, input };
+	return { channel, select, input };
 }
 
 afterEach(() => {
@@ -126,7 +127,7 @@ describe("request（FIFO + abort，spec §4.6）", () => {
 	it("透传 title/options，返回用户选择；无 signal 时第三参为 undefined", async () => {
 		const broker = getEscalationBroker();
 		const { channel, select } = fakeChannel("parent-1");
-		await expect(broker.request(channel, "T", ["Allow once", "Deny"])).resolves.toBe("Allow once");
+		await expect(broker.request(channel, "T", ["Allow once", "Deny"])).resolves.toEqual({ choice: "Allow once" });
 		expect(select).toHaveBeenCalledWith("T", ["Allow once", "Deny"], undefined);
 	});
 
@@ -139,7 +140,7 @@ describe("request（FIFO + abort，spec §4.6）", () => {
 			return "Deny";
 		});
 		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select };
-		await expect(broker.request(channel, "T", ["Allow once", "Deny"], ac.signal)).resolves.toBe("Deny");
+		await expect(broker.request(channel, "T", ["Allow once", "Deny"], ac.signal)).resolves.toEqual({ choice: "Deny" });
 		expect(received).toBe(ac.signal);
 	});
 
@@ -156,10 +157,10 @@ describe("request（FIFO + abort，spec §4.6）", () => {
 		const second = broker.request(channel, "t2", ["Allow once", "Deny"]);
 		await vi.waitFor(() => expect(titles).toEqual(["t1"]));
 		releases[0]?.("Allow once");
-		await expect(first).resolves.toBe("Allow once");
+		await expect(first).resolves.toEqual({ choice: "Allow once" });
 		await vi.waitFor(() => expect(titles).toEqual(["t1", "t2"]));
 		releases[1]?.("Deny");
-		await expect(second).resolves.toBe("Deny");
+		await expect(second).resolves.toEqual({ choice: "Deny" });
 	});
 
 	it("signal 已 abort → 不调 select，resolve undefined（Review Focus #2：不弹幽灵审批）", async () => {
@@ -167,7 +168,7 @@ describe("request（FIFO + abort，spec §4.6）", () => {
 		const { channel, select } = fakeChannel("parent-1");
 		const ac = new AbortController();
 		ac.abort();
-		await expect(broker.request(channel, "T", ["Allow once"], ac.signal)).resolves.toBeUndefined();
+		await expect(broker.request(channel, "T", ["Allow once"], ac.signal)).resolves.toEqual({ choice: undefined });
 		expect(select).not.toHaveBeenCalled();
 	});
 
@@ -185,7 +186,7 @@ describe("request（FIFO + abort，spec §4.6）", () => {
 		const pending = broker.request(channel, "T", ["Allow once", "Deny"], ac.signal);
 		await vi.waitFor(() => expect(received).toBe(ac.signal));
 		ac.abort();
-		await expect(pending).resolves.toBeUndefined();
+		await expect(pending).resolves.toEqual({ choice: undefined });
 	});
 
 	it("父侧 select 抛错 → resolve undefined（按取消处理，不冒泡打断子代理工具调用）", async () => {
@@ -194,7 +195,7 @@ describe("request（FIFO + abort，spec §4.6）", () => {
 			throw new Error("ui exploded");
 		});
 		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select };
-		await expect(broker.request(channel, "T", ["Allow once"])).resolves.toBeUndefined();
+		await expect(broker.request(channel, "T", ["Allow once"])).resolves.toEqual({ choice: undefined });
 	});
 
 	it("前一个请求抛错不影响后续出队（Review Focus #5）", async () => {
@@ -206,8 +207,8 @@ describe("request（FIFO + abort，spec §4.6）", () => {
 			return "Allow once";
 		});
 		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select };
-		await expect(broker.request(channel, "t1", ["Allow once"])).resolves.toBeUndefined();
-		await expect(broker.request(channel, "t2", ["Allow once"])).resolves.toBe("Allow once");
+		await expect(broker.request(channel, "t1", ["Allow once"])).resolves.toEqual({ choice: undefined });
+		await expect(broker.request(channel, "t2", ["Allow once"])).resolves.toEqual({ choice: "Allow once" });
 	});
 });
 
@@ -263,6 +264,82 @@ describe("request 的\"从不 reject\"契约（病态输入，Minor 5）", () =>
 				throw new Error("hostile signal");
 			},
 		} as AbortSignal;
-		await expect(broker.request(channel, "T", ["Allow once"], hostile)).resolves.toBeUndefined();
+		await expect(broker.request(channel, "T", ["Allow once"], hostile)).resolves.toEqual({ choice: undefined });
+	});
+});
+
+describe("request：Deny 理由的两步式（select + input 同 FIFO 任务）", () => {
+	const reasonPrompt = { title: "Why deny?", placeholder: "optional" };
+
+	it("Deny + denialReason + channel.input → 返回理由", async () => {
+		const broker = getEscalationBroker();
+		const { channel, input } = fakeChannel("p", true, "Deny");
+		await expect(broker.request(channel, "T", ["Allow once", "Deny"], undefined, reasonPrompt))
+			.resolves.toEqual({ choice: "Deny", reason: "because" });
+		expect(input).toHaveBeenCalledWith("Why deny?", "optional", undefined);
+	});
+
+	it("Allow once → 不追问理由（input 零调用）", async () => {
+		const broker = getEscalationBroker();
+		const { channel, input } = fakeChannel("p", true, "Allow once");
+		await expect(broker.request(channel, "T", ["Allow once", "Deny"], undefined, reasonPrompt)).resolves.toEqual({ choice: "Allow once" });
+		expect(input).not.toHaveBeenCalled();
+	});
+
+	it("channel 无 input → 返回 { choice: 'Deny' }（理由缺失不阻塞拒绝）", async () => {
+		const broker = getEscalationBroker();
+		const select = vi.fn(async () => "Deny");
+		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select };
+		await expect(broker.request(channel, "T", ["Allow once", "Deny"], undefined, reasonPrompt)).resolves.toEqual({ choice: "Deny" });
+	});
+
+	it("input 抛错 → 返回 { choice: 'Deny' }（理由异常不影响拒绝语义，fail-closed）", async () => {
+		const broker = getEscalationBroker();
+		const select = vi.fn(async () => "Deny");
+		const input = vi.fn(async () => {
+			throw new Error("ui exploded");
+		});
+		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select, input };
+		await expect(broker.request(channel, "T", ["Allow once", "Deny"], undefined, reasonPrompt)).resolves.toEqual({ choice: "Deny" });
+	});
+
+	it("signal abort 透传到 input（在飞时关闭理由弹窗）", async () => {
+		const broker = getEscalationBroker();
+		const ac = new AbortController();
+		let inputSignal: AbortSignal | undefined;
+		const select = vi.fn(async () => "Deny");
+		const input = vi.fn(async (_t: string, _p: string | undefined, opts?: { signal?: AbortSignal }) => {
+			inputSignal = opts?.signal;
+			return "ok";
+		});
+		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select, input };
+		await broker.request(channel, "T", ["Allow once", "Deny"], ac.signal, reasonPrompt);
+		expect(inputSignal).toBe(ac.signal);
+	});
+
+	it("FIFO 原子性：A 的理由输入未 settle 前，B 不得弹出 select（宿主只有一个对话框槽位）", async () => {
+		const broker = getEscalationBroker();
+		const events: string[] = [];
+		let releaseInput: ((value: string | undefined) => void) | undefined;
+		const input = vi.fn((title: string) => {
+			events.push(`input:${title}`);
+			return new Promise<string | undefined>((resolve) => {
+				releaseInput = resolve;
+			});
+		});
+		const select = vi.fn(async (title: string) => {
+			events.push(`select:${title}`);
+			return "Deny";
+		});
+		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select, input };
+		const first = broker.request(channel, "t1", ["Allow once", "Deny"], undefined, reasonPrompt);
+		const second = broker.request(channel, "t2", ["Allow once", "Deny"], undefined, reasonPrompt);
+		await vi.waitFor(() => expect(events).toEqual(["select:t1", "input:Why deny?"]));
+		expect(select).toHaveBeenCalledTimes(1);
+		releaseInput?.("r1");
+		await expect(first).resolves.toEqual({ choice: "Deny", reason: "r1" });
+		await vi.waitFor(() => expect(events).toEqual(["select:t1", "input:Why deny?", "select:t2", "input:Why deny?"]));
+		releaseInput?.("r2");
+		await expect(second).resolves.toEqual({ choice: "Deny", reason: "r2" });
 	});
 });

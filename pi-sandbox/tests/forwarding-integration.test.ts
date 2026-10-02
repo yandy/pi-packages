@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_SANDBOX_CONFIG, resetSandboxConfigCache } from "../src/config";
 import { getEscalationBroker, resetEscalationBrokerForTests } from "../src/escalation-broker";
+import { resetDenialLedgerForTests } from "../src/denial-ledger";
 import { createPermissionState, processPermissionState } from "../src/permission";
 import { createSandboxTools } from "../src/tools";
 
@@ -57,6 +58,7 @@ beforeEach(() => {
 afterEach(() => {
 	processPermissionState.override = null;
 	resetEscalationBrokerForTests();
+	resetDenialLedgerForTests();
 	resetSandboxConfigCache();
 	vi.unstubAllEnvs();
 	rmSync(dir, { recursive: true, force: true });
@@ -127,10 +129,19 @@ describe("端到端（包内）：子会话提权 → 父会话弹窗 → 一次
 		expect(deps.permission.override).toBeNull();
 		expect(getEscalationBroker().resolveChannel("child-1")).not.toBeNull();
 
-		// 3) 子会话结束：disposed 解除 link → 再提权回到 fail-closed
+		// 3) 子会话结束：disposed 解除 link（同时清掉未消费的拒绝账本）
 		channels["subagents:child:disposed"]?.({ sessionId: "child-1" });
+		const afterTarget = join(outsideDir, `fwd-after-${process.pid}-${Date.now()}.txt`);
+		// 3a) 账本已清 + 仍有提权参数 → 门禁忽略，按 workspace-write 执行 → fence 拒绝（同时重新记账）
 		await expect(write.execute("c-3", {
-			path: join(outsideDir, `fwd-after-${process.pid}-${Date.now()}.txt`),
+			path: afterTarget,
+			content: "x",
+			sandbox_permissions: "danger-full-access",
+			justification: "after dispose",
+		}, undefined, undefined, childCtx)).rejects.toThrow(/file access denied under workspace-write mode/);
+		// 3b) 原样重试：账本有记录、link 已断 → 严格 fail-closed（no approval channel）
+		await expect(write.execute("c-4", {
+			path: afterTarget,
 			content: "x",
 			sandbox_permissions: "danger-full-access",
 			justification: "after dispose",

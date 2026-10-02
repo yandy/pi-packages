@@ -30,6 +30,8 @@ export interface SandboxBashOpts extends ConfineOptions {
 	workspaceRoot: string;
 	/** 测试注入点；生产用 node:child_process spawn。 */
 	spawnFn?: SpawnFn;
+	/** 沙箱拒绝（classifyDenial 命中）时的记账回调：denial-first 门禁据此放行一次提权重试。 */
+	onDenial?: () => void;
 }
 
 /** stderr 分类窗口：只保留尾部 8KB（拒绝/失败信息总在末尾附近）。 */
@@ -121,6 +123,7 @@ export function createSandboxBashOps(opts: SandboxBashOpts): BashOperations {
 							return;
 						}
 						if (classifyDenial(code, stderrTail, confined.denialSignatures)) {
+							opts.onDenial?.();
 							execOpts.onData(Buffer.from(`\n${sandboxDenialMarker(opts.mode)}\n${escalationHintMarker("command")}\n`));
 						}
 					}

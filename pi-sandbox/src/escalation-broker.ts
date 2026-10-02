@@ -10,6 +10,8 @@
  * 错误——绝不猜"进程内唯一的交互会话"。
  */
 
+import type { DenialReasonPrompt, EscalationDecision } from "./escalation";
+
 /** 进程全局槽位键：带包名前缀，避免与其他扩展的 globalThis 使用相撞。 */
 const BROKER_KEY = Symbol.for("@yandy0725/pi-sandbox:escalation-broker");
 
@@ -43,6 +45,8 @@ export interface ParentApprovalChannel {
 	readonly sessionId: string;
 	hasUI(): boolean;
 	select(title: string, options: string[], opts?: { signal?: AbortSignal }): Promise<string | undefined>;
+	/** 可选：Deny 后的理由输入（两步式的第二步）。缺失/抛错时请求照常返回 Deny（无理由）。 */
+	input?(title: string, placeholder?: string, opts?: { signal?: AbortSignal }): Promise<string | undefined>;
 }
 
 export interface EscalationBroker {
@@ -61,13 +65,14 @@ export interface EscalationBroker {
 	 * 宿主的 select 只有一个对话框槽位且不排队，第二次调用会让前一个弹窗收不到按键、promise 变孤儿。
 	 */
 	resolveOwnChannel(sessionId: string): ParentApprovalChannel | null;
-	/** 提交一次审批；signal abort → resolve(undefined)，落进既有"取消"分支。 */
+	/** 提交一次审批；signal abort → choice 为 undefined，落进既有"取消"分支。 */
 	request(
 		channel: ParentApprovalChannel,
 		title: string,
 		options: string[],
 		signal?: AbortSignal,
-	): Promise<string | undefined>;
+		denialReason?: DenialReasonPrompt,
+	): Promise<EscalationDecision>;
 }
 
 class InProcessEscalationBroker implements EscalationBroker {
@@ -122,18 +127,30 @@ class InProcessEscalationBroker implements EscalationBroker {
 		title: string,
 		options: string[],
 		signal?: AbortSignal,
-	): Promise<string | undefined> {
-		const run = async (): Promise<string | undefined> => {
+		denialReason?: DenialReasonPrompt,
+	): Promise<EscalationDecision> {
+		const run = async (): Promise<EscalationDecision> => {
 			try {
 				// 排队期间已被中断：根本不弹窗，否则用户会看到没人接收结果的幽灵审批（Review Focus #2）。
 				// 读取 aborted 也放在 try 内——病态 signal getter 抛错时仍须保证 request 从不 reject，
 				// 这条契约是 escalation.ts 能零改动的前提。
-				if (signal?.aborted === true) return undefined;
+				if (signal?.aborted === true) return { choice: undefined };
 				// 在飞时 abort 由 pi 的对话框自行关闭并 resolve undefined（opts.signal 已透传）。
-				return await channel.select(title, options, signal === undefined ? undefined : { signal });
+				const choice = await channel.select(title, options, signal === undefined ? undefined : { signal });
+				// select 与 input 必须在同一个 FIFO 任务内完成：宿主只有一个对话框槽位，
+				// 若把 input 放到任务外，排队中的下一个 select 会覆盖正在等待输入的弹窗。
+				if (choice !== "Deny" || denialReason === undefined || typeof channel.input !== "function") {
+					return { choice };
+				}
+				try {
+					const reason = await channel.input(denialReason.title, denialReason.placeholder, signal === undefined ? undefined : { signal });
+					return { choice, reason };
+				} catch {
+					return { choice }; // 理由输入异常不影响拒绝语义（fail-closed）
+				}
 			} catch {
 				// 父侧 UI 异常按"取消"处理（fail-closed），不让异常冒泡打断子代理的工具调用。
-				return undefined;
+				return { choice: undefined };
 			}
 		};
 		// 前一个请求即使 reject 也要继续出队，否则队列会永久卡死。
