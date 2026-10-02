@@ -1,5 +1,5 @@
 import { getMarkdownTheme, initTheme } from "@earendil-works/pi-coding-agent";
-import type { Component, TUI } from "@earendil-works/pi-tui";
+import { type Component, type TUI, visibleWidth } from "@earendil-works/pi-tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { AgentTypeRegistry } from "../../src/config/agent-types";
 import type { SessionMessage } from "../../src/types";
@@ -32,6 +32,18 @@ function fakeSource(overrides: Partial<TranscriptSource> = {}): TranscriptSource
 		getToolDefinition: () => undefined,
 		...overrides,
 	};
+}
+
+/**
+ * Count full transcript layouts (the expensive path these tests guard).
+ *
+ * `source.streaming()` cannot be the counter any more: it is also called to
+ * re-check the running-agent indicator on every cache read. `buildContentLines`
+ * is the work that must stay cached, so count that.
+ */
+function countLayouts(overlay: TranscriptOverlay): () => number {
+	const spy = vi.spyOn(overlay as unknown as { buildContentLines: (width: number) => string[] }, "buildContentLines");
+	return () => spy.mock.calls.length;
 }
 
 function makeOverlay(
@@ -175,16 +187,124 @@ describe("TranscriptOverlay", () => {
 	});
 
 	it("does not re-render the container on repeated renders or keystrokes (caches laid-out lines)", () => {
-		const streaming = vi.fn(() => undefined);
-		const source = fakeSource({ streaming });
+		const overlay = makeOverlay();
+		const layouts = countLayouts(overlay);
+
+		overlay.render(80); // cache miss → one full layout
+		expect(layouts()).toBe(1);
+		overlay.render(80); // cache hit → no re-layout
+		expect(layouts()).toBe(1);
+		overlay.handleInput("\x1b[B"); // down arrow → uses the cached line count
+		expect(layouts()).toBe(1);
+	});
+
+	it("does not re-lay out the transcript on a keystroke at the overlay's real width", () => {
+		// TUI resolves the overlay's `width: "90%"` against the terminal width, so
+		// render() lays out at floor(columns * 0.9) - 4 while the scroll math
+		// (handleInput) read the cache at columns - 4. Two widths, one cache slot:
+		// every keystroke re-laid out the whole transcript.
+		const overlay = makeOverlay({ tui: mockTui(40, 120) });
+		const overlayWidth = Math.floor(120 * 0.9);
+		const layouts = countLayouts(overlay);
+
+		overlay.render(overlayWidth);
+		overlay.render(overlayWidth);
+		overlay.handleInput("\x1b[B"); // down arrow
+		overlay.render(overlayWidth);
+
+		expect(layouts()).toBe(1);
+	});
+
+	it("keeps materialized messages when the transcript grows", () => {
+		// The body materializes each message once and refreshes only what changed
+		// (pi's own interactive-mode lifecycle). A growing transcript must not
+		// re-create the tool components of messages that are already rendered.
+		const messages = [
+			{
+				role: "assistant",
+				content: [{ type: "toolCall", id: "tc-1", name: "read", arguments: { path: "/a.ts" } }],
+				stopReason: "toolUse",
+			},
+		] as unknown as SessionMessage[];
+		const getToolDefinition = vi.fn(() => undefined);
+		let captured: (() => void) | undefined;
+		const source = fakeSource({
+			getMessages: () => messages,
+			getToolDefinition,
+			subscribe: (onChange) => {
+				captured = onChange;
+				return () => {};
+			},
+		});
 		const overlay = makeOverlay({ source });
 
-		overlay.render(80); // cache miss → buildContentLines reads streaming()
-		expect(streaming).toHaveBeenCalledTimes(1);
-		overlay.render(80); // cache hit → no re-render
-		expect(streaming).toHaveBeenCalledTimes(1);
-		overlay.handleInput("\x1b[B"); // down arrow → uses the cached line count
-		expect(streaming).toHaveBeenCalledTimes(1);
+		overlay.render(80);
+		expect(getToolDefinition).toHaveBeenCalledTimes(1);
+
+		messages.push({ role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" } as unknown as SessionMessage);
+		captured?.();
+
+		expect(overlay.render(80).join("\n")).toContain("done");
+		expect(getToolDefinition).toHaveBeenCalledTimes(1);
+	});
+
+	it("refreshes the running-agent indicator when the activity changes without a message change", () => {
+		// `activeTools` lives outside the message list: a tool starting or finishing
+		// changes the indicator line only. The line cache must notice that too.
+		const messages = [{ role: "user", content: "hi" }] as unknown as SessionMessage[];
+		let active: ReadonlyMap<string, string> = new Map([["k", "read"]]);
+		let captured: (() => void) | undefined;
+		const source = fakeSource({
+			getMessages: () => messages,
+			streaming: () => ({ activeTools: active, responseText: "" }),
+			subscribe: (onChange) => {
+				captured = onChange;
+				return () => {};
+			},
+		});
+		const overlay = makeOverlay({ source });
+
+		expect(overlay.render(80).join("\n")).toContain("reading");
+
+		active = new Map([["k", "bash"]]);
+		captured?.();
+
+		expect(overlay.render(80).join("\n")).toContain("running command");
+	});
+
+	it("clears the running-agent indicator when the agent stops streaming without an event", () => {
+		// Completion flips the record's status; no session event follows. The
+		// indicator therefore has to be re-checked where frames and keystrokes read
+		// the cache, or `◍ …` lingers after the agent is done.
+		let streaming: { activeTools: ReadonlyMap<string, string>; responseText: string } | undefined = {
+			activeTools: new Map([["k", "read"]]),
+			responseText: "",
+		};
+		const source = fakeSource({
+			getMessages: () => [{ role: "user", content: "hi" }] as unknown as SessionMessage[],
+			streaming: () => streaming,
+		});
+		const overlay = makeOverlay({ source });
+
+		expect(overlay.render(80).join("\n")).toContain("◍");
+
+		streaming = undefined;
+
+		expect(overlay.render(80).join("\n")).not.toContain("◍");
+	});
+
+	it("keeps every rendered line within the overlay width", () => {
+		const longLine = "x".repeat(500);
+		const source = fakeSource({
+			getMessages: () => [{ role: "user", content: longLine }] as unknown as SessionMessage[],
+			streaming: () => ({ activeTools: new Map(), responseText: longLine }),
+		});
+		const overlay = makeOverlay({ source });
+		const width = 80;
+
+		for (const line of overlay.render(width)) {
+			expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+		}
 	});
 
 	it("cancels the pending trailing rebuild when disposed", () => {

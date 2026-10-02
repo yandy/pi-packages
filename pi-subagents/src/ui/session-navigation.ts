@@ -7,9 +7,10 @@
  *
  * The `TranscriptSource` seam decouples *how messages are sourced* (live record
  * here; a file snapshot in a follow-up) from *how they render* — the renderer
- * (`session-navigator.ts`, which mounts Pi's per-entry components) talks only to
- * this seam. Rendering lives in the SDK/TUI module because the per-entry
- * components require a `TUI`, `cwd`, and markdown theme.
+ * (`transcript-body.ts`, mounted by the `session-navigator.ts` overlay, which
+ * uses Pi's per-entry components) talks only to this seam. Rendering lives in
+ * the SDK/TUI modules because the per-entry components require a `TUI`, `cwd`,
+ * and markdown theme.
  */
 
 import {

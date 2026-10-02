@@ -4,43 +4,29 @@
  *
  * SDK/TUI consumer half of native session navigation. The unit-testable core
  * (selection, sourcing) lives in `session-navigation.ts`; this module wires that
- * core to the command picker and a read-only scrollable overlay, and owns the
- * renderer — it mounts Pi's interactive components (`AssistantMessageComponent`,
- * `ToolExecutionComponent`, …) into a `Container`, mirroring Pi's own
- * `renderSessionContext` mapping. Rendering lives here, not in the pure module,
- * because the components require a `TUI`, `cwd`, and markdown theme.
+ * core to the command picker and a read-only scrollable overlay. The per-entry
+ * component tree lives in `transcript-body.ts` (incremental, mirrors Pi's own
+ * `renderSessionContext`/`updateContent` lifecycle); this module owns the
+ * viewport: scroll state, chrome, the sync throttle, and the line cache.
  *
  * The overlay is strictly read-only — steering stays in the `steer_subagent` tool
  * and the widget. It consumes a `TranscriptSource`, so the evicted-agent-source
- * follow-up swaps the source without touching the renderer or the overlay.
+ * follow-up swaps the source without touching the body or the overlay.
  */
 
-import {
-	AssistantMessageComponent,
-	BashExecutionComponent,
-	BranchSummaryMessageComponent,
-	CompactionSummaryMessageComponent,
-	getMarkdownTheme,
-	parseSkillBlock,
-	SkillInvocationMessageComponent,
-	type ToolDefinition,
-	ToolExecutionComponent,
-	UserMessageComponent,
-} from "@earendil-works/pi-coding-agent";
+import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import {
 	type Component,
-	Container,
 	type MarkdownTheme,
 	matchesKey,
-	Spacer,
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
 } from "@earendil-works/pi-tui";
 import type { AgentConfigLookup } from "../config/agent-types";
 import type { EvictedSubagent } from "../lifecycle/subagent-manager";
-import type { SessionMessage } from "../types";
 import { describeActivity, type Theme } from "../ui/display";
+import { TranscriptBody } from "../ui/transcript-body";
 import {
 	fileSnapshotSource,
 	listNavigableAgents,
@@ -150,33 +136,33 @@ export class SessionNavigatorHandler {
 }
 
 /**
- * Minimum interval between two component rebuilds for a live (streaming) source.
+ * Minimum interval between two body syncs for a live (streaming) source.
  *
- * A running agent emits many events per second (text deltas, tool calls). Without
- * throttling, each event rebuilt the whole component tree (markdown parsing
- * included) and re-rendered it — starving the event loop so keystrokes (arrows,
- * `q`) stopped responding. Coalescing bursts into at most one rebuild per tick
+ * A running agent emits many events per second (text deltas, tool calls). Each
+ * event can change a message — or only the activity indicator — and every change
+ * ends in a line-cache rebuild. Coalescing bursts into at most one sync per tick
  * keeps the overlay responsive while still streaming.
  */
-const REBUILD_THROTTLE_MS = 120;
+const SYNC_THROTTLE_MS = 120;
 
 /**
  * Read-only scrollable transcript overlay.
  *
  * Two caches keep it responsive even for long, live-streaming transcripts:
  *
- *   - `content` (a `Container` of Pi's per-entry components) is rebuilt only when
- *     the source changes, and rebuilds are *throttled* — a burst of streaming
- *     events coalesces into at most one rebuild per `REBUILD_THROTTLE_MS`, so
- *     markdown highlighting never re-runs on every token.
+ *   - `body` (a `TranscriptBody`) is synced only when the source changes, and
+ *     syncs are *throttled* — a burst of streaming events coalesces into at most
+ *     one sync per `SYNC_THROTTLE_MS`, and the sync itself touches only the
+ *     messages that changed, so markdown/tool rendering never re-runs for the
+ *     whole transcript on every token.
  *   - `renderedLines` caches the laid-out, width-wrapped lines. `render()` and
  *     `handleInput()` read the cache (O(1) slice / length) instead of
  *     re-rendering the whole container on every frame and every keystroke.
  *
- * The cache is invalidated (`linesDirty`) whenever the component tree changes,
- * and recomputed lazily at the current width. This class owns scroll state,
- * chrome, and the running-agent streaming indicator; the component mapping lives
- * in `buildTranscriptComponents`.
+ * The cache is invalidated (`linesDirty`) whenever the body changed, and
+ * recomputed lazily at the width it was requested at. This class owns scroll
+ * state, chrome, and the running-agent streaming indicator; per-entry component
+ * mapping and lifecycle live in `transcript-body.ts`.
  */
 export class TranscriptOverlay implements Component {
 	private scrollOffset = 0;
@@ -188,40 +174,45 @@ export class TranscriptOverlay implements Component {
 	private readonly theme: Theme;
 	private readonly source: TranscriptSource;
 	private readonly done: (result: undefined) => void;
-	private readonly cwd: string;
-	private readonly markdownTheme: MarkdownTheme;
 	private readonly modelName?: string;
 	private readonly thinking?: string;
-	private content: Container;
+	private readonly body: TranscriptBody;
 
-	/** Throttle bookkeeping for coalescing live-source rebuilds. */
-	private rebuildTimer: ReturnType<typeof setTimeout> | undefined;
-	private lastRebuildAt = 0;
+	/** Throttle bookkeeping for coalescing live-source syncs. */
+	private syncTimer: ReturnType<typeof setTimeout> | undefined;
+	private lastSyncAt = 0;
 
 	/** Cached laid-out lines + the width they were computed at; recomputed lazily when `linesDirty`. */
 	private renderedLines: string[] = [];
 	private renderedWidth = -1;
+	/** Width of the last layout, kept across `invalidate()` so a keystroke cannot pick the wrong one. */
+	private lastRenderWidth = -1;
 	private linesDirty = true;
+	/** Running-agent indicator baked into `renderedLines` — invalidates the cache when it changes. */
+	private renderedIndicator = "";
 
 	constructor({ tui, theme, source, done, cwd, markdownTheme, modelName, thinking }: TranscriptOverlayOptions) {
 		this.tui = tui;
 		this.theme = theme;
 		this.source = source;
 		this.done = done;
-		this.cwd = cwd;
-		this.markdownTheme = markdownTheme;
 		this.modelName = modelName;
 		this.thinking = thinking;
-		this.content = this.rebuild();
-		// Seed `lastRebuildAt` far in the past so the first source-change event
-		// always rebuilds immediately (leading-edge throttle). The constructor
-		// already built `content` from the snapshot at construction time, but
-		// the source may have accumulated events between construction and
-		// subscription — that first rebuild surfaces them without delay.
-		// Subsequent events inside the throttle window are coalesced into a
-		// single trailing rebuild.
-		this.lastRebuildAt = 0;
-		this.unsubscribe = source.subscribe(() => this.scheduleRebuild());
+		this.body = new TranscriptBody({
+			tui,
+			cwd,
+			markdownTheme,
+			getToolDefinition: (name) => source.getToolDefinition(name),
+		});
+		this.body.sync(source.getMessages());
+		// Seed `lastSyncAt` far in the past so the first source-change event
+		// always syncs immediately (leading-edge throttle). The constructor
+		// already materialized the snapshot at construction time, but the source
+		// may have accumulated events between construction and subscription —
+		// that first sync surfaces them without delay. Subsequent events inside
+		// the throttle window are coalesced into a single trailing sync.
+		this.lastSyncAt = 0;
+		this.unsubscribe = source.subscribe(() => this.scheduleSync());
 	}
 
 	// fallow-ignore-next-line unused-class-member
@@ -232,7 +223,7 @@ export class TranscriptOverlay implements Component {
 			return;
 		}
 
-		const totalLines = this.getRenderedLines(this.innerWidth()).length;
+		const totalLines = this.getRenderedLines(this.layoutWidth()).length;
 		const viewportHeight = this.viewportHeight();
 		const maxScroll = Math.max(0, totalLines - viewportHeight);
 		let scrolled = false;
@@ -314,7 +305,7 @@ export class TranscriptOverlay implements Component {
 
 	// fallow-ignore-next-line unused-class-member
 	invalidate(): void {
-		this.content.invalidate();
+		this.body.invalidate();
 		this.linesDirty = true;
 		this.renderedWidth = -1;
 	}
@@ -322,9 +313,9 @@ export class TranscriptOverlay implements Component {
 	// fallow-ignore-next-line unused-class-member
 	dispose(): void {
 		this.closed = true;
-		if (this.rebuildTimer) {
-			clearTimeout(this.rebuildTimer);
-			this.rebuildTimer = undefined;
+		if (this.syncTimer) {
+			clearTimeout(this.syncTimer);
+			this.syncTimer = undefined;
 		}
 		if (this.unsubscribe) {
 			this.unsubscribe();
@@ -334,6 +325,20 @@ export class TranscriptOverlay implements Component {
 
 	// ---- Private ----
 
+	/**
+	 * Inner width the laid-out line cache belongs to.
+	 *
+	 * The overlay is rendered by TUI at its *own* width (90% of the terminal),
+	 * not at the terminal width, so the scroll math must reuse the width the
+	 * cache was laid out at — otherwise every keystroke misses the cache and
+	 * re-lays out the whole transcript. Falls back to the terminal width before
+	 * the first layout.
+	 */
+	private layoutWidth(): number {
+		return this.lastRenderWidth > 0 ? this.lastRenderWidth : this.innerWidth();
+	}
+
+	/** Terminal-width-derived inner width — used before the first layout has happened. */
 	private innerWidth(): number {
 		return Math.max(0, this.tui.terminal.columns - 4);
 	}
@@ -344,181 +349,77 @@ export class TranscriptOverlay implements Component {
 	}
 
 	/**
-	 * Coalesce a burst of source-change events into at most one component rebuild
-	 * per `REBUILD_THROTTLE_MS`. The first event after an idle gap rebuilds
+	 * Coalesce a burst of source-change events into at most one body sync
+	 * per `SYNC_THROTTLE_MS`. The first event after an idle gap syncs
 	 * immediately (so a freshly-picked agent paints without delay); subsequent
-	 * events inside the gap are merged into a single trailing rebuild.
+	 * events inside the gap are merged into a single trailing sync.
 	 */
-	private scheduleRebuild(): void {
+	private scheduleSync(): void {
 		if (this.closed) return;
 		const now = Date.now();
-		const elapsed = now - this.lastRebuildAt;
-		if (elapsed >= REBUILD_THROTTLE_MS) {
-			this.doRebuild();
+		const elapsed = now - this.lastSyncAt;
+		if (elapsed >= SYNC_THROTTLE_MS) {
+			this.doSync();
 			return;
 		}
-		if (this.rebuildTimer) return; // a trailing rebuild is already pending
-		this.rebuildTimer = setTimeout(() => {
-			this.rebuildTimer = undefined;
-			this.doRebuild();
-		}, REBUILD_THROTTLE_MS - elapsed);
+		if (this.syncTimer) return; // a trailing sync is already pending
+		this.syncTimer = setTimeout(() => {
+			this.syncTimer = undefined;
+			this.doSync();
+		}, SYNC_THROTTLE_MS - elapsed);
 	}
 
-	/** Rebuild the component tree, invalidate the line cache, and request a paint. */
-	private doRebuild(): void {
+	/** Invalidate the line cache when the sync changed anything, then request a paint. */
+	private doSync(): void {
 		if (this.closed) return;
-		this.lastRebuildAt = Date.now();
-		this.content = this.rebuild();
-		this.linesDirty = true;
+		this.lastSyncAt = Date.now();
+		const outcome = this.body.sync(this.source.getMessages());
+		if (outcome.appended + outcome.refreshed + outcome.rebuilt > 0) this.linesDirty = true;
 		this.tui.requestRender();
 	}
 
 	/**
 	 * Return the laid-out content lines at `innerW`, recomputing the cache only
-	 * when the component tree changed (`linesDirty`) or the width changed.
+	 * when the body or indicator changed (`linesDirty`) or the width changed.
 	 * Cheap O(1) on the hot path (every render frame and every keystroke).
 	 */
 	private getRenderedLines(innerW: number): string[] {
 		if (innerW <= 0) return [];
-		if (!this.linesDirty && this.renderedWidth === innerW) return this.renderedLines;
+		if (!this.linesDirty && this.renderedWidth === innerW) {
+			// The running-agent indicator lives outside the message list (`activeTools`,
+			// streamed preview, and the status flip when the agent finishes), so no
+			// event necessarily marks the cache dirty. Re-check it here, where every
+			// frame and every keystroke reads the cache, and it self-heals.
+			if (this.indicatorLine() === this.renderedIndicator) return this.renderedLines;
+		}
 		this.renderedLines = this.buildContentLines(innerW);
 		this.renderedWidth = innerW;
+		this.lastRenderWidth = innerW;
 		this.linesDirty = false;
 		return this.renderedLines;
 	}
 
+	/**
+	 * Lay out the materialized transcript plus the running-agent indicator.
+	 *
+	 * Over-wide lines are truncated where they are *displayed* (in `render`), not
+	 * here: truncating every line of the transcript on each layout was an O(whole
+	 * transcript) pass just to show a viewport of it.
+	 */
 	private buildContentLines(innerW: number): string[] {
 		if (innerW <= 0) return [];
-		const lines = this.content.render(innerW);
+		const lines = this.body.render(innerW);
+		this.renderedIndicator = this.indicatorLine();
+		if (this.renderedIndicator) {
+			lines.push("", this.renderedIndicator);
+		}
+		return lines;
+	}
+
+	/** Running-agent indicator line, or "" when the source is not streaming. */
+	private indicatorLine(): string {
 		const streaming = this.source.streaming();
-		if (streaming) {
-			lines.push("", `◍ ${describeActivity(streaming.activeTools, streaming.responseText)}`);
-		}
-		return lines.map((l) => truncateToWidth(l, innerW));
-	}
-
-	private rebuild(): Container {
-		return buildTranscriptComponents(this.source.getMessages(), {
-			tui: this.tui,
-			cwd: this.cwd,
-			markdownTheme: this.markdownTheme,
-			getToolDefinition: (name) => this.source.getToolDefinition(name),
-		});
+		return streaming ? `◍ ${describeActivity(streaming.activeTools, streaming.responseText)}` : "";
 	}
 }
 
-/** Dependencies the per-entry component tree needs from the SDK/TUI environment. */
-interface TranscriptRenderOptions {
-	tui: TUI;
-	cwd: string;
-	markdownTheme: MarkdownTheme;
-	getToolDefinition: (name: string) => ToolDefinition | undefined;
-}
-
-/**
- * Build a `Container` of Pi's per-entry components from a message snapshot,
- * mirroring Pi's own interactive-mode `renderSessionContext` mapping. Tool
- * results are matched to their tool-call components by id, exactly as Pi does.
- * `custom`-role messages are skipped — rendering them needs the child session's
- * message-renderer registry, which the navigator does not hold.
- */
-function buildTranscriptComponents(messages: readonly SessionMessage[], opts: TranscriptRenderOptions): Container {
-	const container = new Container();
-	const pendingTools = new Map<string, ToolExecutionComponent>();
-	for (const message of messages) {
-		addMessageComponents(container, message, pendingTools, opts);
-	}
-	return container;
-}
-
-function addMessageComponents(
-	container: Container,
-	message: SessionMessage,
-	pendingTools: Map<string, ToolExecutionComponent>,
-	opts: TranscriptRenderOptions,
-): void {
-	switch (message.role) {
-		case "assistant": {
-			container.addChild(new AssistantMessageComponent(message, false, opts.markdownTheme));
-			for (const content of message.content) {
-				if (content.type !== "toolCall") continue;
-				const tool = new ToolExecutionComponent(
-					content.name,
-					content.id,
-					content.arguments,
-					{ showImages: false },
-					opts.getToolDefinition(content.name),
-					opts.tui,
-					opts.cwd,
-				);
-				tool.setExpanded(true);
-				container.addChild(tool);
-				pendingTools.set(content.id, tool);
-			}
-			break;
-		}
-		case "toolResult": {
-			pendingTools.get(message.toolCallId)?.updateResult(message);
-			pendingTools.delete(message.toolCallId);
-			break;
-		}
-		case "user": {
-			addUserComponents(container, message.content, opts.markdownTheme);
-			break;
-		}
-		case "bashExecution": {
-			const bash = new BashExecutionComponent(message.command, opts.tui, message.excludeFromContext);
-			if (message.output) bash.appendOutput(message.output);
-			bash.setComplete(message.exitCode, message.cancelled, undefined, message.fullOutputPath);
-			container.addChild(bash);
-			break;
-		}
-		case "compactionSummary": {
-			container.addChild(new Spacer(1));
-			const summary = new CompactionSummaryMessageComponent(message, opts.markdownTheme);
-			summary.setExpanded(true);
-			container.addChild(summary);
-			break;
-		}
-		case "branchSummary": {
-			container.addChild(new Spacer(1));
-			const summary = new BranchSummaryMessageComponent(message, opts.markdownTheme);
-			summary.setExpanded(true);
-			container.addChild(summary);
-			break;
-		}
-	}
-}
-
-/** Render a user message (skill block + text) into the container, mirroring Pi. */
-function addUserComponents(
-	container: Container,
-	content: string | readonly { type: string; text?: string }[],
-	markdownTheme: MarkdownTheme,
-): void {
-	const text = userMessageText(content);
-	if (!text) return;
-	if (container.children.length > 0) container.addChild(new Spacer(1));
-
-	const skillBlock = parseSkillBlock(text);
-	if (!skillBlock) {
-		container.addChild(new UserMessageComponent(text, markdownTheme));
-		return;
-	}
-	const skill = new SkillInvocationMessageComponent(skillBlock, markdownTheme);
-	skill.setExpanded(true);
-	container.addChild(skill);
-	if (skillBlock.userMessage) {
-		container.addChild(new Spacer(1));
-		container.addChild(new UserMessageComponent(skillBlock.userMessage, markdownTheme));
-	}
-}
-
-/** Concatenate the text blocks of a user message's content (mirrors Pi). */
-function userMessageText(content: string | readonly { type: string; text?: string }[]): string {
-	if (typeof content === "string") return content;
-	return content
-		.filter((block) => block.type === "text")
-		.map((block) => block.text ?? "")
-		.join("");
-}

@@ -107,6 +107,12 @@ Send a steering message to a running agent.
 | `/subagents:settings` | Configure concurrency, turn limits |
 | `/subagents:sessions` | View a subagent's session transcript |
 
+The session viewer renders the transcript read-only with Pi's own per-entry
+components and follows the running agent live. Tool results appear in Pi's
+collapsed form (summaries and previews), so a `read` call is represented by its
+call line only. The viewer has no expand key, so the "… to expand" hints some
+tools print do not apply here.
+
 ## Concurrency
 
 Background agents are subject to a configurable concurrency limit (default: 4). Excess agents queue automatically. Foreground agents bypass the queue.
