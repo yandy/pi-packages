@@ -90,14 +90,14 @@ function compareSummaries(a: EntrySummary, b: EntrySummary): number {
 /**
  * 进程级唯一写入通道。所有对 memory 目录的修改必须经它。
  *
- * 已知崩溃窗口（由写前快照兜底，消费方属 Plan B 的恢复/迁移工具）：`replaceEntry` 改名时
+ * 已知崩溃窗口（由写前快照兜底，消费方是恢复工具）：`replaceEntry` 改名时
  * 先写新文件、再删旧文件、最后重写索引；若在「删旧文件」与「重写索引」之间进程退出，
  * `MEMORY.md` 会残留一条指向已删文件的死链。`upsertIndexLine` 以 file 为键，因此这条死链
  * 不会被后续写入自动覆盖 —— 只能从 `.backups/` 快照恢复。
  *
- * 锁契约（Plan B 的 dream / 迁移必须遵守）：
+ * 锁契约（dream 等整轮持有者必须遵守）：
  * - **两级锁，作用域不同**：进程内**逻辑锁**（`process-lock.ts`，按 `memoryDir` 分键）承担
- *   「逻辑作用域」（单次原语 = 该次调用；dream / 迁移 = 整轮）；跨进程 `.lock` 承担「毫秒级的
+ *   「逻辑作用域」（单次原语 = 该次调用；dream = 整轮）；跨进程 `.lock` 承担「毫秒级的
  *   物理写入」。因此 `.lock` 永远只被持有一瞬间，不需要 TTL / 续约 / 接管（见 fs-lock.ts）。
  * - 不做整轮的调用方（主 agent 工具、extract）**不必传任何选项** —— 默认就会自取逻辑锁。
  * - 需要整轮独占时：用 `withLogicalLock()` 包住整轮，且**其内部调用必须传
@@ -183,14 +183,13 @@ export class MemoryStore {
 	}
 
 	/**
-	 * 在「进程内逻辑锁」下跑一整轮（dream / 迁移）。持有期间调用原语必须传
+	 * 在「进程内逻辑锁」下跑一整轮（dream）。持有期间调用原语必须传
 	 * `{ skipLogicalLock: true }`，否则会自锁到超时。
 	 *
 	 * 整轮互斥放进程内、而不是让跨进程 `.lock` 持整轮，是刻意的：`.lock` 只承担毫秒级的物理写入，
 	 * 因而不需要 TTL / 续约 / 接管（见 fs-lock.ts）；而 dream 自己的原语调用也不会撞上自己的锁。
 	 *
-	 * `timeoutMs` 缺省为 `cfg.lock.timeoutMs`（5s）。整轮持有者可以显式放宽 —— 迁移用 30s
-	 * （spec §15.3 步骤 1），因为它要在锁内逐条重写整个目录。
+	 * `timeoutMs` 缺省为 `cfg.lock.timeoutMs`（5s）；整轮持有者可以显式放宽。
 	 */
 	async withLogicalLock<T>(fn: () => Promise<T>, timeoutMs?: number): Promise<T> {
 		return withProcessLock(this.#logicalKey, timeoutMs ?? this.cfg.lock.timeoutMs, fn);
@@ -320,8 +319,8 @@ export class MemoryStore {
 		if (value && /[\r\n]/.test(value)) throw new Error("description must be a single line");
 	}
 
-	/** `created` 只接受 `YYYY-MM-DD`（spec §3.1）。迁移会把旧 frontmatter 的 `updated` 归一到这个
-	 *  形状再传进来；非法值写出去会让 `parseEntryFile` 返回 null，整条记忆对 store 静默不可见。 */
+	/** `created` 只接受 `YYYY-MM-DD`（spec §3.1）；非法值写出去会让 `parseEntryFile` 返回 null，
+	 *  整条记忆对 store 静默不可见。 */
 	#validateCreated(value: string | undefined): void {
 		if (value === undefined) return;
 		if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error("created must be YYYY-MM-DD");
@@ -344,7 +343,7 @@ export class MemoryStore {
 				const summaries = await this.listEntries();
 				const existing = summaries.find((s) => s.name === name);
 				const file = existing?.file ?? (await this.#resolveTargetFile(name));
-				// 覆盖同名 entry 时**永远**保留磁盘上的 created（迁移重跑幂等的关键）；
+				// 覆盖同名 entry 时**永远**保留磁盘上的 created（幂等覆盖的关键）；
 				// 只有新建时才接受调用方传入的值，缺省是今天。
 				const created = existing
 					? ((await this.readEntry(existing.file))?.created ?? isoDate(new Date()))

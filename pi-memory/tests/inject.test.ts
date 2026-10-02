@@ -98,8 +98,8 @@ describe("buildIndexSection", () => {
 		await rm(dir, { recursive: true, force: true });
 	});
 
-	// v1 的索引快照函数会自己补一份 `# Memory Index`；v2 的 MEMORY.md 由 rebuildIndex /
-	// 迁移写入该标题 —— 再补一次，注入文本里就有两份。
+	// v1 的索引快照函数会自己补一份 `# Memory Index`；v2 的 MEMORY.md 由 rebuildIndex
+	// 写入该标题 —— 再补一次，注入文本里就有两份。
 	it("keeps exactly one title when MEMORY.md already has one", async () => {
 		await writeFile(join(dir, "MEMORY.md"), "# Memory Index\n\n- [A](a.md) — desc a\n", "utf8");
 

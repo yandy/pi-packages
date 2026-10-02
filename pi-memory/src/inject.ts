@@ -41,7 +41,7 @@ export function buildInjection(systemPrompt: string, snapshot: string): string {
  * `memory_index` section 的值（spec §9.1 / D13）：读索引 → 截断 → 净化。
  *
  * **不再自己加 `# Memory Index\n` 前缀**：v1 的索引快照函数会补一份头部，而 v2 的
- * `MEMORY.md` 由 `rebuildIndex`（默认头部就是 `# Memory Index`）与迁移写入 —— 再补一次
+ * `MEMORY.md` 由 `rebuildIndex`（默认头部就是 `# Memory Index`）写入 —— 再补一次
  * 注入文本里就有两份标题。
  *
  * 空索引返回 `""`（调用方仍要把 `""` 无条件写进 sections，见 `applyIndexSection`）。

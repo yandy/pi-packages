@@ -10,7 +10,7 @@ Aligned with Claude Code's auto memory mechanism: **one memory = one file**, a `
 > - Each memory lives in **its own file** with five frontmatter fields: `name`, `description`, `type`, `created`, `modified` (1.x used `updated`).
 > - The index is injected as a **system-prompt section** (`memory_index`) that is frozen for the whole session, instead of being appended to the system prompt string.
 >
-> The first `session_start` after the upgrade **migrates an existing 1.x directory automatically**: it snapshots the whole directory into `.backups/migrate-<ts>/`, copies the original topic files into `originals/`, splits every `## entry` into its own file, rebuilds the index, and only then writes the `.migrated` marker. If any step fails, the marker is not written, the backup stays, and the next session retries. See [Migration from 1.x](#migration-from-1x).
+> Automatic 1.x → 2.0 migration has been **removed**. Legacy topic files stay on disk untouched but are **invisible** to the memory system — they fail `parseEntryFile`'s five-field v2 frontmatter check. See [1.x data](#1x-data).
 
 ## Features
 
@@ -20,12 +20,12 @@ Aligned with Claude Code's auto memory mechanism: **one memory = one file**, a `
 - **`memory_index` prompt section, frozen per session** ⭐ — the index goes into `event.systemPromptOptions.sections["memory_index"]` and its value **does not change for the rest of the session**; only compaction re-reads it from disk. Because pi diffs sections and appends nothing when they are unchanged, the system prompt stays byte-identical turn after turn and the provider's prefix cache keeps hitting. `resume` / `fork` / `reload` replay the **recorded** value from the transcript instead of reading disk, so restoring a session does not rewrite its head.
 - **Injection sanitising** — everything injected (index lines, surfaced entry bodies and names) has invisible/bidi characters stripped and `<` `>` escaped, so a memory can never forge `</relevant_memories>`, `<system>`, `<project_instructions>`, `<active_agent …>` or `<memory_index>`. Sanitising happens **at injection time only**: your files on disk are never rewritten (they stay readable and hand-editable).
 - **Auto-surfacing** ⭐ — on every user turn a lightweight side query selects up to `maxFiles` **entries** (selected from `description` alone) and injects their bodies inside `<relevant_memories>`. Already-injected files are deduplicated per session; the manifest is served from an in-process `mtime` cache, so a turn costs one `readdir` plus one `stat` per file. Disabled inside subagents.
-- **Extract memories** ⭐ — after each run an async headless agent receives a **structured rendering of the whole conversation** (every user message in full, assistant text and tool calls, tool results with error flags), not just two messages. It writes through the same `memory` primitives, under a whole-round logical lock it never waits for: if a dream or migration is running, that turn is simply skipped.
+- **Extract memories** ⭐ — after each run an async headless agent receives a **structured rendering of the whole conversation** (every user message in full, assistant text and tool calls, tool results with error flags), not just two messages. It writes through the same `memory` primitives, under a whole-round logical lock it never waits for: if a dream is running, that turn is simply skipped.
 - **`/dream`** — a headless consolidation agent (Orient → Gather Signal → Consolidate → Prune & Index) that merges duplicates, resolves contradictions, renames entries and rebuilds the index. It has **no raw file access**: it only gets the seven `memory` actions, holds the logical lock for the whole round, and snapshots the entire directory on entry.
 - **Dream nudge** — after N sessions or N hours a notification suggests `/dream`.
-- **`/memory`** — full status (switch, directory, index capacity, entry count, last dream, migration state, lock state including the holder), plus `on` / `off` / `unlock`.
-- **Two-level locking** — an in-process logical lock carries the *logical* scope (one primitive call, or a whole dream/migration round); the cross-process `.lock` file is held for **milliseconds only** and is **never reclaimed automatically**. There is no TTL, no heartbeat and no takeover, so mutual exclusion is a hard guarantee; the price is that a lock left behind by a crashed process must be removed by a human (`/memory unlock`).
-- **Snapshots** — every write leaves a rollback point under `.backups/<ts>-<label>/`, keeping the last `lock.snapshotKeep` (migration backups use a `migrate-` prefix and are never pruned). `/dream` is the exception: it snapshots the whole directory **once on entry**, and the primitives inside that round skip their per-file snapshots (one round, one rollback point).
+- **`/memory`** — full status (switch, directory, index capacity, entry count, last dream, lock state including the holder), plus `unlock`.
+- **Two-level locking** — an in-process logical lock carries the *logical* scope (one primitive call, or a whole dream round); the cross-process `.lock` file is held for **milliseconds only** and is **never reclaimed automatically**. There is no TTL, no heartbeat and no takeover, so mutual exclusion is a hard guarantee; the price is that a lock left behind by a crashed process must be removed by a human (`/memory unlock`).
+- **Snapshots** — every write leaves a rollback point under `.backups/<ts>-<label>/`, keeping the last `lock.snapshotKeep` (directories named `migrate-*` — pre-2.0 originals from earlier migrations — are never pruned). `/dream` is the exception: it snapshots the whole directory **once on entry**, and the primitives inside that round skip their per-file snapshots (one round, one rollback point).
 - **Session search** — `memory search scope=sessions` queries past conversation history.
 - **Readable, clone-safe layout** — memory lives under `~/.pi/memory/git/<host__owner__repo>/` for git repos with an http(s)/ssh/git remote (including scp-style and `git+ssh`/`git+https`), and `~/.pi/memory/local/<absolute-path>/` otherwise — clones and worktrees of the same repo share memory (a fork has its own remote, so it gets its own directory).
 
@@ -51,8 +51,7 @@ Or add to `~/.pi/agent/settings.json`:
   SSH-port-on-staging.md
   Test-command.md      — one file per memory
   .lock                — cross-process write lock (held for milliseconds, never auto-reclaimed)
-  .backups/            — rollback points: <ISO-ts>-<label>/, plus migrate-<ts>/ for the upgrade
-  .migrated            — marker written as the last step of the 1.x → 2.x migration
+  .backups/            — rollback points: <ISO-ts>-<label>/ (plus migrate-<ts>/ dirs from earlier 1.x migrations)
   .dream-meta.json     — last dream timestamp + session count (drives the nudge)
   sessions/            — persisted headless sessions, only when sessionPersistence is enabled
 ```
@@ -140,33 +139,33 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `enabled` | `true` | Toggle the entire memory system on/off |
+| `enabled` | `true` | Toggle the entire memory system on/off. Read once at session start — changing it requires restarting the session |
 | `memoryDir` | `~/.pi/memory` | Root directory for all memory data |
 | `memIndexMaxLines` | `200` | Write capacity: max non-empty lines in `MEMORY.md` (the `# Memory Index` header and hand-written headings count too, so this is not exactly the memory count) |
 | `memIndexMaxBytes` | `25600` | Write capacity: max bytes of `MEMORY.md` |
 | `memIndexInjectMaxLines` | `200` | Injection budget: max lines of the index put into the `memory_index` section. Same scale as the write capacity on purpose — a smaller budget would hide memories that were written successfully |
 | `memIndexInjectMaxBytes` | `25600` | Injection budget: max bytes of the index section (truncated with a `[truncated: …]` marker) |
-| `lock.timeoutMs` | `5000` | How long a write waits for the logical lock (single primitive) or the cross-process `.lock`. Migration uses a fixed 30s because it rewrites the whole directory inside the lock. Also the upper bound `session_shutdown` waits for in-flight writes |
-| `lock.snapshotKeep` | `5` | Rollback points kept in `.backups/` (directories named `migrate-*` are never pruned) |
-| `defaults.model` | `"deepseek/deepseek-flash"` | Shared model for all sub-tasks (dream / extract / side query); a per-task `model` overrides it; an unresolvable model (no exact `"provider/id"` and no fuzzy match in the registry) or an unset one falls back to the parent session's model |
+| `lock.timeoutMs` | `5000` | How long a write waits for the logical lock (single primitive) or the cross-process `.lock`. Also the upper bound `session_shutdown` waits for in-flight writes |
+| `lock.snapshotKeep` | `5` | Rollback points kept in `.backups/` (directories named `migrate-*` — pre-2.0 originals from earlier migrations — are never pruned) |
+| `defaults.model` | `— (required)` | Shared model for dream / extract / side query. **No default**: every task that will run must resolve a model, otherwise `session_start` fails (see [Model configuration](#model-configuration)). A per-task `model` overrides it |
 | `defaults.sessionPersistence.enabled` | `false` | Shared fallback: headless sub-sessions (extract / dream / side query) stay in memory by default |
 | `defaults.sessionPersistence.sessionDir` | `<project memory dir>/sessions/` | Custom directory for persisted headless sessions |
 | `dream.nudgeAfterSessions` | `5` | Sessions since the last dream before the nudge is shown |
 | `dream.nudgeAfterHours` | `24` | Hours since the last dream before the nudge is shown |
-| `dream.model` | — | Model for dream consolidation (`"provider/id"`). Falls back to `defaults.model` → parent model (when unresolvable) |
+| `dream.model` | — | Model for dream consolidation (`"provider/id"`). Falls back to `defaults.model`; required unless `defaults.model` is set (must be resolvable, no parent-model fallback) |
 | `dream.thinkLevel` | `"high"` | Thinking effort for the dream agent: `off` / `minimal` / `low` / `medium` / `high` / `xhigh` |
 | `dream.sessionPersistence.*` | inherits `defaults` | Persist dream sessions to disk (debug/audit) |
 | `sessionSearch.maxSessions` | `10` | Max sessions to scan for `search scope=sessions` |
 | `sessionSearch.maxMatches` | `5` | Max matches to return from history search |
 | `autoSurfacing.enabled` | `true` | ⭐ Enable per-turn entry auto-injection |
-| `autoSurfacing.model` | — | ⭐ Model for the relevance side query. Falls back to `defaults.model` → parent model (when unresolvable) |
+| `autoSurfacing.model` | — | ⭐ Model for the relevance side query. Falls back to `defaults.model`; required unless `defaults.model` is set (must be resolvable, no parent-model fallback) |
 | `autoSurfacing.thinkLevel` | `"off"` | ⭐ Thinking effort for the side query (`"off"` keeps it cheap) |
 | `autoSurfacing.maxFiles` | `3` | ⭐ Max entries to inject per turn |
 | `autoSurfacing.maxEntryBytes` | `3072` | ⭐ Max bytes of a single injected entry body (truncated). Replaces 1.x's `maxTopicBytes`, which is ignored |
 | `autoSurfacing.maxInjectionBytes` | `10240` | ⭐ Max total bytes of injected content per turn |
 | `autoSurfacing.sessionPersistence.*` | inherits `defaults` | Persist side-query sessions to disk |
 | `extractMemories.enabled` | `true` | ⭐ Enable per-turn memory extraction |
-| `extractMemories.model` | — | ⭐ Model for the extraction agent. Falls back to `defaults.model` → parent model (when unresolvable) |
+| `extractMemories.model` | — | ⭐ Model for the extraction agent. Falls back to `defaults.model`; required unless `defaults.model` is set (must be resolvable, no parent-model fallback) |
 | `extractMemories.thinkLevel` | `"high"` | ⭐ Thinking effort for extraction |
 | `extractMemories.maxContextTokens` | `2000` | ⭐ Budget for the rendered conversation (`× 4` characters; the middle is trimmed first, head and tail are kept, user messages are dropped last) |
 | `extractMemories.maxToolResultChars` | `500` | ⭐ Per-message cap for a rendered `tool_result` |
@@ -175,13 +174,30 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
 
 Persisted headless sessions default to `<project memory dir>/sessions/` — inside the project's memory directory, not inside your working copy.
 
+## Model configuration
+
+Every task that will run must resolve a model — **there is no shipped default and no parent-model fallback**. `defaults.model` satisfies all of them; a per-task `model` (`dream.model`, `extractMemories.model`, `autoSurfacing.model`) overrides it.
+
+| Task | Required when |
+|------|---------------|
+| `dream` | the memory system is enabled (`enabled: true`) — always required |
+| `extractMemories` | `extractMemories.enabled` is true |
+| `autoSurfacing` | `autoSurfacing.enabled` is true |
+
+With `enabled: false` nothing runs — not even `/dream` or the nudge — so no model is required. At `session_start` pi-memory resolves every required model against the model registry. If one is missing or cannot be resolved, it initialises **nothing**: it shows an error notification `pi-memory config error:` followed by one `- <error>` line per problem, and `/memory` reports `Memory: misconfigured` followed by the same lines. The two possible messages are:
+
+- `no model for <task> — set "<task>.model" or "defaults.model" in memory.json`
+- `model "<value>" for <task> is not resolvable (unknown id or missing credentials)`
+
+Fix `memory.json` and restart the session — the config is read once at session start.
+
 ## How it works
 
 ### Session lifecycle
 
 | Event | What pi-memory does |
 |---|---|
-| `session_start` | Load config → resolve the memory directory → run the 1.x migration if needed → **pick the index value and freeze it** (disk for `startup`/`new`; the recorded transcript value for `resume`/`fork`/`reload`) → register the `memory` tool (once, five actions) → rebuild the manifest cache → dream nudge |
+| `session_start` | Load config → resolve the memory directory → **pick the index value and freeze it** (disk for `startup`/`new`; the recorded transcript value for `resume`/`fork`/`reload`) → register the `memory` tool (once, five actions) → rebuild the manifest cache → dream nudge |
 | `before_agent_start` | Write the frozen value into `sections["memory_index"]` (**unconditionally, every turn**), then auto-surfacing (main session, not a subagent) |
 | `agent_end` | Fire the async extractor; notify `Extracted N memories.` when it wrote something, or `Extract failed: …` once per session |
 | `session_compact` | Clear the injected-file set **and re-read the index from disk** — the only in-session refresh point |
@@ -214,13 +230,13 @@ The extractor receives a structured rendering instead of a lossy two-message sum
 [4] user: <correction>
 ```
 
-It runs with the five main-agent actions (never `rename` / `rebuild_index`), no file tools, `maxTurns: 5`, and a 120s timeout. If the logical lock is busy (a dream or a migration owns the round) it **skips the turn** rather than queueing — the next `agent_end` will come.
+It runs with the five main-agent actions (never `rename` / `rebuild_index`), no file tools, `maxTurns: 5`, and a 120s timeout. If the logical lock is busy (a dream owns the round) it **skips the turn** rather than queueing — the next `agent_end` will come.
 
 ### Locking
 
 | Level | Scope | Behaviour |
 |---|---|---|
-| In-process logical lock (per memory dir) | one primitive call; or a whole dream / migration round | Waits up to `lock.timeoutMs` (migration: 30s), then throws a readable error naming the directory. `extract` uses the non-waiting form and skips the turn |
+| In-process logical lock (per memory dir) | one primitive call; or a whole dream round | Waits up to `lock.timeoutMs`, then throws a readable error naming the directory. `extract` uses the non-waiting form and skips the turn |
 | Cross-process `.lock` | milliseconds, around the physical write | Acquired with `link` (atomic), **never reclaimed automatically**: no TTL, no heartbeat, no takeover |
 
 A crash inside a write can therefore leave a `.lock` behind, and nothing will ever delete it for you — that is the deliberate price of a hard mutual-exclusion guarantee. The error names the pid, op and start time; `/memory unlock` is the one sanctioned way to clear it.
@@ -270,8 +286,6 @@ One line per memory: `- name (type, modified …) — description [file]`.
 
 ```
 /memory          — status
-/memory on       — enable
-/memory off      — disable
 /memory unlock   — remove a left-behind .lock (asks for confirmation first)
 ```
 
@@ -283,14 +297,13 @@ Dir: /home/you/.pi/memory/git/github.com__owner__repo
 Index: 38/200 lines, 2841/25600 bytes, 1 unrecognized lines
 Entries: 37
 Last dream: 2026-10-01T22:10:04.882Z
-Migration: migrated at 2026-09-30T09:12:44.120Z (18 entries from 4 files)
 Lock: free
 ```
 
 - `Index` uses the **write** capacity (`memIndexMax*`) and reports how many non-empty lines could not be parsed as index lines (the `# Memory Index` header and hand-written headings count). CRLF (or lone CR) line endings are normalised to LF before parsing, and the next write emits LF too, so a `MEMORY.md` re-saved by a Windows editor does **not** raise this count.
-- `Migration` is `migrated at …`, `not needed` (the marker says nothing had to be moved) or `pending` (no marker / unreadable marker → the next `session_start` retries).
 - `Lock` is `free`, `held by <op> (pid N on <hostname>, started <ISO>)`, or `unreadable — run /memory unlock`. `/memory unlock` shows the same holder line in its confirmation prompt.
-- In a session started with `enabled: false`, nothing is initialized at boot: `/memory` reports `Memory: disabled` plus `Dir: not initialized (run /memory on)`, `/memory on` initializes the store on the spot (and registers the `memory` tool for this session), and `/memory unlock` works without a store. If initialization fails, `/memory on` says so (`Failed to initialize memory: …`) and leaves the switch off.
+- In a session started with `enabled: false`, nothing is initialized at boot: `/memory` reports `Memory: disabled` plus `Dir: not initialized — set "enabled": true in memory.json and restart`, there is no way to enable it mid-session, and `/memory unlock` still works without a store.
+- If a required model is missing or cannot be resolved, nothing is initialized and `/memory` reports `Memory: misconfigured` followed by one `- <error>` line per problem. The same errors are shown as an error notification at session start.
 
 ### `/dream`
 
@@ -303,31 +316,9 @@ Asks for confirmation, snapshots the whole directory, then runs a headless agent
 
 It cannot touch files directly: it only has the seven `memory` actions. A summary notification arrives when it finishes, `Dream failed: …` when it does not. The model is configurable via `dream.model`.
 
-## Migration from 1.x
+## 1.x data
 
-Automatic, on the first `session_start` after the upgrade (or on the first `/memory on` in a session that booted with memory disabled):
-
-1. take the logical lock for the whole round (30s);
-2. snapshot the directory into `.backups/migrate-<ts>/` and copy the original topic files into `.backups/migrate-<ts>/originals/`;
-3. for every legacy file (one with ≥ 2 `## ` sections, or with an `updated` frontmatter field): split each `## entry` into its own file, carrying over `type` and turning `updated` into `created` / `modified`; names that collide across files get a ` (2)`, ` (3)` suffix;
-4. `rebuildIndex()`;
-5. delete the original topic files (they stay in `originals/`);
-6. write `.migrated`;
-7. notify `Migrated N memories from M topic files. Backup at <path>`.
-
-A file that parses as a v2 entry (`name`, `description`, a valid `type`, `created`, `modified`) is **never** treated as a legacy topic file, even when its body contains several `## ` headings — that guard is what keeps a normal v2 entry from being split apart. A file that only *looks* like v2 (for example an invalid `type`) is not covered by the guard and may be migrated if it has `updated` or ≥ 2 `##` sections; the original always stays in `.backups/migrate-<ts>/originals/`.
-
-A re-run is safe: the marker is only written at the very end, and an entry whose name **and** body already exist is reused instead of being duplicated. If a step fails, nothing is marked, the backup is kept, and the error is reported — the next session retries.
-
-**Manual rollback:**
-
-```bash
-cd ~/.pi/memory/git/github.com__owner__repo        # the directory /memory prints
-ls .backups/migrate-*/originals/                   # pick the run you want to undo
-cp .backups/migrate-<ts>/originals/*.md .           # restore the 1.x topic files
-rm .migrated                                       # let the migration run again
-rm <generated entry files>                          # the ones listed by /memory (Entries) and not in originals/
-```
+Automatic 1.x → 2.0 migration has been removed. Legacy topic files (frontmatter with `updated` and no `created`/`modified`, or a body with several `## ` sections) stay on disk untouched and are **invisible to the memory system** — `parseEntryFile` requires the five v2 frontmatter fields, so such files never appear in the index, injections, `list`/`read`/`search`, and `/dream` cannot see them either (dream only has the `memory` tool). To recover their content by hand, split each `## ` section into its own file with v2 frontmatter (`name`, `description`, `type`, `created`, `modified`). Directories created by an earlier migration (`MEMORY.md` backups under `.backups/migrate-*/originals/`) are still never pruned and keep the pre-2.0 text.
 
 ## File layout
 
@@ -338,7 +329,7 @@ rm <generated entry files>                          # the ones listed by /memory
       MEMORY.md            — the index: one line per memory
       SSH-port-on-staging.md
       Test-command.md      — one file per memory
-      .lock  .backups/  .migrated  .dream-meta.json
+      .lock  .backups/  .dream-meta.json
   local/
     home__yandy__workspace__scratch/   ← non-git directory /home/yandy/workspace/scratch
 ```
@@ -355,7 +346,7 @@ Directory names are derived as follows:
 
 The mapping is not injective: underscores are kept as-is, so `/home/a__b` and `/home/a/b` both map to `home__a__b` (and share one memory directory). Changing or renaming a remote, adding a remote that sorts before the one currently in use, or moving a local directory changes the memory directory, orphaning the old one.
 
-**Older legacy layout:** versions before 1.x stored memory under `~/.pi/memory/<12-char-sha256>/`; those directories are no longer read or written. To migrate a project manually, compute the old hash with `printf '%s' "$(git rev-parse --show-toplevel)" | sha256sum | cut -c1-12` (use `$PWD` outside a git repo), then `mv` that directory to the new location (run `/memory` inside the project to see the new path) and let the 1.x → 2.x migration split its topic files.
+**Older legacy layout:** versions before 1.x stored memory under `~/.pi/memory/<12-char-sha256>/`; those directories are no longer read or written. To migrate a project manually, compute the old hash with `printf '%s' "$(git rev-parse --show-toplevel)" | sha256sum | cut -c1-12` (use `$PWD` outside a git repo), then `mv` that directory to the new location (run `/memory` inside the project to see the new path) and split its topic files by hand (see [1.x data](#1x-data)).
 
 ## Notifications
 
@@ -365,8 +356,6 @@ The mapping is not injective: underscores are kept as-is, so `/home/a__b` and `/
 | Auto-surfacing injected entries | `Recalled: <N> entries` |
 | The extractor wrote memories | `Extracted <N> memory.` / `Extracted <N> memories.` |
 | The extractor failed | `Extract failed: <message>` — at most once per session |
-| The 1.x migration ran | `Migrated <N> memories from <M> topic files. Backup at <path>` |
-| The migration failed | `Memory migration failed: <message>` |
 | `/dream` finished / failed | the headless agent's summary / `Dream failed: <message>` |
 
 Headless sessions (`hasUI === false`) never notify.
