@@ -12,23 +12,12 @@ describe("parseConfig", () => {
 	});
 
 	it("accepts a fully valid config", () => {
-		const raw = { model: "openai/gpt-4o", enabled: "on", defaultThinkLevel: "high" };
+		const raw = { model: "openai/gpt-4o", defaultThinkLevel: "high" };
 		expect(parseConfig(raw)).toEqual(raw);
 	});
 
-	it("defaults enabled to 'auto' when omitted", () => {
-		expect(parseConfig({ model: "gpt-4o" })).toEqual({
-			model: "gpt-4o",
-			enabled: "auto",
-		});
-	});
-
 	it("ignores a legacy provider key", () => {
-		expect(parseConfig({ provider: "openai", model: "gpt-4o" })).toEqual({ model: "gpt-4o", enabled: "auto" });
-	});
-
-	it("rejects an invalid enabled value", () => {
-		expect(() => parseConfig({ enabled: "maybe" })).toThrow(/enabled/);
+		expect(parseConfig({ provider: "openai", model: "gpt-4o" })).toEqual({ model: "gpt-4o" });
 	});
 
 	it("rejects a non-string model", () => {
@@ -39,12 +28,12 @@ describe("parseConfig", () => {
 		expect(() => parseConfig({ defaultThinkLevel: "ultra" })).toThrow(/defaultThinkLevel/);
 	});
 
-	it("ignores the legacy defaultReasoning key", () => {
-		expect(parseConfig({ model: "x", defaultReasoning: "high" })).toEqual({ model: "x", enabled: "auto" });
+	it("strips both legacy keys without losing the model", () => {
+		expect(parseConfig({ model: "haiku", enabled: "off", defaultReasoning: "high" })).toEqual({ model: "haiku" });
 	});
 
 	it("strips unknown keys", () => {
-		expect(parseConfig({ model: "x", extra: 1 })).toEqual({ model: "x", enabled: "auto" });
+		expect(parseConfig({ model: "x", extra: 1 })).toEqual({ model: "x" });
 	});
 });
 
@@ -78,15 +67,15 @@ describe("loadConfig / saveConfig (filesystem)", () => {
 	});
 
 	it("round-trips a config through save then load", async () => {
-		const cfg: VisionConfig = { model: "openai/gpt-4o", enabled: "off", defaultThinkLevel: "low" };
+		const cfg: VisionConfig = { model: "openai/gpt-4o", defaultThinkLevel: "low" };
 		await saveConfig(dir, cfg);
 		expect(await loadConfig(dir)).toEqual(cfg);
 	});
 
 	it("write is not pretty / is valid JSON", async () => {
-		await saveConfig(dir, { model: "m", enabled: "auto" });
+		await saveConfig(dir, { model: "m" });
 		const raw = await readFile(configPath(dir), "utf8");
-		expect(JSON.parse(raw)).toEqual({ model: "m", enabled: "auto" });
+		expect(JSON.parse(raw)).toEqual({ model: "m" });
 	});
 
 	it("saveConfig creates the agent dir if missing", async () => {

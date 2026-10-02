@@ -7,26 +7,26 @@ import { compressImage, readCompressionSettings } from "./src/compress.js";
 import { loadConfig, saveConfig, THINK_LEVELS, type VisionConfig } from "./src/config.js";
 import { type DecodedImage, decodeImage } from "./src/image.js";
 import { effectiveThinkLevel, thinkLevelToOptions, type VisionThinkLevel } from "./src/think-level.js";
-import { callingModelHasVision, effectiveEnabled, footerLabel } from "./src/state.js";
+import { callingModelHasVision, footerLabel } from "./src/state.js";
 import { callVision, resolveVisionModel } from "./src/vision.js";
 
 const TOOL_NAME = "describe_image";
 const STATUS_KEY = "pi-vision";
 
 export default function (pi: ExtensionAPI) {
-	let config: VisionConfig = { enabled: "auto" };
-	let enabled = false;
+	let config: VisionConfig = {};
+	let toolActive = false;
 
 	const refresh = (ctx: ExtensionContext) => {
-		enabled = effectiveEnabled(config, ctx.model);
-		const active = pi.getActiveTools();
-		if (enabled && !active.includes(TOOL_NAME)) {
-			pi.setActiveTools([...active, TOOL_NAME]);
-		} else if (!enabled && active.includes(TOOL_NAME)) {
-			pi.setActiveTools(active.filter((t) => t !== TOOL_NAME));
+		toolActive = !callingModelHasVision(ctx.model);
+		const current = pi.getActiveTools();
+		if (toolActive && !current.includes(TOOL_NAME)) {
+			pi.setActiveTools([...current, TOOL_NAME]);
+		} else if (!toolActive && current.includes(TOOL_NAME)) {
+			pi.setActiveTools(current.filter((t) => t !== TOOL_NAME));
 		}
 		if (ctx.hasUI) {
-			const label = footerLabel(enabled, resolveVisionModel(ctx.modelRegistry, config));
+			const label = footerLabel(toolActive, resolveVisionModel(ctx.modelRegistry, config));
 			ctx.ui.setStatus(STATUS_KEY, label);
 		}
 	};
@@ -90,9 +90,9 @@ export default function (pi: ExtensionAPI) {
 			return new Text(body, 0, 0);
 		},
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			if (!enabled) {
+			if (!toolActive) {
 				return {
-					content: [{ type: "text", text: "describe_image is disabled. Run /vision on to enable." }],
+					content: [{ type: "text", text: "describe_image is inactive: the calling model can see images itself." }],
 					details: { error: "disabled" },
 					isError: true,
 				};
@@ -169,7 +169,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("vision", {
-		description: "Configure the vision model for describe_image (/vision config | on | off | status)",
+		description: "Configure the vision model for describe_image (/vision status | config model <m> | config default-think-level <level>)",
 		handler: async (args, ctx) => {
 			const parts = args.trim().split(/\s+/).filter(Boolean);
 			const sub = parts[0];
@@ -181,26 +181,17 @@ export default function (pi: ExtensionAPI) {
 					: resolved.ok
 						? `${resolved.model.provider}/${resolved.model.id}`
 						: `${config.model} (unresolved)`;
-				const visionCap = callingModelHasVision(ctx.model) ? "yes" : "no";
 				const lines = [
 					`vision: ${target}`,
-					`enabled: ${config.enabled} (effective: ${enabled ? "on" : "off"})`,
-					`calling model has vision: ${visionCap}`,
+					`default think level: ${config.defaultThinkLevel ?? "off (built-in)"}`,
+					`active: ${toolActive ? "yes" : "no"} (calling model has vision: ${callingModelHasVision(ctx.model) ? "yes" : "no"})`,
 				];
-				if (!resolved.ok) lines.push(resolved.error);
+				if (config.model && !resolved.ok) lines.push(resolved.error);
 				ctx.ui.notify(lines.join("\n"), "info");
 			};
 
 			if (!sub || sub === "status") {
 				notifyConfig();
-				return;
-			}
-
-			if (sub === "on" || sub === "off" || sub === "auto") {
-				config = { ...config, enabled: sub as VisionConfig["enabled"] };
-				await saveConfig(getAgentDir(), config);
-				refresh(ctx);
-				ctx.ui.notify(`vision ${sub}`, "info");
 				return;
 			}
 
@@ -231,7 +222,7 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			ctx.ui.notify("Usage: /vision [config model <m> | on | off | auto | status]", "warning");
+			ctx.ui.notify("Usage: /vision [status | config model <m> | config default-think-level <level>]", "warning");
 		},
 	});
 }

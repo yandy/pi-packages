@@ -2,18 +2,14 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 
-export type VisionEnabledState = "auto" | "on" | "off";
-
 export interface VisionConfig {
 	/** "provider/modelId" or a fuzzy model name (e.g. "haiku", "qwen vl"). */
 	model?: string;
-	enabled: VisionEnabledState;
 	defaultThinkLevel?: ThinkingLevel | "off";
 }
 
-export const DEFAULT_CONFIG: VisionConfig = { enabled: "auto" };
+export const DEFAULT_CONFIG: VisionConfig = {};
 
-const ENABLED_STATES = ["auto", "on", "off"] as const;
 export const THINK_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 
 export function configPath(agentDir: string): string {
@@ -24,20 +20,13 @@ export function parseConfig(raw: unknown): VisionConfig {
 	if (raw == null || typeof raw !== "object") return { ...DEFAULT_CONFIG };
 	const obj = raw as Record<string, unknown>;
 
-	const cfg: VisionConfig = { enabled: "auto" };
+	const cfg: VisionConfig = {};
 
 	if (obj.model !== undefined) {
 		if (typeof obj.model !== "string" || obj.model.length === 0) {
 			throw new Error("vision-tools config: model must be a non-empty string");
 		}
 		cfg.model = obj.model;
-	}
-
-	if (obj.enabled !== undefined) {
-		if (typeof obj.enabled !== "string" || !ENABLED_STATES.includes(obj.enabled as VisionEnabledState)) {
-			throw new Error(`vision-tools config: enabled must be one of ${ENABLED_STATES.join(", ")}`);
-		}
-		cfg.enabled = obj.enabled as VisionEnabledState;
 	}
 
 	if (obj.defaultThinkLevel !== undefined) {

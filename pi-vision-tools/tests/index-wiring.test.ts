@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -22,7 +22,7 @@ function fakeModel(over: { id?: string; provider?: string; input?: string[] } = 
 		api: "anthropic-messages",
 		baseUrl: "https://example.invalid",
 		reasoning: true,
-		input: over.input ?? ["text"],
+		input: over.input ?? ["text", "image"],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: 1000,
 		maxTokens: 1000,
@@ -103,8 +103,7 @@ describe("/vision command — default think level", () => {
 
 	it("writes defaultThinkLevel for /vision config default-think-level high", async () => {
 		await h.commands.vision.handler("config default-think-level high", h.ctx());
-		// Task 2 阶段 `enabled` 仍在类型里，写出的文件还带 enabled —— Task 3 Step 1 会把它收紧为 toEqual
-		expect(JSON.parse(readFileSync(configFile(), "utf8"))).toMatchObject({ defaultThinkLevel: "high" });
+		expect(JSON.parse(readFileSync(configFile(), "utf8"))).toEqual({ defaultThinkLevel: "high" });
 		expect(h.notifications.at(-1)?.text).toContain("default-think-level");
 	});
 
@@ -114,12 +113,83 @@ describe("/vision command — default think level", () => {
 		expect(h.notifications.at(-1)?.level).toBe("warning");
 		await h.commands.vision.handler("config default-think-level HIGH", h.ctx());
 		expect(h.notifications.at(-1)?.level).toBe("warning");
-		expect(JSON.parse(readFileSync(configFile(), "utf8"))).toMatchObject({ defaultThinkLevel: "high" });
+		expect(JSON.parse(readFileSync(configFile(), "utf8"))).toEqual({ defaultThinkLevel: "high" });
 	});
 
 	it("no longer accepts /vision config default-reasoning", async () => {
 		await h.commands.vision.handler("config default-reasoning high", h.ctx());
 		expect(h.notifications.at(-1)?.level).toBe("warning");
 		expect(existsSync(configFile())).toBe(false);
+	});
+});
+
+describe("/vision command — auto-only activation", () => {
+	let dir: string;
+	let h: ReturnType<typeof createHarness>;
+	const configFile = () => join(dir, "vision-tools.json");
+
+	beforeEach(() => {
+		dir = mkdtempSync(join(tmpdir(), "vision-wiring-"));
+		hoisted.agentDir = dir;
+		h = createHarness();
+	});
+	afterEach(() => {
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	it("rejects the removed on/off/auto subcommands without writing", async () => {
+		for (const arg of ["on", "off", "auto"]) {
+			await h.commands.vision.handler(arg, h.ctx());
+			expect(h.notifications.at(-1)?.level).toBe("warning");
+		}
+		expect(existsSync(configFile())).toBe(false);
+	});
+
+	it("status shows the default think level and the activation state", async () => {
+		const registry = fakeRegistry([fakeModel()]);
+		await h.commands.vision.handler("config model haiku", h.ctx({ registry }));
+		await h.commands.vision.handler("status", h.ctx({ registry }));
+		const text = h.notifications.at(-1)?.text ?? "";
+		expect(text).toContain("anthropic/claude-haiku-4-5");
+		expect(text).toContain("default think level: off (built-in)");
+		expect(text).toContain("active: yes");
+	});
+
+	it("status degrades gracefully when unconfigured or unresolvable", async () => {
+		await h.commands.vision.handler("status", h.ctx());
+		expect(h.notifications.at(-1)?.text).toContain("(unconfigured)");
+
+		const registry = fakeRegistry([fakeModel()]);
+		await h.commands.vision.handler("config model nope", h.ctx({ registry }));
+		await h.commands.vision.handler("status", h.ctx({ registry }));
+		const text = h.notifications.at(-1)?.text ?? "";
+		expect(text).toContain("nope (unresolved)");
+		expect(text).toContain("Model not found");
+	});
+
+	it("activates the tool purely from the calling model, even after a corrupt config load", async () => {
+		await h.sessionStart({ model: fakeModel({ input: ["text"] }) });
+		expect(h.activeTools).toContain("describe_image");
+
+		await h.sessionStart({ model: fakeModel({ input: ["text", "image"] }) });
+		expect(h.activeTools).not.toContain("describe_image");
+
+		writeFileSync(configFile(), "{ not json");
+		await h.sessionStart({ model: fakeModel({ input: ["text"] }) });
+		expect(h.activeTools).toContain("describe_image");
+	});
+
+	it("guards describe_image with a message that no longer points at /vision on", async () => {
+		await h.sessionStart({ model: fakeModel({ input: ["text", "image"] }) });
+		const tool = h.tools.find((t) => t.name === "describe_image");
+		const result = await tool.execute(
+			"call-1",
+			{ image_path: "/tmp/does-not-matter.png", prompt: "hi" },
+			undefined,
+			undefined,
+			h.ctx({ model: fakeModel({ input: ["text", "image"] }) }),
+		);
+		expect(result.isError).toBe(true);
+		expect(result.content[0].text).toContain("calling model can see images itself");
 	});
 });
