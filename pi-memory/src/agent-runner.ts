@@ -1,4 +1,3 @@
-import type { Model } from "@earendil-works/pi-ai";
 import { join } from "node:path";
 import {
 	type AgentSession,
@@ -18,8 +17,8 @@ export interface HeadlessAgentOpts {
 	task: string;
 	cwd: string;
 	modelRegistry: import("@earendil-works/pi-coding-agent").ModelRegistry;
-	model?: string;
-	parentModel?: Model<any>;
+	/** 必填：模型必须来自显式配置（启动校验已经保证可解析），没有父模型回退。 */
+	model: string;
 	thinkLevel?: ThinkLevel;
 	maxTurns?: number;
 	signal?: AbortSignal;
@@ -56,10 +55,12 @@ const GRACE_TURNS = 1;
  * so pi-memory's own before_agent_start cannot recurse.
  */
 export async function runHeadlessAgent(opts: HeadlessAgentOpts): Promise<string> {
-	// 1. Resolve model: undefined → parentModel; otherwise fuzzy resolve (fallback parent)
-	const resolvedModel = !opts.model
-		? opts.parentModel
-		: (resolveModel(opts.model, opts.modelRegistry) ?? opts.parentModel);
+	// 模型必须显式配置且可解析：启动校验之外再挡一次（会话中途凭据被移除等），
+	// 结果是显式失败，而不是静默用父会话模型跑一个用户没选的模型。
+	const resolvedModel = resolveModel(opts.model, opts.modelRegistry);
+	if (!resolvedModel) {
+		throw new Error(`model "${opts.model}" is not resolvable (unknown id or missing credentials)`);
+	}
 
 	// 2. Build a pure resource loader (no extensions/skills/context files/etc.)
 	const settingsManager = SettingsManager.inMemory();

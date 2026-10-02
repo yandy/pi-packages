@@ -425,8 +425,7 @@ describe("runSideQuery", () => {
 			new Set(),
 			5,
 			"off",
-			undefined,
-			{} as any,
+			"deepseek/deepseek-v4-flash",
 			{} as any,
 			"/mem",
 		);
@@ -447,7 +446,6 @@ describe("runSideQuery", () => {
 			"off",
 			"deepseek/deepseek-v4-flash",
 			{} as any,
-			{} as any,
 			"/mem",
 		);
 		expect(runHeadlessAgentMock.mock.calls[0][0]).toMatchObject({
@@ -464,8 +462,7 @@ describe("runSideQuery", () => {
 			new Set(),
 			5,
 			"off",
-			undefined,
-			{} as any,
+			"deepseek/deepseek-v4-flash",
 			{} as any,
 			"/mem",
 		);
@@ -480,8 +477,7 @@ describe("runSideQuery", () => {
 			new Set(),
 			5,
 			"off",
-			undefined,
-			{} as any,
+			"deepseek/deepseek-v4-flash",
 			{} as any,
 			"/mem",
 		);
@@ -496,8 +492,7 @@ describe("runSideQuery", () => {
 			new Set(),
 			5,
 			"off",
-			undefined,
-			{} as any,
+			"deepseek/deepseek-v4-flash",
 			{} as any,
 			"/mem",
 		);
@@ -505,7 +500,7 @@ describe("runSideQuery", () => {
 	});
 
 	it("returns [] when no candidates remain", async () => {
-		const result = await runSideQuery([], "some prompt", new Set(), 5, "off", undefined, {} as any, {} as any, "/mem");
+		const result = await runSideQuery([], "some prompt", new Set(), 5, "off", "deepseek/deepseek-v4-flash", {} as any, "/mem");
 		expect(result).toEqual([]);
 		expect(runHeadlessAgentMock).not.toHaveBeenCalled();
 	});
@@ -518,8 +513,7 @@ describe("runSideQuery", () => {
 			new Set(["a.md"]),
 			5,
 			"off",
-			undefined,
-			{} as any,
+			"deepseek/deepseek-v4-flash",
 			{} as any,
 			"/mem",
 		);

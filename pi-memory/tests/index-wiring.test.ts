@@ -1236,7 +1236,7 @@ describe("index wiring (integration)", () => {
 
 		await handlers["before_agent_start"][0]({ prompt: "q", systemPrompt: "sp" }, uiCtx());
 
-		expect(runSideQueryMock.mock.calls[0][9]).toEqual({ enabled: true });
+		expect(runSideQueryMock.mock.calls[0][8]).toEqual({ enabled: true });
 	});
 
 	it("resolveDefault: per-task sessionPersistence overrides defaults", async () => {
@@ -1254,7 +1254,7 @@ describe("index wiring (integration)", () => {
 
 		await handlers["before_agent_start"][0]({ prompt: "q", systemPrompt: "sp" }, uiCtx());
 
-		expect(runSideQueryMock.mock.calls[0][9]).toEqual({ enabled: false });
+		expect(runSideQueryMock.mock.calls[0][8]).toEqual({ enabled: false });
 	});
 
 	it("agent_end hands the raw messages, char limits and a 5-action tool to runExtract", async () => {

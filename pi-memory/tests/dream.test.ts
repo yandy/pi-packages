@@ -30,6 +30,7 @@ function opts(over: Partial<RunDreamOpts> = {}): RunDreamOpts {
 		memoryDir: dir,
 		store,
 		maxLines: 200,
+		model: "deepseek/deepseek-v4-flash",
 		modelRegistry: {} as any,
 		customTools: [],
 		...over,
@@ -145,7 +146,7 @@ describe("runDream", () => {
 		runHeadlessAgentMock.mockResolvedValueOnce("ok");
 		const customTools = [{ name: "memory" } as unknown as ToolDefinition];
 
-		await runDream(opts({ customTools, model: "deepseek/deepseek-v4-flash", parentModel: { id: "p" } as any }));
+		await runDream(opts({ customTools, model: "deepseek/deepseek-v4-flash" }));
 
 		expect(runHeadlessAgentMock).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -157,7 +158,6 @@ describe("runDream", () => {
 				noTools: "builtin",
 				customTools,
 				model: "deepseek/deepseek-v4-flash",
-				parentModel: { id: "p" },
 			}),
 		);
 		expect(runHeadlessAgentMock.mock.calls[0][0].tools).toBeUndefined();

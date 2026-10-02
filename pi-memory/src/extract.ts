@@ -1,4 +1,3 @@
-import type { Model } from "@earendil-works/pi-ai";
 import type { ModelRegistry, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { runHeadlessAgent } from "./agent-runner";
 import type { SessionPersistenceConfig, ThinkLevel } from "./config";
@@ -27,7 +26,8 @@ export interface ConversationLimits {
 }
 
 export interface RunExtractOpts {
-	model?: string;
+	/** 必填：模型来自显式配置（启动校验已保证可解析），没有父模型回退。 */
+	model: string;
 	thinkLevel: ThinkLevel;
 	memoryDir: string;
 	/** 唯一写入通道：extract 的整轮互斥挂在它的 `tryWithLogicalLock` 上。 */
@@ -38,7 +38,6 @@ export interface RunExtractOpts {
 	maxToolResultChars: number;
 	maxAssistantChars: number;
 	modelRegistry: ModelRegistry;
-	parentModel?: Model<any>;
 	sessionPersistence?: SessionPersistenceConfig;
 	/** extract 子会话专属的工具集（5 个 action，D12）。 */
 	customTools: ToolDefinition[];
@@ -407,7 +406,6 @@ export async function runExtract(opts: RunExtractOpts): Promise<{ skipped: boole
 			cwd: opts.memoryDir,
 			modelRegistry: opts.modelRegistry,
 			model: opts.model,
-			parentModel: opts.parentModel,
 			thinkLevel: opts.thinkLevel,
 			maxTurns: 5,
 			timeoutMs: 120_000,

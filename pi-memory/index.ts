@@ -2,7 +2,7 @@ import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { loadConfig, modelConfigErrors, type MemoryConfig, type SessionPersistenceConfig } from "./src/config";
+import { loadConfig, modelConfigErrors, requiredModel, type MemoryConfig, type SessionPersistenceConfig } from "./src/config";
 import { runDream } from "./src/dream";
 import { indexCapacity, parseEntryIndex } from "./src/entry-index";
 import { runExtract } from "./src/extract";
@@ -145,9 +145,7 @@ async function unlockMemory(memoryDir: string, ui: ExtensionUIContext): Promise<
 	}
 }
 
-function resolveDefault(cfg: MemoryConfig, task: "dream" | "autoSurfacing" | "extractMemories", key: "model"): string | undefined;
-function resolveDefault(cfg: MemoryConfig, task: "dream" | "autoSurfacing" | "extractMemories", key: "sessionPersistence"): SessionPersistenceConfig | undefined;
-function resolveDefault(cfg: MemoryConfig, task: "dream" | "autoSurfacing" | "extractMemories", key: "model" | "sessionPersistence"): string | SessionPersistenceConfig | undefined {
+function resolveDefault(cfg: MemoryConfig, task: "dream" | "autoSurfacing" | "extractMemories", key: "sessionPersistence"): SessionPersistenceConfig | undefined {
 	const perTask = cfg[task][key];
 	if (perTask !== undefined) return perTask;
 	return cfg.defaults?.[key];
@@ -310,7 +308,7 @@ export default function (pi: ExtensionAPI) {
 				if (ok && activeStore) {
 					// Fire-and-forget: does not block session_start. The headless
 					// dream agent runs independently; completion notifies the user.
-					const dreamModel = resolveDefault(config, "dream", "model");
+					const dreamModel = requiredModel(config, "dream");
 					const dreamThinkLevel = config.dream.thinkLevel;
 					const dir = nudgeDir;
 					ui.setStatus("dream", "Consolidating memory...");
@@ -321,7 +319,6 @@ export default function (pi: ExtensionAPI) {
 						store: activeStore,
 						maxLines: config.memIndexMaxLines,
 						modelRegistry: ctx.modelRegistry,
-						parentModel: ctx.model,
 						sessionPersistence: resolveDefault(config, "dream", "sessionPersistence"),
 						// dream 的 7 个 action 只注入它自己的 headless session（D12）；整轮持锁与
 						// 进入时的全目录快照都在 runDream 里，所以内部原语两个选项都跳过。
@@ -388,9 +385,8 @@ export default function (pi: ExtensionAPI) {
 						injectedFiles,
 						autoSurfacing.maxFiles,
 						autoSurfacing.thinkLevel,
-						resolveDefault(config, "autoSurfacing", "model"),
+						requiredModel(config, "autoSurfacing"),
 						ctx.modelRegistry,
-						ctx.model,
 						memoryDir,
 						resolveDefault(config, "autoSurfacing", "sessionPersistence"),
 					);
@@ -474,7 +470,7 @@ export default function (pi: ExtensionAPI) {
 		const ui = ctx.hasUI ? ctx.ui : undefined;
 		const extractRun = runExtract({
 			agentsMdBlocks: extractAgentsMdBlocks(lastSystemPrompt),
-			model: resolveDefault(config, "extractMemories", "model"),
+			model: requiredModel(config, "extractMemories"),
 			thinkLevel: extractConfig.thinkLevel,
 			memoryDir: dir,
 			store: activeStore,
@@ -485,7 +481,6 @@ export default function (pi: ExtensionAPI) {
 			maxToolResultChars: extractConfig.maxToolResultChars,
 			maxAssistantChars: extractConfig.maxAssistantChars,
 			modelRegistry: ctx.modelRegistry,
-			parentModel: ctx.model,
 			// extract 的工具集与主 agent 相同（5 个 action，D12），且**只**注入它自己的 headless session。
 			// 不开 skipSnapshot：extract 没有整轮快照，它的每次写入都该留下自己的回滚点。
 			customTools: [
@@ -601,13 +596,12 @@ export default function (pi: ExtensionAPI) {
 			const dir = memoryDir;
 			ui?.setStatus("dream", "Consolidating memory...");
 			const dreamRun = runDream({
-				model: resolveDefault(config, "dream", "model"),
+				model: requiredModel(config, "dream"),
 				thinkLevel: config.dream.thinkLevel,
 				memoryDir,
 				store: activeStore,
 				maxLines: config.memIndexMaxLines,
 				modelRegistry: ctx.modelRegistry,
-				parentModel: ctx.model,
 				sessionPersistence: resolveDefault(config, "dream", "sessionPersistence"),
 				customTools: [
 					createMemoryTool(toolDeps, {

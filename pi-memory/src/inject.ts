@@ -1,4 +1,3 @@
-import type { Model } from "@earendil-works/pi-ai";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { runHeadlessAgent } from "./agent-runner";
 import type { SessionPersistenceConfig, ThinkLevel } from "./config";
@@ -187,9 +186,8 @@ export async function runSideQuery(
 	injectedFiles: Set<string>,
 	maxFiles: number,
 	thinkLevel: ThinkLevel,
-	model: string | undefined,
+	model: string,
 	modelRegistry: ModelRegistry,
-	parentModel: Model<any> | undefined,
 	memoryDir: string,
 	sessionPersistence?: SessionPersistenceConfig,
 ): Promise<string[]> {
@@ -202,7 +200,6 @@ export async function runSideQuery(
 			cwd: memoryDir,
 			modelRegistry,
 			model,
-			parentModel,
 			thinkLevel,
 			maxTurns: 1,
 			timeoutMs: 30_000,
