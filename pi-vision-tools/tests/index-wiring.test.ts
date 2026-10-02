@@ -193,3 +193,13 @@ describe("/vision command — auto-only activation", () => {
 		expect(result.content[0].text).toContain("calling model can see images itself");
 	});
 });
+
+describe("describe_image tool schema", () => {
+	it("exposes thinkLevel as the parameter name, not reasoning", () => {
+		const h = createHarness();
+		const tool = h.tools.find((t) => t.name === "describe_image");
+		const props = Object.keys(tool.parameters.properties);
+		expect(props).toContain("thinkLevel");
+		expect(props).not.toContain("reasoning");
+	});
+});

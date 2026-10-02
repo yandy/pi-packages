@@ -46,12 +46,12 @@ export default function (pi: ExtensionAPI) {
 			"Analyze an image by delegating to a vision-capable model. Lets non-multimodal models understand images. " +
 			"`image_path` is a file path, data: URL, or raw base64 (>100 chars). " +
 			"`compress` (default true) downscales/strips to speed up; set false for pixel-perfect needs. " +
-			"`reasoning` controls the vision model's thinking effort (off/minimal/low/medium/high/xhigh).",
+			"`thinkLevel` controls the vision model's thinking effort (off/minimal/low/medium/high/xhigh).",
 		promptSnippet: "describe_image: delegate image analysis to a vision model (non-multimodal models).",
 		promptGuidelines: [
 			"Use describe_image when you need to understand an image you cannot see (the calling model lacks vision).",
 			"Set compress:false when you need pixel-perfect accuracy (reading coordinates, tiny UI elements).",
-			"Set reasoning:'high'/'xhigh' for complex visual analysis (architecture diagrams, bug hunting).",
+			"Set thinkLevel:'high'/'xhigh' for complex visual analysis (architecture diagrams, bug hunting).",
 		],
 		parameters: Type.Object({
 			image_path: Type.String({ description: "File path, data: URL, or raw base64 (>100 chars)." }),
@@ -61,9 +61,9 @@ export default function (pi: ExtensionAPI) {
 			compress: Type.Optional(
 				Type.Boolean({ default: true, description: "Compress image before sending (default true)." }),
 			),
-			reasoning: Type.Optional(
+			thinkLevel: Type.Optional(
 				StringEnum(["off", "minimal", "low", "medium", "high", "xhigh"] as const, {
-					description: "Vision model reasoning effort. Default off.",
+					description: "Vision model thinking effort. Default off.",
 				}),
 			),
 		}),
@@ -97,7 +97,7 @@ export default function (pi: ExtensionAPI) {
 					isError: true,
 				};
 			}
-			const p = params as { image_path: string; prompt: string; compress?: boolean; reasoning?: VisionThinkLevel };
+			const p = params as { image_path: string; prompt: string; compress?: boolean; thinkLevel?: VisionThinkLevel };
 
 			const resolved = resolveVisionModel(ctx.modelRegistry, config);
 			if (!resolved.ok) {
@@ -133,7 +133,7 @@ export default function (pi: ExtensionAPI) {
 
 			onUpdate?.({ content: [{ type: "text", text: "Analyzing image..." }], details: {} });
 
-			const thinkLevel = effectiveThinkLevel(p.reasoning, config.defaultThinkLevel);
+			const thinkLevel = effectiveThinkLevel(p.thinkLevel, config.defaultThinkLevel);
 			const thinkLevelOptions = thinkLevelToOptions(thinkLevel);
 			const result = await callVision(
 				{
@@ -162,7 +162,7 @@ export default function (pi: ExtensionAPI) {
 					usage: result.usage,
 					compressed,
 					mimeType,
-					reasoning: thinkLevel,
+					thinkLevel,
 				},
 			};
 		},
