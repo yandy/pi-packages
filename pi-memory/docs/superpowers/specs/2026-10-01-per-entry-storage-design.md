@@ -315,7 +315,7 @@ memory(
 
 ### 8.3 注入截断
 
-- 注入时按 `memIndexInjectMaxLines` / `memIndexInjectMaxBytes`（与写入同值：200 / 25600）截断，截断时追加 `[truncated: N lines omitted]` 标记。
+- 注入时按 `memIndexInjectMaxLines` / `memIndexInjectMaxBytes`（与写入同值：200 / 25600）截断，截断时追加标记（2.0.0 实装为 `[truncated: memory index exceeds injection limit]`）。
 
 ---
 
