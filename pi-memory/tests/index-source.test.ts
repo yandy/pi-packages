@@ -13,7 +13,12 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 	},
 }));
 
-import { MEMORY_INDEX_SECTION, readRecordedMemoryIndex, replaySystemSections } from "../src/index-source";
+import {
+	MEMORY_INDEX_SECTION,
+	readRecordedMemoryIndex,
+	replaySystemSections,
+	unwrapSectionValue,
+} from "../src/index-source";
 
 /** 假的 `sessionEntryToContextMessages`：entry 自带 messages，原样返回。 */
 const passthrough = (entry: unknown): unknown[] => {
@@ -38,11 +43,58 @@ function sessionManager(entries: unknown[], over: Record<string, unknown> = {}) 
 	};
 }
 
+/** 0.99.2 `core/system-prompt.js`：宿主把每个非 preamble section 渲染成这个形状再写进 transcript。 */
+function wrapSection(content: string): string {
+	return `<${MEMORY_INDEX_SECTION}>\n${content}\n</${MEMORY_INDEX_SECTION}>`;
+}
+
 describe("MEMORY_INDEX_SECTION", () => {
 	it("is memory_index and satisfies pi's section-name rule", () => {
 		expect(MEMORY_INDEX_SECTION).toBe("memory_index");
 		// 0.99.2 core/system-prompt.js: /^[a-z][a-z0-9_-]*$/ —— 不合法的名字会被 pi 拒绝
 		expect(/^[a-z][a-z0-9_-]*$/.test(MEMORY_INDEX_SECTION)).toBe(true);
+	});
+});
+
+// R42：宿主录制的是带标签的值，回写 `options.sections[name]` 前必须脱掉一层，否则
+// `wrap(wrap(x)) !== wrap(x)` —— resume/fork/reload 第一轮就产生 patch（D13/D14 失效）。
+describe("unwrapSectionValue", () => {
+	it("strips exactly the host's one-layer wrapper", () => {
+		const raw = "- [SSH](ssh.md) — recorded value\n";
+		expect(unwrapSectionValue(wrapSection(raw))).toBe(raw);
+	});
+
+	it("round-trips: re-rendering the unwrapped value reproduces the recorded bytes", () => {
+		const raw = "- [A](a.md) — a &lt; b\n\n- [B](b.md) — 中文\n";
+		const recorded = wrapSection(raw);
+		const unwrapped = unwrapSectionValue(recorded);
+
+		expect(unwrapped).toBe(raw);
+		expect(wrapSection(unwrapped)).toBe(recorded);
+		expect(unwrapSectionValue(unwrapped)).toBe(unwrapped);
+	});
+
+	it("strips only one layer, so a nested wrapper stays as content", () => {
+		const inner = wrapSection("nested");
+		expect(unwrapSectionValue(wrapSection(inner))).toBe(inner);
+	});
+
+	it("strips an empty-content wrapper to the empty string", () => {
+		expect(unwrapSectionValue(wrapSection(""))).toBe("");
+	});
+
+	it("returns a value without the wrapper unchanged", () => {
+		for (const value of [
+			"",
+			"- [A](a.md) — bare\n",
+			"plain text",
+			"<memory_index>unterminated",
+			"missing </memory_index>",
+			"</memory_index>\nnot-a-prefix",
+			"<memory_index>x</memory_index>",
+		]) {
+			expect(unwrapSectionValue(value), value).toBe(value);
+		}
 	});
 });
 
@@ -104,9 +156,20 @@ describe("replaySystemSections", () => {
 });
 
 describe("readRecordedMemoryIndex", () => {
-	it("returns the recorded memory_index from the transcript", () => {
-		const recorded = "- [SSH](ssh.md) — recorded value\n";
+	// R42：真实 transcript 里存的是宿主渲染后的带标签值，重放必须脱掉这一层再返回。
+	it("returns the bare value when the transcript recorded a host-wrapped section", () => {
+		const raw = "- [SSH](ssh.md) — recorded value\n";
+		const recorded = wrapSection(raw);
 		const sm = sessionManager([entry(systemMessage({ preamble: "p", memory_index: recorded }))]);
+
+		expect(readRecordedMemoryIndex(sm, { sessionEntryToContextMessages: passthrough })).toBe(raw);
+		// 宿主再渲染一次仍逐字节等于录制值：回写不会产生新 patch（D13/D14）。
+		expect(wrapSection(raw)).toBe(recorded);
+	});
+
+	it("returns a recorded value without a wrapper unchanged", () => {
+		const recorded = "- [SSH](ssh.md) — legacy bare value\n";
+		const sm = sessionManager([entry(systemMessage({ memory_index: recorded }))]);
 
 		expect(readRecordedMemoryIndex(sm, { sessionEntryToContextMessages: passthrough })).toBe(recorded);
 	});
@@ -153,6 +216,11 @@ describe("readRecordedMemoryIndex", () => {
 
 	it("returns an empty recorded value as-is (an empty index is a value, not an absence)", () => {
 		const sm = sessionManager([entry(systemMessage({ memory_index: "" }))]);
+		expect(readRecordedMemoryIndex(sm, { sessionEntryToContextMessages: passthrough })).toBe("");
+	});
+
+	it("returns an empty index from a host-wrapped empty section", () => {
+		const sm = sessionManager([entry(systemMessage({ memory_index: wrapSection("") }))]);
 		expect(readRecordedMemoryIndex(sm, { sessionEntryToContextMessages: passthrough })).toBe("");
 	});
 
@@ -209,6 +277,31 @@ describe("readRecordedMemoryIndex", () => {
 			getLeafId: () => null,
 		};
 		expect(readRecordedMemoryIndex(sm, { sessionEntryToContextMessages: passthrough })).toBeNull();
+	});
+
+	// Finding 2 / R43：index.ts 的 session_start 直接调用这里，getLeafId 抛错不能冒泡
+	//（否则 memory 工具整个会话都不注册）。降级 = 没有 leaf，照样重放。
+	it("replays when getLeafId throws", () => {
+		const sm = sessionManager([entry(systemMessage({ memory_index: "still-found" }))], {
+			getLeafId: () => {
+				throw new Error("no leaf");
+			},
+		});
+		expect(readRecordedMemoryIndex(sm, { sessionEntryToContextMessages: passthrough })).toBe("still-found");
+	});
+
+	it("replays when getLeafId throws even for a host-wrapped value", () => {
+		const raw = "- [SSH](ssh.md) — recorded\n";
+		const sm = sessionManager([entry(systemMessage({ memory_index: wrapSection(raw) }))], {
+			getLeafId: () => {
+				throw new Error("no leaf");
+			},
+			buildContextEntries: (entries: unknown[], leafId?: string | null) => {
+				expect(leafId).toBeNull();
+				return entries;
+			},
+		});
+		expect(readRecordedMemoryIndex(sm, { sessionEntryToContextMessages: passthrough })).toBe(raw);
 	});
 
 	it("replays across many entries, keeping the last recorded value", () => {

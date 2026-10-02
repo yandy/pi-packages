@@ -317,6 +317,46 @@ describe("index wiring (integration)", () => {
 		}
 	});
 
+	// Finding 1 / R42：0.99.2 宿主把每个 non-preamble section 渲染成
+	// `<memory_index>\n<裸值>\n</memory_index>` 后才写进 transcript，重放拿到的是**带标签**的值。
+	// 端到端保真 = 冻结值等于原始裸串，且宿主再渲染一次逐字节等于录制值（不产生新 patch）。
+	it("freezes the bare recorded index after resume and never produces a new patch", async () => {
+		const raw = "- [SSH](ssh.md) — staging ssh config\n";
+		const recorded = `<memory_index>\n${raw}\n</memory_index>`;
+		const sessionManager = {
+			getEntries: () => [
+				{ type: "message", message: { role: "system", content: "", sections: { memory_index: recorded } } },
+			],
+			getLeafId: () => "leaf-1",
+		};
+
+		// 本文件把 index-source 整个 mock 了；这里用真实实现（注入 converter 替代 0.80.2 缺失的
+		// SDK 导出），走完「重放 → 脱壳 → 冻结 → 回写」全程。
+		const actual = await vi.importActual<typeof import("../src/index-source")>("../src/index-source");
+		readRecordedMemoryIndexMock.mockImplementation((sm: unknown) =>
+			actual.readRecordedMemoryIndex(sm, {
+				sessionEntryToContextMessages: (e: unknown) => [(e as { message: unknown }).message],
+			}),
+		);
+
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({ reason: "resume" }, uiCtx({ sessionManager }));
+
+		const ctx = uiCtx({ sessionManager });
+		const first = sectionsEvent();
+		await handlers["before_agent_start"][0](first, ctx);
+		const frozen = first.systemPromptOptions.sections["memory_index"];
+
+		expect(frozen).toBe(raw);
+		// 宿主渲染 = 录制值：头部字节恒等，resume 第一轮没有 patch（D13/D14）
+		expect(`<memory_index>\n${frozen}\n</memory_index>`).toBe(recorded);
+
+		const second = sectionsEvent();
+		await handlers["before_agent_start"][0](second, ctx);
+		expect(second.systemPromptOptions.sections["memory_index"]).toBe(frozen);
+	});
+
 	// Review Focus #3：重放拿不到录制值 → 回退磁盘，而不是把索引丢掉。
 	it("falls back to the disk index when no recorded value is available", async () => {
 		readRecordedMemoryIndexMock.mockReturnValue(null);

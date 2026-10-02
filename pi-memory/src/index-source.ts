@@ -24,6 +24,26 @@ export interface ReplayOpts {
 	sessionEntryToContextMessages?: (entry: unknown) => unknown[];
 }
 
+/**
+ * 脱掉宿主为 section 值加的一层包裹（R42）。
+ *
+ * 0.99.2 `core/system-prompt.js` 把每个非 `preamble` section 渲染成
+ * `<${name}>\n${content}\n</${name}>` 之后才写进 transcript；`sessionEntryToContextMessages`
+ * 原样返回录制消息，所以重放拿到的是**带标签**的值。直接回写成 `options.sections[name]`
+ * 会被宿主二次包裹：`wrap(wrap(x)) !== wrap(x)` —— resume/fork/reload 第一轮就产生 patch
+ *（D13/D14 的头部字节恒等失效），内层闭合标签还会提前闭合外层标签。
+ *
+ * 只脱一层；不匹配（裸值、老 session、内容碰巧含标签）原样返回。
+ */
+export function unwrapSectionValue(value: string): string {
+	const prefix = `<${MEMORY_INDEX_SECTION}>\n`;
+	const suffix = `\n</${MEMORY_INDEX_SECTION}>`;
+	if (value.length >= prefix.length + suffix.length && value.startsWith(prefix) && value.endsWith(suffix)) {
+		return value.slice(prefix.length, value.length - suffix.length);
+	}
+	return value;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
 }
@@ -69,6 +89,9 @@ function resolveConverter(): ((entry: unknown) => unknown[]) | null {
  * 任何一步不可得都返回 `null`，由调用方回退磁盘读：SDK 太旧（没有转换函数）、
  * sessionManager 形状不认识、entry 转换抛错、重放后没有这个键、或该键被 `null` patch 删除。
  * **绝不把 `null` 当录制值返回**（spec §9.1 的 null 陷阱）。
+ *
+ * 返回值是**裸值**：宿主把 section 渲染成 `<memory_index>…</memory_index>` 后才写进
+ * transcript，所以这里要脱掉那一层再回写（R42 / `unwrapSectionValue`）。
  */
 export function readRecordedMemoryIndex(sessionManager: unknown, opts?: ReplayOpts): string | null {
 	const toMessages = opts?.sessionEntryToContextMessages ?? resolveConverter();
@@ -85,7 +108,14 @@ export function readRecordedMemoryIndex(sessionManager: unknown, opts?: ReplayOp
 		return null;
 	}
 
-	const leafId = sm.getLeafId();
+	let leafId: string | null = null;
+	try {
+		leafId = sm.getLeafId();
+	} catch {
+		// Finding 2 / R43：这个函数在 index.ts 的 session_start 路径上被调用，抛错会让整个
+		// session_start 失败 → memory 工具整个会话不注册。拿不到 leaf 就退化成「没有 branch」：
+		// 用全部 entry 重放，多出来的 system patch 只会被后面的覆盖或删掉。
+	}
 	if (typeof sm.buildContextEntries === "function") {
 		try {
 			const built = sm.buildContextEntries(entries, leafId);
@@ -106,5 +136,5 @@ export function readRecordedMemoryIndex(sessionManager: unknown, opts?: ReplayOp
 	}
 
 	const recorded = replaySystemSections(messages).get(MEMORY_INDEX_SECTION);
-	return typeof recorded === "string" ? recorded : null;
+	return typeof recorded === "string" ? unwrapSectionValue(recorded) : null;
 }
