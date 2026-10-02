@@ -1940,4 +1940,129 @@ describe("index wiring (integration)", () => {
 		await commands["memory"].handler("", uiCtx(uiWith(notify)));
 		expect(notify.mock.calls[1][0].split("\n")[0]).toBe("Memory: misconfigured");
 	});
+
+	// ── 错误态的跨 session 生命周期（design §2.5）──────────────────────────
+	// 同一个工厂（= 同一个常驻进程）里 healthy → misconfigured → healthy：
+	// · misconfigured 那次重启必须**不沿用**上一 session 的目录（`/memory` 只能说 not initialized，
+	//   `/dream` 必须拒绝，否则会对上一个项目的目录起一轮 dream）；
+	// · 改好配置再重启必须回到 `Memory: enabled` —— `session_start` 里的 `configError = null`
+	//   是这一行为的唯一实现（少了它，错误态会一直粘在工厂作用域里）；
+	// · 工具只在第一次健康会话注册一次（`tools` 恒为 1，钉住不重复注册）。
+	it("/memory flips back to enabled after a misconfigured session is fixed and restarted", async () => {
+		const notify = vi.fn();
+		const confirm = vi.fn().mockResolvedValue(true);
+		const ctxUI = () => uiCtx({ hasUI: true, ui: { notify, confirm, setStatus: vi.fn() } });
+		const errorLines = [
+			'- no model for dream — set "dream.model" or "defaults.model" in memory.json',
+			'- no model for autoSurfacing — set "autoSurfacing.model" or "defaults.model" in memory.json',
+		];
+		const { pi, tools, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		// ① 健康会话：状态块首行是 enabled
+		await handlers["session_start"][0]({}, ctxUI());
+		expect(tools).toHaveLength(1);
+		await commands["memory"].handler("", ctxUI());
+		expect(notify).toHaveBeenCalledTimes(1);
+		expect(notify.mock.calls[0][1]).toBe("info");
+		expect(notify.mock.calls[0][0].split("\n")[0]).toBe("Memory: enabled");
+		expect(notify.mock.calls[0][0]).toContain(`Dir: ${dir}`);
+		notify.mockClear();
+
+		// ② 用户删掉模型配置后重启：misconfigured，且不得沿用上一 session 的目录
+		mockConfigValue.defaults = { sessionPersistence: { enabled: false } };
+		await handlers["session_start"][0]({}, ctxUI());
+		expect(notify.mock.calls[0][1]).toBe("error");
+		expect(notify.mock.calls[0][0].split("\n")).toEqual(["pi-memory config error:", ...errorLines]);
+
+		await commands["memory"].handler("", ctxUI());
+		expect(notify.mock.calls[1][0].split("\n")).toEqual([
+			"Memory: misconfigured",
+			"Dir: not initialized",
+			...errorLines,
+		]);
+		expect(notify.mock.calls[1][0]).not.toContain(dir);
+
+		// confirm 返回 true：守卫若失效，`/dream` 就会真的对上一 session 的目录跑一轮
+		await commands["dream"].handler("", ctxUI());
+		expect(notify.mock.calls[2]).toEqual(["Memory not initialized.", "info"]);
+		expect(runDreamMock).not.toHaveBeenCalled();
+		expect(confirm).not.toHaveBeenCalled();
+		// 已注册的工具不会因为错误态再注册一次
+		expect(tools).toHaveLength(1);
+		notify.mockClear();
+
+		// ③ 改好配置再重启：错误态被清掉，状态块回到 enabled
+		mockConfigValue.defaults = { model: "test/model", sessionPersistence: { enabled: false } };
+		await handlers["session_start"][0]({}, ctxUI());
+		expect(notify).not.toHaveBeenCalled();
+		await commands["memory"].handler("", ctxUI());
+		expect(notify).toHaveBeenCalledTimes(1);
+		expect(notify.mock.calls[0][0].split("\n")[0]).toBe("Memory: enabled");
+		expect(notify.mock.calls[0][0]).not.toContain("misconfigured");
+		expect(tools).toHaveLength(1);
+	});
+
+	// `configError = null` 在 `!config.enabled` 早退**之前**：用户「修好配置」的另一条路是直接
+	// 关掉 memory，这一 session 既不该继承上一 session 的错误态（否则状态行会说 misconfigured
+	// 而不是 disabled，把人指错方向），也不该继承目录。删掉那一行 → 本用例变红。
+	it("/memory reports disabled, not the stale config error, after a misconfigured session restarts disabled", async () => {
+		const notify = vi.fn();
+		const ctxUI = () => uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } });
+		const { pi, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		mockConfigValue.defaults = { sessionPersistence: { enabled: false } };
+		await handlers["session_start"][0]({}, ctxUI());
+		expect(notify.mock.calls[0][1]).toBe("error");
+		expect(notify.mock.calls[0][0].split("\n")[0]).toBe("pi-memory config error:");
+		await commands["memory"].handler("", ctxUI());
+		expect(notify.mock.calls[1][0].split("\n")[0]).toBe("Memory: misconfigured");
+		notify.mockClear();
+
+		mockConfigValue.enabled = false;
+		await handlers["session_start"][0]({}, ctxUI());
+		expect(notify).not.toHaveBeenCalled();
+
+		await commands["memory"].handler("", ctxUI());
+		expect(notify).toHaveBeenCalledTimes(1);
+		expect(notify.mock.calls[0][1]).toBe("info");
+		expect(notify.mock.calls[0][0].split("\n")).toEqual([
+			"Memory: disabled",
+			'Dir: not initialized — set "enabled": true in memory.json and restart',
+		]);
+	});
+
+	// 约束「`/memory unlock` 在每种状态下都可用」在 misconfigured 态同样成立：错误态下
+	// memoryDir 为 null，unlock 走 resolveMemoryDir 兜底，仍然只清本 cwd 的 `.lock`。
+	// 钉住两处易碎点：unlock 分支必须**在**状态分支之前，且 resetSessionState 不得清 `config`。
+	it("/memory unlock removes the lock in a session that booted misconfigured", async () => {
+		mockConfigValue.defaults = { sessionPersistence: { enabled: false } };
+		const notify = vi.fn();
+		const confirm = vi.fn().mockResolvedValue(true);
+		const { pi, tools, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx(uiWith(notify)));
+		expect(notify.mock.calls[0][1]).toBe("error");
+		expect(tools).toHaveLength(0);
+
+		await writeFile(
+			join(dir, ".lock"),
+			JSON.stringify({ pid: process.pid, hostname: "h", startedAt: "2026-10-02T01:02:03.000Z", op: "dream" }),
+			"utf8",
+		);
+		await writeFile(join(dir, "keep.md"), "not a lock", "utf8");
+		notify.mockClear();
+
+		await commands["memory"].handler("unlock", uiCtx({ hasUI: true, ui: { notify, confirm, setStatus: vi.fn() } }));
+
+		expect(confirm).toHaveBeenCalledWith(
+			"Memory lock",
+			`Remove the memory lock file? It is held by dream (pid ${process.pid} on h, started 2026-10-02T01:02:03.000Z). Only do this if no memory operation is running.`,
+		);
+		expect(await readdir(dir)).not.toContain(".lock");
+		expect(await readdir(dir)).toContain("keep.md");
+		expect(notify).toHaveBeenCalledWith("Memory lock removed.", "info");
+		expect(tools).toHaveLength(0);
+	});
 });
