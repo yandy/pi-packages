@@ -166,7 +166,8 @@ function replayEntryMessages(sm: Partial<ReplayableSessionManager>, opts?: Repla
  * 拿不到（0.80.2 / 更老的 session / 投影抛错）才回落到自实现的 entry 重放（Plan C 终审 #4）。
  *
  * 两条路径都不可得时返回 `null`，由调用方回退磁盘读：SDK 太旧（既无投影也无转换函数）、
- * sessionManager 形状不认识、`buildSessionProjection` / `getEntries` 抛错、重放后没有这个键、
+ * sessionManager 形状不认识（含 `buildSessionProjection()` 的返回值里没有 `messages` 数组，
+ * `projectionMessages` 对非数组返回 `null`）、`buildSessionProjection` / `getEntries` 抛错、重放后没有这个键、
  * 或该键被 `null` patch 删除。**单条 entry 的形状不认识**不会让整次重放失败：那一条被跳过
  *（见 `replayEntryMessages`），其余 entry 照常重放 —— 它不会变成 `null` 返回值。
  * **绝不把 `null` 当录制值返回**（spec §9.1 的 null 陷阱）。

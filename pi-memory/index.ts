@@ -527,6 +527,8 @@ export default function (pi: ExtensionAPI) {
 						return;
 					}
 					// 返回值也真实使用：false = 这次没建起来（initMemory 看到的 enabled 是假）。
+					// 当前不可达：进入前刚把 `enabled` 置 true，而 initMemory 只在 `!cfg?.enabled` 时
+					// 返回 false。若将来 initMemory 的契约变宽（别的原因也返回 false），这里的文案要同步。
 					if (!ok) {
 						config = { ...config, enabled: false };
 						ctx.ui.notify("Failed to initialize memory: memory is disabled", "error");

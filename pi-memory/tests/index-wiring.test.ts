@@ -1804,7 +1804,10 @@ describe("index wiring (integration)", () => {
 	it("/dream refuses right after a disabled restart instead of dreaming the old dir", async () => {
 		const dirB = await mkdtemp(join(tmpdir(), "mem-wiring-b-"));
 		const notify = vi.fn();
-		const ctxB = () => uiCtx({ cwd: dirB, hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } });
+		// confirm 必须返回 true：它若为假值，disabled 分支即使没复位 store、守卫放行，`/dream`
+		// 也会先在 `!ok` 处 return —— `runDreamMock` 的断言就成了假承重（review Minor #2/#3）。
+		const confirm = vi.fn().mockResolvedValue(true);
+		const ctxB = () => uiCtx({ cwd: dirB, hasUI: true, ui: { notify, confirm, setStatus: vi.fn() } });
 		try {
 			const { pi, commands, handlers } = createFakePi();
 			memoryFactory(pi as any);
