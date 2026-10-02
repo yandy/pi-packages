@@ -1,5 +1,7 @@
 # Design: pi-vision-tools — 让非多模态模型调用视觉模型
 
+> **已被取代：** 本文档描述的 `enabled` 三态与 `/vision on|off|auto`、`default-reasoning` 已在 [2026-10-02-pi-vision-tools-auto-only-design.md](./2026-10-02-pi-vision-tools-auto-only-design.md) 中变更。本文档保留为历史记录。
+
 **Date:** 2026-06-25
 **Status:** draft
 
