@@ -169,7 +169,8 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("vision", {
-		description: "Configure the vision model for describe_image (/vision status | config model <m> | config default-think-level <level>)",
+		description:
+			"Configure the vision model for describe_image (/vision status | config model <m> | config default-think-level <level>)",
 		handler: async (args, ctx) => {
 			const parts = args.trim().split(/\s+/).filter(Boolean);
 			const sub = parts[0];
