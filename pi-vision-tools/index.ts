@@ -4,29 +4,29 @@ import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { compressImage, readCompressionSettings } from "./src/compress.js";
-import { loadConfig, saveConfig, type VisionConfig } from "./src/config.js";
+import { loadConfig, saveConfig, THINK_LEVELS, type VisionConfig } from "./src/config.js";
 import { type DecodedImage, decodeImage } from "./src/image.js";
-import { effectiveReasoning, reasoningToOptions, type VisionReasoning } from "./src/reasoning.js";
-import { callingModelHasVision, effectiveEnabled, footerLabel } from "./src/state.js";
+import { effectiveThinkLevel, thinkLevelToOptions, type VisionThinkLevel } from "./src/think-level.js";
+import { callingModelHasVision, footerLabel } from "./src/state.js";
 import { callVision, resolveVisionModel } from "./src/vision.js";
 
 const TOOL_NAME = "describe_image";
 const STATUS_KEY = "pi-vision";
 
 export default function (pi: ExtensionAPI) {
-	let config: VisionConfig = { enabled: "auto" };
-	let enabled = false;
+	let config: VisionConfig = {};
+	let toolActive = false;
 
 	const refresh = (ctx: ExtensionContext) => {
-		enabled = effectiveEnabled(config, ctx.model);
-		const active = pi.getActiveTools();
-		if (enabled && !active.includes(TOOL_NAME)) {
-			pi.setActiveTools([...active, TOOL_NAME]);
-		} else if (!enabled && active.includes(TOOL_NAME)) {
-			pi.setActiveTools(active.filter((t) => t !== TOOL_NAME));
+		toolActive = !callingModelHasVision(ctx.model);
+		const current = pi.getActiveTools();
+		if (toolActive && !current.includes(TOOL_NAME)) {
+			pi.setActiveTools([...current, TOOL_NAME]);
+		} else if (!toolActive && current.includes(TOOL_NAME)) {
+			pi.setActiveTools(current.filter((t) => t !== TOOL_NAME));
 		}
 		if (ctx.hasUI) {
-			const label = footerLabel(enabled, resolveVisionModel(ctx.modelRegistry, config));
+			const label = footerLabel(toolActive, resolveVisionModel(ctx.modelRegistry, config));
 			ctx.ui.setStatus(STATUS_KEY, label);
 		}
 	};
@@ -46,12 +46,12 @@ export default function (pi: ExtensionAPI) {
 			"Analyze an image by delegating to a vision-capable model. Lets non-multimodal models understand images. " +
 			"`image_path` is a file path, data: URL, or raw base64 (>100 chars). " +
 			"`compress` (default true) downscales/strips to speed up; set false for pixel-perfect needs. " +
-			"`reasoning` controls the vision model's thinking effort (off/minimal/low/medium/high/xhigh).",
+			"`thinkLevel` controls the vision model's thinking effort (off/minimal/low/medium/high/xhigh).",
 		promptSnippet: "describe_image: delegate image analysis to a vision model (non-multimodal models).",
 		promptGuidelines: [
 			"Use describe_image when you need to understand an image you cannot see (the calling model lacks vision).",
 			"Set compress:false when you need pixel-perfect accuracy (reading coordinates, tiny UI elements).",
-			"Set reasoning:'high'/'xhigh' for complex visual analysis (architecture diagrams, bug hunting).",
+			"Set thinkLevel:'high'/'xhigh' for complex visual analysis (architecture diagrams, bug hunting).",
 		],
 		parameters: Type.Object({
 			image_path: Type.String({ description: "File path, data: URL, or raw base64 (>100 chars)." }),
@@ -61,9 +61,9 @@ export default function (pi: ExtensionAPI) {
 			compress: Type.Optional(
 				Type.Boolean({ default: true, description: "Compress image before sending (default true)." }),
 			),
-			reasoning: Type.Optional(
-				StringEnum(["off", "minimal", "low", "medium", "high", "xhigh"] as const, {
-					description: "Vision model reasoning effort. Default off.",
+			thinkLevel: Type.Optional(
+				StringEnum(THINK_LEVELS, {
+					description: "Vision model thinking effort. Default off.",
 				}),
 			),
 		}),
@@ -90,14 +90,17 @@ export default function (pi: ExtensionAPI) {
 			return new Text(body, 0, 0);
 		},
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			if (!enabled) {
+			if (!toolActive) {
+				const reason = callingModelHasVision(ctx.model)
+					? "the calling model can see images itself"
+					: "the tool is not active for the current model";
 				return {
-					content: [{ type: "text", text: "describe_image is disabled. Run /vision on to enable." }],
+					content: [{ type: "text", text: `describe_image is inactive: ${reason}.` }],
 					details: { error: "disabled" },
 					isError: true,
 				};
 			}
-			const p = params as { image_path: string; prompt: string; compress?: boolean; reasoning?: VisionReasoning };
+			const p = params as { image_path: string; prompt: string; compress?: boolean; thinkLevel?: VisionThinkLevel };
 
 			const resolved = resolveVisionModel(ctx.modelRegistry, config);
 			if (!resolved.ok) {
@@ -133,15 +136,15 @@ export default function (pi: ExtensionAPI) {
 
 			onUpdate?.({ content: [{ type: "text", text: "Analyzing image..." }], details: {} });
 
-			const reasoningLevel = effectiveReasoning(p.reasoning, config.defaultReasoning);
-			const reasoning = reasoningToOptions(reasoningLevel);
+			const thinkLevel = effectiveThinkLevel(p.thinkLevel, config.defaultThinkLevel);
+			const thinkLevelOptions = thinkLevelToOptions(thinkLevel);
 			const result = await callVision(
 				{
 					model: resolved.model,
 					auth: { apiKey: auth.apiKey, headers: auth.headers },
 					prompt: p.prompt,
 					images: [image],
-					reasoning,
+					reasoning: thinkLevelOptions,
 					signal: signal ?? undefined,
 				},
 				complete,
@@ -162,14 +165,15 @@ export default function (pi: ExtensionAPI) {
 					usage: result.usage,
 					compressed,
 					mimeType,
-					reasoning: reasoningLevel,
+					thinkLevel,
 				},
 			};
 		},
 	});
 
 	pi.registerCommand("vision", {
-		description: "Configure the vision model for describe_image (/vision config | on | off | status)",
+		description:
+			"Configure the vision model for describe_image (/vision status | config model <m> | config default-think-level <level>)",
 		handler: async (args, ctx) => {
 			const parts = args.trim().split(/\s+/).filter(Boolean);
 			const sub = parts[0];
@@ -181,11 +185,10 @@ export default function (pi: ExtensionAPI) {
 					: resolved.ok
 						? `${resolved.model.provider}/${resolved.model.id}`
 						: `${config.model} (unresolved)`;
-				const visionCap = callingModelHasVision(ctx.model) ? "yes" : "no";
 				const lines = [
 					`vision: ${target}`,
-					`enabled: ${config.enabled} (effective: ${enabled ? "on" : "off"})`,
-					`calling model has vision: ${visionCap}`,
+					`default think level: ${config.defaultThinkLevel ?? "off (built-in)"}`,
+					`active: ${toolActive ? "yes" : "no"} (calling model has vision: ${callingModelHasVision(ctx.model) ? "yes" : "no"})`,
 				];
 				if (!resolved.ok) lines.push(resolved.error);
 				ctx.ui.notify(lines.join("\n"), "info");
@@ -196,21 +199,19 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			if (sub === "on" || sub === "off" || sub === "auto") {
-				config = { ...config, enabled: sub as VisionConfig["enabled"] };
-				await saveConfig(getAgentDir(), config);
-				refresh(ctx);
-				ctx.ui.notify(`vision ${sub}`, "info");
-				return;
-			}
-
 			if (sub === "config") {
 				const key = parts[1];
 				const val = parts.slice(2).join(" ") || undefined;
-				if (key === "model" && val) config = { ...config, model: val };
-				else if (key === "default-reasoning" && val) config = { ...config, defaultReasoning: val as VisionReasoning };
-				else {
-					ctx.ui.notify("Usage: /vision config model <m> | default-reasoning <level>", "warning");
+				if (key === "model" && val) {
+					config = { ...config, model: val };
+				} else if (key === "default-think-level" && val) {
+					if (!(THINK_LEVELS as readonly string[]).includes(val)) {
+						ctx.ui.notify(`Invalid think level "${val}". Valid: ${THINK_LEVELS.join(", ")}`, "warning");
+						return;
+					}
+					config = { ...config, defaultThinkLevel: val as VisionThinkLevel };
+				} else {
+					ctx.ui.notify("Usage: /vision config model <m> | default-think-level <level>", "warning");
 					return;
 				}
 				await saveConfig(getAgentDir(), config);
@@ -220,12 +221,12 @@ export default function (pi: ExtensionAPI) {
 					if (resolved.ok) ctx.ui.notify(`vision model = ${resolved.model.provider}/${resolved.model.id}`, "info");
 					else ctx.ui.notify(resolved.error, "warning");
 				} else {
-					ctx.ui.notify(`vision ${key} = ${val}`, "info");
+					ctx.ui.notify(`vision default-think-level = ${val}`, "info");
 				}
 				return;
 			}
 
-			ctx.ui.notify("Usage: /vision [config model <m> | on | off | auto | status]", "warning");
+			ctx.ui.notify("Usage: /vision [status | config model <m> | config default-think-level <level>]", "warning");
 		},
 	});
 }

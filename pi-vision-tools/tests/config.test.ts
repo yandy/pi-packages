@@ -12,35 +12,28 @@ describe("parseConfig", () => {
 	});
 
 	it("accepts a fully valid config", () => {
-		const raw = { model: "openai/gpt-4o", enabled: "on", defaultReasoning: "high" };
+		const raw = { model: "openai/gpt-4o", defaultThinkLevel: "high" };
 		expect(parseConfig(raw)).toEqual(raw);
 	});
 
-	it("defaults enabled to 'auto' when omitted", () => {
-		expect(parseConfig({ model: "gpt-4o" })).toEqual({
-			model: "gpt-4o",
-			enabled: "auto",
-		});
-	});
-
 	it("ignores a legacy provider key", () => {
-		expect(parseConfig({ provider: "openai", model: "gpt-4o" })).toEqual({ model: "gpt-4o", enabled: "auto" });
-	});
-
-	it("rejects an invalid enabled value", () => {
-		expect(() => parseConfig({ enabled: "maybe" })).toThrow(/enabled/);
+		expect(parseConfig({ provider: "openai", model: "gpt-4o" })).toEqual({ model: "gpt-4o" });
 	});
 
 	it("rejects a non-string model", () => {
 		expect(() => parseConfig({ model: false })).toThrow(/model/);
 	});
 
-	it("rejects an invalid defaultReasoning", () => {
-		expect(() => parseConfig({ defaultReasoning: "ultra" })).toThrow(/defaultReasoning/);
+	it("rejects an invalid defaultThinkLevel", () => {
+		expect(() => parseConfig({ defaultThinkLevel: "ultra" })).toThrow(/defaultThinkLevel/);
+	});
+
+	it("strips both legacy keys without losing the model", () => {
+		expect(parseConfig({ model: "haiku", enabled: "off", defaultReasoning: "high" })).toEqual({ model: "haiku" });
 	});
 
 	it("strips unknown keys", () => {
-		expect(parseConfig({ model: "x", extra: 1 })).toEqual({ model: "x", enabled: "auto" });
+		expect(parseConfig({ model: "x", extra: 1 })).toEqual({ model: "x" });
 	});
 });
 
@@ -68,16 +61,21 @@ describe("loadConfig / saveConfig (filesystem)", () => {
 		expect(await loadConfig(dir)).toEqual(DEFAULT_CONFIG);
 	});
 
+	it("falls back to DEFAULT_CONFIG when a hand-written think level is invalid", async () => {
+		await writeFile(configPath(dir), JSON.stringify({ model: "haiku", defaultThinkLevel: "ultra" }));
+		expect(await loadConfig(dir)).toEqual(DEFAULT_CONFIG);
+	});
+
 	it("round-trips a config through save then load", async () => {
-		const cfg: VisionConfig = { model: "openai/gpt-4o", enabled: "off", defaultReasoning: "low" };
+		const cfg: VisionConfig = { model: "openai/gpt-4o", defaultThinkLevel: "low" };
 		await saveConfig(dir, cfg);
 		expect(await loadConfig(dir)).toEqual(cfg);
 	});
 
 	it("write is not pretty / is valid JSON", async () => {
-		await saveConfig(dir, { model: "m", enabled: "auto" });
+		await saveConfig(dir, { model: "m" });
 		const raw = await readFile(configPath(dir), "utf8");
-		expect(JSON.parse(raw)).toEqual({ model: "m", enabled: "auto" });
+		expect(JSON.parse(raw)).toEqual({ model: "m" });
 	});
 
 	it("saveConfig creates the agent dir if missing", async () => {

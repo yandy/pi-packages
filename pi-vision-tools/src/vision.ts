@@ -2,7 +2,7 @@ import type { AssistantMessage, Context, Model, UserMessage } from "@earendil-wo
 import type { VisionConfig } from "./config.js";
 import type { DecodedImage } from "./image.js";
 import { resolveModel, type VisionModelRegistry } from "./model-resolver.js";
-import type { ReasoningOptions } from "./reasoning.js";
+import type { ThinkLevelOptions } from "./think-level.js";
 
 export type CompleteFn = (
 	model: Model<any>,
@@ -15,7 +15,7 @@ export interface VisionCallInput {
 	auth: { apiKey?: string; headers?: Record<string, string> };
 	prompt: string;
 	images: DecodedImage[];
-	reasoning: ReasoningOptions;
+	reasoning: ThinkLevelOptions;
 	signal?: AbortSignal;
 }
 

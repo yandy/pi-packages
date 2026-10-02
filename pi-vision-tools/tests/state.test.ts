@@ -1,6 +1,6 @@
 import type { Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
-import { footerLabel } from "../src/state.js";
+import { callingModelHasVision, footerLabel } from "../src/state.js";
 
 const fakeModel = (id: string, provider: string) =>
 	({
@@ -17,7 +17,7 @@ const fakeModel = (id: string, provider: string) =>
 	}) as Model<any>;
 
 describe("footerLabel", () => {
-	it("hides the indicator when the tool is disabled", () => {
+	it("hides the indicator when the tool is inactive", () => {
 		expect(footerLabel(false, { ok: true, model: fakeModel("gpt-4o", "openai") })).toBeUndefined();
 	});
 
@@ -29,5 +29,20 @@ describe("footerLabel", () => {
 		expect(footerLabel(true, { ok: true, model: fakeModel("claude-haiku-4-5", "anthropic") })).toBe(
 			"👁 anthropic/claude-haiku-4-5",
 		);
+	});
+});
+
+describe("callingModelHasVision", () => {
+	it("is true when the model accepts image input", () => {
+		expect(callingModelHasVision(fakeModel("gpt-4o", "openai"))).toBe(true);
+	});
+
+	it("is false for text-only models", () => {
+		const textOnly = { ...fakeModel("deepseek", "deepseek"), input: ["text"] } as Model<any>;
+		expect(callingModelHasVision(textOnly)).toBe(false);
+	});
+
+	it("is false when no model is selected", () => {
+		expect(callingModelHasVision(undefined)).toBe(false);
 	});
 });
