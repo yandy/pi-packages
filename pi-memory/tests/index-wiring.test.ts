@@ -879,10 +879,10 @@ describe("index wiring (integration)", () => {
 		expect(notify).toHaveBeenCalledWith("Extract failed: model exploded", "error");
 	});
 
-	it("resets the extract failure quota even when the next session boots disabled", async () => {
+	it("resets the extract failure quota across a disabled restart", async () => {
 		mockConfigValue.extractMemories.enabled = true;
 		runExtractMock.mockImplementation(() => Promise.reject(new Error("model exploded")));
-		const { pi, handlers, commands } = createFakePi();
+		const { pi, handlers } = createFakePi();
 		memoryFactory(pi as any);
 		await handlers["session_start"][0]({}, uiCtx());
 
@@ -895,9 +895,11 @@ describe("index wiring (integration)", () => {
 		mockConfigValue.enabled = false;
 		try {
 			await handlers["session_start"][0]({ reason: "reload" }, uiCtx());
-			// 用户中途 /memory on：D1 之后 disabled 启动会清空 memoryDir/store，所以这里
-			// 是真的重新初始化（resolveMemoryDir 的 mock 仍返回同一个 dir）
-			await commands["memory"].handler("on", uiCtx(uiWith()));
+			// 中途 `/memory on` 已删除：重新启用只有「改配置 + 重启」一条路，即再一次 session_start。
+			// D1 之后 disabled 启动已清空 memoryDir/store，所以这里是真的重新初始化
+			// （resolveMemoryDir 的 mock 仍返回同一个 dir）。
+			mockConfigValue.enabled = true;
+			await handlers["session_start"][0]({ reason: "reload" }, uiCtx());
 
 			const secondNotify = vi.fn();
 			await handlers["agent_end"][0]({ messages: [{ role: "user", content: "b" }] }, uiCtx(uiWith(secondNotify)));
@@ -1493,22 +1495,23 @@ describe("index wiring (integration)", () => {
 		expect(notify.mock.calls[0][0].split("\n")[6]).toBe("Lock: unreadable — run /memory unlock");
 	});
 
-	it("/memory off is reflected in the status output", async () => {
+	it("/memory on and /memory off are no longer subcommands", async () => {
 		const notify = vi.fn();
-		const { pi, commands, handlers } = createFakePi();
+		const { pi, tools, commands, handlers } = createFakePi();
 		memoryFactory(pi as any);
 		await handlers["session_start"][0]({}, uiCtx());
-		const ctx = () => uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } });
+		const ctx = () => uiCtx(uiWith(notify));
+		const registered = tools.length;
 
 		await commands["memory"].handler("off", ctx());
-		await commands["memory"].handler("", ctx());
 		await commands["memory"].handler("on", ctx());
-		await commands["memory"].handler("", ctx());
 
-		expect(notify.mock.calls[0]).toEqual(["Memory off", "info"]);
-		expect(notify.mock.calls[1][0].split("\n")[0]).toBe("Memory: disabled");
-		expect(notify.mock.calls[2]).toEqual(["Memory on", "info"]);
-		expect(notify.mock.calls[3][0].split("\n")[0]).toBe("Memory: enabled");
+		// 两者都落到状态分支：不发开关通知、不改变初始化状态
+		for (const call of notify.mock.calls) {
+			expect(call[1]).toBe("info");
+			expect(call[0].split("\n")[0]).toBe("Memory: enabled");
+		}
+		expect(tools).toHaveLength(registered);
 	});
 
 	it("/memory says it is not initialized before session_start", async () => {
@@ -1615,8 +1618,8 @@ describe("index wiring (integration)", () => {
 		expect(await readdir(join(dir, ".lock"))).toContain("inner");
 	});
 
-	// ── Plan D（D1）：禁用启动的会话也能初始化 + 跨 session 状态复位 ──────────────
-	it("/memory reports a not-initialized directory when the session booted disabled", async () => {
+	// ── Plan D（D1）：禁用启动的会话状态（unlock / 状态行）与跨 session 复位 ──────
+	it("/memory reports the disabled switch when the session booted disabled", async () => {
 		mockConfigValue.enabled = false;
 		const notify = vi.fn();
 		const { pi, commands, handlers } = createFakePi();
@@ -1629,7 +1632,7 @@ describe("index wiring (integration)", () => {
 		expect(notify.mock.calls[0][1]).toBe("info");
 		expect(notify.mock.calls[0][0].split("\n")).toEqual([
 			"Memory: disabled",
-			"Dir: not initialized (run /memory on)",
+			'Dir: not initialized — set "enabled": true in memory.json and restart',
 		]);
 	});
 
@@ -1680,79 +1683,6 @@ describe("index wiring (integration)", () => {
 		expect(notify).not.toHaveBeenCalled();
 	});
 
-	it("/memory on initialises a session that booted disabled", async () => {
-		mockConfigValue.enabled = false;
-		const notify = vi.fn();
-		const { pi, tools, commands, handlers } = createFakePi();
-		memoryFactory(pi as any);
-		await handlers["session_start"][0]({}, uiCtx());
-		// 禁用启动：既没有 store，也不注册工具
-		expect(tools).toHaveLength(0);
-
-		await commands["memory"].handler("on", uiCtx(uiWith(notify)));
-
-		expect(notify).toHaveBeenCalledWith("Memory on", "info");
-		expect(tools).toHaveLength(1);
-		expect(tools[0].parameters.properties.action.enum).toEqual(["add", "replace", "remove", "list", "search"]);
-
-		// 工具真的能写（不再一律 "Memory not initialized"）
-		const result = await tools[0].execute(
-			"c1",
-			{ action: "add", name: "After on", description: "d", content: "正文" },
-			undefined,
-			undefined,
-			undefined,
-		);
-		expect(result.content[0].text).toBe('Saved "After on" (After-on.md).');
-		expect(await readFile(join(dir, "After-on.md"), "utf8")).toContain("name: After on");
-
-		// 索引快照已经构建，并照旧无条件写进 sections（值是 session_start 那一刻的磁盘索引）
-		const event = sectionsEvent();
-		await handlers["before_agent_start"][0](event, uiCtx());
-		expect(event.systemPromptOptions.sections["memory_index"]).toBe(DISK_INDEX);
-
-		// 状态命令回到完整七行
-		const status = vi.fn();
-		await commands["memory"].handler("", uiCtx(uiWith(status)));
-		const lines = status.mock.calls[0][0].split("\n");
-		expect(lines).toHaveLength(7);
-		expect(lines[0]).toBe("Memory: enabled");
-		expect(lines[1]).toBe(`Dir: ${dir}`);
-		expect(lines[3]).toBe("Entries: 1");
-	});
-
-	// Review Focus #2：上一个 session 是 enabled 的（dir A），本 session 以 disabled 启动且
-	// cwd 不同。不清空残留状态的话 `/memory on` 会继续往 A 的目录写。
-	it("/memory on after a disabled restart points at the new cwd, not the previous session", async () => {
-		const dirB = await mkdtemp(join(tmpdir(), "mem-wiring-b-"));
-		const notify = vi.fn();
-		const ctxB = () => uiCtx({ cwd: dirB, hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } });
-		try {
-			const { pi, commands, handlers } = createFakePi();
-			memoryFactory(pi as any);
-			await handlers["session_start"][0]({}, uiCtx()); // enabled，dir A = dir
-
-			dirOverrideRef.current = (cwd) => join(cwd, ".memory");
-			mockConfigValue.enabled = false;
-			await mkdir(join(dirB, ".memory"), { recursive: true });
-			await writeFile(join(dirB, ".memory", "MEMORY.md"), "- [B](B.md) — from B\n", "utf8");
-			await handlers["session_start"][0]({}, uiCtx({ cwd: dirB }));
-
-			await commands["memory"].handler("on", ctxB());
-			await commands["memory"].handler("", ctxB());
-
-			expect(notify.mock.calls[0]).toEqual(["Memory on", "info"]);
-			const lines = notify.mock.calls[1][0].split("\n");
-			expect(lines).toHaveLength(7);
-			expect(lines[1]).toBe(`Dir: ${join(dirB, ".memory")}`);
-			expect(lines[1]).not.toContain(dir);
-			expect(lines[2]).toMatch(/^Index: 1\/200 lines, \d+\/25600 bytes, 0 unrecognized lines$/);
-		} finally {
-			mockConfigValue.enabled = true;
-			await rm(dirB, { recursive: true, force: true });
-		}
-	});
-
 	// Plan E/next #2(a)：disabled 重启必须把上一 session 的 memoryDir 清掉 —— 光靠状态行的
 	// 两行输出只能证明「memoryDir 与 store 至少有一个被清了」（`/memory` 的守卫是 `||`），
 	// 所以这里再用 `/memory unlock` 钉一次 memoryDir 本身：它拿到的必须是**本 cwd** 的目录，
@@ -1778,7 +1708,7 @@ describe("index wiring (integration)", () => {
 			expect(notify.mock.calls[0][1]).toBe("info");
 			expect(notify.mock.calls[0][0].split("\n")).toEqual([
 				"Memory: disabled",
-				"Dir: not initialized (run /memory on)",
+				'Dir: not initialized — set "enabled": true in memory.json and restart',
 			]);
 			expect(notify.mock.calls[0][0]).not.toContain(dir);
 
@@ -1827,33 +1757,8 @@ describe("index wiring (integration)", () => {
 		}
 	});
 
-	// Review Focus #1：初始化中途抛错不得留下「enabled=true 但没有 store」的半状态。
-	it("/memory on rolls the switch back when initialisation fails", async () => {
-		mockConfigValue.enabled = false;
-		const notify = vi.fn();
-		const { pi, tools, commands, handlers } = createFakePi();
-		memoryFactory(pi as any);
-		await handlers["session_start"][0]({}, uiCtx());
-		dirOverrideRef.current = () => {
-			throw new Error("no writable home");
-		};
-
-		await commands["memory"].handler("on", uiCtx(uiWith(notify)));
-
-		expect(notify).toHaveBeenCalledTimes(1);
-		expect(notify.mock.calls[0]).toEqual(["Failed to initialize memory: no writable home", "error"]);
-		expect(tools).toHaveLength(0);
-
-		// 回滚是可观测的：状态行说 disabled，而且没有半初始化的目录
-		await commands["memory"].handler("", uiCtx(uiWith(notify)));
-		expect(notify.mock.calls[1][0].split("\n")).toEqual([
-			"Memory: disabled",
-			"Dir: not initialized (run /memory on)",
-		]);
-	});
-
 	// Review Focus #2 的另一半：disabled 启动必须清掉上一 session 的 injectedFiles，
-	// 否则 `/memory on` 之后同一条 entry 在本会话再也不会浮现。
+	// 否则改配置重启重新启用后，同一条 entry 在新会话也不会浮现。
 	it("a disabled restart clears the injected-file set", async () => {
 		const injectedAtCall: Array<Set<string>> = [];
 		scanEntriesMock.mockResolvedValue([
@@ -1866,40 +1771,23 @@ describe("index wiring (integration)", () => {
 		});
 		injectSurfacedContentMock.mockResolvedValue("<relevant_memories>x</relevant_memories>");
 
-		const { pi, commands, handlers } = createFakePi();
+		const { pi, handlers } = createFakePi();
 		memoryFactory(pi as any);
 		await handlers["session_start"][0]({}, uiCtx());
 		await handlers["before_agent_start"][0](sectionsEvent("ssh?"), uiCtx());
 
 		mockConfigValue.enabled = false;
 		await handlers["session_start"][0]({}, uiCtx());
-		await commands["memory"].handler("on", uiCtx(uiWith()));
+		// 中途 `/memory on` 已删除：重新启用只有「改配置 + 重启」一条路（新的 session_start）。
+		// 这条 enabled 重启**不会**再清 injectedFiles（只有 disabled 分支调 resetSessionState），
+		// 所以下一次 surfacing 看到的集合就是 disabled 重启留下的结果。
+		mockConfigValue.enabled = true;
+		await handlers["session_start"][0]({}, uiCtx());
 		await handlers["before_agent_start"][0](sectionsEvent("ssh?"), uiCtx());
 
 		expect(injectedAtCall).toHaveLength(2);
 		expect(injectedAtCall[0]).toEqual(new Set());
 		expect(injectedAtCall[1]).toEqual(new Set());
-	});
-
-	it("tool execute throws when memory is disabled", async () => {
-		mockConfigValue.enabled = false;
-		const { createMemoryTool } = await import("../src/memory-tool");
-		const tool = createMemoryTool({
-			getMemoryDir: () => dir,
-			getStore: () => null,
-			getConfig: () => ({
-				memIndexMaxLines: 200,
-				memIndexMaxBytes: 25600,
-				sessionSearch: { maxSessions: 10, maxMatches: 5 },
-			}),
-			getEnabled: () => false,
-			searchSessions: async () => "",
-			cwd: () => dir,
-		});
-
-		await expect(
-			tool.execute("id", { action: "list" }, undefined, undefined, undefined as any),
-		).rejects.toThrow("Memory is disabled (run /memory on)");
 	});
 
 	it("tool execute throws when the store is not initialized", async () => {
@@ -1912,7 +1800,6 @@ describe("index wiring (integration)", () => {
 				memIndexMaxBytes: 25600,
 				sessionSearch: { maxSessions: 10, maxMatches: 5 },
 			}),
-			getEnabled: () => true,
 			searchSessions: async () => "",
 			cwd: () => dir,
 		});

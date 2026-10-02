@@ -67,7 +67,6 @@ export interface MemoryToolDeps {
 	/** `session_start` 之后才有值；为 null 时工具报「未初始化」而不是崩。 */
 	getStore: () => MemoryStore | null;
 	getConfig: () => MemoryToolConfig;
-	getEnabled: () => boolean;
 	searchSessions: (cwd: string, query: string, cfg: { maxSessions: number; maxMatches: number }) => Promise<string>;
 	cwd: () => string;
 }
@@ -194,7 +193,6 @@ export function createMemoryTool(deps: MemoryToolDeps, options: MemoryToolOption
 		},
 		// biome-ignore lint/suspicious/noExplicitAny: execute params
 		async execute(_id: string, params: any, _signal: AbortSignal | undefined, _onUpdate: any, ctx: any) {
-			if (!deps.getEnabled()) throw new Error("Memory is disabled (run /memory on)");
 			const store = deps.getStore();
 			if (!store) throw new Error("Memory not initialized (no session_start yet)");
 			const cfg = deps.getConfig();

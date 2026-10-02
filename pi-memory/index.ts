@@ -171,6 +171,17 @@ export default function (pi: ExtensionAPI) {
 	 */
 	const inFlight = new Set<Promise<unknown>>();
 
+	/**
+	 * 清空本 session 的运行时状态。三条早退路径（disabled / 配置错误 / 初始化失败）共用：
+	 * 残留上一 session 的 store 会让后续写入落到别的项目目录（Plan C ledger R51）。
+	 */
+	function resetSessionState(): void {
+		memoryDir = null;
+		store = null;
+		indexSnapshot = "";
+		injectedFiles.clear();
+	}
+
 	/** 登记一个后台 promise，settle 后自动摘掉；返回同一个 promise 以便调用方继续链式处理。 */
 	function track<T>(promise: Promise<T>): Promise<T> {
 		inFlight.add(promise);
@@ -187,7 +198,6 @@ export default function (pi: ExtensionAPI) {
 		getStore: () => store,
 		// biome-ignore lint/style/noNonNullAssertion: config 在 session_start 里赋值，工具执行必然晚于它
 		getConfig: () => config!,
-		getEnabled: () => config?.enabled ?? false,
 		searchSessions,
 		cwd: () => currentCwd,
 	};
@@ -195,18 +205,13 @@ export default function (pi: ExtensionAPI) {
 	/**
 	 * 建立本 session 的记忆运行时：目录 → store → 迁移 → 索引来源 → 注册工具。
 	 *
-	 * `session_start` 与 `/memory on` 共用。以 `enabled: false` 启动的会话也必须能中途打开：
-	 * 否则本 session 的 `memory` 工具永远报 "Memory not initialized"，而 `/memory unlock`
-	 * （崩溃遗留 `.lock` 的**唯一**人工入口，spec §19）也不可达（Plan C ledger R50）。
-	 *
-	 * 返回 `false` 当且仅当 config 缺失或 `enabled` 为 false；抛错 = 初始化失败，由调用方决定
-	 * 怎么收拾（`/memory on` 必须回滚开关，不得留下「enabled=true 但没有 store」的半状态）。
+	 * 只在 `session_start` 调用，且调用方已确认 `config.enabled`（中途启用路径已随 `/memory on` 删除）。
+	 * 抛错 = 初始化失败，由调用方转成配置错误态（`configError`）。
 	 * `reason` 只有 `session_start` 会传：resume / fork / reload 用 transcript 的录制值（D14）。
 	 */
-	async function initMemory(ctx: ExtensionContext, reason?: string): Promise<boolean> {
-		// 先拷到 const：`config` 是工厂作用域的 let，异步回调里 TS 不保留外层收窄。
-		const cfg = config;
-		if (!cfg?.enabled) return false;
+	async function initMemory(ctx: ExtensionContext, reason?: string): Promise<void> {
+		// biome-ignore lint/style/noNonNullAssertion: 调用方已确认 enabled
+		const cfg = config!;
 		currentCwd = ctx.cwd;
 		const dir = await resolveMemoryDir(cfg, ctx.cwd);
 		const activeStore = new MemoryStore({
@@ -242,7 +247,6 @@ export default function (pi: ExtensionAPI) {
 		// sessionEntryToContextMessages）才回退磁盘读。
 		// 录制值**不再 re-sanitize**：写入当年已经净化过，而 sanitizeForInjection 是幂等的 ——
 		// 保持字节恒等更利于缓存。
-		// `/memory on` 不传 reason：中途打开的会话没有可重放的录制值，从磁盘读。
 		const useRecorded = reason === "resume" || reason === "fork" || reason === "reload";
 		const recorded = useRecorded ? readRecordedMemoryIndex(ctx.sessionManager) : null;
 		indexSnapshot =
@@ -256,24 +260,16 @@ export default function (pi: ExtensionAPI) {
 			);
 			toolRegistered = true;
 		}
-		return true;
 	}
 	pi.on("session_start", async (event, ctx) => {
-		// 先重置限流配额：本 session 若以 disabled 启动（下面提前 return），用户中途
-		// `/memory on` 之后仍应拿到一次失败通知 —— 否则上一 session 残留的 true 会一直吞掉它。
+		// 先重置限流配额：冷启动与 disabled 会话都要有干净的一次失败通知配额。
 		extractErrorNotified = false;
 		config = await loadConfig(ctx);
-		// 返回值真的用上：`false` = 本 session 没建起来（`enabled` 为假时 initMemory 提前返回）。
-		// 把复位与提前返回并到这一个分支里，`enabled` 的判定只有 initMemory 一处。
-		if (!(await initMemory(ctx, (event as { reason?: string }).reason))) {
-			// 跨 session 复位：上一个 session 可能是 enabled 的、甚至 cwd 不同。留着的话，
-			// 本 session 中途 `/memory on` 会拿上一个项目的 store 继续写（Plan C ledger R51）。
-			memoryDir = null;
-			store = null;
-			indexSnapshot = "";
-			injectedFiles.clear();
+		if (!config.enabled) {
+			resetSessionState();
 			return;
 		}
+		await initMemory(ctx, (event as { reason?: string }).reason);
 
 		// nudge
 		// 先拷到 const：initMemory 里赋的值，TS 在本函数的控制流里看不到收窄。
@@ -507,36 +503,10 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("memory", {
-		description: "Show memory status, toggle enabled, or remove a stale lock",
+		description: "Show memory status or remove a stale lock",
 		handler: async (args, ctx) => {
 			if (!config) {
 				ctx.ui.notify("Memory not initialized.", "info");
-				return;
-			}
-			if (args === "off" || args === "on") {
-				config = { ...config, enabled: args === "on" };
-				if (args === "on") {
-					// 以 disabled 启动的会话在这里才真正建起 store / 注册工具（见 initMemory）。
-					let ok = false;
-					try {
-						ok = await initMemory(ctx);
-					} catch (e) {
-						// Review Focus #1：不得留下「enabled=true 但没有 store」的半状态。
-						config = { ...config, enabled: false };
-						ctx.ui.notify(`Failed to initialize memory: ${e instanceof Error ? e.message : String(e)}`, "error");
-						return;
-					}
-					// 返回值也真实使用：false = 这次没建起来（initMemory 看到的 enabled 是假）。
-					// 当前不可达：进入前刚把 `enabled` 置 true，而 initMemory 只在 `!cfg?.enabled` 时
-					// 返回 false。若将来 initMemory 的契约变宽（别的原因也返回 false），这里的文案要同步。
-					if (!ok) {
-						config = { ...config, enabled: false };
-						ctx.ui.notify("Failed to initialize memory: memory is disabled", "error");
-						return;
-					}
-				}
-				// `off` 只翻开关、保留 state：状态命令仍能显示目录与条目数。
-				ctx.ui.notify(`Memory ${args}`, "info");
 				return;
 			}
 			if (args === "unlock") {
@@ -563,9 +533,9 @@ export default function (pi: ExtensionAPI) {
 			const activeStore = store;
 			const dir = memoryDir;
 			if (!dir || !activeStore) {
-				// 以 disabled 启动、还没 `/memory on`：报两行而不是一句笼统的 "not initialized" ——
-				// 开关状态本身就是诊断信息，第二行直接告诉用户下一步做什么。
-				const notReady = [`Memory: ${config.enabled ? "enabled" : "disabled"}`, "Dir: not initialized (run /memory on)"];
+				// 唯一可达的「没有 store」原因是配置里 enabled 为假（中途启用已删除）：
+				// 直接告诉用户去哪改、改完要重启。
+				const notReady = ["Memory: disabled", 'Dir: not initialized — set "enabled": true in memory.json and restart'];
 				ctx.ui.notify(notReady.join("\n"), "info");
 				return;
 			}

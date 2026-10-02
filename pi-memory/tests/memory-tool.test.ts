@@ -15,7 +15,6 @@ import {
 
 let dir: string;
 let store: MemoryStore;
-let enabled: boolean;
 
 const CFG = (memoryDir: string, over: Partial<StoreConfig> = {}): StoreConfig => ({
 	memoryDir,
@@ -34,7 +33,6 @@ function deps(over: Partial<MemoryToolDeps> = {}): MemoryToolDeps {
 			memIndexMaxBytes: store.cfg.indexMaxBytes,
 			sessionSearch: { maxSessions: 10, maxMatches: 5 },
 		}),
-		getEnabled: () => enabled,
 		searchSessions: async () => "session hits",
 		cwd: () => dir,
 		...over,
@@ -58,7 +56,6 @@ function schemaOf(tool: { parameters: unknown }): any {
 beforeEach(async () => {
 	dir = await mkdtemp(join(tmpdir(), "mem-tool-"));
 	store = new MemoryStore(CFG(dir));
-	enabled = true;
 });
 afterEach(async () => {
 	await rm(dir, { recursive: true, force: true });
@@ -364,12 +361,6 @@ describe("dream-only actions", () => {
 });
 
 describe("guards 与写选项透传", () => {
-	it("throws when memory is disabled", async () => {
-		enabled = false;
-		const tool = createMemoryTool(deps());
-		await expect(run(tool, { action: "list" })).rejects.toThrow("Memory is disabled (run /memory on)");
-	});
-
 	it("throws when the store is not initialized yet", async () => {
 		const tool = createMemoryTool(deps({ getStore: () => null }));
 		await expect(run(tool, { action: "list" })).rejects.toThrow("Memory not initialized (no session_start yet)");
