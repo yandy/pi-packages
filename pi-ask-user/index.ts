@@ -1570,7 +1570,7 @@ export default function (pi: ExtensionAPI) {
 			allowMultiple: Type.Optional(Type.Boolean({ description: "Allow selecting multiple options. Default: false" })),
 			allowFreeform: Type.Optional(Type.Boolean({ description: "Add a freeform text option. Default: true" })),
 			allowComment: Type.Optional(
-				Type.Boolean({ description: "Collect an optional comment after selecting one or more options. Default: false" }),
+				Type.Boolean({ description: "Collect an optional comment after selecting one or more options. Default: true" }),
 			),
 			displayMode: Type.Optional(
 				StringEnum(["overlay", "inline"] as const, {
@@ -1609,7 +1609,7 @@ export default function (pi: ExtensionAPI) {
 				options: rawOptions = [],
 				allowMultiple = false,
 				allowFreeform = true,
-				allowComment = false,
+				allowComment = true,
 				displayMode,
 				overlayToggleKey,
 				commentToggleKey,
