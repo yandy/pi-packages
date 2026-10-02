@@ -344,6 +344,18 @@ describe("readRecordedMemoryIndex 优先用宿主的 buildSessionProjection", ()
 		expect(converter).not.toHaveBeenCalled();
 	});
 
+	// Plan E/next #3：`{ messages: [] }` 是**有效投影**（空会话），不是「投影不可用」——
+	// 不能因为它是空的就回落 entry 重放（那会把被 compaction 丢弃的历史又搬回来）。
+	it("treats an empty projection as valid and never falls back to the entry replay", () => {
+		const converter = vi.fn(passthrough);
+		const sm = projecting([]);
+
+		expect(readRecordedMemoryIndex(sm, { sessionEntryToContextMessages: converter })).toBeNull();
+		expect(sm.buildSessionProjection).toHaveBeenCalledTimes(1);
+		expect(sm.getEntries).not.toHaveBeenCalled();
+		expect(converter).not.toHaveBeenCalled();
+	});
+
 	// 投影路径根本不需要转换函数：旧 SDK 没有 `sessionEntryToContextMessages` 导出时，
 	// 只要宿主够新（有 buildSessionProjection）就仍能拿到录制值。
 	it("works without a converter at all", () => {

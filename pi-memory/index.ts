@@ -6,7 +6,7 @@ import { loadConfig, type MemoryConfig, type SessionPersistenceConfig } from "./
 import { runDream } from "./src/dream";
 import { indexCapacity, parseEntryIndex } from "./src/entry-index";
 import { runExtract } from "./src/extract";
-import { readLockStatus } from "./src/fs-lock";
+import { readLockStatus, type LockInfo } from "./src/fs-lock";
 import { readRecordedMemoryIndex } from "./src/index-source";
 import { applyIndexSection, buildIndexSection, buildInjection, injectSurfacedContent, runSideQuery, scanEntries } from "./src/inject";
 import {
@@ -95,31 +95,41 @@ async function readMigrationStatus(memoryDir: string): Promise<string> {
 	}
 }
 
+/** `<op> (pid N on <hostname>, started <ISO>)` —— `/memory` 的 Lock 行与 unlock 确认框共用同一份描述。 */
+function describeHolder(holder: LockInfo): string {
+	return `${holder.op} (pid ${holder.pid} on ${holder.hostname}, started ${holder.startedAt})`;
+}
+
 /**
  * `/memory` 的锁状态行。只读不碰 —— `.lock` **永不自动回收**（spec §5.1），
  * 人工清除只有 `/memory unlock` 一个入口。
+ * 带 hostname：`.lock` 是目录里的普通文件，同一份目录可能被挂载到多台机器（spec §19），
+ * 只看 pid 无法判断持有者是不是“本机的另一个进程”。
  */
 async function lockStatusLine(memoryDir: string): Promise<string> {
 	const status = await readLockStatus(join(memoryDir, LOCK_FILE));
 	if (status.kind === "absent") return "free";
 	if (status.kind === "unreadable") return "unreadable — run /memory unlock";
-	return `held by ${status.holder.op} (pid ${status.holder.pid}, started ${status.holder.startedAt})`;
+	return `held by ${describeHolder(status.holder)}`;
 }
 
 /**
  * `/memory unlock`：崩溃遗留的 `.lock` 的**唯一**人工清除入口（spec §19 风险表）。
  * 必须显式 confirm，而且只删 `.lock` 本身 —— 删错了就是两个写入者同时持有锁。
+ * confirm 正文在 `held` 时点名持有者：只有人能把「本机已死的进程」与「别的机器正在跑」区分开。
  */
 async function unlockMemory(memoryDir: string, ui: ExtensionUIContext): Promise<void> {
 	const lockPath = join(memoryDir, LOCK_FILE);
-	if ((await readLockStatus(lockPath)).kind === "absent") {
+	const status = await readLockStatus(lockPath);
+	if (status.kind === "absent") {
 		ui.notify("No lock present.", "info");
 		return;
 	}
-	const ok = await ui.confirm(
-		"Memory lock",
-		"Remove the memory lock file? Only do this if no memory operation is running.",
-	);
+	const question =
+		status.kind === "held"
+			? `Remove the memory lock file? It is held by ${describeHolder(status.holder)}. Only do this if no memory operation is running.`
+			: "Remove the memory lock file? Only do this if no memory operation is running.";
+	const ok = await ui.confirm("Memory lock", question);
 	if (!ok) return;
 	try {
 		await unlink(lockPath);
@@ -253,7 +263,9 @@ export default function (pi: ExtensionAPI) {
 		// `/memory on` 之后仍应拿到一次失败通知 —— 否则上一 session 残留的 true 会一直吞掉它。
 		extractErrorNotified = false;
 		config = await loadConfig(ctx);
-		if (!config.enabled) {
+		// 返回值真的用上：`false` = 本 session 没建起来（`enabled` 为假时 initMemory 提前返回）。
+		// 把复位与提前返回并到这一个分支里，`enabled` 的判定只有 initMemory 一处。
+		if (!(await initMemory(ctx, (event as { reason?: string }).reason))) {
 			// 跨 session 复位：上一个 session 可能是 enabled 的、甚至 cwd 不同。留着的话，
 			// 本 session 中途 `/memory on` 会拿上一个项目的 store 继续写（Plan C ledger R51）。
 			memoryDir = null;
@@ -262,7 +274,6 @@ export default function (pi: ExtensionAPI) {
 			injectedFiles.clear();
 			return;
 		}
-		await initMemory(ctx, (event as { reason?: string }).reason);
 
 		// nudge
 		// 先拷到 const：initMemory 里赋的值，TS 在本函数的控制流里看不到收窄。
@@ -506,12 +517,21 @@ export default function (pi: ExtensionAPI) {
 				config = { ...config, enabled: args === "on" };
 				if (args === "on") {
 					// 以 disabled 启动的会话在这里才真正建起 store / 注册工具（见 initMemory）。
+					let ok = false;
 					try {
-						await initMemory(ctx);
+						ok = await initMemory(ctx);
 					} catch (e) {
 						// Review Focus #1：不得留下「enabled=true 但没有 store」的半状态。
 						config = { ...config, enabled: false };
 						ctx.ui.notify(`Failed to initialize memory: ${e instanceof Error ? e.message : String(e)}`, "error");
+						return;
+					}
+					// 返回值也真实使用：false = 这次没建起来（initMemory 看到的 enabled 是假）。
+					// 当前不可达：进入前刚把 `enabled` 置 true，而 initMemory 只在 `!cfg?.enabled` 时
+					// 返回 false。若将来 initMemory 的契约变宽（别的原因也返回 false），这里的文案要同步。
+					if (!ok) {
+						config = { ...config, enabled: false };
+						ctx.ui.notify("Failed to initialize memory: memory is disabled", "error");
 						return;
 					}
 				}
@@ -522,7 +542,21 @@ export default function (pi: ExtensionAPI) {
 			if (args === "unlock") {
 				// `unlock` 只需要**目录**、不需要 store：以 disabled 启动的会话也要能清锁
 				//（它是崩溃遗留 `.lock` 的唯一人工入口，spec §19）。
-				await unlockMemory(memoryDir ?? (await resolveMemoryDir(config, ctx.cwd)), ctx.ui);
+				let dir = memoryDir;
+				if (!dir) {
+					// 目录解析本身可能失败（HOME 不可写 / git 探测炸了）：失败要变成一条可读的 error
+					// 通知，不能冒泡成命令 handler 抛错（那只会变成一条裸的宿主报错）。
+					try {
+						dir = await resolveMemoryDir(config, ctx.cwd);
+					} catch (e) {
+						ctx.ui.notify(
+							`Failed to resolve memory dir: ${e instanceof Error ? e.message : String(e)}`,
+							"error",
+						);
+						return;
+					}
+				}
+				await unlockMemory(dir, ctx.ui);
 				return;
 			}
 			// 先拷到 const：`store` / `memoryDir` 是工厂作用域的 let，异步回调里 TS 不保留外层收窄。

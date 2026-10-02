@@ -15,7 +15,7 @@ export interface SessionPersistenceConfig {
 
 /** Shared defaults that per-task configs inherit. Per-task fields override these. */
 export interface DefaultsConfig {
-	/** Shared model for dream / extract / the side query. Ships as `"deepseek/deepseek-flash"`; an unresolvable value falls back to the parent session's model. */
+	/** Shared model for dream / extract / the side query. Ships as `"deepseek/deepseek-flash"`; a value that cannot be resolved (no exact `"provider/id"` and no fuzzy match in the registry) falls back to the parent session's model. */
 	model?: string;
 	sessionPersistence?: SessionPersistenceConfig;
 }

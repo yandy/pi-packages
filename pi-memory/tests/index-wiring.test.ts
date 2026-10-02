@@ -9,8 +9,9 @@ const { mockConfigValue, dirRef, dirOverrideRef } = vi.hoisted(() => ({
 		memoryDir: "",
 		memIndexMaxLines: 200,
 		memIndexMaxBytes: 25600,
-		memIndexInjectMaxLines: 20,
-		memIndexInjectMaxBytes: 3072,
+		// 显式注入的 fixture 不该对 DEFAULT_CONFIG 撒谎（D3：注入预算与写入口径同值）。
+		memIndexInjectMaxLines: 200,
+		memIndexInjectMaxBytes: 25600,
 		lock: { timeoutMs: 5000, snapshotKeep: 5 },
 		dream: { nudgeAfterSessions: 5, nudgeAfterHours: 24, thinkLevel: "high" as const },
 		sessionSearch: { maxSessions: 10, maxMatches: 5 },
@@ -37,7 +38,7 @@ const { mockConfigValue, dirRef, dirOverrideRef } = vi.hoisted(() => ({
 	dirOverrideRef: { current: null as null | ((cwd: string) => string) },
 }));
 
-const { scanEntriesMock, runSideQueryMock, injectSurfacedContentMock, runExtractMock, runDreamMock, shouldNudgeMock, readRecordedMemoryIndexMock, readDreamMetaMock } =
+const { scanEntriesMock, runSideQueryMock, injectSurfacedContentMock, runExtractMock, runDreamMock, shouldNudgeMock, readRecordedMemoryIndexMock, readDreamMetaMock, writeDreamMetaMock } =
 	vi.hoisted(() => ({
 		scanEntriesMock: vi.fn(),
 		runSideQueryMock: vi.fn(),
@@ -47,6 +48,7 @@ const { scanEntriesMock, runSideQueryMock, injectSurfacedContentMock, runExtract
 		shouldNudgeMock: vi.fn(),
 		readRecordedMemoryIndexMock: vi.fn(),
 		readDreamMetaMock: vi.fn(),
+		writeDreamMetaMock: vi.fn().mockResolvedValue(undefined),
 	}));
 
 vi.mock("../src/config", () => ({
@@ -60,7 +62,7 @@ vi.mock("../src/paths", () => ({
 
 vi.mock("../src/nudge", () => ({
 	shouldNudge: shouldNudgeMock,
-	writeDreamMeta: vi.fn().mockResolvedValue(undefined),
+	writeDreamMeta: writeDreamMetaMock,
 	readDreamMeta: readDreamMetaMock,
 }));
 
@@ -187,6 +189,8 @@ describe("index wiring (integration)", () => {
 		readRecordedMemoryIndexMock.mockReturnValue(null);
 		readDreamMetaMock.mockReset();
 		readDreamMetaMock.mockResolvedValue({ lastDreamAt: null });
+		writeDreamMetaMock.mockReset();
+		writeDreamMetaMock.mockResolvedValue(undefined);
 	});
 
 	afterEach(async () => {
@@ -519,7 +523,10 @@ describe("index wiring (integration)", () => {
 	});
 
 	// ── Plan C（spec §14 通知）────────────────────────────────────────────
-	/** 把待处理的微任务与定时器回调全部排空（extract 的 .then/.catch 是异步的）。 */
+	/**
+	 * 排空待处理的微任务（extract / dream 的 `.then` 链是异步的）。
+	 * **只覆盖一层宏任务**：链上每个 `await` 都要再 flush 一次，别指望一次 flush 跑完整条链。
+	 */
 	async function flush(): Promise<void> {
 		await new Promise((resolve) => setTimeout(resolve, 0));
 	}
@@ -930,6 +937,31 @@ describe("index wiring (integration)", () => {
 		expect(session.notify).toHaveBeenCalledWith("consolidated", "info");
 	});
 
+	// Plan E/next #11：nudge 链的失败分支也要盖到 —— rejected 的值不一定是 Error
+	//（pi 的模型层可能抛字符串），`dreamFailureMessage` 必须用 `String(e)` 渲染。
+	it("renders a non-Error nudge dream failure with String(e)", async () => {
+		shouldNudgeMock.mockResolvedValue({ nudge: true, message: "💡 dream", sessions: 7, newEntries: 7 });
+		let rejectDream: ((reason?: unknown) => void) | undefined;
+		runDreamMock.mockImplementationOnce(
+			() =>
+				new Promise<string>((_resolve, reject) => {
+					rejectDream = reject;
+				}),
+		);
+		const notify = vi.fn();
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		await handlers["session_start"][0](
+			{},
+			uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn().mockResolvedValue(true), setStatus: vi.fn() } }),
+		);
+		rejectDream?.("model exploded");
+		await flush();
+
+		expect(notify).toHaveBeenCalledWith("Dream failed: model exploded", "error");
+	});
+
 	it("settles /dream without touching a disposed ctx", async () => {
 		let resolveDream: ((summary: string) => void) | undefined;
 		runDreamMock.mockImplementationOnce(
@@ -986,6 +1018,31 @@ describe("index wiring (integration)", () => {
 
 		expect(caught).toEqual([]);
 		expect(session.notify).toHaveBeenCalledWith("Dream failed: model exploded", "error");
+	});
+
+	// Plan E/next #11：success 分支里的 `writeDreamMeta` 自己抛错时，不能只走成功通知，
+	// 也不能变成无人接管的 rejection（它已被 `track` 登记，但 `.finally` 不会接住）。
+	it("/dream reports a failing writeDreamMeta instead of a success notification", async () => {
+		writeDreamMetaMock.mockRejectedValueOnce(new Error("meta write failed"));
+		const notify = vi.fn();
+		const confirm = vi.fn().mockResolvedValue(true);
+		const { pi, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+		// 完成回调里的 `SessionManager.list(cwd)` 会碰 getAgentDir()：隔离到本用例的 temp dir。
+		vi.stubEnv("PI_CODING_AGENT_DIR", join(dir, "agent"));
+		try {
+			const caught = await captureUnhandledRejections(async () => {
+				await commands["dream"].handler("", uiCtx({ hasUI: true, ui: { notify, confirm, setStatus: vi.fn() } }));
+				await flush();
+			});
+
+			expect(caught).toEqual([]);
+			expect(notify).toHaveBeenCalledTimes(1);
+			expect(notify.mock.calls[0]).toEqual(["Dream failed: meta write failed", "error"]);
+		} finally {
+			vi.unstubAllEnvs();
+		}
 	});
 
 	it("clears the shutdown give-up timer when the in-flight write finishes first", async () => {
@@ -1386,7 +1443,7 @@ describe("index wiring (integration)", () => {
 		expect(lines[3]).toBe("Entries: 1");
 		expect(lines[4]).toBe("Last dream: 2026-10-01T00:00:00.000Z");
 		expect(lines[5]).toBe("Migration: migrated at 2026-09-30T00:00:00.000Z (4 entries from 2 files)");
-		expect(lines[6]).toBe(`Lock: held by dream (pid ${process.pid}, started 2026-10-02T01:02:03.000Z)`);
+		expect(lines[6]).toBe(`Lock: held by dream (pid ${process.pid} on h, started 2026-10-02T01:02:03.000Z)`);
 	});
 
 	it("/memory reports a fresh directory as free / never / not needed", async () => {
@@ -1480,13 +1537,32 @@ describe("index wiring (integration)", () => {
 
 		await commands["memory"].handler("unlock", uiCtx({ hasUI: true, ui: { notify, confirm, setStatus: vi.fn() } }));
 
+		// held 的锁：confirm 正文必须点名持有者（op / pid / hostname / startedAt）
 		expect(confirm).toHaveBeenCalledWith(
 			"Memory lock",
-			"Remove the memory lock file? Only do this if no memory operation is running.",
+			`Remove the memory lock file? It is held by dream (pid ${process.pid} on h, started 2026-10-02T01:02:03.000Z). Only do this if no memory operation is running.`,
 		);
 		expect(await readdir(dir)).not.toContain(".lock");
 		expect(await readdir(dir)).toContain("keep.md");
 		expect(notify).toHaveBeenCalledWith("Memory lock removed.", "info");
+	});
+
+	// Plan E/next #1：`unlock` 不需要 store，但**解析目录本身**也可能失败（HOME 不可写、
+	// git 探测炸了）。失败必须变成一条 error 通知与干净返回，不能冒泡成 handler 抛错。
+	it("/memory unlock reports an unresolvable memory dir instead of throwing", async () => {
+		mockConfigValue.enabled = false;
+		const notify = vi.fn();
+		const { pi, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx()); // disabled：memoryDir 为 null
+		dirOverrideRef.current = () => {
+			throw new Error("no writable home");
+		};
+
+		await expect(commands["memory"].handler("unlock", uiCtx(uiWith(notify)))).resolves.toBeUndefined();
+
+		expect(notify).toHaveBeenCalledTimes(1);
+		expect(notify.mock.calls[0]).toEqual(["Failed to resolve memory dir: no writable home", "error"]);
 	});
 
 	it("/memory unlock leaves the lock alone when the user declines", async () => {
@@ -1499,7 +1575,10 @@ describe("index wiring (integration)", () => {
 
 		await commands["memory"].handler("unlock", uiCtx({ hasUI: true, ui: { notify, confirm, setStatus: vi.fn() } }));
 
-		expect(confirm).toHaveBeenCalled();
+		// 取消路径也必须先把持有者摆到用户面前（否则“要不要删”无从判断）
+		expect(confirm).toHaveBeenCalledTimes(1);
+		expect(confirm.mock.calls[0][0]).toBe("Memory lock");
+		expect(confirm.mock.calls[0][1]).toContain(`held by dream (pid ${process.pid} on h, started x)`);
 		expect(await readdir(dir)).toContain(".lock");
 		expect(notify).not.toHaveBeenCalled();
 	});
@@ -1574,7 +1653,7 @@ describe("index wiring (integration)", () => {
 
 		expect(confirm).toHaveBeenCalledWith(
 			"Memory lock",
-			"Remove the memory lock file? Only do this if no memory operation is running.",
+			`Remove the memory lock file? It is held by dream (pid ${process.pid} on h, started 2026-10-02T01:02:03.000Z). Only do this if no memory operation is running.`,
 		);
 		expect(await readdir(dir)).not.toContain(".lock");
 		expect(await readdir(dir)).toContain("keep.md");
@@ -1668,6 +1747,80 @@ describe("index wiring (integration)", () => {
 			expect(lines[1]).toBe(`Dir: ${join(dirB, ".memory")}`);
 			expect(lines[1]).not.toContain(dir);
 			expect(lines[2]).toMatch(/^Index: 1\/200 lines, \d+\/25600 bytes, 0 unrecognized lines$/);
+		} finally {
+			mockConfigValue.enabled = true;
+			await rm(dirB, { recursive: true, force: true });
+		}
+	});
+
+	// Plan E/next #2(a)：disabled 重启必须把上一 session 的 memoryDir 清掉 —— 光靠状态行的
+	// 两行输出只能证明「memoryDir 与 store 至少有一个被清了」（`/memory` 的守卫是 `||`），
+	// 所以这里再用 `/memory unlock` 钉一次 memoryDir 本身：它拿到的必须是**本 cwd** 的目录，
+	// 而不是上一 session 的 dirA（否则会去删错项目的锁，真事故）。
+	it("/memory after a disabled restart never reports or unlocks the previous session's dir", async () => {
+		const dirB = await mkdtemp(join(tmpdir(), "mem-wiring-b-"));
+		const notify = vi.fn();
+		const confirm = vi.fn().mockResolvedValue(true);
+		const ctxB = () => uiCtx({ cwd: dirB, hasUI: true, ui: { notify, confirm, setStatus: vi.fn() } });
+		const lock = JSON.stringify({ pid: process.pid, hostname: "h", startedAt: "x", op: "dream" });
+		try {
+			const { pi, commands, handlers } = createFakePi();
+			memoryFactory(pi as any);
+			await handlers["session_start"][0]({}, uiCtx()); // enabled @ dirA
+
+			dirOverrideRef.current = (cwd) => join(cwd, ".memory");
+			mockConfigValue.enabled = false;
+			await handlers["session_start"][0]({}, uiCtx({ cwd: dirB }));
+
+			await commands["memory"].handler("", ctxB());
+
+			expect(notify).toHaveBeenCalledTimes(1);
+			expect(notify.mock.calls[0][1]).toBe("info");
+			expect(notify.mock.calls[0][0].split("\n")).toEqual([
+				"Memory: disabled",
+				"Dir: not initialized (run /memory on)",
+			]);
+			expect(notify.mock.calls[0][0]).not.toContain(dir);
+
+			// 两个目录各放一把锁：unlock 只能动本 cwd（dirB/.memory）的那把
+			await writeFile(join(dir, ".lock"), lock, "utf8");
+			await mkdir(join(dirB, ".memory"), { recursive: true });
+			await writeFile(join(dirB, ".memory", ".lock"), lock, "utf8");
+			notify.mockClear();
+
+			await commands["memory"].handler("unlock", ctxB());
+
+			expect(notify.mock.calls[0]).toEqual(["Memory lock removed.", "info"]);
+			expect(await readdir(join(dirB, ".memory"))).not.toContain(".lock");
+			expect(await readdir(dir)).toContain(".lock");
+		} finally {
+			mockConfigValue.enabled = true;
+			await rm(dirB, { recursive: true, force: true });
+		}
+	});
+
+	// Plan E/next #2(b)：`/dream` 的守卫是 `!config || !memoryDir || !activeStore`。store 残留
+	// 会真的对 dirA 起一轮 dream（而不只是打错一行状态）。
+	it("/dream refuses right after a disabled restart instead of dreaming the old dir", async () => {
+		const dirB = await mkdtemp(join(tmpdir(), "mem-wiring-b-"));
+		const notify = vi.fn();
+		// confirm 必须返回 true：它若为假值，disabled 分支即使没复位 store、守卫放行，`/dream`
+		// 也会先在 `!ok` 处 return —— `runDreamMock` 的断言就成了假承重（review Minor #2/#3）。
+		const confirm = vi.fn().mockResolvedValue(true);
+		const ctxB = () => uiCtx({ cwd: dirB, hasUI: true, ui: { notify, confirm, setStatus: vi.fn() } });
+		try {
+			const { pi, commands, handlers } = createFakePi();
+			memoryFactory(pi as any);
+			await handlers["session_start"][0]({}, uiCtx()); // enabled @ dirA
+
+			dirOverrideRef.current = (cwd) => join(cwd, ".memory");
+			mockConfigValue.enabled = false;
+			await handlers["session_start"][0]({}, uiCtx({ cwd: dirB }));
+
+			await commands["dream"].handler("", ctxB());
+
+			expect(notify).toHaveBeenCalledWith("Memory not initialized.", "info");
+			expect(runDreamMock).not.toHaveBeenCalled();
 		} finally {
 			mockConfigValue.enabled = true;
 			await rm(dirB, { recursive: true, force: true });

@@ -101,7 +101,7 @@ Writes are **surgical**: only the target line changes, hand-written headings, gr
 
 ### Capacity: 200 index lines ≈ 199 memories
 
-The index holds at most `memIndexMaxLines` (200) non-empty lines and `memIndexMaxBytes` (25600) bytes. Those 200 lines are **index lines, not memories**: `rebuildIndex` guarantees at least one header line — a hand-written header is kept verbatim, otherwise it writes `# Memory Index` — and hand-written headings, groups and comments count too. A rebuilt index therefore holds at most about **199 memories per project directory** (fewer if you keep hand-written headings). Exceeding the limit does **not** fail the write: the write succeeds and the tool returns an actionable warning telling the model to merge or drop entries (everything past the limit is invisible on the next load).
+The index holds at most `memIndexMaxLines` (200) non-empty lines and `memIndexMaxBytes` (25600) bytes. Those 200 lines are **index lines, not memories**: `rebuildIndex` guarantees at least one header line — an existing hand-written header is kept verbatim (trailing blank lines before the first entry are dropped), otherwise it writes `# Memory Index` — and hand-written headings, groups and comments count too. A rebuilt index therefore holds at most about **199 memories per project directory** (fewer if you keep hand-written headings). Exceeding the limit does **not** fail the write: the write succeeds and the tool returns an actionable warning telling the model to merge or drop entries (everything past the limit is invisible on the next load).
 
 This is why `/dream` is no longer optional housekeeping — it is **capacity management**. Run it (or accept the nudge) before you approach 199 memories.
 
@@ -148,25 +148,25 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
 | `memIndexInjectMaxBytes` | `25600` | Injection budget: max bytes of the index section (truncated with a `[truncated: …]` marker) |
 | `lock.timeoutMs` | `5000` | How long a write waits for the logical lock (single primitive) or the cross-process `.lock`. Migration uses a fixed 30s because it rewrites the whole directory inside the lock. Also the upper bound `session_shutdown` waits for in-flight writes |
 | `lock.snapshotKeep` | `5` | Rollback points kept in `.backups/` (directories named `migrate-*` are never pruned) |
-| `defaults.model` | `"deepseek/deepseek-flash"` | Shared model for all sub-tasks (dream / extract / side query); a per-task `model` overrides it, and an unresolvable or unset model falls back to the parent session's model |
+| `defaults.model` | `"deepseek/deepseek-flash"` | Shared model for all sub-tasks (dream / extract / side query); a per-task `model` overrides it; an unresolvable model (no exact `"provider/id"` and no fuzzy match in the registry) or an unset one falls back to the parent session's model |
 | `defaults.sessionPersistence.enabled` | `false` | Shared fallback: headless sub-sessions (extract / dream / side query) stay in memory by default |
 | `defaults.sessionPersistence.sessionDir` | `<project memory dir>/sessions/` | Custom directory for persisted headless sessions |
 | `dream.nudgeAfterSessions` | `5` | Sessions since the last dream before the nudge is shown |
 | `dream.nudgeAfterHours` | `24` | Hours since the last dream before the nudge is shown |
-| `dream.model` | — | Model for dream consolidation (`"provider/id"`). Falls back to `defaults.model` → parent model |
+| `dream.model` | — | Model for dream consolidation (`"provider/id"`). Falls back to `defaults.model` → parent model (when unresolvable) |
 | `dream.thinkLevel` | `"high"` | Thinking effort for the dream agent: `off` / `minimal` / `low` / `medium` / `high` / `xhigh` |
 | `dream.sessionPersistence.*` | inherits `defaults` | Persist dream sessions to disk (debug/audit) |
 | `sessionSearch.maxSessions` | `10` | Max sessions to scan for `search scope=sessions` |
 | `sessionSearch.maxMatches` | `5` | Max matches to return from history search |
 | `autoSurfacing.enabled` | `true` | ⭐ Enable per-turn entry auto-injection |
-| `autoSurfacing.model` | — | ⭐ Model for the relevance side query. Falls back to `defaults.model` → parent model |
+| `autoSurfacing.model` | — | ⭐ Model for the relevance side query. Falls back to `defaults.model` → parent model (when unresolvable) |
 | `autoSurfacing.thinkLevel` | `"off"` | ⭐ Thinking effort for the side query (`"off"` keeps it cheap) |
 | `autoSurfacing.maxFiles` | `3` | ⭐ Max entries to inject per turn |
 | `autoSurfacing.maxEntryBytes` | `3072` | ⭐ Max bytes of a single injected entry body (truncated). Replaces 1.x's `maxTopicBytes`, which is ignored |
 | `autoSurfacing.maxInjectionBytes` | `10240` | ⭐ Max total bytes of injected content per turn |
 | `autoSurfacing.sessionPersistence.*` | inherits `defaults` | Persist side-query sessions to disk |
 | `extractMemories.enabled` | `true` | ⭐ Enable per-turn memory extraction |
-| `extractMemories.model` | — | ⭐ Model for the extraction agent. Falls back to `defaults.model` → parent model |
+| `extractMemories.model` | — | ⭐ Model for the extraction agent. Falls back to `defaults.model` → parent model (when unresolvable) |
 | `extractMemories.thinkLevel` | `"high"` | ⭐ Thinking effort for extraction |
 | `extractMemories.maxContextTokens` | `2000` | ⭐ Budget for the rendered conversation (`× 4` characters; the middle is trimmed first, head and tail are kept, user messages are dropped last) |
 | `extractMemories.maxToolResultChars` | `500` | ⭐ Per-message cap for a rendered `tool_result` |
@@ -289,7 +289,7 @@ Lock: free
 
 - `Index` uses the **write** capacity (`memIndexMax*`) and reports how many non-empty lines could not be parsed as index lines (the `# Memory Index` header and hand-written headings count). CRLF (or lone CR) line endings are normalised to LF before parsing, and the next write emits LF too, so a `MEMORY.md` re-saved by a Windows editor does **not** raise this count.
 - `Migration` is `migrated at …`, `not needed` (the marker says nothing had to be moved) or `pending` (no marker / unreadable marker → the next `session_start` retries).
-- `Lock` is `free`, `held by <op> (pid N, started <ISO>)`, or `unreadable — run /memory unlock`.
+- `Lock` is `free`, `held by <op> (pid N on <hostname>, started <ISO>)`, or `unreadable — run /memory unlock`. `/memory unlock` shows the same holder line in its confirmation prompt.
 - In a session started with `enabled: false`, nothing is initialized at boot: `/memory` reports `Memory: disabled` plus `Dir: not initialized (run /memory on)`, `/memory on` initializes the store on the spot (and registers the `memory` tool for this session), and `/memory unlock` works without a store. If initialization fails, `/memory on` says so (`Failed to initialize memory: …`) and leaves the switch off.
 
 ### `/dream`
