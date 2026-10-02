@@ -2,7 +2,7 @@ import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { loadConfig, type MemoryConfig, type SessionPersistenceConfig } from "./src/config";
+import { loadConfig, modelConfigErrors, type MemoryConfig, type SessionPersistenceConfig } from "./src/config";
 import { runDream } from "./src/dream";
 import { indexCapacity, parseEntryIndex } from "./src/entry-index";
 import { runExtract } from "./src/extract";
@@ -17,6 +17,7 @@ import {
 } from "./src/memory-tool";
 import { LOCK_FILE, MemoryStore } from "./src/memory-store";
 import { MIGRATED_FILE, migrateIfNeeded } from "./src/migrate";
+import { resolveModel } from "./src/model-resolver";
 import { readDreamMeta, shouldNudge, writeDreamMeta } from "./src/nudge";
 import { resolveMemoryDir } from "./src/paths";
 import { searchSessions } from "./src/session-search";
@@ -157,6 +158,8 @@ export default function (pi: ExtensionAPI) {
 	let config: MemoryConfig | null = null;
 	/** 唯一写入通道（D4）。session_start 里建，之后工具 / extract / dream 都只经它读写。 */
 	let store: MemoryStore | null = null;
+	/** 配置错误态（模型校验失败或初始化失败）。/memory 重复显示它，直到用户改好配置并重启。 */
+	let configError: string | null = null;
 	let indexSnapshot = "";
 	let toolRegistered = false;
 	let currentCwd = "";
@@ -180,6 +183,14 @@ export default function (pi: ExtensionAPI) {
 		store = null;
 		indexSnapshot = "";
 		injectedFiles.clear();
+	}
+
+	/** 统一的配置错误态：记录 → 清空运行时 → 通知。无 UI 时只记录（`/memory` 仍可读到）。 */
+	function failConfig(errors: string[], ctx: ExtensionContext): void {
+		configError = errors.join("\n");
+		resetSessionState();
+		if (!ctx.hasUI) return;
+		ctx.ui.notify(`pi-memory config error:\n${errors.map((e) => `- ${e}`).join("\n")}`, "error");
 	}
 
 	/** 登记一个后台 promise，settle 后自动摘掉；返回同一个 promise 以便调用方继续链式处理。 */
@@ -265,11 +276,25 @@ export default function (pi: ExtensionAPI) {
 		// 先重置限流配额：冷启动与 disabled 会话都要有干净的一次失败通知配额。
 		extractErrorNotified = false;
 		config = await loadConfig(ctx);
+		configError = null;
 		if (!config.enabled) {
 			resetSessionState();
 			return;
 		}
-		await initMemory(ctx, (event as { reason?: string }).reason);
+		// 启动校验（spec §2.3）：模型键缺失 / 不可解析 → 本会话**完全不初始化**
+		//（不解析目录、不建 store、不注册工具），错误态由 `/memory` 重复显示。
+		const errors = modelConfigErrors(config, (value) => resolveModel(value, ctx.modelRegistry) !== undefined);
+		if (errors.length > 0) {
+			failConfig(errors, ctx);
+			return;
+		}
+		try {
+			await initMemory(ctx, (event as { reason?: string }).reason);
+		} catch (e) {
+			// spec §2.4：初始化失败走同一个错误态，不冒泡给宿主（那只会变成一条裸报错）。
+			failConfig([`Failed to initialize memory: ${e instanceof Error ? e.message : String(e)}`], ctx);
+			return;
+		}
 
 		// nudge
 		// 先拷到 const：initMemory 里赋的值，TS 在本函数的控制流里看不到收窄。
@@ -533,10 +558,12 @@ export default function (pi: ExtensionAPI) {
 			const activeStore = store;
 			const dir = memoryDir;
 			if (!dir || !activeStore) {
-				// 唯一可达的「没有 store」原因是配置里 enabled 为假（中途启用已删除）：
-				// 直接告诉用户去哪改、改完要重启。
-				const notReady = ["Memory: disabled", 'Dir: not initialized — set "enabled": true in memory.json and restart'];
-				ctx.ui.notify(notReady.join("\n"), "info");
+				// configError 非空 = 校验或初始化失败（`/memory` 是用户重读错误的唯一入口）；
+				// 否则只可能是配置里 enabled 为假。
+				const lines = configError
+					? ["Memory: misconfigured", "Dir: not initialized", ...configError.split("\n").map((e) => `- ${e}`)]
+					: ["Memory: disabled", 'Dir: not initialized — set "enabled": true in memory.json and restart'];
+				ctx.ui.notify(lines.join("\n"), "info");
 				return;
 			}
 			// 容量用写入那一侧的口径（memIndexMax*）：用户要知道的是「还能不能写」，

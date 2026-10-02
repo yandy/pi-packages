@@ -13,6 +13,7 @@ const { mockConfigValue, dirRef, dirOverrideRef } = vi.hoisted(() => ({
 		memIndexInjectMaxLines: 200,
 		memIndexInjectMaxBytes: 25600,
 		lock: { timeoutMs: 5000, snapshotKeep: 5 },
+		defaults: { model: "test/model", sessionPersistence: { enabled: false } },
 		dream: { nudgeAfterSessions: 5, nudgeAfterHours: 24, thinkLevel: "high" as const },
 		sessionSearch: { maxSessions: 10, maxMatches: 5 },
 		autoSurfacing: {
@@ -51,9 +52,15 @@ const { scanEntriesMock, runSideQueryMock, injectSurfacedContentMock, runExtract
 		writeDreamMetaMock: vi.fn().mockResolvedValue(undefined),
 	}));
 
-vi.mock("../src/config", () => ({
-	loadConfig: vi.fn().mockImplementation(async () => ({ ...mockConfigValue, memoryDir: dirRef.current })),
-}));
+// 只替换 loadConfig，保留真实导出：modelConfigErrors / requiredModels 是 session_start 校验的
+// 被测对象，mock 掉整个模块会让它们在使用处变成 undefined。
+vi.mock("../src/config", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../src/config")>();
+	return {
+		...actual,
+		loadConfig: vi.fn().mockImplementation(async () => ({ ...mockConfigValue, memoryDir: dirRef.current })),
+	};
+});
 
 vi.mock("../src/paths", () => ({
 	resolveMemoryDir: vi.fn().mockImplementation(async (_config: unknown, cwd: string) =>
@@ -140,12 +147,25 @@ function createFakePi() {
 	};
 }
 
+/** resolveModel 只用到这三个方法；ids 形如 "provider/id"。 */
+function fakeRegistry(ids: string[]) {
+	const models = ids.map((full) => {
+		const [provider, id] = full.split("/");
+		return { provider, id, name: id };
+	});
+	return {
+		getAll: () => models,
+		getAvailable: () => models,
+		find: (provider: string, id: string) => models.find((m) => m.provider === provider && m.id === id),
+	} as any;
+}
+
 function uiCtx(over: Record<string, unknown> = {}) {
 	return {
 		cwd: dirRef.current,
 		hasUI: false,
 		isProjectTrusted: () => true,
-		modelRegistry: {},
+		modelRegistry: fakeRegistry(["test/model"]),
 		model: undefined,
 		sessionManager: { getEntries: () => [], getLeafId: () => null },
 		...over,
@@ -191,11 +211,16 @@ describe("index wiring (integration)", () => {
 		readDreamMetaMock.mockResolvedValue({ lastDreamAt: null });
 		writeDreamMetaMock.mockReset();
 		writeDreamMetaMock.mockResolvedValue(undefined);
+
+		// 模型 fixture：默认走 defaults.model；各用例按需覆盖 mockConfigValue 的 model 段
+		mockConfigValue.defaults = { model: "test/model", sessionPersistence: { enabled: false } };
+		mockConfigValue.dream.model = undefined;
+		mockConfigValue.extractMemories.model = undefined;
+		mockConfigValue.autoSurfacing.model = undefined;
 	});
 
 	afterEach(async () => {
 		await rm(dir, { recursive: true, force: true });
-		delete mockConfigValue.defaults;
 		delete (mockConfigValue.autoSurfacing as any).sessionPersistence;
 		mockConfigValue.extractMemories.enabled = false;
 		mockConfigValue.lock = { timeoutMs: 5000, snapshotKeep: 5 };
@@ -1198,7 +1223,8 @@ describe("index wiring (integration)", () => {
 	});
 
 	it("resolveDefault: defaults.sessionPersistence flows through to runSideQuery", async () => {
-		mockConfigValue.defaults = { sessionPersistence: { enabled: true } };
+		// 保留 model：启动校验（设计 §2.3）要求 defaults.model 存在，否则 session_start 直接失败
+		mockConfigValue.defaults = { model: "test/model", sessionPersistence: { enabled: true } };
 		const { pi, handlers } = createFakePi();
 		memoryFactory(pi as any);
 		await handlers["session_start"][0]({}, uiCtx());
@@ -1214,7 +1240,8 @@ describe("index wiring (integration)", () => {
 	});
 
 	it("resolveDefault: per-task sessionPersistence overrides defaults", async () => {
-		mockConfigValue.defaults = { sessionPersistence: { enabled: true } };
+		// 同上：覆盖 defaults 时必须带上 model，否则启动校验失败
+		mockConfigValue.defaults = { model: "test/model", sessionPersistence: { enabled: true } };
 		(mockConfigValue.autoSurfacing as any).sessionPersistence = { enabled: false };
 		const { pi, handlers } = createFakePi();
 		memoryFactory(pi as any);
@@ -1807,5 +1834,110 @@ describe("index wiring (integration)", () => {
 		await expect(
 			tool.execute("id", { action: "list" }, undefined, undefined, undefined as any),
 		).rejects.toThrow("Memory not initialized (no session_start yet)");
+	});
+
+	// ── 模型校验（设计 §2）─────────────────────────────────────────────
+	it("reports missing models and does not initialise anything", async () => {
+		mockConfigValue.defaults = { sessionPersistence: { enabled: false } };
+		mockConfigValue.autoSurfacing.enabled = true;
+		const notify = vi.fn();
+		const { pi, tools, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		await handlers["session_start"][0]({}, uiCtx(uiWith(notify)));
+
+		expect(tools).toHaveLength(0);
+		expect(notify).toHaveBeenCalledTimes(1);
+		expect(notify.mock.calls[0][1]).toBe("error");
+		expect(notify.mock.calls[0][0].split("\n")).toEqual([
+			"pi-memory config error:",
+			'- no model for dream — set "dream.model" or "defaults.model" in memory.json',
+			'- no model for autoSurfacing — set "autoSurfacing.model" or "defaults.model" in memory.json',
+		]);
+
+		// `Memory: misconfigured` + 同样的错误行，且不解析目录
+		await commands["memory"].handler("", uiCtx(uiWith(notify)));
+		const status = notify.mock.calls[1][0].split("\n");
+		expect(status.slice(0, 2)).toEqual(["Memory: misconfigured", "Dir: not initialized"]);
+		expect(status.slice(2)).toEqual([
+			'- no model for dream — set "dream.model" or "defaults.model" in memory.json',
+			'- no model for autoSurfacing — set "autoSurfacing.model" or "defaults.model" in memory.json',
+		]);
+	});
+
+	it("reports a configured but unresolvable model", async () => {
+		mockConfigValue.dream.model = "nope/nope";
+		const notify = vi.fn();
+		const { pi, tools, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		await handlers["session_start"][0]({}, uiCtx(uiWith(notify)));
+
+		expect(tools).toHaveLength(0);
+		expect(notify.mock.calls[0][1]).toBe("error");
+		expect(notify.mock.calls[0][0]).toBe(
+			'pi-memory config error:\n- model "nope/nope" for dream is not resolvable (unknown id or missing credentials)',
+		);
+	});
+
+	it("reports a configured model that the registry cannot see (no credentials)", async () => {
+		const notify = vi.fn();
+		const { pi, tools, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		await handlers["session_start"][0]({}, uiCtx({ ...uiWith(notify), modelRegistry: fakeRegistry([]) }));
+
+		expect(tools).toHaveLength(0);
+		expect(notify.mock.calls[0][1]).toBe("error");
+		expect(notify.mock.calls[0][0]).toContain('model "test/model" for dream is not resolvable');
+	});
+
+	it("initialises when only defaults.model is set", async () => {
+		mockConfigValue.extractMemories.enabled = true;
+		const notify = vi.fn();
+		const { pi, tools, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		await handlers["session_start"][0]({}, uiCtx(uiWith(notify)));
+
+		expect(tools).toHaveLength(1);
+		expect(notify).not.toHaveBeenCalled();
+	});
+
+	it("reports nothing when memory is disabled even with no models configured", async () => {
+		mockConfigValue.enabled = false;
+		mockConfigValue.defaults = { sessionPersistence: { enabled: false } };
+		const notify = vi.fn();
+		const { pi, tools, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		await handlers["session_start"][0]({}, uiCtx(uiWith(notify)));
+
+		expect(tools).toHaveLength(0);
+		expect(notify).not.toHaveBeenCalled();
+		await commands["memory"].handler("", uiCtx(uiWith(notify)));
+		expect(notify.mock.calls[0][0].split("\n")).toEqual([
+			"Memory: disabled",
+			'Dir: not initialized — set "enabled": true in memory.json and restart',
+		]);
+	});
+
+	it("turns an initialisation failure into the config error state", async () => {
+		dirOverrideRef.current = () => {
+			throw new Error("no writable home");
+		};
+		const notify = vi.fn();
+		const { pi, tools, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		await expect(handlers["session_start"][0]({}, uiCtx(uiWith(notify)))).resolves.toBeUndefined();
+
+		expect(tools).toHaveLength(0);
+		expect(notify.mock.calls[0][1]).toBe("error");
+		expect(notify.mock.calls[0][0]).toBe(
+			"pi-memory config error:\n- Failed to initialize memory: no writable home",
+		);
+		await commands["memory"].handler("", uiCtx(uiWith(notify)));
+		expect(notify.mock.calls[1][0].split("\n")[0]).toBe("Memory: misconfigured");
 	});
 });
