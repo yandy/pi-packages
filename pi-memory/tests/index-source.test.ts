@@ -313,3 +313,104 @@ describe("readRecordedMemoryIndex", () => {
 		expect(readRecordedMemoryIndex(sm, { sessionEntryToContextMessages: passthrough })).toBe("second");
 	});
 });
+
+// ── Plan D（D2：优先用宿主的 buildSessionProjection 重放）────────────────────
+describe("readRecordedMemoryIndex 优先用宿主的 buildSessionProjection", () => {
+	/**
+	 * 0.99.2 的 `SessionManager#buildSessionProjection()`：无参实例方法，返回
+	 * `{ entries, messages, thinkingLevel, model }`。宿主自己算 system 消息用的就是它
+	 * （session-manager.js:882 `getCurrentSystemMessage(this.buildSessionProjection().messages)`）。
+	 * `getEntries` 默认抛错：一旦被调用，用例就红（投影路径不得再走 entry 重放）。
+	 */
+	function projecting(messages: unknown[], over: Record<string, unknown> = {}) {
+		return {
+			getEntries: vi.fn((): unknown[] => {
+				throw new Error("getEntries must not be called on the projection path");
+			}),
+			getLeafId: vi.fn(() => null),
+			buildSessionProjection: vi.fn(() => ({ messages })),
+			...over,
+		};
+	}
+
+	it("reads the recorded value from the projection and never touches getEntries or the converter", () => {
+		const raw = "- [SSH](ssh.md) — recorded value\n";
+		const converter = vi.fn(passthrough);
+		const sm = projecting([systemMessage({ preamble: "p", memory_index: wrapSection(raw) })]);
+
+		expect(readRecordedMemoryIndex(sm, { sessionEntryToContextMessages: converter })).toBe(raw);
+		expect(sm.buildSessionProjection).toHaveBeenCalledTimes(1);
+		expect(sm.getEntries).not.toHaveBeenCalled();
+		expect(converter).not.toHaveBeenCalled();
+	});
+
+	// 投影路径根本不需要转换函数：旧 SDK 没有 `sessionEntryToContextMessages` 导出时，
+	// 只要宿主够新（有 buildSessionProjection）就仍能拿到录制值。
+	it("works without a converter at all", () => {
+		converterRef.current = undefined;
+		const sm = projecting([systemMessage({ memory_index: "from-projection" })]);
+
+		expect(readRecordedMemoryIndex(sm)).toBe("from-projection");
+	});
+
+	// 双重 compaction：投影里只剩宿主保留的消息，而 getEntries 仍是全量旧数据 ——
+	// 必须以投影为准，否则极端会话 resume 时会冻结一份陈旧索引。
+	it("prefers the projection over the entry replay when the two disagree", () => {
+		const sm = projecting([systemMessage({ memory_index: "kept-by-host" })], {
+			getEntries: vi.fn(() => [entry(systemMessage({ memory_index: "pre-compaction" }))]),
+			buildContextEntries: vi.fn((entries: unknown[]) => entries),
+		});
+
+		expect(readRecordedMemoryIndex(sm, { sessionEntryToContextMessages: passthrough })).toBe("kept-by-host");
+	});
+
+	it("applies the same null-patch semantics to projected messages", () => {
+		const sm = projecting([systemMessage({ memory_index: "v1" }), systemMessage({ memory_index: null })]);
+
+		expect(readRecordedMemoryIndex(sm, { sessionEntryToContextMessages: passthrough })).toBeNull();
+		// 而且是真的走的投影路径（而不是因为 getEntries 抛错而降级成 null）
+		expect(sm.getEntries).not.toHaveBeenCalled();
+	});
+
+	// Review Focus #3：投影抛错 / 形状不对 → 必须回落原路径，结果与没有投影时逐字相同。
+	it("falls back to the entry replay when buildSessionProjection throws", () => {
+		const sm = {
+			getEntries: () => [entry(systemMessage({ memory_index: "from-entries" }))],
+			getLeafId: () => null,
+			buildSessionProjection: () => {
+				throw new Error("projection unavailable");
+			},
+		};
+
+		expect(readRecordedMemoryIndex(sm, { sessionEntryToContextMessages: passthrough })).toBe("from-entries");
+	});
+
+	it("falls back when the projection is not an object or carries no messages array", () => {
+		const entries = [entry(systemMessage({ memory_index: "from-entries" }))];
+		for (const projection of [undefined, null, "nope", {}, { messages: "nope" }, { messages: {} }]) {
+			const sm = {
+				getEntries: () => entries,
+				getLeafId: () => null,
+				buildSessionProjection: () => projection,
+			};
+
+			expect(
+				readRecordedMemoryIndex(sm, { sessionEntryToContextMessages: passthrough }),
+				String(JSON.stringify(projection)),
+			).toBe("from-entries");
+		}
+	});
+
+	it("returns null when neither the projection nor the fallback can replay", () => {
+		converterRef.current = undefined;
+		const sm = {
+			getEntries: () => [entry(systemMessage({ memory_index: "unreachable" }))],
+			getLeafId: () => null,
+			buildSessionProjection: () => {
+				throw new Error("nope");
+			},
+		};
+
+		expect(readRecordedMemoryIndex(sm)).toBeNull();
+	});
+});
