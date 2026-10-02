@@ -1,6 +1,7 @@
 import type { AssistantMessage, Context, Model, UserMessage } from "@earendil-works/pi-ai";
 import type { VisionConfig } from "./config.js";
 import type { DecodedImage } from "./image.js";
+import { resolveModel, type VisionModelRegistry } from "./model-resolver.js";
 import type { ReasoningOptions } from "./reasoning.js";
 
 export type CompleteFn = (
@@ -27,25 +28,17 @@ export interface VisionCallResult {
 
 export type ResolveResult = { ok: true; model: Model<any> } | { ok: false; error: string };
 
-interface ModelLookup {
-	find(provider: string, id: string): Model<any> | undefined;
-}
-
-export function resolveVisionModel(registry: ModelLookup, config: VisionConfig): ResolveResult {
-	if (!config.provider || !config.model) {
-		return {
-			ok: false,
-			error: "Vision model not configured. Run: /vision config provider <p> ; /vision config model <m>",
-		};
+/**
+ * Resolve the configured vision model. The configured string is either
+ * "provider/id" or a fuzzy name; resolution also rejects models without image input.
+ */
+export function resolveVisionModel(registry: VisionModelRegistry, config: VisionConfig): ResolveResult {
+	if (!config.model?.trim()) {
+		return { ok: false, error: "Vision model not configured. Run: /vision config model <m>" };
 	}
-	const model = registry.find(config.provider, config.model);
-	if (!model) {
-		return { ok: false, error: `Vision model not found: ${config.provider}/${config.model}` };
-	}
-	if (!Array.isArray(model.input) || !model.input.includes("image")) {
-		return { ok: false, error: `Model ${config.provider}/${config.model} does not support image input` };
-	}
-	return { ok: true, model };
+	const resolved = resolveModel(config.model, registry);
+	if (typeof resolved === "string") return { ok: false, error: resolved };
+	return { ok: true, model: resolved };
 }
 
 export async function callVision(input: VisionCallInput, completeFn: CompleteFn): Promise<VisionCallResult> {

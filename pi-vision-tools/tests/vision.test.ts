@@ -1,15 +1,14 @@
 import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
-import type { VisionConfig } from "../src/config.js";
 import type { DecodedImage } from "../src/image.js";
 import { type CompleteFn, callVision, resolveVisionModel } from "../src/vision.js";
 
-const fakeModel = (input: string[]) =>
+const fakeModel = (input: string[], id = "m", provider = "p") =>
 	({
-		id: "m",
-		name: "m",
+		id,
+		name: id,
 		api: "openai-completions",
-		provider: "p",
+		provider,
 		baseUrl: "https://x",
 		reasoning: false,
 		input,
@@ -19,34 +18,42 @@ const fakeModel = (input: string[]) =>
 	}) as Model<any>;
 
 describe("resolveVisionModel", () => {
+	const gpt4o = fakeModel(["text", "image"], "gpt-4o", "openai");
+	const haiku = fakeModel(["text", "image"], "claude-haiku-4-5", "anthropic");
+	const textOnly = fakeModel(["text"], "text-only", "openai");
+	const models = [gpt4o, haiku, textOnly];
 	const registry = {
-		find: (provider: string, id: string) =>
-			provider === "openai" && id === "gpt-4o" ? fakeModel(["text", "image"]) : undefined,
+		find: (provider: string, id: string) => models.find((m) => m.provider === provider && m.id === id),
+		getAll: () => models,
+		getAvailable: () => models,
 	};
 
-	it("resolves a configured vision model", () => {
-		const cfg: VisionConfig = { provider: "openai", model: "gpt-4o", enabled: "auto" };
-		const r = resolveVisionModel(registry, cfg);
-		expect(r.ok).toBe(true);
+	it("resolves a configured provider/id", () => {
+		const r = resolveVisionModel(registry, { model: "openai/gpt-4o", enabled: "auto" });
+		expect(r.ok && r.model).toBe(gpt4o);
 	});
 
-	it("errors when provider/model not configured", () => {
+	it("resolves a fuzzy model name", () => {
+		const r = resolveVisionModel(registry, { model: "haiku", enabled: "auto" });
+		expect(r.ok && r.model).toBe(haiku);
+	});
+
+	it("errors when no model is configured", () => {
 		const r = resolveVisionModel(registry, { enabled: "auto" });
 		expect(r.ok).toBe(false);
 		expect((r as { error: string }).error).toMatch(/not configured/i);
 	});
 
-	it("errors when model not found in registry", () => {
-		const r = resolveVisionModel(registry, { provider: "openai", model: "nope", enabled: "auto" });
+	it("errors when the model cannot be resolved", () => {
+		const r = resolveVisionModel(registry, { model: "nope", enabled: "auto" });
 		expect(r.ok).toBe(false);
 		expect((r as { error: string }).error).toMatch(/not found/i);
 	});
 
-	it("errors when the model lacks image input", () => {
-		const reg = { find: () => fakeModel(["text"]) };
-		const r = resolveVisionModel(reg, { provider: "openai", model: "text-only", enabled: "auto" });
+	it("errors when the resolved model cannot accept images", () => {
+		const r = resolveVisionModel(registry, { model: "openai/text-only", enabled: "auto" });
 		expect(r.ok).toBe(false);
-		expect((r as { error: string }).error).toMatch(/vision|image/i);
+		expect((r as { error: string }).error).toMatch(/image input/i);
 	});
 });
 

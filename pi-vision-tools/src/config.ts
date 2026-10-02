@@ -5,7 +5,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-ai";
 export type VisionEnabledState = "auto" | "on" | "off";
 
 export interface VisionConfig {
-	provider?: string;
+	/** "provider/modelId" or a fuzzy model name (e.g. "haiku", "qwen vl"). */
 	model?: string;
 	enabled: VisionEnabledState;
 	defaultReasoning?: ThinkingLevel | "off";
@@ -25,13 +25,6 @@ export function parseConfig(raw: unknown): VisionConfig {
 	const obj = raw as Record<string, unknown>;
 
 	const cfg: VisionConfig = { enabled: "auto" };
-
-	if (obj.provider !== undefined) {
-		if (typeof obj.provider !== "string" || obj.provider.length === 0) {
-			throw new Error("vision-tools config: provider must be a non-empty string");
-		}
-		cfg.provider = obj.provider;
-	}
 
 	if (obj.model !== undefined) {
 		if (typeof obj.model !== "string" || obj.model.length === 0) {

@@ -12,24 +12,23 @@ describe("parseConfig", () => {
 	});
 
 	it("accepts a fully valid config", () => {
-		const raw = { provider: "openai", model: "gpt-4o", enabled: "on", defaultReasoning: "high" };
+		const raw = { model: "openai/gpt-4o", enabled: "on", defaultReasoning: "high" };
 		expect(parseConfig(raw)).toEqual(raw);
 	});
 
 	it("defaults enabled to 'auto' when omitted", () => {
-		expect(parseConfig({ provider: "openai", model: "gpt-4o" })).toEqual({
-			provider: "openai",
+		expect(parseConfig({ model: "gpt-4o" })).toEqual({
 			model: "gpt-4o",
 			enabled: "auto",
 		});
 	});
 
-	it("rejects an invalid enabled value", () => {
-		expect(() => parseConfig({ enabled: "maybe" })).toThrow(/enabled/);
+	it("ignores a legacy provider key", () => {
+		expect(parseConfig({ provider: "openai", model: "gpt-4o" })).toEqual({ model: "gpt-4o", enabled: "auto" });
 	});
 
-	it("rejects a non-string provider", () => {
-		expect(() => parseConfig({ provider: 123 })).toThrow(/provider/);
+	it("rejects an invalid enabled value", () => {
+		expect(() => parseConfig({ enabled: "maybe" })).toThrow(/enabled/);
 	});
 
 	it("rejects a non-string model", () => {
@@ -41,7 +40,7 @@ describe("parseConfig", () => {
 	});
 
 	it("strips unknown keys", () => {
-		expect(parseConfig({ provider: "x", extra: 1 })).toEqual({ provider: "x", enabled: "auto" });
+		expect(parseConfig({ model: "x", extra: 1 })).toEqual({ model: "x", enabled: "auto" });
 	});
 });
 
@@ -70,15 +69,15 @@ describe("loadConfig / saveConfig (filesystem)", () => {
 	});
 
 	it("round-trips a config through save then load", async () => {
-		const cfg: VisionConfig = { provider: "openai", model: "gpt-4o", enabled: "off", defaultReasoning: "low" };
+		const cfg: VisionConfig = { model: "openai/gpt-4o", enabled: "off", defaultReasoning: "low" };
 		await saveConfig(dir, cfg);
 		expect(await loadConfig(dir)).toEqual(cfg);
 	});
 
 	it("write is not pretty / is valid JSON", async () => {
-		await saveConfig(dir, { provider: "p", model: "m", enabled: "auto" });
+		await saveConfig(dir, { model: "m", enabled: "auto" });
 		const raw = await readFile(configPath(dir), "utf8");
-		expect(JSON.parse(raw)).toEqual({ provider: "p", model: "m", enabled: "auto" });
+		expect(JSON.parse(raw)).toEqual({ model: "m", enabled: "auto" });
 	});
 
 	it("saveConfig creates the agent dir if missing", async () => {

@@ -26,7 +26,7 @@ export default function (pi: ExtensionAPI) {
 			pi.setActiveTools(active.filter((t) => t !== TOOL_NAME));
 		}
 		if (ctx.hasUI) {
-			const label = footerLabel(config, enabled);
+			const label = footerLabel(enabled, resolveVisionModel(ctx.modelRegistry, config));
 			ctx.ui.setStatus(STATUS_KEY, label);
 		}
 	};
@@ -106,7 +106,7 @@ export default function (pi: ExtensionAPI) {
 
 			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(resolved.model);
 			if (!auth.ok || !auth.apiKey) {
-				const msg = auth.ok ? `No API key for ${config.provider}/${config.model}` : auth.error;
+				const msg = auth.ok ? `No API key for ${resolved.model.provider}/${resolved.model.id}` : auth.error;
 				return { content: [{ type: "text", text: msg }], details: { error: msg }, isError: true };
 			}
 
@@ -150,7 +150,7 @@ export default function (pi: ExtensionAPI) {
 			if (result.errorMessage) {
 				return {
 					content: [{ type: "text", text: `Vision model error: ${result.errorMessage}` }],
-					details: { error: result.errorMessage, model: `${config.provider}/${config.model}` },
+					details: { error: result.errorMessage, model: `${resolved.model.provider}/${resolved.model.id}` },
 					isError: true,
 				};
 			}
@@ -158,7 +158,7 @@ export default function (pi: ExtensionAPI) {
 			return {
 				content: [{ type: "text", text: result.text }],
 				details: {
-					model: `${config.provider}/${config.model}`,
+					model: `${resolved.model.provider}/${resolved.model.id}`,
 					usage: result.usage,
 					compressed,
 					mimeType,
@@ -175,12 +175,20 @@ export default function (pi: ExtensionAPI) {
 			const sub = parts[0];
 
 			const notifyConfig = () => {
-				const target = config.provider && config.model ? `${config.provider}/${config.model}` : "(unconfigured)";
+				const resolved = resolveVisionModel(ctx.modelRegistry, config);
+				const target = !config.model
+					? "(unconfigured)"
+					: resolved.ok
+						? `${resolved.model.provider}/${resolved.model.id}`
+						: `${config.model} (unresolved)`;
 				const visionCap = callingModelHasVision(ctx.model) ? "yes" : "no";
-				ctx.ui.notify(
-					`vision: ${target}\nenabled: ${config.enabled} (effective: ${enabled ? "on" : "off"})\ncalling model has vision: ${visionCap}`,
-					"info",
-				);
+				const lines = [
+					`vision: ${target}`,
+					`enabled: ${config.enabled} (effective: ${enabled ? "on" : "off"})`,
+					`calling model has vision: ${visionCap}`,
+				];
+				if (!resolved.ok) lines.push(resolved.error);
+				ctx.ui.notify(lines.join("\n"), "info");
 			};
 
 			if (!sub || sub === "status") {
@@ -198,21 +206,26 @@ export default function (pi: ExtensionAPI) {
 
 			if (sub === "config") {
 				const key = parts[1];
-				const val = parts[2];
-				if (key === "provider" && val) config = { ...config, provider: val };
-				else if (key === "model" && val) config = { ...config, model: val };
+				const val = parts.slice(2).join(" ") || undefined;
+				if (key === "model" && val) config = { ...config, model: val };
 				else if (key === "default-reasoning" && val) config = { ...config, defaultReasoning: val as VisionReasoning };
 				else {
-					ctx.ui.notify("Usage: /vision config provider <p> | model <m> | default-reasoning <level>", "warning");
+					ctx.ui.notify("Usage: /vision config model <m> | default-reasoning <level>", "warning");
 					return;
 				}
 				await saveConfig(getAgentDir(), config);
 				refresh(ctx);
-				ctx.ui.notify(`vision ${key} = ${val}`, "info");
+				if (key === "model") {
+					const resolved = resolveVisionModel(ctx.modelRegistry, config);
+					if (resolved.ok) ctx.ui.notify(`vision model = ${resolved.model.provider}/${resolved.model.id}`, "info");
+					else ctx.ui.notify(resolved.error, "warning");
+				} else {
+					ctx.ui.notify(`vision ${key} = ${val}`, "info");
+				}
 				return;
 			}
 
-			ctx.ui.notify("Usage: /vision [config provider <p> | config model <m> | on | off | auto | status]", "warning");
+			ctx.ui.notify("Usage: /vision [config model <m> | on | off | auto | status]", "warning");
 		},
 	});
 }
