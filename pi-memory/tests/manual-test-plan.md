@@ -89,7 +89,8 @@ Lock: free
    **预期**：出现 `Recalled: N entries`（N = 本轮注入的块数），且 agent 答得出来。同一会话内同一条 entry 不会重复浮现（再问一次不再有 `Recalled`，除非发生过 compaction）。
 3. 聊一些**不显式说"记住"**的偏好（例如 `我以后都用 pnpm，别再用 npm 了`），等这一轮结束。
    **预期**：稍后出现 `Extracted 1 memory.`（或复数 `Extracted 2 memories.`）；`/memory` 的 `Entries` 增加；没有任何写入时**不会**弹通知。
-4. extract 失败限流：模型现在在 `session_start` 校验，把 `extractMemories.model` 改成不存在的 id 只会让整个会话进入 misconfigured 态（见测试 2），无法再用来触发运行时失败；本条不再单独验证。
+4. extract 失败限流：模型 id 现在在 `session_start` 就校验，改成一个不存在的 id 只会让整个会话进入 misconfigured 态（见测试 2），触发不了运行时失败。改用一个**能解析、但请求时才失败**的模型：把 `extractMemories.model` 指向一个 provider key 已被吊销 / 已过期的模型（或者先正常启动会话，`session_start` 之后再把网络断开 / 关掉代理），然后聊一轮并等它结束。
+   **预期**：出现一条 error 通知 `Extract failed: <原因>`，而且**同一会话内最多一次** —— 再聊几轮不会重复弹（配额只在 `session_start` 重置）；`/memory` 的 `Entries` 不增加；下一轮模型恢复可用时 extract 照常工作。
 5. headless 不通知：`pi -p "记住：x"`（print 模式）不应弹出任何 `Saved:` / `Recalled:` 通知，但磁盘上确实写入了。
 
 ---

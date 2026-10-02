@@ -189,7 +189,7 @@ With `enabled: false` nothing runs — not even `/dream` or the nudge — so no 
 - `no model for <task> — set "<task>.model" or "defaults.model" in memory.json`
 - `model "<value>" for <task> is not resolvable (unknown id or missing credentials)`
 
-Fix `memory.json` and restart the session — the config is read once at session start.
+Fix `memory.json` and restart the session — the config is read once at session start. In headless/print sessions a config error is silent (no notification is shown), so check `/memory` in an interactive session.
 
 ## How it works
 
@@ -197,7 +197,7 @@ Fix `memory.json` and restart the session — the config is read once at session
 
 | Event | What pi-memory does |
 |---|---|
-| `session_start` | Load config → resolve the memory directory → **pick the index value and freeze it** (disk for `startup`/`new`; the recorded transcript value for `resume`/`fork`/`reload`) → register the `memory` tool (once, five actions) → rebuild the manifest cache → dream nudge |
+| `session_start` | Load config → validate the required models (a failure means nothing is initialised) → resolve the memory directory → **pick the index value and freeze it** (disk for `startup`/`new`; the recorded transcript value for `resume`/`fork`/`reload`) → register the `memory` tool (once, five actions) → rebuild the manifest cache → dream nudge |
 | `before_agent_start` | Write the frozen value into `sections["memory_index"]` (**unconditionally, every turn**), then auto-surfacing (main session, not a subagent) |
 | `agent_end` | Fire the async extractor; notify `Extracted N memories.` when it wrote something, or `Extract failed: …` once per session |
 | `session_compact` | Clear the injected-file set **and re-read the index from disk** — the only in-session refresh point |
@@ -318,7 +318,7 @@ It cannot touch files directly: it only has the seven `memory` actions. A summar
 
 ## 1.x data
 
-Automatic 1.x → 2.0 migration has been removed. Legacy topic files (frontmatter with `updated` and without `created`/`modified`, so they fail the five-field v2 frontmatter check) stay on disk untouched and are **invisible to the memory system** — `parseEntryFile` requires the five v2 frontmatter fields, so such files never appear in the index, injections, `list`/`read`/`search`, and `/dream` cannot see them either (dream only has the `memory` tool). To recover their content by hand, split each `## ` section into its own file with v2 frontmatter (`name`, `description`, `type`, `created`, `modified`). Directories created by an earlier migration (`MEMORY.md` backups under `.backups/migrate-*/originals/`) are still never pruned and keep the pre-2.0 text.
+Automatic 1.x → 2.0 migration has been removed. Legacy topic files (frontmatter with `updated` and without `created`/`modified`, so they fail the five-field v2 frontmatter check) stay on disk untouched and are **invisible to the memory system** — `parseEntryFile` requires the five v2 frontmatter fields, so such files never appear in the index, injections, `list`/`read`/`search`, and `/dream` cannot see them either (dream only has the `memory` tool). To recover their content by hand, split each `## ` section into its own file with v2 frontmatter (`name`, `description`, `type`, `created`, `modified`). Directories created by an earlier migration are still never pruned: `.backups/migrate-*/originals/` holds the pre-2.0 topic files, and `.backups/migrate-*/MEMORY.md` the index as it was then.
 
 ## File layout
 

@@ -189,7 +189,7 @@ headless 会话默认落在 `<项目记忆目录>/sessions/` —— 在项目记
 - `no model for <task> — set "<task>.model" or "defaults.model" in memory.json`
 - `model "<value>" for <task> is not resolvable (unknown id or missing credentials)`
 
-改好 `memory.json` 后重启会话 —— 配置在启动时只读一次。
+改好 `memory.json` 后重启会话 —— 配置在启动时只读一次。headless / print 会话里配置错误是静默的（不会弹任何通知），所以要在交互式会话里用 `/memory` 确认。
 
 ## 工作原理
 
@@ -197,7 +197,7 @@ headless 会话默认落在 `<项目记忆目录>/sessions/` —— 在项目记
 
 | 事件 | pi-memory 做什么 |
 |---|---|
-| `session_start` | 加载配置 → 解析记忆目录 → **确定索引值并冻结**（`startup`/`new` 读磁盘；`resume`/`fork`/`reload` 重放 transcript 取录制值）→ 注册 `memory` 工具（仅首次，5 个 action）→ 重建清单缓存 → dream 提醒检查 |
+| `session_start` | 加载配置 → 校验必需模型（失败即什么都不初始化）→ 解析记忆目录 → **确定索引值并冻结**（`startup`/`new` 读磁盘；`resume`/`fork`/`reload` 重放 transcript 取录制值）→ 注册 `memory` 工具（仅首次，5 个 action）→ 重建清单缓存 → dream 提醒检查 |
 | `before_agent_start` | 把冻结值写进 `sections["memory_index"]`（**每一轮、无条件**），然后做 auto-surfacing（主会话且非子 agent） |
 | `agent_end` | 触发异步 extract；写入成功通知 `Extracted N memories.`，失败通知 `Extract failed: …`（每会话一次） |
 | `session_compact` | 清空已注入集合，**并从磁盘重读索引** —— 会话内唯一的刷新点 |
@@ -318,7 +318,7 @@ Lock: free
 
 ## 1.x 数据
 
-1.x → 2.0 的自动迁移已被删除。legacy topic 文件（frontmatter 带 `updated` 而缺 `created`/`modified`，过不了 v2 的五字段 frontmatter 校验）原样留在磁盘上，且**对记忆系统不可见** —— `parseEntryFile` 要求 v2 的五个 frontmatter 字段，所以这类文件不会出现在索引、注入、`list`/`read`/`search` 里，`/dream` 也看不到它们（dream 只有 `memory` 工具）。要人工恢复内容，把每个 `## ` 段拆成带 v2 frontmatter（`name`、`description`、`type`、`created`、`modified`）的独立文件。旧版迁移建过的目录（`.backups/migrate-*/originals/` 下的 `MEMORY.md` 备份）仍然永不被裁剪，2.0 之前的正文还在里面。
+1.x → 2.0 的自动迁移已被删除。legacy topic 文件（frontmatter 带 `updated` 而缺 `created`/`modified`，过不了 v2 的五字段 frontmatter 校验）原样留在磁盘上，且**对记忆系统不可见** —— `parseEntryFile` 要求 v2 的五个 frontmatter 字段，所以这类文件不会出现在索引、注入、`list`/`read`/`search` 里，`/dream` 也看不到它们（dream 只有 `memory` 工具）。要人工恢复内容，把每个 `## ` 段拆成带 v2 frontmatter（`name`、`description`、`type`、`created`、`modified`）的独立文件。旧版迁移建过的目录仍然永不被裁剪：`.backups/migrate-*/originals/` 里是 2.0 之前的 topic 原文，`.backups/migrate-*/MEMORY.md` 是当时的索引。
 
 ## 文件布局
 
