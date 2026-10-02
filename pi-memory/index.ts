@@ -179,7 +179,12 @@ export default function (pi: ExtensionAPI) {
 		getStore: () => store,
 		// biome-ignore lint/style/noNonNullAssertion: config 在 session_start 里赋值，工具执行必然晚于它
 		getConfig: () => config!,
-		getInitError: () => configError,
+		getUnavailableMessage: () =>
+			configError
+				? `Memory not initialized — ${configError.split("\n")[0]}; run /memory for details`
+				: config?.enabled === false
+					? 'Memory is disabled — set "enabled": true in memory.json and restart'
+					: null,
 		searchSessions,
 		cwd: () => currentCwd,
 	};

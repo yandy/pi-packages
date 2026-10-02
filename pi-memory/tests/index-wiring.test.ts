@@ -1841,7 +1841,7 @@ describe("index wiring (integration)", () => {
 				memIndexMaxBytes: 25600,
 				sessionSearch: { maxSessions: 10, maxMatches: 5 },
 			}),
-			getInitError: () => null,
+			getUnavailableMessage: () => null,
 			searchSessions: async () => "",
 			cwd: () => dir,
 		});
@@ -2061,6 +2061,20 @@ describe("index wiring (integration)", () => {
 		).rejects.toThrow(
 			'Memory not initialized — no model for dream — set "dream.model" or "defaults.model" in memory.json; run /memory for details',
 		);
+	});
+
+	it("tells the tool caller that memory is disabled after a disabled restart", async () => {
+		const { pi, tools, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx()); // healthy：工具已注册
+		expect(tools).toHaveLength(1);
+
+		mockConfigValue.enabled = false;
+		await handlers["session_start"][0]({}, uiCtx()); // disabled：store 被清空，configError 为 null
+
+		await expect(
+			tools[0].execute("c1", { action: "list" }, undefined, undefined, undefined),
+		).rejects.toThrow('Memory is disabled — set "enabled": true in memory.json and restart');
 	});
 
 	// ── 错误态的跨 session 生命周期（design §2.5）──────────────────────────
