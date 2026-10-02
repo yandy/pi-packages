@@ -78,7 +78,13 @@ describe("createAgentSession tool filtering (real SDK)", () => {
 	it("keeps custom tools active when noTools is 'builtin'", async () => {
 		const created = await createSession({ noTools: "builtin" });
 		try {
-			expect(created.session.getActiveToolNames()).toContain("memory");
+			const active = created.session.getActiveToolNames();
+			expect(active).toContain("memory");
+			// Plan B R41 的另一半语义：builtin 真的被关掉了 —— dream / extract 的 headless 会话
+			// 不得拿到裸写工具（D12：它们只能通过 memory 原语改记忆目录）。
+			for (const builtin of ["read", "write", "edit", "bash"]) {
+				expect(active, builtin).not.toContain(builtin);
+			}
 		} finally {
 			created.session.dispose?.();
 		}

@@ -484,6 +484,26 @@ describe("onWrite 回调与 Saved 通知", () => {
 		expect(await store.listEntries()).toHaveLength(2);
 	});
 
+	// Plan C 终审 #11 / Plan D（D4）：`ctx.ui` 是宿主代理，session dispose 之后 notify 会抛。
+	// 一次**已经成功落盘**的写入不得因此变成工具错误 —— 模型会以为没存下来而重复写。
+	it("still reports a successful add when the Saved notification throws", async () => {
+		const notify = vi.fn(() => {
+			throw new Error("Extension instance is no longer active");
+		});
+		const tool = createMemoryTool(deps());
+
+		const text = await run(
+			tool,
+			{ action: "add", name: "A", description: "d", content: "正文" },
+			{ hasUI: true, ui: { notify } },
+		);
+
+		expect(notify).toHaveBeenCalledTimes(1);
+		expect(text).toBe('Saved "A" (A.md).');
+		expect(await readFile(join(dir, "A.md"), "utf8")).toContain("name: A");
+		expect(await store.listEntries()).toHaveLength(1);
+	});
+
 	it("notifies for add only — replace / rename / remove stay quiet", async () => {
 		const notify = vi.fn();
 		const ctx = uiContext(notify);

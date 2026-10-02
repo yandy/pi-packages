@@ -398,6 +398,28 @@ describe("renderConversation", () => {
 		expect(out.length).toBeLessThanOrEqual(80);
 	});
 
+	// Plan C 终审 #9 / Plan D（D4）：user 正文里恰好出现与块级标记逐字相同的串（模型抄了
+	// 我们自己的截断标记）。`String.replace` 删**首次**出现 → 误删正文里的那一份，真正的
+	// 标记留在输出里，于是 N 与保留下来的首尾全部错位；`lastIndexOf` 只删我们自己那一个。
+	it("removes only the block-level marker when a user block carries the same string", () => {
+		const spoof = "[truncated: 319 chars omitted from the middle]";
+		const messages: ExtractMessage[] = [
+			{ role: "user", text: `HEAD ${spoof} ${"u".repeat(200)}` },
+			{ role: "assistant", text: `MID${"a".repeat(300)}` },
+			{ role: "user", text: `${"v".repeat(200)} TAIL` },
+		];
+
+		const out = renderConversation(messages, { ...LIMITS, maxContextTokens: 100 });
+
+		// 正文里的同款串活着（修复前它被当成块级标记删掉了，`HEAD` 后面直接跟 u）
+		expect(out).toContain(`HEAD ${spoof} `);
+		// 块级标记只有一个，N 精确（修复前是 402，因为它把误删的正文也算进了省略量）
+		expect(out).toContain("[truncated: 448 chars omitted from the middle]");
+		expect(out).not.toContain("[truncated: 402 chars omitted from the middle]");
+		expect(out).toContain("TAIL");
+		expect(out.length).toBeLessThanOrEqual(400);
+	});
+
 	it("leaves a short conversation untouched", () => {
 		const messages: ExtractMessage[] = [{ role: "user", text: "hi" }];
 		expect(renderConversation(messages, { ...LIMITS, maxContextTokens: 2000 })).toBe("[1] user: hi");

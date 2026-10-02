@@ -61,6 +61,21 @@ const middleMarkerLabel = (omitted: number): string => `[truncated: ${omitted} c
 const middleMarker = (omitted: number): string => `\n${middleMarkerLabel(omitted)}\n`;
 
 /**
+ * 删掉 `needle` 的**最后一次**出现（连带它后面紧跟的一个 `\n`）；不存在就原样返回。
+ *
+ * 用 `lastIndexOf` 而不是 `String.replace`（删首次出现）：块级标记总是被 `assemble` 放在
+ * 靠后的位置，而 user 正文里完全可能恰好出现同一串（模型/用户抄了我们自己的截断标记）。
+ * 删首次出现会误删正文里的那一份，把真正的标记留在输出里，于是 N 与保留下来的首尾全部错位
+ * （Plan C 终审 #9）。只删一次，也保证输出里不会少算/多算标记自身的长度。
+ */
+function removeLastOccurrence(text: string, needle: string): string {
+	const at = text.lastIndexOf(needle);
+	if (at === -1) return text;
+	const trailingNewline = text[at + needle.length] === "\n" ? 1 : 0;
+	return `${text.slice(0, at)}${text.slice(at + needle.length + trailingNewline)}`;
+}
+
+/**
  * 字符串级的中段裁减：只剩 user 块仍超预算时的回退。
  *
  * `alreadyOmitted` 是块级裁减已经丢掉的字符数，它并入标记里的 N，并且**不再插入第二个标记**
@@ -73,7 +88,7 @@ function clipMiddle(text: string, maxChars: number, alreadyOmitted = 0): string 
 	// 块级标记自己占的字符既不是被省略的正文，也不该在输出里出现第二次。
 	// 它可能是独立一行（后面跟着 `\n`），也可能被 `assemble` 追加在末尾（后面没有 `\n`）。
 	const label = alreadyOmitted > 0 ? middleMarkerLabel(alreadyOmitted) : "";
-	const body = label === "" ? text : text.replace(`${label}\n`, "").replace(label, "");
+	const body = label === "" ? text : removeLastOccurrence(text, label);
 	// 给标记文本预留位置（按一个六位数省略量估算），避免「裁减之后反而更长」。
 	const budget = Math.max(0, maxChars - middleMarker(999999).length);
 	const head = Math.min(Math.ceil(budget / 2), body.length);

@@ -46,6 +46,11 @@ export function buildInjection(systemPrompt: string, snapshot: string): string {
  * 注入文本里就有两份标题。
  *
  * 空索引返回 `""`（调用方仍要把 `""` 无条件写进 sections，见 `applyIndexSection`）。
+ *
+ * **顺序是「先截断、后净化」，刻意如此**（Plan C 终审 #6 的决策：保留现状）。注入预算是
+ * **软**约束，而反过来（先净化后截断）会在字节上限处切出半个 HTML entity（`…&l`）——
+ * 那才是真正会让模型读错的破损。代价：`<` → `&lt;` 会让净化后的字节数略超 `maxBytes`
+ * （索引正文里尖括号极少，实际放大可忽略）。`injectSurfacedContent` 同理。
  */
 export async function buildIndexSection(store: MemoryStore, maxLines: number, maxBytes: number): Promise<string> {
 	const raw = await store.readIndex();
@@ -125,6 +130,8 @@ export async function injectSurfacedContent(
 		const { content } = truncateForInjection(entry.body, 999999, maxEntryBytes);
 		// spec §13：正文与 name 都要净化（用户/模型写进磁盘的内容可能含 `</relevant_memories>`
 		// 之类的仿冒标签）。包裹标签是我们自己生成的，不净化。
+		// 先截断后净化的取舍见 `buildIndexSection` 的注释（Plan C 终审 #6：预算是软约束，
+		// 而「净化后截断」会切出半个 entity）。
 		const block = `## ${sanitizeForInjection(entry.name)}\n${sanitizeForInjection(content)}`;
 		const blockBytes = Buffer.byteLength(block, "utf8");
 		if (totalBytes + blockBytes > maxInjectionBytes) break;

@@ -222,7 +222,16 @@ export function createMemoryTool(deps: MemoryToolDeps, options: MemoryToolOption
 					details = { file: r.file, capacityWarning: r.capacityWarning };
 					// spec §14：写成功了要让用户看见。headless 会话（extract / dream）hasUI=false，
 					// 天然不通知；旧调用形状完全不传 ctx，所以用 `?.`。
-					if (ctx?.hasUI) ctx.ui.notify(`Saved: ${p.name.trim()}`, "info");
+					// 通知本身必须包起来（Plan C 终审 #11）：`ctx.ui` 是宿主代理，session dispose
+					// 之后 notify 会抛 —— 一次**已经落盘**的写入不能因此变成工具错误，
+					// 否则模型会以为没存下来而重复写。
+					if (ctx?.hasUI) {
+						try {
+							ctx.ui.notify(`Saved: ${p.name.trim()}`, "info");
+						} catch {
+							/* UI 已失效：宿主不再收这条通知，写入结果不受影响 */
+						}
+					}
 					break;
 				}
 				case "replace": {
