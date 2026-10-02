@@ -62,7 +62,7 @@ export default function (pi: ExtensionAPI) {
 				Type.Boolean({ default: true, description: "Compress image before sending (default true)." }),
 			),
 			thinkLevel: Type.Optional(
-				StringEnum(["off", "minimal", "low", "medium", "high", "xhigh"] as const, {
+				StringEnum(THINK_LEVELS, {
 					description: "Vision model thinking effort. Default off.",
 				}),
 			),
@@ -91,8 +91,11 @@ export default function (pi: ExtensionAPI) {
 		},
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			if (!toolActive) {
+				const reason = callingModelHasVision(ctx.model)
+					? "the calling model can see images itself"
+					: "the tool is not active for the current model";
 				return {
-					content: [{ type: "text", text: "describe_image is inactive: the calling model can see images itself." }],
+					content: [{ type: "text", text: `describe_image is inactive: ${reason}.` }],
 					details: { error: "disabled" },
 					isError: true,
 				};
@@ -187,7 +190,7 @@ export default function (pi: ExtensionAPI) {
 					`default think level: ${config.defaultThinkLevel ?? "off (built-in)"}`,
 					`active: ${toolActive ? "yes" : "no"} (calling model has vision: ${callingModelHasVision(ctx.model) ? "yes" : "no"})`,
 				];
-				if (config.model && !resolved.ok) lines.push(resolved.error);
+				if (!resolved.ok) lines.push(resolved.error);
 				ctx.ui.notify(lines.join("\n"), "info");
 			};
 

@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
+import type { VisionThinkLevel } from "./think-level.js";
 
 export interface VisionConfig {
 	/** "provider/modelId" or a fuzzy model name (e.g. "haiku", "qwen vl"). */
@@ -10,7 +11,14 @@ export interface VisionConfig {
 
 export const DEFAULT_CONFIG: VisionConfig = {};
 
-export const THINK_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+export const THINK_LEVELS = [
+	"off",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+] as const satisfies readonly VisionThinkLevel[];
 
 export function configPath(agentDir: string): string {
 	return join(agentDir, "vision-tools.json");

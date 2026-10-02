@@ -17,7 +17,7 @@ const fakeModel = (id: string, provider: string) =>
 	}) as Model<any>;
 
 describe("footerLabel", () => {
-	it("hides the indicator when the tool is disabled", () => {
+	it("hides the indicator when the tool is inactive", () => {
 		expect(footerLabel(false, { ok: true, model: fakeModel("gpt-4o", "openai") })).toBeUndefined();
 	});
 

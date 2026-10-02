@@ -19,6 +19,7 @@ vi.mock("../src/image.js", () => ({
 }));
 
 import visionExtension from "../index.js";
+import { THINK_LEVELS } from "../src/config.js";
 
 // ---- fakes ---------------------------------------------------------------
 
@@ -167,7 +168,9 @@ describe("/vision command — auto-only activation", () => {
 
 	it("status degrades gracefully when unconfigured or unresolvable", async () => {
 		await h.commands.vision.handler("status", h.ctx());
-		expect(h.notifications.at(-1)?.text).toContain("(unconfigured)");
+		const unconfigured = h.notifications.at(-1)?.text ?? "";
+		expect(unconfigured).toContain("(unconfigured)");
+		expect(unconfigured).toContain("Run: /vision config model");
 
 		const registry = fakeRegistry([fakeModel()]);
 		await h.commands.vision.handler("config model nope", h.ctx({ registry }));
@@ -189,18 +192,40 @@ describe("/vision command — auto-only activation", () => {
 		expect(h.activeTools).toContain("describe_image");
 	});
 
-	it("guards describe_image with a message that no longer points at /vision on", async () => {
+	it("drives the footer indicator from the tool state and the resolved model", async () => {
+		const registry = fakeRegistry([fakeModel()]);
+		await h.commands.vision.handler("config model haiku", h.ctx({ registry }));
+		await h.sessionStart({ model: fakeModel({ input: ["text"] }), registry });
+		expect(h.statuses["pi-vision"]).toBe("👁 anthropic/claude-haiku-4-5");
+
+		await h.sessionStart({ model: fakeModel({ input: ["text", "image"] }), registry });
+		expect(h.statuses["pi-vision"]).toBeUndefined();
+	});
+
+	it("guards describe_image with a message that matches the live calling model", async () => {
 		await h.sessionStart({ model: fakeModel({ input: ["text", "image"] }) });
 		const tool = h.tools.find((t) => t.name === "describe_image");
-		const result = await tool.execute(
+
+		const visionCaller = await tool.execute(
 			"call-1",
 			{ image_path: "/tmp/does-not-matter.png", prompt: "hi" },
 			undefined,
 			undefined,
 			h.ctx({ model: fakeModel({ input: ["text", "image"] }) }),
 		);
-		expect(result.isError).toBe(true);
-		expect(result.content[0].text).toContain("calling model can see images itself");
+		expect(visionCaller.isError).toBe(true);
+		expect(visionCaller.content[0].text).toContain("calling model can see images itself");
+
+		const blindCaller = await tool.execute(
+			"call-2",
+			{ image_path: "/tmp/does-not-matter.png", prompt: "hi" },
+			undefined,
+			undefined,
+			h.ctx({ model: fakeModel({ input: ["text"] }) }),
+		);
+		expect(blindCaller.isError).toBe(true);
+		expect(blindCaller.content[0].text).not.toContain("can see images itself");
+		expect(blindCaller.content[0].text).toContain("not active for the current model");
 	});
 });
 
@@ -211,6 +236,12 @@ describe("describe_image tool schema", () => {
 		const props = Object.keys(tool.parameters.properties);
 		expect(props).toContain("thinkLevel");
 		expect(props).not.toContain("reasoning");
+	});
+
+	it("keeps the thinkLevel enum in sync with THINK_LEVELS", () => {
+		const h = createHarness();
+		const tool = h.tools.find((t) => t.name === "describe_image");
+		expect(tool.parameters.properties.thinkLevel.enum).toEqual([...THINK_LEVELS]);
 	});
 });
 

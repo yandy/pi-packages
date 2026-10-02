@@ -7,7 +7,7 @@ export function callingModelHasVision(model: Model<any> | undefined): boolean {
 }
 
 /** Footer indicator for the resolved vision model. Hidden while the tool is inactive or the model cannot be resolved. */
-export function footerLabel(enabled: boolean, resolved: ResolveResult | undefined): string | undefined {
-	if (!enabled || !resolved?.ok) return undefined;
+export function footerLabel(active: boolean, resolved: ResolveResult | undefined): string | undefined {
+	if (!active || !resolved?.ok) return undefined;
 	return `👁 ${resolved.model.provider}/${resolved.model.id}`;
 }
