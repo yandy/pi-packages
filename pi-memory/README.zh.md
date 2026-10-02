@@ -4,13 +4,19 @@ pi coding agent 的文件系统持久记忆层。把项目知识（事实、偏�
 
 对齐 Claude Code 的自动记忆机制：**一条记忆 = 一个文件**、`MEMORY.md` 索引一行一条记忆、按相关性自动浮现、每轮自动提取、记忆分类。
 
-> ## ⚠️ 2.0.0 是破坏性的存储变更
+> ## ⚠️ 破坏性变更
+>
+> **2.0.0 之后（未发布）：**
+>
+> - **模型必须显式配置。** 没有内置默认值，也没有父会话模型回退：`defaults.model`（或 per-task `model`）必须存在且可解析，否则 `session_start` 会报配置错误并且**什么都不初始化**。详见[模型配置](#模型配置)。
+> - **`/memory on` / `/memory off` 已删除。** `enabled` 只是 `memory.json` 里的开关，启动时读一次，改动需要重启会话。
+> - **1.x → 2.0 的自动迁移已删除。** legacy topic 文件原样留在磁盘上，但对记忆系统**不可见**（过不了 `parseEntryFile` 的 v2 五字段校验）。详见 [1.x 数据](#1x-数据)。
+>
+> **2.0.0 已包含：**
 >
 > - 索引现在**一行一条记忆**（1.x 是一行一个 topic 文件，文件里塞很多 `## entry`）。
 > - 每条记忆**独占一个文件**，frontmatter 五个字段：`name`、`description`、`type`、`created`、`modified`（1.x 用的是 `updated`）。
 > - 索引改为以 **system prompt section**（`memory_index`）注入，并在整个会话内冻结，而不是拼到 system prompt 字符串末尾。
->
-> 1.x → 2.0 的**自动迁移已被删除**：legacy topic 文件原样留在磁盘上，但对记忆系统**不可见**（过不了 `parseEntryFile` 的 v2 五字段校验）。详见 [1.x 数据](#1x-数据)。
 
 ## 功能
 
@@ -25,7 +31,7 @@ pi coding agent 的文件系统持久记忆层。把项目知识（事实、偏�
 - **Dream 提醒** —— 距上次 dream 超过 N 个会话或 N 小时后提示 `/dream`。
 - **`/memory`** —— 完整状态（开关、目录、索引容量、entry 数、上次 dream、锁状态含持有者），以及 `unlock`。
 - **两级锁** —— 进程内逻辑锁承担**逻辑作用域**（单次原语，或 dream 的整轮）；跨进程 `.lock` **只持毫秒**且**永不自动回收**。没有 TTL、没有心跳、没有接管，所以互斥是硬保证；代价是崩溃遗留的锁必须**人工**清除（`/memory unlock`）。
-- **快照** —— 每次写入都在 `.backups/<ts>-<label>/` 留下回滚点，保留最近 `lock.snapshotKeep` 份（`migrate-` 开头的目录是旧版迁移留下的 2.0 之前原文，永不裁剪）。`/dream` 是例外：它**进入时只对整个目录拍一次**快照，该轮内部的原语会跳过逐文件快照（一轮只留一个回滚点）。
+- **快照** —— 每次写入都在 `.backups/<ts>-<label>/` 留下回滚点，保留最近 `lock.snapshotKeep` 份（`migrate-` 开头的目录是旧版迁移留下的整目录快照，其 `originals/` 子目录里才是 2.0 之前的 topic 原文，永不裁剪）。`/dream` 是例外：它**进入时只对整个目录拍一次**快照，该轮内部的原语会跳过逐文件快照（一轮只留一个回滚点）。
 - **会话检索** —— `memory search scope=sessions` 查历史会话。
 - **可读、clone 友好的布局** —— git 仓库（http(s)/ssh/git remote，含 scp 写法与 `git+ssh`/`git+https`）存在 `~/.pi/memory/git/<host__owner__repo>/`，其余存在 `~/.pi/memory/local/<absolute-path>/`；同一仓库的 clone 与 worktree 共享记忆（fork 有自己的 remote，因此有独立目录）。
 
@@ -51,7 +57,7 @@ pi install npm:@yandy0725/pi-memory
   SSH-port-on-staging.md
   Test-command.md      — 一条记忆一个文件
   .lock                — 跨进程写锁（只持毫秒，永不自动回收）
-  .backups/            — 回滚点：<ISO-ts>-<label>/（以及旧版 1.x 迁移留下的 migrate-<ts>/）
+  .backups/            — 回滚点：<ISO-ts>-<label>/（以及旧版 1.x 迁移留下的 migrate-<ts>/ 整目录快照）
   .dream-meta.json     — 上次 dream 的时间与会话数（提醒逻辑用它）
   sessions/            — headless 会话落盘目录，仅在开启 sessionPersistence 时使用
 ```
@@ -117,7 +123,7 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
   "memIndexInjectMaxLines": 200,
   "memIndexInjectMaxBytes": 25600,
   "lock": { "timeoutMs": 5000, "snapshotKeep": 5 },
-  "defaults": { "model": "deepseek/deepseek-flash", "sessionPersistence": { "enabled": false } },
+  "defaults": { "model": "provider/model-id", "sessionPersistence": { "enabled": false } },
   "dream": { "nudgeAfterSessions": 5, "nudgeAfterHours": 24, "thinkLevel": "high" },
   "sessionSearch": { "maxSessions": 10, "maxMatches": 5 },
   "autoSurfacing": {
@@ -137,6 +143,8 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
 }
 ```
 
+> 每个 `model` 值都必须能在你的 registry 里解析 —— 没有默认值。缺失或解析不出的模型会让 `session_start` 报配置错误并且什么都不初始化。详见[模型配置](#模型配置)。
+
 | 键 | 默认值 | 说明 |
 |-----|---------|------|
 | `enabled` | `true` | 整个记忆系统的开关。**启动时读一次**，改动需重启会话 |
@@ -146,7 +154,7 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
 | `memIndexInjectMaxLines` | `200` | 注入口径：放进 `memory_index` section 的最大行数。**刻意与写入口径同量级** —— 预算更小会让「已经写成功」的记忆看不见 |
 | `memIndexInjectMaxBytes` | `25600` | 注入口径：section 的最大字节数（超出则截断并带 `[truncated: …]` 标记） |
 | `lock.timeoutMs` | `5000` | 单次原语等逻辑锁 / 等跨进程 `.lock` 的上限。同时也是 `session_shutdown` 等在途写入的上限 |
-| `lock.snapshotKeep` | `5` | `.backups/` 保留的回滚点数量（`migrate-` 前缀的目录永不裁剪 —— 它们装着旧版迁移留下的 2.0 之前原文） |
+| `lock.snapshotKeep` | `5` | `.backups/` 保留的回滚点数量（`migrate-` 前缀的目录永不裁剪 —— 它们是旧版迁移留下的整目录快照，`originals/` 子目录里装着 2.0 之前的 topic 原文） |
 | `defaults.model` | —（必需） | 三个子任务的共享模型。**没有默认值**：会执行的任务必须能解析出模型，否则启动失败（见[模型配置](#模型配置)）。per-task 覆盖它 |
 | `defaults.sessionPersistence.enabled` | `false` | 共享回退：headless 子会话（extract / dream / 侧查询）默认只在内存里跑 |
 | `defaults.sessionPersistence.sessionDir` | `<项目记忆目录>/sessions/` | headless 会话的自定义落盘目录 |
