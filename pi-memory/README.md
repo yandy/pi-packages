@@ -25,7 +25,7 @@ Aligned with Claude Code's auto memory mechanism: **one memory = one file**, a `
 - **Dream nudge** — after N sessions or N hours a notification suggests `/dream`.
 - **`/memory`** — full status (switch, directory, index capacity, entry count, last dream, migration state, lock state including the holder), plus `on` / `off` / `unlock`.
 - **Two-level locking** — an in-process logical lock carries the *logical* scope (one primitive call, or a whole dream/migration round); the cross-process `.lock` file is held for **milliseconds only** and is **never reclaimed automatically**. There is no TTL, no heartbeat and no takeover, so mutual exclusion is a hard guarantee; the price is that a lock left behind by a crashed process must be removed by a human (`/memory unlock`).
-- **Snapshots** — every write leaves a rollback point under `.backups/<ts>-<label>/`, keeping the last `lock.snapshotKeep` (migration backups use a `migrate-` prefix and are never pruned).
+- **Snapshots** — every write leaves a rollback point under `.backups/<ts>-<label>/`, keeping the last `lock.snapshotKeep` (migration backups use a `migrate-` prefix and are never pruned). `/dream` is the exception: it snapshots the whole directory **once on entry**, and the primitives inside that round skip their per-file snapshots (one round, one rollback point).
 - **Session search** — `memory search scope=sessions` queries past conversation history.
 - **Readable, clone-safe layout** — memory lives under `~/.pi/memory/git/<host__owner__repo>/` for git repos with an http(s)/ssh/git remote (including scp-style and `git+ssh`/`git+https`), and `~/.pi/memory/local/<absolute-path>/` otherwise — clones and worktrees of the same repo share memory (a fork has its own remote, so it gets its own directory).
 
@@ -88,7 +88,7 @@ File names are derived from `name` (unsafe characters replaced, 100-byte cap, `-
 - [Test command](Test-command.md) — run npm test, not npm run test
 ```
 
-Writes are **surgical**: only the target line changes, hand-written headings, groups and comments are preserved byte-for-byte, and line order is stable.
+Writes are **surgical**: only the target line changes, hand-written headings, groups and comments are preserved byte-for-byte, and line order is stable. The one exception is line endings: CRLF (or lone CR) is normalised to LF before parsing, so the first write to a CRLF file rewrites it with LF.
 
 ### Memory types
 
@@ -99,11 +99,11 @@ Writes are **surgical**: only the target line changes, hand-written headings, gr
 | `project` | Project state, deadlines, incidents | "Merge freeze starts 2026-03-05 for mobile release" |
 | `reference` | Pointers to external systems | "Bug tracker = Linear INGEST project" |
 
-### Capacity: 200 lines = 200 memories
+### Capacity: 200 index lines ≈ 199 memories
 
-The index holds at most `memIndexMaxLines` (200) non-empty lines and `memIndexMaxBytes` (25600) bytes. Because one line is one memory, **that is a hard cap of 200 memories per project directory**. Exceeding it does **not** fail the write: the write succeeds and the tool returns an actionable warning telling the model to merge or drop entries (everything past the limit is invisible on the next load).
+The index holds at most `memIndexMaxLines` (200) non-empty lines and `memIndexMaxBytes` (25600) bytes. Those 200 lines are **index lines, not memories**: `rebuildIndex` always writes a `# Memory Index` header line, and hand-written headings, groups and comments count too. A rebuilt index therefore holds at most about **199 memories per project directory** (fewer if you keep hand-written headings). Exceeding the limit does **not** fail the write: the write succeeds and the tool returns an actionable warning telling the model to merge or drop entries (everything past the limit is invisible on the next load).
 
-This is why `/dream` is no longer optional housekeeping — it is **capacity management**. Run it (or accept the nudge) before you hit 200.
+This is why `/dream` is no longer optional housekeeping — it is **capacity management**. Run it (or accept the nudge) before you approach 199 memories.
 
 ## Configuration
 
@@ -142,7 +142,7 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
 |-----|---------|-------------|
 | `enabled` | `true` | Toggle the entire memory system on/off |
 | `memoryDir` | `~/.pi/memory` | Root directory for all memory data |
-| `memIndexMaxLines` | `200` | Write capacity: max non-empty lines in `MEMORY.md` (= max memories) |
+| `memIndexMaxLines` | `200` | Write capacity: max non-empty lines in `MEMORY.md` (the `# Memory Index` header and hand-written headings count too, so this is not exactly the memory count) |
 | `memIndexMaxBytes` | `25600` | Write capacity: max bytes of `MEMORY.md` |
 | `memIndexInjectMaxLines` | `200` | Injection budget: max lines of the index put into the `memory_index` section. Same scale as the write capacity on purpose — a smaller budget would hide memories that were written successfully |
 | `memIndexInjectMaxBytes` | `25600` | Injection budget: max bytes of the index section (truncated with a `[truncated: …]` marker) |
@@ -280,14 +280,14 @@ Status output:
 ```
 Memory: enabled
 Dir: /home/you/.pi/memory/git/github.com__owner__repo
-Index: 37/200 lines, 2841/25600 bytes, 1 unrecognized lines
+Index: 38/200 lines, 2841/25600 bytes, 1 unrecognized lines
 Entries: 37
 Last dream: 2026-10-01T22:10:04.882Z
 Migration: migrated at 2026-09-30T09:12:44.120Z (18 entries from 4 files)
 Lock: free
 ```
 
-- `Index` uses the **write** capacity (`memIndexMax*`) and reports how many non-empty lines could not be parsed as index lines (hand-written headings count; a `MEMORY.md` re-saved with CRLF line endings by a Windows editor shows up here too).
+- `Index` uses the **write** capacity (`memIndexMax*`) and reports how many non-empty lines could not be parsed as index lines (the `# Memory Index` header and hand-written headings count). CRLF (or lone CR) line endings are normalised to LF before parsing, and the next write emits LF too, so a `MEMORY.md` re-saved by a Windows editor does **not** raise this count.
 - `Migration` is `migrated at …`, `not needed` (the marker says nothing had to be moved) or `pending` (no marker / unreadable marker → the next `session_start` retries).
 - `Lock` is `free`, `held by <op> (pid N, started <ISO>)`, or `unreadable — run /memory unlock`.
 
@@ -313,6 +313,8 @@ Automatic, on the first `session_start` after the upgrade:
 5. delete the original topic files (they stay in `originals/`);
 6. write `.migrated`;
 7. notify `Migrated N memories from M topic files. Backup at <path>`.
+
+A file whose frontmatter already has a `modified` field is **never** treated as a legacy topic file, even when its body contains several `## ` headings — that guard is what keeps a normal v2 entry from being split apart.
 
 A re-run is safe: the marker is only written at the very end, and an entry whose name **and** body already exist is reused instead of being duplicated. If a step fails, nothing is marked, the backup is kept, and the error is reported — the next session retries.
 

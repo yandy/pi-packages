@@ -25,7 +25,7 @@ pi coding agent 的文件系统持久记忆层。把项目知识（事实、偏�
 - **Dream 提醒** —— 距上次 dream 超过 N 个会话或 N 小时后提示 `/dream`。
 - **`/memory`** —— 完整状态（开关、目录、索引容量、entry 数、上次 dream、迁移状态、锁状态含持有者），以及 `on` / `off` / `unlock`。
 - **两级锁** —— 进程内逻辑锁承担**逻辑作用域**（单次原语，或 dream / 迁移的整轮）；跨进程 `.lock` **只持毫秒**且**永不自动回收**。没有 TTL、没有心跳、没有接管，所以互斥是硬保证；代价是崩溃遗留的锁必须**人工**清除（`/memory unlock`）。
-- **快照** —— 每次写入都在 `.backups/<ts>-<label>/` 留下回滚点，保留最近 `lock.snapshotKeep` 份（迁移备份以 `migrate-` 开头，永不裁剪）。
+- **快照** —— 每次写入都在 `.backups/<ts>-<label>/` 留下回滚点，保留最近 `lock.snapshotKeep` 份（迁移备份以 `migrate-` 开头，永不裁剪）。`/dream` 是例外：它**进入时只对整个目录拍一次**快照，该轮内部的原语会跳过逐文件快照（一轮只留一个回滚点）。
 - **会话检索** —— `memory search scope=sessions` 查历史会话。
 - **可读、clone 友好的布局** —— git 仓库（http(s)/ssh/git remote，含 scp 写法与 `git+ssh`/`git+https`）存在 `~/.pi/memory/git/<host__owner__repo>/`，其余存在 `~/.pi/memory/local/<absolute-path>/`；同一仓库的 clone 与 worktree 共享记忆（fork 有自己的 remote，因此有独立目录）。
 
@@ -88,7 +88,7 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
 - [Test command](Test-command.md) — run npm test, not npm run test
 ```
 
-写入是**外科式**的：只改目标行，手写的标题、分组、注释逐字保留，行序稳定。
+写入是**外科式**的：只改目标行，手写的标题、分组、注释逐字保留，行序稳定。唯一的例外是行尾：CRLF（以及单独的 CR）在解析前被归一为 LF，因此第一次写入 CRLF 文件会把它整体转成 LF。
 
 ### 记忆类型
 
@@ -99,11 +99,11 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
 | `project` | 项目状态、时间点、事故 | "移动端 2026-03-05 起封版" |
 | `reference` | 外部系统的指针 | "缺陷跟踪 = Linear 的 INGEST 项目" |
 
-### 容量：200 行 = 200 条记忆
+### 容量：200 行索引 ≈ 199 条记忆
 
-索引上限是 `memIndexMaxLines`（200）个非空行与 `memIndexMaxBytes`（25600）字节。因为一行一条记忆，**这就是每个项目目录 200 条记忆的硬上限**。超限时写入**不会失败**：写入照样成功，工具把一条可操作的警告回给模型，让它去合并或删除条目（超出上限的部分下次加载时不可见）。
+索引上限是 `memIndexMaxLines`（200）个非空行与 `memIndexMaxBytes`（25600）字节。这 200 行是**索引行，不是记忆条数**：`rebuildIndex` 总会写一行 `# Memory Index` 头，手写的标题、分组、注释同样占额度。因此重建后的索引最多约 **199 条记忆**（每个项目目录；若保留手写标题则更少）。超限时写入**不会失败**：写入照样成功，工具把一条可操作的警告回给模型，让它去合并或删除条目（超出上限的部分下次加载时不可见）。
 
-这也是 `/dream` 不再是「可选的整理」而是**容量管理必需**的原因。在撞到 200 之前跑一次（或者接受提醒）。
+这也是 `/dream` 不再是「可选的整理」而是**容量管理必需**的原因。在接近 199 条之前跑一次（或者接受提醒）。
 
 ## 配置
 
@@ -142,7 +142,7 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
 |-----|---------|------|
 | `enabled` | `true` | 整个记忆系统的总开关 |
 | `memoryDir` | `~/.pi/memory` | 所有记忆数据的根目录 |
-| `memIndexMaxLines` | `200` | 写入口径：`MEMORY.md` 的最大非空行数（= 最大记忆条数） |
+| `memIndexMaxLines` | `200` | 写入口径：`MEMORY.md` 的最大非空行数（`# Memory Index` 头行与手写标题同样占额度，所以并不等于记忆条数） |
 | `memIndexMaxBytes` | `25600` | 写入口径：`MEMORY.md` 的最大字节数 |
 | `memIndexInjectMaxLines` | `200` | 注入口径：放进 `memory_index` section 的最大行数。**刻意与写入口径同量级** —— 预算更小会让「已经写成功」的记忆看不见 |
 | `memIndexInjectMaxBytes` | `25600` | 注入口径：section 的最大字节数（超出则截断并带 `[truncated: …]` 标记） |
@@ -280,14 +280,14 @@ memory(action: "add" | "replace" | "remove" | "list" | "search",
 ```
 Memory: enabled
 Dir: /home/you/.pi/memory/git/github.com__owner__repo
-Index: 37/200 lines, 2841/25600 bytes, 1 unrecognized lines
+Index: 38/200 lines, 2841/25600 bytes, 1 unrecognized lines
 Entries: 37
 Last dream: 2026-10-01T22:10:04.882Z
 Migration: migrated at 2026-09-30T09:12:44.120Z (18 entries from 4 files)
 Lock: free
 ```
 
-- `Index` 用**写入**口径（`memIndexMax*`），并报告索引里有多少非空行解析不出（手写标题会计入；被 Windows 编辑器改成 CRLF 行尾的 `MEMORY.md` 也会在这里露出来）。
+- `Index` 用**写入**口径（`memIndexMax*`），并报告索引里有多少非空行解析不出（`# Memory Index` 头行与手写标题会计入）。CRLF（以及单独的 CR）行尾在解析前就被归一为 LF，下一次写入也一律输出 LF，因此被 Windows 编辑器改过行尾的 `MEMORY.md` **不会**推高这个计数。
 - `Migration` 有三种：`migrated at …`、`not needed`（标记显示当时没东西要迁）、`pending`（没有标记或标记读不懂 → 下次 `session_start` 重试）。
 - `Lock` 有三种：`free`、`held by <op> (pid N, started <ISO>)`、`unreadable — run /memory unlock`。
 
@@ -313,6 +313,8 @@ Lock: free
 5. 删除原 topic 文件（它们仍在 `originals/` 里）；
 6. 写 `.migrated`；
 7. 通知 `Migrated N memories from M topic files. Backup at <path>`。
+
+frontmatter 里已含 `modified` 字段的文件**永远不**会被当成 legacy topic 文件（即使正文里有多个 `## ` 小标题）—— 这道守卫正是为了避免正常的 v2 记忆被再次拆碎。
 
 重跑是安全的：标记只在最后写，而**同名且同正文**的条目会被复用而不是复制一份。任一步失败就不写标记、保留备份、上报错误 —— 下次会话重试。
 

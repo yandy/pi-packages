@@ -84,7 +84,7 @@ rm "$MEM/SSH-Gotcha.md" "$MEM/MySQL-Timeout.md"
 ```
 Memory: enabled
 Dir: /home/you/.pi/memory/local/tmp__mem-v2-test
-Index: 2/200 lines, 143/25600 bytes, 1 unrecognized lines
+Index: 3/200 lines, 114/25600 bytes, 1 unrecognized lines
 Entries: 2
 Last dream: never
 Migration: migrated at 2026-10-02T03:11:22.444Z (2 entries from 1 files)
@@ -156,6 +156,8 @@ Lock: free
 printf '{"pid":%d,"hostname":"%s","startedAt":"2026-10-02T00:00:00.000Z","op":"dream"}\n' \
   "$$" "$(hostname)" > "$MEM/.lock"
 ```
+
+> **注意**：写入的 pid 是执行上面命令的 shell 的 `$$` —— 只有在**同一终端/进程还活着**时才能观察到 `Memory is locked by …`；该进程退出后，同一把锁会变成 `… is abandoned by …`，也就是 5d 的预期。
 
 - 让 agent 记一条东西 → **预期**报 `Memory is locked by dream (pid N, started 2026-10-02T00:00:00.000Z)`。
 - `/memory` → `Lock: held by dream (pid N, started 2026-10-02T00:00:00.000Z)`。
