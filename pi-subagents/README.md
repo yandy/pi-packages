@@ -110,7 +110,8 @@ Send a steering message to a running agent.
 The session viewer renders the transcript read-only with Pi's own per-entry
 components and follows the running agent live. Tool results appear in Pi's
 collapsed form (summaries and previews), so a `read` call is represented by its
-call line only.
+call line only. The viewer has no expand key, so the "… to expand" hints some
+tools print do not apply here.
 
 ## Concurrency
 

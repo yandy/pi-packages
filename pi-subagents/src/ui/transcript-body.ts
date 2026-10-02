@@ -44,8 +44,14 @@ export interface TranscriptSyncOutcome {
 	readonly appended: number;
 	/** Existing entries whose content was updated in place (streaming tail). */
 	readonly refreshed: number;
-	/** Entries dropped and re-materialized after the transcript diverged. */
+	/** Entries dropped after the transcript diverged (their replacements count as `appended`). */
 	readonly rebuilt: number;
+}
+
+/** A materialized tool component plus the tool name it was built for (the renderer is name-bound). */
+interface MaterializedTool {
+	readonly name: string;
+	readonly component: ToolExecutionComponent;
 }
 
 /** One materialized message plus the components it contributed, in render order. */
@@ -54,8 +60,8 @@ interface MaterializedEntry {
 	message: SessionMessage;
 	/** Assistant text/thinking component, when the message produced one. */
 	assistant?: AssistantMessageComponent;
-	/** Tool components created by this message's tool calls, keyed by call id. */
-	readonly tools: Map<string, ToolExecutionComponent>;
+	/** Tool components created by this message's tool calls, keyed by call id (with the name they were built for). */
+	readonly tools: Map<string, MaterializedTool>;
 	/** Children contributed to the container, in add order. */
 	readonly children: Component[];
 }
@@ -75,7 +81,7 @@ export class TranscriptBody {
 	private readonly container = new Container();
 	/** One entry per materialized message, index-aligned with the source's message list. */
 	private readonly entries: MaterializedEntry[] = [];
-	/** Tool components whose result has not been attached yet, keyed by tool-call id. */
+	/** Tool components by tool-call id; each result message is applied to the component its call created. */
 	private readonly pendingTools = new Map<string, ToolExecutionComponent>();
 	/** Fingerprint of the tail message's rendered content — detects an in-place streaming mutation. */
 	private tailFingerprint = "";
@@ -224,26 +230,48 @@ export class TranscriptBody {
 	 */
 	private syncToolCalls(entry: MaterializedEntry, message: SessionMessage): void {
 		if (message.role !== "assistant") return;
+		const present = new Set<string>();
 		for (const content of message.content) {
 			if (content.type !== "toolCall") continue;
+			present.add(content.id);
 			const existing = entry.tools.get(content.id);
-			if (existing) {
-				existing.updateArgs(content.arguments);
+			if (existing && existing.name === content.name) {
+				existing.component.updateArgs(content.arguments);
 				continue;
 			}
-			const tool = new ToolExecutionComponent(
-				content.name,
-				content.id,
-				content.arguments,
-				{ showImages: false },
-				this.opts.getToolDefinition(content.name),
-				this.opts.tui,
-				this.opts.cwd,
-			);
-			entry.tools.set(content.id, tool);
-			this.pendingTools.set(content.id, tool);
-			this.addChild(entry, tool);
+			// A call can vanish or change tool in an in-place rewrite of the tail
+			// message, so the reconciled set — not just additions — is what renders.
+			if (existing) this.dropTool(entry, content.id);
+			this.addTool(entry, content.id, content.name, content.arguments);
 		}
+		for (const id of entry.tools.keys()) {
+			if (!present.has(id)) this.dropTool(entry, id);
+		}
+	}
+
+	/** Materialize one tool-call component and register it for its result. */
+	private addTool(entry: MaterializedEntry, id: string, name: string, args: unknown): void {
+		const component = new ToolExecutionComponent(
+			name,
+			id,
+			args,
+			{ showImages: false },
+			this.opts.getToolDefinition(name),
+			this.opts.tui,
+			this.opts.cwd,
+		);
+		entry.tools.set(id, { name, component });
+		this.pendingTools.set(id, component);
+		this.addChild(entry, component);
+	}
+
+	/** Drop one tool-call component (its call disappeared or changed tool). */
+	private dropTool(entry: MaterializedEntry, id: string): void {
+		const materialized = entry.tools.get(id);
+		if (!materialized) return;
+		entry.tools.delete(id);
+		this.pendingTools.delete(id);
+		this.removeChild(entry, materialized.component);
 	}
 
 	/** Render a user message (skill block + text) into the container, mirroring pi. */
@@ -270,6 +298,13 @@ export class TranscriptBody {
 	private addChild(entry: MaterializedEntry, child: Component): void {
 		entry.children.push(child);
 		this.container.addChild(child);
+	}
+
+	/** Detach a child from both the container and the entry that owns it. */
+	private removeChild(entry: MaterializedEntry, child: Component): void {
+		const index = entry.children.indexOf(child);
+		if (index !== -1) entry.children.splice(index, 1);
+		this.container.removeChild(child);
 	}
 
 	/**
@@ -306,17 +341,36 @@ function fingerprintOf(message: SessionMessage): string {
 			return `branchSummary\u0000${message.summary}`;
 		case "compactionSummary":
 			return `compactionSummary\u0000${message.summary}`;
-		default: {
-			const content = message.content;
-			if (typeof content === "string") return `${message.role}\u0000${content}`;
-			return `${message.role}\u0000${content.map(fingerprintOfBlock).join("\u0001")}`;
-		}
+		case "assistant":
+			// `stopReason`/`errorMessage` drive the aborted/error footer lines, and an
+			// extension's `message_end` replacement can flip them on a message that
+			// keeps its object identity.
+			return `assistant\u0000${message.stopReason ?? ""}\u0000${message.errorMessage ?? ""}\u0000${contentFingerprint(message.content)}`;
+		case "toolResult":
+			// `isError` picks the success/error background, `toolName` the renderer.
+			return `toolResult\u0000${message.toolCallId}\u0000${message.toolName}\u0000${message.isError}\u0000${contentFingerprint(message.content)}`;
+		default:
+			return `${message.role}\u0000${contentFingerprint(message.content)}`;
 	}
+}
+
+/** Fingerprint a message body; non-array shapes degrade to their string form instead of throwing. */
+function contentFingerprint(content: unknown): string {
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return String(content);
+	return content.map(fingerprintOfBlock).join("\u0001");
 }
 
 /** Fingerprint one content block; unknown block types (e.g. images) only contribute their type. */
 function fingerprintOfBlock(block: { type: string }): string {
-	const value = block as { type: string; text?: string; thinking?: string; id?: string; name?: string; arguments?: unknown };
+	const value = block as {
+		type: string;
+		text?: string;
+		thinking?: string;
+		id?: string;
+		name?: string;
+		arguments?: unknown;
+	};
 	switch (block.type) {
 		case "text":
 			return `text:${value.text ?? ""}`;

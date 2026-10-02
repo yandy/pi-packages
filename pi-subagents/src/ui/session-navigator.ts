@@ -185,6 +185,8 @@ export class TranscriptOverlay implements Component {
 	/** Cached laid-out lines + the width they were computed at; recomputed lazily when `linesDirty`. */
 	private renderedLines: string[] = [];
 	private renderedWidth = -1;
+	/** Width of the last layout, kept across `invalidate()` so a keystroke cannot pick the wrong one. */
+	private lastRenderWidth = -1;
 	private linesDirty = true;
 	/** Running-agent indicator baked into `renderedLines` — invalidates the cache when it changes. */
 	private renderedIndicator = "";
@@ -333,7 +335,7 @@ export class TranscriptOverlay implements Component {
 	 * the first layout.
 	 */
 	private layoutWidth(): number {
-		return this.renderedWidth > 0 ? this.renderedWidth : this.innerWidth();
+		return this.lastRenderWidth > 0 ? this.lastRenderWidth : this.innerWidth();
 	}
 
 	/** Terminal-width-derived inner width — used before the first layout has happened. */
@@ -367,15 +369,12 @@ export class TranscriptOverlay implements Component {
 		}, SYNC_THROTTLE_MS - elapsed);
 	}
 
-	/** Invalidate the line cache when the transcript or the indicator changed, then request a paint. */
+	/** Invalidate the line cache when the sync changed anything, then request a paint. */
 	private doSync(): void {
 		if (this.closed) return;
 		this.lastSyncAt = Date.now();
 		const outcome = this.body.sync(this.source.getMessages());
-		const changed = outcome.appended + outcome.refreshed + outcome.rebuilt > 0;
-		// `activeTools` and the streamed preview live outside the message list, so the
-		// indicator can change on its own.
-		if (changed || this.indicatorLine() !== this.renderedIndicator) this.linesDirty = true;
+		if (outcome.appended + outcome.refreshed + outcome.rebuilt > 0) this.linesDirty = true;
 		this.tui.requestRender();
 	}
 
@@ -386,9 +385,16 @@ export class TranscriptOverlay implements Component {
 	 */
 	private getRenderedLines(innerW: number): string[] {
 		if (innerW <= 0) return [];
-		if (!this.linesDirty && this.renderedWidth === innerW) return this.renderedLines;
+		if (!this.linesDirty && this.renderedWidth === innerW) {
+			// The running-agent indicator lives outside the message list (`activeTools`,
+			// streamed preview, and the status flip when the agent finishes), so no
+			// event necessarily marks the cache dirty. Re-check it here, where every
+			// frame and every keystroke reads the cache, and it self-heals.
+			if (this.indicatorLine() === this.renderedIndicator) return this.renderedLines;
+		}
 		this.renderedLines = this.buildContentLines(innerW);
 		this.renderedWidth = innerW;
+		this.lastRenderWidth = innerW;
 		this.linesDirty = false;
 		return this.renderedLines;
 	}

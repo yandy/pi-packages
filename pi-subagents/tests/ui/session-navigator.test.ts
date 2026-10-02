@@ -34,6 +34,18 @@ function fakeSource(overrides: Partial<TranscriptSource> = {}): TranscriptSource
 	};
 }
 
+/**
+ * Count full transcript layouts (the expensive path these tests guard).
+ *
+ * `source.streaming()` cannot be the counter any more: it is also called to
+ * re-check the running-agent indicator on every cache read. `buildContentLines`
+ * is the work that must stay cached, so count that.
+ */
+function countLayouts(overlay: TranscriptOverlay): () => number {
+	const spy = vi.spyOn(overlay as unknown as { buildContentLines: (width: number) => string[] }, "buildContentLines");
+	return () => spy.mock.calls.length;
+}
+
 function makeOverlay(
 	opts: { source?: TranscriptSource; done?: (r: undefined) => void; tui?: TUI; modelName?: string } = {},
 ) {
@@ -175,16 +187,15 @@ describe("TranscriptOverlay", () => {
 	});
 
 	it("does not re-render the container on repeated renders or keystrokes (caches laid-out lines)", () => {
-		const streaming = vi.fn(() => undefined);
-		const source = fakeSource({ streaming });
-		const overlay = makeOverlay({ source });
+		const overlay = makeOverlay();
+		const layouts = countLayouts(overlay);
 
-		overlay.render(80); // cache miss → buildContentLines reads streaming()
-		expect(streaming).toHaveBeenCalledTimes(1);
-		overlay.render(80); // cache hit → no re-render
-		expect(streaming).toHaveBeenCalledTimes(1);
+		overlay.render(80); // cache miss → one full layout
+		expect(layouts()).toBe(1);
+		overlay.render(80); // cache hit → no re-layout
+		expect(layouts()).toBe(1);
 		overlay.handleInput("\x1b[B"); // down arrow → uses the cached line count
-		expect(streaming).toHaveBeenCalledTimes(1);
+		expect(layouts()).toBe(1);
 	});
 
 	it("does not re-lay out the transcript on a keystroke at the overlay's real width", () => {
@@ -192,16 +203,16 @@ describe("TranscriptOverlay", () => {
 		// render() lays out at floor(columns * 0.9) - 4 while the scroll math
 		// (handleInput) read the cache at columns - 4. Two widths, one cache slot:
 		// every keystroke re-laid out the whole transcript.
-		const streaming = vi.fn(() => undefined);
-		const overlay = makeOverlay({ source: fakeSource({ streaming }), tui: mockTui(40, 120) });
+		const overlay = makeOverlay({ tui: mockTui(40, 120) });
 		const overlayWidth = Math.floor(120 * 0.9);
+		const layouts = countLayouts(overlay);
 
 		overlay.render(overlayWidth);
 		overlay.render(overlayWidth);
 		overlay.handleInput("\x1b[B"); // down arrow
 		overlay.render(overlayWidth);
 
-		expect(streaming).toHaveBeenCalledTimes(1);
+		expect(layouts()).toBe(1);
 	});
 
 	it("keeps materialized messages when the transcript grows", () => {
@@ -259,6 +270,27 @@ describe("TranscriptOverlay", () => {
 		captured?.();
 
 		expect(overlay.render(80).join("\n")).toContain("running command");
+	});
+
+	it("clears the running-agent indicator when the agent stops streaming without an event", () => {
+		// Completion flips the record's status; no session event follows. The
+		// indicator therefore has to be re-checked where frames and keystrokes read
+		// the cache, or `◍ …` lingers after the agent is done.
+		let streaming: { activeTools: ReadonlyMap<string, string>; responseText: string } | undefined = {
+			activeTools: new Map([["k", "read"]]),
+			responseText: "",
+		};
+		const source = fakeSource({
+			getMessages: () => [{ role: "user", content: "hi" }] as unknown as SessionMessage[],
+			streaming: () => streaming,
+		});
+		const overlay = makeOverlay({ source });
+
+		expect(overlay.render(80).join("\n")).toContain("◍");
+
+		streaming = undefined;
+
+		expect(overlay.render(80).join("\n")).not.toContain("◍");
 	});
 
 	it("keeps every rendered line within the overlay width", () => {
