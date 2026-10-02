@@ -34,7 +34,7 @@
 | **D2** | **一次性消费**：进入审批对话前消费记录（Allow / Deny / 取消都算用掉）；一次拒绝 = 一笔提权重试机会 |
 | **D3** | **kind 隔离**：bash 的拒绝只放行 bash 提权（`command`），write/edit 的只放行其自身（`operation`） |
 | **D4** | 门禁**只作用于严格更宽的请求**；同档免审批与"非法目标报 not-strictly-wider 错误"逐字不变 |
-| **D5** | **参数归一化**：`null` / `"null"`（trim、大小写无关）/ 空串 / 纯空白 → 视为未提供、按普通调用执行；真正的畸形（如只给 justification）仍报既有 malformed 错误（pi ≥1.0.0 下可达性按字段不同，见 §4.3 修订注记） |
+| **D5** | **参数归一化**：`null` / `"null"`（trim、大小写无关）/ 空串 / 纯空白 → 视为未提供、按普通调用执行；真正的畸形（如只给 justification）仍报既有 malformed 错误（pi ≥0.80.2 下可达性按字段不同，见 §4.3 修订注记） |
 | **D6** | **Deny 可选理由**（用户追加）：两步式 `select → input`；理由可选（回车跳过）、sanitize（折叠空白、截断 500 字符）、随拒绝错误回传模型 |
 | **D7** | 忽略提权时**不弹窗、不报错**：按当前档位执行，结果附 `[sandbox: escalation fields were ignored …]`（原位反馈） |
 | **D8** | **无配置开关**：不引入 escalation policy 配置项（用户明确未选方案 3） |
@@ -108,12 +108,38 @@ interface DenialLedger {
 
 `ResolvedCall` 增加 `ignoredEscalation`；三个 `execute` 在 ignored 时对结果追加 `escalationIgnoredMarker`。
 
-> **2026-10-02 修订注记（pi 1.0.0 的参数校验层：占位符归一化按字段可达）**：第 1 步仍必需，但**可达性不同**——pi ≥1.0.0 在 extension `execute` 之前跑 `validateToolArguments`，而它校验的是 **declared schema**（不是下发给模型的 strict wire schema）。实测结论：
+> **2026-10-02 修订注记（宿主参数校验层：占位符归一化按字段可达）**：第 1 步仍必需，但**可达性不同**——pi ≥0.80.2（本包 peer floor；1.0.0 实测同）在 extension `execute` 之前跑 `validateToolArguments`，而它校验的是 **declared schema**（不是下发给模型的 strict wire schema；0.80.2 尚无 strict 转换与 `normalizeOptionalNulls`，但**有**这项校验）。实测结论：
 > - `justification` 的字符串臂是 `Type.String()`（字段本身为 `string | null`）：字符串占位符 `"null"` / `""` / 空白都是合法值，**真的会到达 `execute`** → 归一化是 load-bearing 的。删掉它，一笔普通调用会被误判成 `justification was sent without sandbox_permissions`；真提权还会带着 `Reason: null` 进审批弹窗。
-> - `sandbox_permissions`（两个字面量枚举）：字符串形态在 pi 的参数校验期就被拒（`execute` 不会跑），只有“省略”和 schema 显式声明的 JSON `null` 会到达；后者是本次新增的（§4.6 与 09-29 §“工具 schema 扩展”）。
+> - `sandbox_permissions`（两个字面量枚举）：字符串形态在 pi 的参数校验期就被拒（`execute` 不会跑）——**0.80.2 与 1.0.0 实测同**；只有“省略”和 schema 显式声明的 JSON `null` 会到达；后者是本次新增的（§4.6 与 09-29 §“工具 schema 扩展”）。
 > - 校验对 declared schema 做 → “省略”永远放行，与 strict wire schema 的 `required` 无关；JSON `null` 之所以曾“没事”，是 `normalizeOptionalNulls` 把 optional 且不允许 null 的字段直接删键。声明 `Type.Null()` 后它不再被删，而是原样送达归一化——这条分支从“靠 pi 的补丁”变成契约内行为。
 >
 > 第 2–6 步与 `ResolvedCall` 契约不变。
+
+> **2026-10-02 三次修订（`prepareArguments` 占位符剥离：噪声在校验前出局）**：上一条把 `Type.Null()` 当作“不提权”的合法取值，但实测（deepseek-flash，strict 提供商）它**降低不了**模型写字符串 `"null"` 的概率——三个机制叠加：
+> 1. strict 转换把所有 property 塞进 `required`，模型在协议上无法省略；
+> 2. schema 文本里 `null` 只以带引号的 `{"type":"null"}` 出现（JSON Schema 的类型名本身是字符串），模型逐 token 生成时照抄成字符串；
+> 3. `"null"` 在 `sandbox_permissions` 的两字面量枚举上被 pi 的参数校验硬拒，而错误消息把原参数 JSON 回放（`Received arguments: … "sandbox_permissions": "null" …`）进上下文，成为下一轮最强的模仿样本 → 自我强化。
+>
+> 因此新增 `stripEscalationPlaceholders`（`src/escalation.ts`）并挂在三个工具的 `prepareArguments` 上（`src/tools.ts` 的 `withPlaceholderStripping`）。pi 的 `prepareToolCallArguments` 在 `validateToolArguments` **之前**执行，于是字符串占位符在校验前出局：普通调用照常执行，第 3 条的回放循环被掐断。
+>
+> - **与 `Type.Null()` 正交，二者都保留**：`Type.Null()` 管“裸 null 的合法性/自证”（不依赖 pi 的 strict 包裹与 `normalizeOptionalNulls` 剥键），钩子管“错误字符串的容错”。删掉 `Type.Null()` 会让裸 null 的正确性重新依赖宿主实现细节，故不删。
+> - **只剥占位符字符串**（判定复用 `normalizeEscalationValue`）：JSON `null`、省略、真提权（合法档位 + 非空理由）原样通过；非法值（非法档位、数字、对象等）原样保留，交给宿主校验 / `validateEscalationArgs` 报错（注意 pi 的 `Value.Convert` 会把数字/布尔强转成字符串、拒掉对象/数组，所以“保留”不等于“原样到达 execute”）；真畸形仍由 `validateEscalationArgs` 报既有 MALFORMED。
+> - **必须串联 base 钩子**：pi 内置 edit 的 `prepareEditArguments`（legacy `oldText`/`newText` → `edits`）不得被覆盖——`withPlaceholderStripping` 先跑 base 再剥离；bash/write 在 pi 侧暂无钩子，串联写法对未来新增的 base 钩子自动生效。
+> - **可达性更新**：`sandbox_permissions` 的字符串占位符不再“在 pi 校验期硬拒”（先被钩子剥掉）；`normalizeEscalationValue` 保留为未走钩子的调用路径的兜底。
+> - 测试：`tests/escalation.test.ts`（纯函数语义：剥占位符 / 不碰裸 null 与真提权 / 非对象防御 / 不 mutation / 无占位符同引用）与 `tests/tools.test.ts`（三工具接线 + edit legacy 回归 + 剥后走 `resolveCall` 的普通调用断言）。
+> - **版本适用面**：钩子在 peer floor 0.80.2 上就是 load-bearing 的——0.80.2 的 `validateToolArguments` 同样硬拒 `"null"`（实测），只是 0.80.2 无 strict wire schema 转换，模型“被迫给值”的动机比 1.0.0 弱。
+> - **宿主级验证配方（手工跑；CI 盖不住这类漂移）**：包自己的 vitest 不 import 宿主校验器（`check:host-deps` 要求 import 宿主提供包必须在 `peerDependencies` 声明），因此“raw 被拒 → 钩子后通过”只能手工复现。把下面内容存为**仓库内**的脚本（不能在 `/tmp`：否则解析不到宿主包），`node <file>.mjs`：
+>   ```js
+>   import { validateToolArguments } from "@earendil-works/pi-ai/compat"; // 0.80.2 与 1.0.0 同
+>   const tool = { name: "bash", parameters: { type: "object", required: ["command"], properties: {
+>     command: { type: "string" },
+>     sandbox_permissions: { anyOf: [ { type: "string", const: "workspace-write" },
+>       { type: "string", const: "danger-full-access" }, { type: "null" } ] },
+>     justification: { anyOf: [{ type: "string" }, { type: "null" }] } } } };
+>   validateToolArguments(tool, { name: "bash", arguments: { command: "ls", sandbox_permissions: "null" } });
+>   // 期望抛出：sandbox_permissions: must be equal to constant（0.80.2 与 1.0.0 实测同）
+>   ```
+>   再把同一参数过一遍 `stripEscalationPlaceholders`（`src/escalation.ts`）后重跑校验：应通过且参数为 `{command:"ls"}`。宿主若改为按 strict wire schema 校验，本钩子的“删键”反而会让普通调用失败（strict 下 required 全含）——配方此时会变成反向信号。
 
 ### 4.4 记账点
 
@@ -142,7 +168,7 @@ interface DenialLedger {
 
 **真实拒绝后重试（放行）**：命令被拒 → 记账 → 模型原样重试 → 门禁命中并消费 → 审批对话（Allow once / Deny + 可选理由）→ 一次性更宽执行 → 结果附 one-shot 标记。
 
-**占位符**：JSON `null`（或省略）→ 归一化 `undefined` → 普通调用（无弹窗、无报错）；`justification` 的字符串占位符 `"null"` / `""` 走同一条路（它们能过 pi 的参数校验）。`sandbox_permissions` 的字符串形态例外：pi ≥1.0.0 在校验期就拒（execute 不跑），见 §4.3 修订注记。
+**占位符**：工具侧 `prepareArguments` 先把字符串占位符（`"null"` / `""` / 纯空白）剥成“未提供”（三次修订，见 §4.3）；随后 JSON `null`（或省略）→ 归一化 `undefined` → 普通调用（无弹窗、无报错）；`justification` 的字符串占位符在未走钩子的调用路径上走同一条归一化。
 
 **子代理**：子会话各记各的账；子被拒 → 记账 → 重试 → 门禁命中 → 转发父会话弹窗（09-30 链路不变）；子会话 disposed 时账本 `forget`。
 
@@ -156,7 +182,7 @@ interface DenialLedger {
 | 有记录 + 更宽请求 + 用户 Deny | 消费记录；错误文案含可选理由；再提权因无记录被忽略（模型被告知 stop and explain） |
 | 同档请求（含 `/permission` 已放宽） | 免审批，不触达门禁（不受记录影响） |
 | 非法目标（更窄 / 未知） | 既有 not-strictly-wider 错误（不进门禁、不静默降级） |
-| 占位符参数（可达者） | 视为未提供，普通调用（`sandbox_permissions` 的字符串形态在 pi ≥1.0.0 校验期被拒，见 §4.3） |
+| 占位符参数（可达者） | `prepareArguments` 在校验前剥掉字符串形态；JSON `null` / 省略走归一化 → 普通调用（三次修订，见 §4.3） |
 | 真畸形（只给一个字段 / 空 justification） | 既有 malformed 错误（nothing ran + 修复配方） |
 | 读不到 sessionId（窄 ctx / 异常宿主） | 无记录可证 → 忽略（不抛 TypeError，fail-closed 方向） |
 | headless（有会话身份、无通道） | 有记录时走既有 no approval channel 错误；无记录时忽略 |

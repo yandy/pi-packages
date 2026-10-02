@@ -207,7 +207,7 @@ bash / write / edit 各增加可选参数：
 
 **2026-10-02 增补（denial-first 硬化，见 `2026-10-02-denial-first-escalation-design.md`）**：上述 1–6 步语义不变，在 `resolveCall` 层新增三处前置/嵌入处理：
 
-- **归一化（在原第 1 步之前）**：`null` / `"null"`（trim、大小写无关）/ 空串 / 纯空白 → 视为未提供、按普通调用执行；原第 1 步的 malformed 分支不再接收这些占位符（它们曾是"模型误判为沙箱拒绝"的一条噪声来源）。注意可达性按字段不同：pi ≥1.0.0 的参数校验会把 `sandbox_permissions` 的字符串形态拒在执行之前（只有省略与 JSON `null` 能到达），见 `2026-10-02-denial-first-escalation-design.md` §4.3 修订注记；
+- **归一化（在原第 1 步之前）**：`null` / `"null"`（trim、大小写无关）/ 空串 / 纯空白 → 视为未提供、按普通调用执行；原第 1 步的 malformed 分支不再接收这些占位符（它们曾是"模型误判为沙箱拒绝"的一条噪声来源）。注意可达性按字段不同：pi ≥0.80.2 的参数校验会把 `sandbox_permissions` 的字符串形态拒在执行之前（只有省略与 JSON `null` 能到达）；2026-10-02 三次修订后，工具侧 `prepareArguments` 已在参数校验前拿到并剥掉字符串占位符——该形态不再产生与沙箱无关的硬错误，见 `2026-10-02-denial-first-escalation-design.md` §4.3 修订注记；
 - **denial-first 门禁（在原第 3 步与第 4 步之间）**：严格更宽的请求必须命中本会话、同工具类（`command`/`operation`）的未消费拒绝记录（bash 沙箱拒绝 / fs 围栏拒绝时记账，一次性消费）；未命中则忽略提权参数、按 effective mode 执行，并在结果附 `[sandbox: escalation fields were ignored …]`。同档请求与非法目标不经过门禁（原第 2、3 步语义不变）；
 - **Deny 理由（原第 5 步的 Deny 分支）**：`Deny` 后追问可选理由（`ctx.ui.input`，回车跳过），理由折叠空白、截断 500 字符，追加为拒绝错误后缀 `. The user's reason: <reason>`；无 input 能力的宿主自动跳过。
 

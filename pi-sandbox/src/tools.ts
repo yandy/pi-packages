@@ -21,6 +21,7 @@ import {
 	type EscalationUI,
 	isStrictlyWider,
 	normalizeEscalationValue,
+	stripEscalationPlaceholders,
 	validateEscalationArgs,
 } from "./escalation";
 import { getEscalationBroker } from "./escalation-broker";
@@ -66,8 +67,9 @@ function configForCall(deps: SandboxToolDeps, sessionCwd: string): SandboxConfig
  *  显式声明 null 后，“不提权”有一个 schema 认可、文案也认可的取值，而不是靠模型去猜字符串 `"null"`；
  *  同时 pi 的 strict 转换不再补包裹层（`schemaAllowsNull` 递归识别），JSON null 也不会被
  *  `normalizeOptionalNulls` 剥掉，而是原样送达 execute 的归一化。后两条是宿主（pi ≥1.0.0）行为：
- *  本仓 devDependency 是 0.80.2（无严格转换 / 无参数校验），单测只能钉 declared schema——
- *  实测记录见 docs/superpowers/specs/2026-10-02-denial-first-escalation-design.md §4.3。 */
+ *  本仓 devDependency 是 0.80.2（无严格转换、无 `normalizeOptionalNulls`，但**有** declared-schema 参数校验
+ *  ——实测字符串 `"null"` 在 0.80.2 上同样被硬拒），单测只能钉 declared schema——
+ *  宿主链路的可复现验证配方与实测记录见 docs/superpowers/specs/2026-10-02-denial-first-escalation-design.md §4.3。 */
 export const ESCALATION_PROPS = {
 	sandbox_permissions: Type.Optional(
 		Type.Union([Type.Literal("workspace-write"), Type.Literal("danger-full-access"), Type.Null()]),
@@ -212,6 +214,18 @@ function extendParams(base: TSchema): TSchema {
 }
 
 /**
+ * `prepareArguments` 串联：base 钩子在前，占位符剥离在后。
+ * base 侧不能丢——pi 内置 edit 的 `prepareEditArguments` 负责 legacy `oldText`/`newText` → `edits` 的规整，
+ * 直接写自己的 `prepareArguments` 会把它静默覆盖（旧式输入兼容回归）；bash/write 在 pi 侧暂无钩子，
+ * 写成串联后未来 base 新增钩子也自动生效。
+ * 宿主契约（与 src/escalation.ts 的 stripEscalationPlaceholders 注释互为补充）：pi 的
+ * `prepareToolCallArguments` 在 `validateToolArguments` 之前执行（0.80.2 与 1.0.0 均如此），剥离因此在校验前生效。
+ */
+function withPlaceholderStripping<T>(base: ((args: unknown) => T) | undefined): (args: unknown) => T {
+	return (args: unknown): T => stripEscalationPlaceholders(base === undefined ? args : base(args)) as T;
+}
+
+/**
  * 提示预算（β′，每请求成本受控）：
  * - `tool.description` 与参数 schema 是**按工具**进请求的 → 同一句话写进 bash/write/edit 就付 3 份；
  * - `promptGuidelines` 进 system prompt 的 rules，pi 按字符串去重（`buildRules` 的 seen 集）→ 只付 1 份。
@@ -301,6 +315,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 		description: escalationDescription(baseBash.description),
 		promptGuidelines: [...(baseBash.promptGuidelines ?? []), ESCALATION_GUIDELINE],
 		parameters: extendParams(baseBash.parameters),
+		prepareArguments: withPlaceholderStripping(baseBash.prepareArguments),
 		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
 			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;
 			const workspaceRoot = workspaceRootFor(sessionCwd);
@@ -337,6 +352,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 		description: escalationDescription(baseWrite.description),
 		promptGuidelines: [...(baseWrite.promptGuidelines ?? []), ESCALATION_GUIDELINE],
 		parameters: extendParams(baseWrite.parameters),
+		prepareArguments: withPlaceholderStripping(baseWrite.prepareArguments),
 		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
 			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;
 			const workspaceRoot = workspaceRootFor(sessionCwd);
@@ -362,6 +378,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 		description: escalationDescription(baseEdit.description),
 		promptGuidelines: [...(baseEdit.promptGuidelines ?? []), ESCALATION_GUIDELINE],
 		parameters: extendParams(baseEdit.parameters),
+		prepareArguments: withPlaceholderStripping(baseEdit.prepareArguments),
 		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
 			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;
 			const workspaceRoot = workspaceRootFor(sessionCwd);
