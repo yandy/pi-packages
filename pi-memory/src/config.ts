@@ -15,7 +15,7 @@ export interface SessionPersistenceConfig {
 
 /** Shared defaults that per-task configs inherit. Per-task fields override these. */
 export interface DefaultsConfig {
-	/** Shared model for dream / extract / the side query. Ships as `"deepseek/deepseek-flash"`; a value that cannot be resolved (no exact `"provider/id"` and no fuzzy match in the registry) falls back to the parent session's model. */
+	/** 共享模型：per-task 未指定时生效。**没有默认值** —— 必须由用户显式配置。 */
 	model?: string;
 	sessionPersistence?: SessionPersistenceConfig;
 }
@@ -87,8 +87,8 @@ export interface MemoryConfig {
 export const DEFAULT_CONFIG: MemoryConfig = {
 	enabled: true,
 	// headless 子会话默认只在内存里跑：extract / dream / 侧查询都不该往用户的 sessions 目录里落盘。
-	// 共享默认模型：dream / extract / 侧查询都继承它；不可用时 resolveModel(...) ?? parentModel 会回退父会话模型。
-	defaults: { model: "deepseek/deepseek-flash", sessionPersistence: { enabled: false } },
+	// **没有模型默认值**：model 必须由用户显式配置（defaults.model 或 per-task），否则 session_start 报错。
+	defaults: { sessionPersistence: { enabled: false } },
 	memoryDir: join(homedir(), CONFIG_DIR_NAME, "memory"),
 	memIndexMaxLines: 200,
 	memIndexMaxBytes: 25600,
@@ -113,6 +113,54 @@ export const DEFAULT_CONFIG: MemoryConfig = {
 		maxAssistantChars: 2000,
 	},
 };
+
+/** 需要显式模型的子任务。顺序固定：dream → extractMemories → autoSurfacing（校验信息按此顺序输出）。 */
+export type ModelTask = "dream" | "extractMemories" | "autoSurfacing";
+
+/** 某任务的模型值：per-task 优先，其次共享的 defaults.model。 */
+function taskModel(cfg: MemoryConfig, task: ModelTask): string | undefined {
+	return cfg[task].model ?? cfg.defaults?.model;
+}
+
+/**
+ * 会执行的任务及其模型值。`enabled: false` 的会话不执行任何一个任务 —— 包括 dream，
+ * 因为 `/dream` 命令与 nudge 都被 `config.enabled` 挡住。
+ */
+export function requiredModels(cfg: MemoryConfig): Array<{ task: ModelTask; value: string | undefined }> {
+	if (!cfg.enabled) return [];
+	const out: Array<{ task: ModelTask; value: string | undefined }> = [
+		{ task: "dream", value: taskModel(cfg, "dream") },
+	];
+	if (cfg.extractMemories.enabled) out.push({ task: "extractMemories", value: taskModel(cfg, "extractMemories") });
+	if (cfg.autoSurfacing.enabled) out.push({ task: "autoSurfacing", value: taskModel(cfg, "autoSurfacing") });
+	return out;
+}
+
+/**
+ * 启动校验：空数组 = 通过。
+ * `resolve` 由调用方注入（生产时是 `(v) => resolveModel(v, ctx.modelRegistry) !== undefined`），
+ * 因此本函数不依赖 SDK 的 registry 类型，可用假 resolve 单测。
+ */
+export function modelConfigErrors(cfg: MemoryConfig, resolve: (value: string) => boolean): string[] {
+	const errors: string[] = [];
+	for (const { task, value } of requiredModels(cfg)) {
+		if (value === undefined) {
+			errors.push(`no model for ${task} — set "${task}.model" or "defaults.model" in memory.json`);
+		} else if (!resolve(value)) {
+			errors.push(`model "${value}" for ${task} is not resolvable (unknown id or missing credentials)`);
+		}
+	}
+	return errors;
+}
+
+/** 已通过启动校验的模型值；缺失时抛错（真正的守卫在 session_start，这里是防御）。 */
+export function requiredModel(cfg: MemoryConfig, task: ModelTask): string {
+	const value = taskModel(cfg, task);
+	if (value === undefined) {
+		throw new Error(`no model for ${task} — set "${task}.model" or "defaults.model" in memory.json`);
+	}
+	return value;
+}
 
 function expandTilde(p: string): string {
 	if (p === "~") return homedir();
