@@ -208,6 +208,8 @@ function approvalChannelFor(ctx: ToolCtxLike, signal: AbortSignal | undefined): 
 
 ### 4.4 `src/escalation.ts`：零改动
 
+> **2026-10-02 修订注记**：该结论只在本设计范围内成立。后续 denial-first 硬化（`2026-10-02-denial-first-escalation-design.md`）把 `EscalationUI` 的 `select` 收敛为 `ask` 原语、新增占位符归一化与 Deny 可选理由（含下方表格的 Deny 行追加可选理由后缀）；六步校验顺序与三条返回路径映射本身仍不变。
+
 论证：`approveEscalation` 的 6 步顺序（配对校验 → 同模式免审批 → 严格更宽 → `hasUI` 显式检查 → `select` → 结果分派）全部复用。三条返回路径的映射关系不变：
 
 | broker/父侧结果 | 落进的现有分支 | 现有文案 |
@@ -364,7 +366,7 @@ abort 的两种时机：
 
 ## 9. 未来扩展点
 
-- **跨进程转发**：若将来需要，新增一个 mailbox 实现即可——`resolveChannel` 的第二来源（env `PI_SUBAGENT_PARENT_SESSION`）+ `request` 的第二实现（文件邮箱 + 轮询）。`EscalationUI` seam（`{ hasUI, select }`）与 `escalation.ts` 均不必改。
+- **跨进程转发**：若将来需要，新增一个 mailbox 实现即可——`resolveChannel` 的第二来源（env `PI_SUBAGENT_PARENT_SESSION`）+ `request` 的第二实现（文件邮箱 + 轮询）。`EscalationUI` seam（2026-10-02 起为 `{ hasUI, ask }`，见 denial-first 设计）与 `escalation.ts` 均不必改。
 - **子会话接入 uiContext**：pi-subagents 若将来给子会话传 uiContext，子会话即走 direct 分支（自己注册了通道就经 FIFO 车道，未注册则直连），无需改本包代码。
 
 ## 10. 文档改动清单
@@ -399,7 +401,7 @@ abort 的两种时机：
 | 通道解析（无 link） | 同上但无 link → 抛 `no approval channel is available` | 同上 |
 | direct 路径不回归 | `hasUI: true` 的 ctx → 仍调 `ctx.ui.select`，不触达 broker | 同上 |
 | direct 路径透传 signal | `hasUI: true` + 传入 signal → `ctx.ui.select` 收到 `{ signal }`；无 signal 时第三参为 `undefined`（行为逐字不变） | 同上 |
-| 现有 escalation 语义不回归 | 严格更宽校验、配对校验、Deny/取消文案全部不变 | `tests/escalation.test.ts`（现有用例必须继续通过，零改动） |
+| 现有 escalation 语义不回归 | 严格更宽校验、配对校验、Deny/取消文案全部不变（2026-10-02 起 Deny 文案追加**可选**理由后缀，无理由时逐字回退；用例因 `ask` 原语重构而适配） | `tests/escalation.test.ts` |
 | 接线冒烟 | 加载 `index.ts` 不抛错；`session_start`/`session_shutdown`/两个事件通道均被订阅 | `tests/index-smoke.test.ts`（扩） |
 | resolveOwnChannel 五种情形（命中/未注册/hasUI 假/hasUI 抛错/不走 link） | 见 tests/escalation-broker.test.ts | 同上 |
 | execute 层 signal 接线（bash/write/edit 各一条） | 已 abort 的 signal → 不弹窗且抛 cancelled | tests/tools.test.ts |

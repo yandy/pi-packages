@@ -8,6 +8,7 @@ import { createSandboxTools, resolveCall, resolveCallMode } from "../src/tools";
 import { createPermissionState } from "../src/permission";
 import { DEFAULT_SANDBOX_CONFIG } from "../src/config";
 import { getEscalationBroker, resetEscalationBrokerForTests } from "../src/escalation-broker";
+import { getDenialLedger, resetDenialLedgerForTests } from "../src/denial-ledger";
 
 let dir: string;
 let ws: string;
@@ -44,8 +45,20 @@ function makeDeps(overrides: Partial<Parameters<typeof createSandboxTools>[0]> =
 	};
 }
 
+/** 测试会话 id：denial-first 门禁按会话记账/消费，默认 ctx 共用它。 */
+const TEST_SESSION = "test-session";
+
 function toolCtx(hasUI = true, choice: string | undefined = "Allow once") {
-	return { hasUI, ui: { select: vi.fn(async () => choice), notify: vi.fn() } } as never;
+	return {
+		hasUI,
+		sessionManager: { getSessionId: () => TEST_SESSION },
+		ui: { select: vi.fn(async () => choice), input: vi.fn(async () => undefined), notify: vi.fn() },
+	} as never;
+}
+
+/** 播种一笔前置拒绝（denial-first 门禁的放行条件）。 */
+function seedDenial(kind: "command" | "operation" = "command", sessionId = TEST_SESSION) {
+	getDenialLedger().record(sessionId, kind);
 }
 
 beforeEach(() => {
@@ -57,7 +70,7 @@ beforeEach(() => {
 	fakeTmpDir = realpathSync.native(join(dir, "fake-tmp"));
 	outsideDir = realpathSync.native(join(dir, "outside"));
 });
-afterEach(() => { resetEscalationBrokerForTests(); rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => { resetEscalationBrokerForTests(); resetDenialLedgerForTests(); rmSync(dir, { recursive: true, force: true }); });
 
 describe("createSandboxTools schemas", () => {
 	it("bash keeps command/timeout and gains the escalation pair", () => {
@@ -71,9 +84,9 @@ describe("createSandboxTools schemas", () => {
 	it("description teaches the escalation contract within the per-tool budget (β′)", () => {
 		const { deps } = makeDeps();
 		const { bash, write, edit } = createSandboxTools(deps);
-		// 跨工具规则只留一句：正常调用两个提权字段都不传（never null），协议细节在按需面。
+		// 跨工具规则只留一句：正常调用两个提权字段都不传（never null），且非拒绝重试的提权会被忽略。
 		for (const tool of [bash, write, edit]) {
-			expect(tool.description).toContain("Pass neither escalation field unless you are retrying a denial (never null).");
+			expect(tool.description).toContain("Pass escalation fields only when retrying a denial (never null); others are ignored.");
 			expect(tool.description).toContain("workspace-write already allows the workspace and /tmp");
 			// 旧版把这套协议写进每个 description（×3 重复）：不许回潮。
 			expect(tool.description).not.toContain("Writes outside the permitted roots are denied");
@@ -116,15 +129,18 @@ describe("resolveCallMode", () => {
 	});
 	it("resolveCall flags a genuine one-shot escalation only (same-mode request stays escalated:false)", async () => {
 		const { deps } = makeDeps();
-		expect(await resolveCall({}, toolCtx(), deps, "command", () => "x")).toEqual({ mode: "workspace-write", escalated: false });
+		expect(await resolveCall({}, toolCtx(), deps, "command", () => "x")).toEqual({ mode: "workspace-write", escalated: false, ignoredEscalation: false });
 		// 请求档位 == effective：免审批执行，不是提权（否则会给模型发假的"特批"信号）。
 		expect(await resolveCall({ sandbox_permissions: "workspace-write", justification: "same as effective" }, toolCtx(), deps, "command", () => "x"))
-			.toEqual({ mode: "workspace-write", escalated: false });
+			.toEqual({ mode: "workspace-write", escalated: false, ignoredEscalation: false });
+		// 严格更宽 + 有前置拒绝记录（denial-first 硬门禁的放行条件）→ 真提权
+		seedDenial("command");
 		expect(await resolveCall({ sandbox_permissions: "danger-full-access", justification: "need /etc write" }, toolCtx(true, "Allow once"), deps, "command", () => "x"))
-			.toEqual({ mode: "danger-full-access", escalated: true });
+			.toEqual({ mode: "danger-full-access", escalated: true, ignoredEscalation: false });
 	});
 	it("approved escalation is one-shot: override state untouched (Review Focus #5)", async () => {
 		const { deps } = makeDeps();
+		seedDenial("command");
 		const mode = await resolveCallMode(
 			{ sandbox_permissions: "danger-full-access", justification: "need /etc write" },
 			toolCtx(true, "Allow once"), deps, "command", () => "x",
@@ -134,9 +150,12 @@ describe("resolveCallMode", () => {
 	});
 	it("headless: escalation fails closed", async () => {
 		const { deps } = makeDeps();
+		seedDenial("command");
+		// 有会话身份（能走到门禁的下一环）但无审批通道：仍按既有 fail-closed 报错。
+		const headless = { hasUI: false, sessionManager: { getSessionId: () => TEST_SESSION }, ui: { select: vi.fn() } } as never;
 		await expect(resolveCallMode(
 			{ sandbox_permissions: "danger-full-access", justification: "x" },
-			toolCtx(false), deps, "command", () => "x",
+			headless, deps, "command", () => "x",
 		)).rejects.toThrow(/no approval channel is available/);
 	});
 });
@@ -184,6 +203,9 @@ describe("write tool fence + escalation wiring", () => {
 		const { deps } = makeDeps();
 		const { write } = createSandboxTools(deps);
 		const outside = join(outsideDir, "denied.txt");
+		// denial-first：先有一次真实拒绝（记账），提权才会进入审批对话
+		await expect(write.execute("call-4-pre", { path: outside, content: "x" }, undefined, undefined, toolCtx()))
+			.rejects.toThrow(/file access denied under workspace-write mode/);
 		await expect(write.execute("call-4", {
 			path: outside, content: "x",
 			sandbox_permissions: "danger-full-access", justification: "reason",
@@ -278,6 +300,7 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 		const { deps } = makeDeps();
 		const parentSelect = registerParent("parent-1");
 		getEscalationBroker().linkChild("child-1", "parent-1");
+		seedDenial("command", "child-1");
 		const mode = await resolveCallMode(
 			{ sandbox_permissions: "danger-full-access", justification: "need /etc write" },
 			subagentCtx("child-1"),
@@ -298,6 +321,7 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 		const { deps } = makeDeps();
 		registerParent("parent-2", "Deny");
 		getEscalationBroker().linkChild("child-2", "parent-2");
+		seedDenial("command", "child-2");
 		await expect(resolveCallMode(
 			{ sandbox_permissions: "danger-full-access", justification: "j" },
 			subagentCtx("child-2"),
@@ -308,6 +332,7 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 	it("无 link 的子会话 → fail-closed（Review Focus #4）", async () => {
 		const { deps } = makeDeps();
 		registerParent("parent-3");
+		seedDenial("command", "orphan");
 		await expect(resolveCallMode(
 			{ sandbox_permissions: "danger-full-access", justification: "j" },
 			subagentCtx("orphan"),
@@ -315,22 +340,24 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 		)).rejects.toThrow(/no approval channel is available/);
 	});
 
-	it("ctx 无 sessionManager → fail-closed，不抛 TypeError（Review Focus #1）", async () => {
+	it("ctx 无 sessionManager → 门禁忽略提权（无会话身份无从证明前置拒绝），不抛 TypeError（Review Focus #1）", async () => {
 		const { deps } = makeDeps();
 		registerParent("parent-4");
 		getEscalationBroker().linkChild("child-4", "parent-4");
-		// toolCtx(false) 是既有判例用的窄 ctx：没有 sessionManager
-		await expect(resolveCallMode(
+		// 窄 ctx：没有 sessionManager——门禁先于通道解析，按"无前置拒绝"忽略（不弹窗、不抛 TypeError）
+		const narrowCtx = { hasUI: false, ui: { select: vi.fn(async () => "Allow once") } } as never;
+		const result = await resolveCall(
 			{ sandbox_permissions: "danger-full-access", justification: "j" },
-			toolCtx(false),
-			deps, "command", () => "x",
-		)).rejects.toThrow(/no approval channel is available/);
+			narrowCtx, deps, "command", () => "x",
+		);
+		expect(result).toEqual({ mode: "workspace-write", escalated: false, ignoredEscalation: true });
 	});
 
 	it("子会话 signal 已 abort → 不弹窗，按取消抛错（Review Focus #2）", async () => {
 		const { deps } = makeDeps();
 		const parentSelect = registerParent("parent-5");
 		getEscalationBroker().linkChild("child-5", "parent-5");
+		seedDenial("command", "child-5");
 		const ac = new AbortController();
 		ac.abort();
 		await expect(resolveCallMode(
@@ -345,6 +372,7 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 		const { deps } = makeDeps();
 		const ctx = toolCtx(true, "Allow once") as { ui: { select: ReturnType<typeof vi.fn> } };
 		const ac = new AbortController();
+		seedDenial("command");
 		await resolveCallMode(
 			{ sandbox_permissions: "danger-full-access", justification: "j" },
 			ctx as never,
@@ -356,6 +384,7 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 	it("direct 路径无 signal → 第三参为 undefined（headless 行为逐字不变，D6）", async () => {
 		const { deps } = makeDeps();
 		const ctx = toolCtx(true, "Allow once") as { ui: { select: ReturnType<typeof vi.fn> } };
+		seedDenial("command");
 		await resolveCallMode(
 			{ sandbox_permissions: "danger-full-access", justification: "j" },
 			ctx as never,
@@ -368,6 +397,7 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 		const { deps } = makeDeps();
 		const ownSelect = vi.fn(async () => "Allow once");
 		getEscalationBroker().registerParent({ sessionId: "self", hasUI: () => true, select: ownSelect });
+		seedDenial("command", "self");
 		const ctx = {
 			hasUI: true,
 			sessionManager: { getSessionId: () => "self" },
@@ -389,6 +419,7 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 		const { deps } = makeDeps();
 		const select = vi.fn(async () => "Allow once");
 		const ctx = { hasUI: true, sessionManager: { getSessionId: () => "unregistered" }, ui: { select } } as never;
+		seedDenial("command", "unregistered");
 		const mode = await resolveCallMode(
 			{ sandbox_permissions: "danger-full-access", justification: "j" },
 			ctx, deps, "command", () => "x",
@@ -401,6 +432,7 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 		const { deps } = makeDeps();
 		const parentSelect = registerParent("parent-e1");
 		getEscalationBroker().linkChild("child-e1", "parent-e1");
+		seedDenial("command", "child-e1");
 		const { bash } = createSandboxTools(deps);
 		const ac = new AbortController();
 		ac.abort();
@@ -416,6 +448,7 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 		const { deps } = makeDeps();
 		const parentSelect = registerParent("parent-e2");
 		getEscalationBroker().linkChild("child-e2", "parent-e2");
+		seedDenial("operation", "child-e2");
 		const { write } = createSandboxTools(deps);
 		const ac = new AbortController();
 		ac.abort();
@@ -432,6 +465,7 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 		const { deps } = makeDeps();
 		const parentSelect = registerParent("parent-e3");
 		getEscalationBroker().linkChild("child-e3", "parent-e3");
+		seedDenial("operation", "child-e3");
 		const { edit } = createSandboxTools(deps);
 		const ac = new AbortController();
 		ac.abort();
@@ -442,5 +476,99 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 			justification: "probe",
 		}, ac.signal, undefined, subagentCtx("child-e3"))).rejects.toThrow(/cancelled/);
 		expect(parentSelect).not.toHaveBeenCalled();
+	});
+});
+
+describe("denial-first 硬门禁（未经真实拒绝不提权）", () => {
+	it("无前置拒绝 → 忽略提权参数：不弹窗、按当前档位执行、ignoredEscalation:true", async () => {
+		const { deps } = makeDeps();
+		const ctx = toolCtx(true, "Allow once") as { ui: { select: ReturnType<typeof vi.fn> } };
+		const result = await resolveCall(
+			{ sandbox_permissions: "danger-full-access", justification: "preemptive" },
+			ctx as never, deps, "command", () => "ls",
+		);
+		expect(result).toEqual({ mode: "workspace-write", escalated: false, ignoredEscalation: true });
+		expect(ctx.ui.select).not.toHaveBeenCalled();
+	});
+
+	it("消费一次性：一次拒绝只放行一笔提权，第二笔又被忽略", async () => {
+		const { deps } = makeDeps();
+		seedDenial("command");
+		expect(await resolveCall({ sandbox_permissions: "danger-full-access", justification: "j" }, toolCtx(true, "Allow once"), deps, "command", () => "x"))
+			.toEqual({ mode: "danger-full-access", escalated: true, ignoredEscalation: false });
+		expect(await resolveCall({ sandbox_permissions: "danger-full-access", justification: "j" }, toolCtx(true, "Allow once"), deps, "command", () => "x"))
+			.toEqual({ mode: "workspace-write", escalated: false, ignoredEscalation: true });
+	});
+
+	it("kind 隔离：operation 拒绝不放行 command 提权（反之亦然）", async () => {
+		const { deps } = makeDeps();
+		seedDenial("operation");
+		expect(await resolveCall({ sandbox_permissions: "danger-full-access", justification: "j" }, toolCtx(), deps, "command", () => "x"))
+			.toEqual({ mode: "workspace-write", escalated: false, ignoredEscalation: true });
+		// operation 的记录仍在：write/edit 提权可用
+		expect(await resolveCall({ sandbox_permissions: "danger-full-access", justification: "j" }, toolCtx(true, "Allow once"), deps, "operation", () => "x"))
+			.toEqual({ mode: "danger-full-access", escalated: true, ignoredEscalation: false });
+	});
+
+	it("同档请求不受门禁影响：/permission danger-full-access 下请求同档直接放行", async () => {
+		const { deps } = makeDeps();
+		deps.permission.override = "danger-full-access";
+		const ctx = toolCtx(true, "Deny") as { ui: { select: ReturnType<typeof vi.fn> } };
+		expect(await resolveCall({ sandbox_permissions: "danger-full-access", justification: "same" }, ctx as never, deps, "command", () => "x"))
+			.toEqual({ mode: "danger-full-access", escalated: false, ignoredEscalation: false });
+		expect(ctx.ui.select).not.toHaveBeenCalled();
+	});
+
+	it("非法请求不受门禁影响：更窄目标仍报 not strictly wider（不静默降级执行）", async () => {
+		const { deps } = makeDeps();
+		deps.permission.override = "danger-full-access";
+		await expect(resolveCall(
+			{ sandbox_permissions: "workspace-write", justification: "narrower" },
+			toolCtx(), deps, "command", () => "x",
+		)).rejects.toThrow(/not strictly wider/);
+	});
+
+	it("归一化：null / \"null\" / 空白提权参数 → 按普通调用执行（不再 MALFORMED）", async () => {
+		const { deps } = makeDeps();
+		expect(await resolveCall({ sandbox_permissions: null as never, justification: null as never }, toolCtx(), deps, "command", () => "x"))
+			.toEqual({ mode: "workspace-write", escalated: false, ignoredEscalation: false });
+		expect(await resolveCall({ sandbox_permissions: "null", justification: "null" }, toolCtx(), deps, "command", () => "x"))
+			.toEqual({ mode: "workspace-write", escalated: false, ignoredEscalation: false });
+	});
+
+	it("write 工具：围栏内 + 无前置拒绝 → 照常写入，结果追加 ignored 标记且不弹窗", async () => {
+		const { deps } = makeDeps();
+		const { write } = createSandboxTools(deps);
+		const ctx = toolCtx(true, "Allow once") as { ui: { select: ReturnType<typeof vi.fn> } };
+		const target = join(ws, "ignored-write.txt");
+		const result = (await write.execute("c-ignored", {
+			path: target, content: "ok",
+			sandbox_permissions: "danger-full-access", justification: "preemptive",
+		}, undefined, undefined, ctx as never)) as { content: { text: string }[] };
+		const { readFile } = await import("node:fs/promises");
+		expect(await readFile(target, "utf-8")).toBe("ok");
+		expect(result.content.map((c) => c.text).join("\n")).toContain("escalation fields were ignored");
+		expect(ctx.ui.select).not.toHaveBeenCalled();
+	});
+
+	it("忽略后真实被拒 → 记账，下一次同类提权恢复标准审批（denial → retry 全链路）", async () => {
+		const { deps } = makeDeps();
+		const { write } = createSandboxTools(deps);
+		const outside = join(outsideDir, `gate-${process.pid}-${Date.now()}.txt`);
+		const ctx = toolCtx(true, "Allow once") as { ui: { select: ReturnType<typeof vi.fn> } };
+		// 1) 无前置拒绝 + 提权参数 → 忽略，按 workspace-write 执行 → fence 拒绝（同时记账）
+		await expect(write.execute("g-1", {
+			path: outside, content: "x",
+			sandbox_permissions: "danger-full-access", justification: "preemptive",
+		}, undefined, undefined, ctx as never)).rejects.toThrow(/file access denied under workspace-write mode/);
+		expect(ctx.ui.select).not.toHaveBeenCalled();
+		// 2) 原样重试：这次有拒绝记录 → 弹窗 → 真实落盘
+		await write.execute("g-2", {
+			path: outside, content: "ok",
+			sandbox_permissions: "danger-full-access", justification: "retry after denial",
+		}, undefined, undefined, ctx as never);
+		expect(ctx.ui.select).toHaveBeenCalledTimes(1);
+		const { readFile } = await import("node:fs/promises");
+		expect(await readFile(outside, "utf-8")).toBe("ok");
 	});
 });

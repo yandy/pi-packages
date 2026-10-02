@@ -38,9 +38,15 @@ Network is always allowed (no network isolation).
 - `/permission` — show the current status (mode and source, selected runner and enforcement, workspace)
 - `/permission <read-only|workspace-write|danger-full-access>` — switch mode, **process-wide**: the next tool call in the parent session and in every subagent child session adopts it immediately
 
-## Escalation approval (model-initiated)
+## Escalation approval (model-initiated, denial-first)
 
-bash/write/edit take two optional parameters: `sandbox_permissions` (`workspace-write` or `danger-full-access`) + `justification` (a one-sentence reason). After an operation is denied by the sandbox, the model may retry the exact same call once with these two parameters, which opens an approval prompt (Allow once / Deny); approval applies to that one call only. A subagent child session's escalation (foreground or background) is forwarded to the parent session's prompt (in-process pi-subagents, and the parent must have UI); with no parent channel available (headless, cross-process subagents) escalation is always refused (fail-closed) — widen the process mode with `/permission` to unblock it.
+bash/write/edit take two optional parameters: `sandbox_permissions` (`workspace-write` or `danger-full-access`) + `justification` (a one-sentence reason). Approval is **denial-first**:
+
+- A strictly wider request is honored only when this session already had a **real sandbox denial** of the same kind (bash ↔ `command`, write/edit ↔ `operation`); otherwise the escalation fields are **ignored**, the call runs at the current mode, and the result carries a `[sandbox: escalation fields were ignored …]` note so the model learns that the request did not take effect;
+- a denial record is **consumed once**: one denial buys exactly one escalation retry (approval still applies to that one call only);
+- placeholder parameters (`null` / `"null"` / blank) are treated as "not provided" and run as a plain call (no longer a malformed-argument error).
+
+The prompt offers **Allow once / Deny**; after choosing Deny you may type an **optional reason** (press Enter to skip) that is passed back to the model with the rejection, so it understands why instead of retrying a rewritten command. A subagent child session's escalation (foreground or background) is forwarded to the parent session's prompt (in-process pi-subagents, and the parent must have UI); with no parent channel available (headless, cross-process subagents) escalation is always refused (fail-closed) — widen the process mode with `/permission` to unblock it.
 
 ## Configuration
 

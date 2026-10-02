@@ -10,6 +10,11 @@ export const WIDER_MODES: Record<string, readonly SandboxMode[]> = {
 	"workspace-write": ["danger-full-access"],
 };
 
+/** 请求档位是否严格更宽（denial-first 门禁与 approveEscalation 共用同一张表）。 */
+export function isStrictlyWider(effective: SandboxMode, requested: string): boolean {
+	return (WIDER_MODES[effective] ?? []).includes(requested as SandboxMode);
+}
+
 /** 封闭的提权目标词汇（read-only 是底线，不可作为目标）。 */
 export const ESCALATION_TARGETS = ["workspace-write", "danger-full-access"] as const;
 
@@ -35,6 +40,19 @@ export function validateEscalationArgs(sandboxPermissions: string | undefined, j
 	}
 }
 
+/**
+ * 提权参数的占位符归一化：LLM 常把可选字段填成 null / "null" / 空串——这些都不是提权请求，
+ * 而是"没填"。归一化成 undefined 后走无提权路径：报 MALFORMED 会让模型误判为"沙箱拒绝了我"，
+ * 转而升级成真正的最大档提权（denial-first 门禁要消除的正是这类噪声）。
+ * 只识别占位符；真正的畸形（如只给 justification）仍交 validateEscalationArgs 报错。
+ */
+export function normalizeEscalationValue(value: unknown): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const trimmed = value.trim();
+	if (trimmed === "" || trimmed.toLowerCase() === "null") return undefined;
+	return trimmed;
+}
+
 /** 模型可见的拒绝标记（fs 围栏与 bash denial 分类共用，逐字勿改）。 */
 export function sandboxDenialMarker(mode: SandboxMode): string {
 	return `[sandbox: file access denied under ${mode} mode]`;
@@ -57,13 +75,35 @@ export function escalationAppliedMarker(mode: SandboxMode): string {
 }
 
 /**
- * 审批通道的最小结构形状（不依赖 pi 类型，便于测试注入）。
+ * denial-first 门禁的忽略标记：提权参数没被受理（本会话没有前置拒绝记录），调用按当前档位执行。
+ * 给模型原位反馈——否则它会把"参数没生效"误读成沙箱静默放行，继续对后续调用无脑带参数。
+ */
+export function escalationIgnoredMarker(mode: SandboxMode): string {
+	return `[sandbox: escalation fields were ignored — no sandbox denial was recorded for this session, so this call ran under "${mode}" mode. Send escalation fields only when retrying a call that just returned a denial marker.]`;
+}
+
+/** Deny 后的可选理由追问（两步式的第二步：select → input）。 */
+export interface DenialReasonPrompt {
+	title: string;
+	placeholder: string;
+}
+
+/** 一次审批对话的结算：choice 为 undefined 表示取消/无通道；reason 为 Deny 时的可选理由。 */
+export interface EscalationDecision {
+	choice: string | undefined;
+	reason?: string;
+}
+
+/**
+ * 审批通道的最小结构形状（不依赖 pi 类型，便于测试注入）。ask 是一次完整审批对话：
+ * 直连通道 select →（Deny 时）input；broker 通道把两步放进同一个 FIFO 任务（宿主只有
+ * 一个对话框槽位，select 与 input 之间不得插入其他弹窗）。
  * 注意：pi 的 noOpUIContext.select 静默返回 undefined——调用前必须显式查 hasUI，
- * 否则"无通道"会被误判为"用户取消"（spec §9）。
+ * 否则“无通道”会被误判为“用户取消”（spec §9）。
  */
 export interface EscalationUI {
 	hasUI: boolean;
-	select(title: string, options: string[]): Promise<string | undefined>;
+	ask(title: string, options: string[], denialReason?: DenialReasonPrompt): Promise<EscalationDecision>;
 }
 
 export interface EscalationRequest {
@@ -75,9 +115,31 @@ export interface EscalationRequest {
 	summary: string;
 }
 
+/** Deny 后的可选理由输入（两步式的第二步）。 */
+export const DENIAL_REASON_PROMPT: DenialReasonPrompt = {
+	title: "Why deny? (optional — the model will see it)",
+	placeholder: "e.g. never touch files outside the workspace",
+};
+
+/**
+ * 理由归一化：折叠空白、trim、截断到 500 字符。空/占位符 → undefined（拒绝文案逐字回退原样）。
+ * 理由随工具错误进上下文，不能让一次输入撑爆提示预算。
+ */
+export function sanitizeDenialReason(raw: string | undefined): string | undefined {
+	if (typeof raw !== "string") return undefined;
+	const collapsed = raw.replace(/\s+/g, " ").trim();
+	if (collapsed.length === 0) return undefined;
+	return collapsed.length > 500 ? `${collapsed.slice(0, 500)}…` : collapsed;
+}
+
+function denialReasonSuffix(raw: string | undefined): string {
+	const reason = sanitizeDenialReason(raw);
+	return reason === undefined ? "" : `. The user's reason: ${reason}`;
+}
+
 /**
  * 执行前解析一次提权请求（顺序即优先级，全部 fail-closed）：
- * 同模式免审批 → 严格更宽校验 → hasUI 显式检查 → select 审批。
+ * 同模式免审批 → 严格更宽校验 → hasUI 显式检查 → ask 审批（Deny 时追问可选理由）。
  * 返回值只对发起它的那一次调用生效（一次性，不持久）。
  */
 export async function approveEscalation(request: EscalationRequest, ui: EscalationUI): Promise<SandboxMode> {
@@ -93,7 +155,7 @@ export async function approveEscalation(request: EscalationRequest, ui: Escalati
 			`sandbox escalation to "${requestedMode}" requires approval, but no approval channel is available — nothing was executed. This happens in headless and cross-process subagents: do the work inside the writable roots, or ask the user to run /permission ${requestedMode} in their main session and retry.`,
 		);
 	}
-	const choice = await ui.select(
+	const decision = await ui.ask(
 		[
 			`Sandbox escalation: allow this ${subject} under "${requestedMode}"?`,
 			"",
@@ -101,13 +163,14 @@ export async function approveEscalation(request: EscalationRequest, ui: Escalati
 			`${subject === "command" ? "Command" : "Path"}: ${summary}`,
 		].join("\n"),
 		[...ESCALATION_OPTIONS],
+		DENIAL_REASON_PROMPT,
 	);
-	if (choice === undefined) {
+	if (decision.choice === undefined) {
 		throw new Error(`approval for escalating to "${requestedMode}" was cancelled — nothing was executed`);
 	}
-	if (choice === "Deny") {
+	if (decision.choice === "Deny") {
 		throw new Error(
-			`the user rejected escalating this ${subject} to "${requestedMode}"; it stays denied, so stop and explain instead of working around it — do not retry with a different mode or a rewritten command`,
+			`the user rejected escalating this ${subject} to "${requestedMode}"; it stays denied, so stop and explain instead of working around it — do not retry with a different mode or a rewritten command${denialReasonSuffix(decision.reason)}`,
 		);
 	}
 	return requestedMode as SandboxMode;

@@ -107,6 +107,32 @@ describe("createSandboxBashOps", () => {
 		expect(text).toContain(sandboxDenialMarker("workspace-write"));
 		expect(text).toContain(escalationHintMarker("command"));
 	});
+	it("onDenial fires exactly once on classified denial (denial-first 记账)", async () => {
+		const child = fakeChild();
+		const spawnFn = vi.fn(() => child) as never;
+		const onDenial = vi.fn();
+		const ops = createSandboxBashOps({ mode: "workspace-write", workspaceRoot: "/ws", spawnFn, ...bwrapSelected, onDenial });
+		const p = ops.exec("touch /etc/x", cwd, { onData: () => {} });
+		child.stderr.write("touch: cannot touch '/etc/x': Read-only file system");
+		await settle(child, 1);
+		await p;
+		expect(onDenial).toHaveBeenCalledTimes(1);
+	});
+	it("onDenial 不因 runner failure 触发（那是沙箱不可用，不是拒绝）", async () => {
+		const child = fakeChild();
+		const spawnFn = vi.fn(() => child) as never;
+		const onDenial = vi.fn();
+		const ops = createSandboxBashOps({
+			mode: "workspace-write", workspaceRoot: "/ws", spawnFn, onDenial,
+			selected: { runner: "landlock", enforcement: "full" },
+			hooks: { launcherPath: () => "/opt/landlock-run" },
+		});
+		const p = ops.exec("true", cwd, { onData: () => {} });
+		child.stderr.write("landlock-run: ruleset creation failed");
+		await settle(child, 125);
+		await expect(p).rejects.toThrow(/SANDBOX_UNAVAILABLE/);
+		expect(onDenial).not.toHaveBeenCalled();
+	});
 	it("runner failure rejects with SandboxUnavailableError (exit-gated)", async () => {
 		const child = fakeChild();
 		const spawnFn = vi.fn(() => child) as never;
