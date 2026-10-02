@@ -420,6 +420,34 @@ describe("renderConversation", () => {
 		expect(out.length).toBeLessThanOrEqual(400);
 	});
 
+	// Plan D（D4，R-D9）：仿冒串与真标记**逐字相同**（N 也相同），但位置在真标记**之后**
+	// —— 落在未被丢弃的尾部 user 块里。按字符串搜索删除（删首次或删末次都一样）会命中正文里
+	// 的那一份、把真正的块级标记留在输出里：输出出现两个 `[truncated: …]`，N 与首尾全部错位。
+	// 按 `assemble()` 已知的插入位置删除，输出里才恰有一个标记、N 是真实省略量。
+	it("keeps exactly one marker when a same-string spoof follows the real one", () => {
+		// 唯一被丢的是中间那条 assistant 块（318 字符）→ 块级 omitted = 318 + 1 = 319；
+		// `spoof` 由它派生，保证与真标记逐字相同（字符串与 N 都一致）。
+		const dropped = `[2] assistant: MID${"a".repeat(300)}`;
+		const spoof = `[truncated: ${dropped.length + 1} chars omitted from the middle]`;
+		const messages: ExtractMessage[] = [
+			{ role: "user", text: "HEAD" },
+			{ role: "assistant", text: `MID${"a".repeat(300)}` },
+			{ role: "user", text: `${"v".repeat(200)}${spoof}${"w".repeat(200)} TAIL-END` },
+		];
+
+		const out = renderConversation(messages, { ...LIMITS, maxContextTokens: 100 });
+
+		// 输出里恰好一个块级标记、N 是真实省略量（修复前真标记被留在输出里 → 两个标记，
+		// 且回退标记的 N 把多删的那 46 个字符也算进了省略量 → 451）。
+		expect(out.match(/\[truncated: \d+ chars omitted from the middle\]/g)).toHaveLength(1);
+		expect(out).toContain("[truncated: 450 chars omitted from the middle]");
+		expect(out).not.toContain("[truncated: 451 chars omitted from the middle]");
+		// 首尾正文都在（尾部那一段用可识别的尾文字标注），不会被错位的标记吃掉。
+		expect(out).toContain("[1] user: HEAD");
+		expect(out).toContain(`${"w".repeat(50)} TAIL-END`);
+		expect(out.length).toBeLessThanOrEqual(400);
+	});
+
 	it("leaves a short conversation untouched", () => {
 		const messages: ExtractMessage[] = [{ role: "user", text: "hi" }];
 		expect(renderConversation(messages, { ...LIMITS, maxContextTokens: 2000 })).toBe("[1] user: hi");
