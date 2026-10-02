@@ -705,6 +705,191 @@ describe("index wiring (integration)", () => {
 		expect(notify).not.toHaveBeenCalled();
 	});
 
+	// ── Review 修复轮（R44）：session dispose 之后 ctx 不可再访问 ─────────────
+	/**
+	 * pi 的 `ExtensionContext` 是代理：`hasUI` / `ui` 的 getter 会先 `runner.assertActive()`，
+	 * session dispose（/new、switch、fork、reload、退出宽限超时）之后调用即抛错。
+	 * 这里造一个同形状的 fake：`dispose()` 之后读取这两个字段直接抛错。
+	 */
+	function disposableCtx() {
+		let active = true;
+		const notify = vi.fn();
+		const ui = { notify, confirm: vi.fn(), setStatus: vi.fn() };
+		const ctx: any = uiCtx();
+		Object.defineProperty(ctx, "hasUI", {
+			get: () => {
+				if (!active) throw new Error("Extension instance is no longer active");
+				return true;
+			},
+		});
+		Object.defineProperty(ctx, "ui", {
+			get: () => {
+				if (!active) throw new Error("Extension instance is no longer active");
+				return ui;
+			},
+		});
+		return {
+			ctx,
+			notify,
+			dispose: () => {
+				active = false;
+			},
+		};
+	}
+
+	/**
+	 * 收集进程级未处理 rejection。extract 的通知挂在 `void` 链上，没人接住的 rejection 在 pi
+	 * 里没有全局 handler（Node 默认打印并退出）—— 这里显式抓住它们。
+	 */
+	async function captureUnhandledRejections(body: () => Promise<void>): Promise<unknown[]> {
+		const caught: unknown[] = [];
+		const onUnhandled = (reason: unknown) => {
+			caught.push(reason);
+		};
+		process.on("unhandledRejection", onUnhandled);
+		try {
+			await body();
+			// 未处理 rejection 要等微任务队列排空后的下一轮事件循环才派发。
+			await flush();
+			await flush();
+		} finally {
+			process.off("unhandledRejection", onUnhandled);
+		}
+		return caught;
+	}
+
+	it("delivers 'Extracted' from the sync UI snapshot when the session dies mid-extract", async () => {
+		mockConfigValue.extractMemories.enabled = true;
+		let resolveExtract: ((value: { skipped: boolean; result?: string }) => void) | undefined;
+		runExtractMock.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveExtract = resolve;
+				}),
+		);
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		const session = disposableCtx();
+		const caught = await captureUnhandledRejections(async () => {
+			await handlers["agent_end"][0]({ messages: [{ role: "user", content: "hi" }] }, session.ctx);
+			const tool = runExtractMock.mock.calls[0][0].customTools[0];
+			await tool.execute("c1", { action: "add", name: "A", description: "d", content: "正文" }, undefined, undefined, undefined);
+
+			// extract 还没回来，session 先被 /new（或退出宽限超时）销毁了
+			session.dispose();
+			resolveExtract?.({ skipped: false, result: "ok" });
+			await flush();
+		});
+
+		expect(caught).toEqual([]);
+		// UI 是同步段快照的：回调不再访问 ctx（否则这里会抛「no longer active」）
+		expect(session.notify).toHaveBeenCalledWith("Extracted 1 memory.", "info");
+	});
+
+	it("does not reject unhandled when a failing extract settles after the session died", async () => {
+		mockConfigValue.extractMemories.enabled = true;
+		let rejectExtract: ((reason?: unknown) => void) | undefined;
+		runExtractMock.mockImplementationOnce(
+			() =>
+				new Promise((_resolve, reject) => {
+					rejectExtract = reject;
+				}),
+		);
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		const session = disposableCtx();
+		const caught = await captureUnhandledRejections(async () => {
+			await handlers["agent_end"][0]({ messages: [{ role: "user", content: "hi" }] }, session.ctx);
+			session.dispose();
+			rejectExtract?.(new Error("model exploded"));
+			await flush();
+		});
+
+		expect(caught).toEqual([]);
+	});
+
+	it("does not misreport a throwing 'Extracted' notice as an extract failure", async () => {
+		mockConfigValue.extractMemories.enabled = true;
+		let resolveExtract: ((value: { skipped: boolean; result?: string }) => void) | undefined;
+		runExtractMock.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveExtract = resolve;
+				}),
+		);
+		const notify = vi.fn((_message: string, _type?: string): void => {
+			throw new Error("UI is gone");
+		});
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		const caught = await captureUnhandledRejections(async () => {
+			await handlers["agent_end"][0]({ messages: [{ role: "user", content: "hi" }] }, uiCtx(uiWith(notify)));
+			const tool = runExtractMock.mock.calls[0][0].customTools[0];
+			await tool.execute("c1", { action: "add", name: "A", description: "d", content: "正文" }, undefined, undefined, undefined);
+			resolveExtract?.({ skipped: false, result: "ok" });
+			await flush();
+		});
+
+		expect(caught).toEqual([]);
+		expect(notify).toHaveBeenCalledTimes(1);
+		expect(String(notify.mock.calls[0][0])).not.toMatch(/^Extract failed:/);
+
+		// 成功通知抛错不能烧掉失败通知配额：下一轮真失败仍然要报
+		runExtractMock.mockImplementationOnce(() => Promise.reject(new Error("model exploded")));
+		const okNotify = vi.fn();
+		await handlers["agent_end"][0]({ messages: [{ role: "user", content: "hi" }] }, uiCtx(uiWith(okNotify)));
+		await flush();
+		expect(okNotify).toHaveBeenCalledWith("Extract failed: model exploded", "error");
+	});
+
+	it("renders a non-Error rejection reason without 'undefined'", async () => {
+		mockConfigValue.extractMemories.enabled = true;
+		runExtractMock.mockImplementationOnce(() => Promise.reject("model exploded"));
+		const notify = vi.fn();
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		await handlers["agent_end"][0]({ messages: [{ role: "user", content: "a" }] }, uiCtx(uiWith(notify)));
+		await flush();
+
+		expect(notify).toHaveBeenCalledWith("Extract failed: model exploded", "error");
+	});
+
+	it("resets the extract failure quota even when the next session boots disabled", async () => {
+		mockConfigValue.extractMemories.enabled = true;
+		runExtractMock.mockImplementation(() => Promise.reject(new Error("model exploded")));
+		const { pi, handlers, commands } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		const firstNotify = vi.fn();
+		await handlers["agent_end"][0]({ messages: [{ role: "user", content: "a" }] }, uiCtx(uiWith(firstNotify)));
+		await flush();
+		expect(firstNotify).toHaveBeenCalledWith("Extract failed: model exploded", "error");
+
+		// 新 session 以 disabled 启动：session_start 提前 return，但配额必须已经重置
+		mockConfigValue.enabled = false;
+		try {
+			await handlers["session_start"][0]({ reason: "reload" }, uiCtx());
+			// 用户中途 /memory on（memoryDir / store 还是上个 session 建好的）
+			await commands["memory"].handler("on", uiCtx(uiWith()));
+
+			const secondNotify = vi.fn();
+			await handlers["agent_end"][0]({ messages: [{ role: "user", content: "b" }] }, uiCtx(uiWith(secondNotify)));
+			await flush();
+			expect(secondNotify).toHaveBeenCalledWith("Extract failed: model exploded", "error");
+		} finally {
+			mockConfigValue.enabled = true;
+		}
+	});
+
 	it("runs auto-surfacing through the store for main agents", async () => {
 		const { pi, handlers } = createFakePi();
 		memoryFactory(pi as any);

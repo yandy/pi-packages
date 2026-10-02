@@ -90,10 +90,12 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	pi.on("session_start", async (event, ctx) => {
+		// 先重置限流配额：本 session 若以 disabled 启动（下面提前 return），用户中途
+		// `/memory on` 之后仍应拿到一次失败通知 —— 否则上一 session 残留的 true 会一直吞掉它。
+		extractErrorNotified = false;
 		config = await loadConfig(ctx);
 		if (!config.enabled) return;
 		currentCwd = ctx.cwd;
-		extractErrorNotified = false;
 		memoryDir = await resolveMemoryDir(config, ctx.cwd);
 		store = new MemoryStore({
 			memoryDir,
@@ -289,6 +291,11 @@ export default function (pi: ExtensionAPI) {
 		if (!event.messages || event.messages.length === 0) return;
 		// 本轮经 extract 的工具真实写入了几条（工具的 onWrite 回调计数，spec §14）。
 		let written = 0;
+		// pi 的 `ExtensionContext` 是代理：`hasUI` / `ui` 的 getter 会先 `runner.assertActive()`，
+		// session dispose（/new、switch、fork、reload、退出宽限超时）之后调用即抛错。extract 是
+		// 长时后台任务（120s timeout），而 `session_shutdown` 只等 `lock.timeoutMs`（默认 5s），
+		// 所以「extract 在途 + session 已销毁」是常态路径：UI 必须在**同步段**快照，回调里不再碰 ctx。
+		const ui = ctx.hasUI ? ctx.ui : undefined;
 		const extractRun = runExtract({
 			agentsMdBlocks: extractAgentsMdBlocks(lastSystemPrompt),
 			model: resolveDefault(config, "extractMemories", "model"),
@@ -317,20 +324,31 @@ export default function (pi: ExtensionAPI) {
 			sessionPersistence: resolveDefault(config, "extractMemories", "sessionPersistence"),
 		});
 		track(extractRun);
-		void extractRun
-			.then((result) => {
+		// 用两参 `.then`（而不是 `.then().catch()`）：成功通知自己抛错只会进它自己的分支，
+		// 不会被失败回调接住 —— 否则会被误报成 `Extract failed:` 并烧掉本 session 的失败配额。
+		void extractRun.then(
+			(result) => {
 				// 只有「没被锁跳过」且「真的写了东西」才报数：否则每轮都弹一条空通知。
-				if (!result.skipped && written > 0 && ctx.hasUI) {
-					ctx.ui.notify(`Extracted ${written} ${written === 1 ? "memory" : "memories"}.`, "info");
+				if (result.skipped || written === 0 || !ui) return;
+				try {
+					ui.notify(`Extracted ${written} ${written === 1 ? "memory" : "memories"}.`, "info");
+				} catch {
+					// UI 已失效（session dispose 后宿主会忽略这条通知）：不能拖垮进程。
 				}
-			})
-			.catch((e: unknown) => {
+			},
+			(e: unknown) => {
 				// spec §14：失败不再被静默吞掉，但同一 session 只报一次（extract 每轮都跑，
 				// 模型挂了的时候不能把用户淹没在重复通知里）。
-				if (extractErrorNotified || !ctx.hasUI) return;
+				if (extractErrorNotified || !ui) return;
 				extractErrorNotified = true;
-				ctx.ui.notify(`Extract failed: ${(e as Error).message}`, "error");
-			});
+				try {
+					// rejected 的值不一定是 Error（pi 的模型层可能抛字符串 / 对象）。
+					ui.notify(`Extract failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+				} catch {
+					// 配额已经用掉，不再重试。
+				}
+			},
+		);
 	});
 
 	pi.registerCommand("memory", {
