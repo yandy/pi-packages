@@ -13,6 +13,7 @@ const { mockConfigValue, dirRef, dirOverrideRef } = vi.hoisted(() => ({
 		memIndexInjectMaxLines: 200,
 		memIndexInjectMaxBytes: 25600,
 		lock: { timeoutMs: 5000, snapshotKeep: 5 },
+		defaults: { model: "test/model", sessionPersistence: { enabled: false } },
 		dream: { nudgeAfterSessions: 5, nudgeAfterHours: 24, thinkLevel: "high" as const },
 		sessionSearch: { maxSessions: 10, maxMatches: 5 },
 		autoSurfacing: {
@@ -51,9 +52,15 @@ const { scanEntriesMock, runSideQueryMock, injectSurfacedContentMock, runExtract
 		writeDreamMetaMock: vi.fn().mockResolvedValue(undefined),
 	}));
 
-vi.mock("../src/config", () => ({
-	loadConfig: vi.fn().mockImplementation(async () => ({ ...mockConfigValue, memoryDir: dirRef.current })),
-}));
+// 只替换 loadConfig，保留真实导出：modelConfigErrors / requiredModels 是 session_start 校验的
+// 被测对象，mock 掉整个模块会让它们在使用处变成 undefined。
+vi.mock("../src/config", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../src/config")>();
+	return {
+		...actual,
+		loadConfig: vi.fn().mockImplementation(async () => ({ ...mockConfigValue, memoryDir: dirRef.current })),
+	};
+});
 
 vi.mock("../src/paths", () => ({
 	resolveMemoryDir: vi.fn().mockImplementation(async (_config: unknown, cwd: string) =>
@@ -101,6 +108,7 @@ vi.mock("../src/index-source", async (importOriginal) => {
 });
 
 import memoryFactory from "../index";
+import { loadConfig } from "../src/config";
 
 const LEGACY_TOPIC = [
 	"---",
@@ -140,12 +148,33 @@ function createFakePi() {
 	};
 }
 
+/**
+ * resolveModel 只用到这三个方法；ids 形如 "provider/id"。
+ * `availableIds` 缺省与 `ids` 同值（= 全部可用）；显式传它就能造出「getAll 认得这个模型、
+ * getAvailable 里没有」的 registry —— 也就是模型存在但**没有凭据**（spec 风险表里的
+ * "missing credentials"），与「registry 完全不知道这个 id」是两回事。
+ */
+function fakeRegistry(ids: string[], availableIds: string[] = ids) {
+	const toModels = (list: string[]) =>
+		list.map((full) => {
+			const [provider, id] = full.split("/");
+			return { provider, id, name: id };
+		});
+	const models = toModels(ids);
+	const available = toModels(availableIds);
+	return {
+		getAll: () => models,
+		getAvailable: () => available,
+		find: (provider: string, id: string) => models.find((m) => m.provider === provider && m.id === id),
+	} as any;
+}
+
 function uiCtx(over: Record<string, unknown> = {}) {
 	return {
 		cwd: dirRef.current,
 		hasUI: false,
 		isProjectTrusted: () => true,
-		modelRegistry: {},
+		modelRegistry: fakeRegistry(["test/model"]),
 		model: undefined,
 		sessionManager: { getEntries: () => [], getLeafId: () => null },
 		...over,
@@ -191,11 +220,16 @@ describe("index wiring (integration)", () => {
 		readDreamMetaMock.mockResolvedValue({ lastDreamAt: null });
 		writeDreamMetaMock.mockReset();
 		writeDreamMetaMock.mockResolvedValue(undefined);
+
+		// 模型 fixture：默认走 defaults.model；各用例按需覆盖 mockConfigValue 的 model 段
+		mockConfigValue.defaults = { model: "test/model", sessionPersistence: { enabled: false } };
+		mockConfigValue.dream.model = undefined;
+		mockConfigValue.extractMemories.model = undefined;
+		mockConfigValue.autoSurfacing.model = undefined;
 	});
 
 	afterEach(async () => {
 		await rm(dir, { recursive: true, force: true });
-		delete mockConfigValue.defaults;
 		delete (mockConfigValue.autoSurfacing as any).sessionPersistence;
 		mockConfigValue.extractMemories.enabled = false;
 		mockConfigValue.lock = { timeoutMs: 5000, snapshotKeep: 5 };
@@ -879,10 +913,10 @@ describe("index wiring (integration)", () => {
 		expect(notify).toHaveBeenCalledWith("Extract failed: model exploded", "error");
 	});
 
-	it("resets the extract failure quota even when the next session boots disabled", async () => {
+	it("resets the extract failure quota across a disabled restart", async () => {
 		mockConfigValue.extractMemories.enabled = true;
 		runExtractMock.mockImplementation(() => Promise.reject(new Error("model exploded")));
-		const { pi, handlers, commands } = createFakePi();
+		const { pi, handlers } = createFakePi();
 		memoryFactory(pi as any);
 		await handlers["session_start"][0]({}, uiCtx());
 
@@ -895,9 +929,11 @@ describe("index wiring (integration)", () => {
 		mockConfigValue.enabled = false;
 		try {
 			await handlers["session_start"][0]({ reason: "reload" }, uiCtx());
-			// 用户中途 /memory on：D1 之后 disabled 启动会清空 memoryDir/store，所以这里
-			// 是真的重新初始化（resolveMemoryDir 的 mock 仍返回同一个 dir）
-			await commands["memory"].handler("on", uiCtx(uiWith()));
+			// 中途 `/memory on` 已删除：重新启用只有「改配置 + 重启」一条路，即再一次 session_start。
+			// D1 之后 disabled 启动已清空 memoryDir/store，所以这里是真的重新初始化
+			// （resolveMemoryDir 的 mock 仍返回同一个 dir）。
+			mockConfigValue.enabled = true;
+			await handlers["session_start"][0]({ reason: "reload" }, uiCtx());
 
 			const secondNotify = vi.fn();
 			await handlers["agent_end"][0]({ messages: [{ role: "user", content: "b" }] }, uiCtx(uiWith(secondNotify)));
@@ -1196,7 +1232,8 @@ describe("index wiring (integration)", () => {
 	});
 
 	it("resolveDefault: defaults.sessionPersistence flows through to runSideQuery", async () => {
-		mockConfigValue.defaults = { sessionPersistence: { enabled: true } };
+		// 保留 model：启动校验（设计 §2.3）要求 defaults.model 存在，否则 session_start 直接失败
+		mockConfigValue.defaults = { model: "test/model", sessionPersistence: { enabled: true } };
 		const { pi, handlers } = createFakePi();
 		memoryFactory(pi as any);
 		await handlers["session_start"][0]({}, uiCtx());
@@ -1208,11 +1245,12 @@ describe("index wiring (integration)", () => {
 
 		await handlers["before_agent_start"][0]({ prompt: "q", systemPrompt: "sp" }, uiCtx());
 
-		expect(runSideQueryMock.mock.calls[0][9]).toEqual({ enabled: true });
+		expect(runSideQueryMock.mock.calls[0][8]).toEqual({ enabled: true });
 	});
 
 	it("resolveDefault: per-task sessionPersistence overrides defaults", async () => {
-		mockConfigValue.defaults = { sessionPersistence: { enabled: true } };
+		// 同上：覆盖 defaults 时必须带上 model，否则启动校验失败
+		mockConfigValue.defaults = { model: "test/model", sessionPersistence: { enabled: true } };
 		(mockConfigValue.autoSurfacing as any).sessionPersistence = { enabled: false };
 		const { pi, handlers } = createFakePi();
 		memoryFactory(pi as any);
@@ -1225,7 +1263,7 @@ describe("index wiring (integration)", () => {
 
 		await handlers["before_agent_start"][0]({ prompt: "q", systemPrompt: "sp" }, uiCtx());
 
-		expect(runSideQueryMock.mock.calls[0][9]).toEqual({ enabled: false });
+		expect(runSideQueryMock.mock.calls[0][8]).toEqual({ enabled: false });
 	});
 
 	it("agent_end hands the raw messages, char limits and a 5-action tool to runExtract", async () => {
@@ -1305,53 +1343,6 @@ describe("index wiring (integration)", () => {
 		expect(runExtractMock).not.toHaveBeenCalled();
 	});
 
-	it("migrates a legacy directory during session_start and notifies the user", async () => {
-		await writeFile(join(dir, "debugging.md"), LEGACY_TOPIC, "utf8");
-		const notify = vi.fn();
-		const { pi, handlers } = createFakePi();
-		memoryFactory(pi as any);
-
-		await handlers["session_start"][0]({}, uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } }));
-
-		expect(notify).toHaveBeenCalledTimes(1);
-		expect(notify.mock.calls[0][0]).toContain("Migrated 1 memories from 1 topic files");
-		expect(notify.mock.calls[0][0]).toContain(join(dir, ".backups", "migrate-"));
-		expect(notify.mock.calls[0][1]).toBe("info");
-		// 迁移发生在读 indexSnapshot 之前：注入的是迁移后的索引
-		expect(await readFile(join(dir, "MEMORY.md"), "utf8")).toContain("- [SSH Gotcha](SSH-Gotcha.md)");
-		expect(await readdir(dir)).not.toContain("debugging.md");
-	});
-
-	it("does not notify about migration when there is nothing to migrate", async () => {
-		const notify = vi.fn();
-		const { pi, handlers } = createFakePi();
-		memoryFactory(pi as any);
-
-		await handlers["session_start"][0]({}, uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } }));
-
-		expect(notify).not.toHaveBeenCalled();
-		expect(await readFile(join(dir, ".migrated"), "utf8")).toContain('"entries": 0');
-	});
-
-	it("reports a migration failure without killing session_start", async () => {
-		await writeFile(join(dir, "debugging.md"), LEGACY_TOPIC, "utf8");
-		// .backups 是普通文件 → 建回滚点时 mkdir 抛错 → 迁移失败
-		await writeFile(join(dir, ".backups"), "not a directory", "utf8");
-		const notify = vi.fn();
-		const { pi, tools, handlers } = createFakePi();
-		memoryFactory(pi as any);
-
-		await handlers["session_start"][0]({}, uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } }));
-
-		expect(notify).toHaveBeenCalledTimes(1);
-		expect(notify.mock.calls[0][0]).toContain("Memory migration failed:");
-		expect(notify.mock.calls[0][1]).toBe("error");
-		// session_start 没有中断：工具照常注册，`.migrated` 没写（下次重试）
-		expect(tools).toHaveLength(1);
-		expect(await readdir(dir)).not.toContain(".migrated");
-		expect(await readdir(dir)).toContain("debugging.md");
-	});
-
 	it("/dream hands the store, the line limit and the 7-action tool set to runDream", async () => {
 		const confirm = vi.fn().mockResolvedValue(true);
 		const { pi, commands, handlers } = createFakePi();
@@ -1389,6 +1380,28 @@ describe("index wiring (integration)", () => {
 		expect(runDreamMock).not.toHaveBeenCalled();
 	});
 
+	// 取模型必须在改状态**之前**：requiredModel 抛错时不能把 "dream" 状态留在 UI 上
+	//（`/dream` 这条链只有 confirm 之后的 .finally，抛在它之前就没有人清）。
+	// 把 requiredModel 挖回 `runDream({...})` 的字面量里，本用例就变红。
+	it("/dream does not leave the dream status behind when the model disappeared mid-session", async () => {
+		const setStatus = vi.fn();
+		const confirm = vi.fn().mockResolvedValue(true);
+		const { pi, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		// 启动校验通过之后配置被改坏（loadConfig 的返回值是浅拷贝，改嵌套对象才能被会话内的
+		// config 看到）：真实场景就是用户在会话中途删了 `defaults.model`。
+		mockConfigValue.defaults.model = undefined;
+
+		await expect(
+			commands["dream"].handler("", uiCtx({ hasUI: true, ui: { notify: vi.fn(), confirm, setStatus } })),
+		).rejects.toThrow('no model for dream — set "dream.model" or "defaults.model" in memory.json');
+
+		expect(setStatus).not.toHaveBeenCalled();
+		expect(runDreamMock).not.toHaveBeenCalled();
+	});
+
 	it("the session_start nudge path passes the same dream arguments", async () => {
 		shouldNudgeMock.mockResolvedValue({ nudge: true, message: "💡 dream", sessions: 7, newEntries: 7 });
 		const confirm = vi.fn().mockResolvedValue(true);
@@ -1421,11 +1434,6 @@ describe("index wiring (integration)", () => {
 		const index = await readFile(join(dir, "MEMORY.md"), "utf8");
 		await writeFile(join(dir, "MEMORY.md"), `# Memory Index\n\n${index}手写的一行\n`, "utf8");
 		await writeFile(
-			join(dir, ".migrated"),
-			JSON.stringify({ migratedAt: "2026-09-30T00:00:00.000Z", entries: 4, files: 2, backupDir: "/x" }),
-			"utf8",
-		);
-		await writeFile(
 			join(dir, ".lock"),
 			JSON.stringify({ pid: process.pid, hostname: "h", startedAt: "2026-10-02T01:02:03.000Z", op: "dream" }),
 			"utf8",
@@ -1436,14 +1444,13 @@ describe("index wiring (integration)", () => {
 		expect(notify).toHaveBeenCalledTimes(1);
 		expect(notify.mock.calls[0][1]).toBe("info");
 		const lines = notify.mock.calls[0][0].split("\n");
-		expect(lines).toHaveLength(7);
+		expect(lines).toHaveLength(6);
 		expect(lines[0]).toBe("Memory: enabled");
 		expect(lines[1]).toBe(`Dir: ${dir}`);
 		expect(lines[2]).toMatch(/^Index: 4\/200 lines, \d+\/25600 bytes, 2 unrecognized lines$/);
 		expect(lines[3]).toBe("Entries: 1");
 		expect(lines[4]).toBe("Last dream: 2026-10-01T00:00:00.000Z");
-		expect(lines[5]).toBe("Migration: migrated at 2026-09-30T00:00:00.000Z (4 entries from 2 files)");
-		expect(lines[6]).toBe(`Lock: held by dream (pid ${process.pid} on h, started 2026-10-02T01:02:03.000Z)`);
+		expect(lines[5]).toBe(`Lock: held by dream (pid ${process.pid} on h, started 2026-10-02T01:02:03.000Z)`);
 	});
 
 	it("/memory reports a fresh directory as free / never / not needed", async () => {
@@ -1460,25 +1467,57 @@ describe("index wiring (integration)", () => {
 		);
 		expect(lines[3]).toBe("Entries: 0");
 		expect(lines[4]).toBe("Last dream: never");
-		expect(lines[5]).toBe("Migration: not needed");
-		expect(lines[6]).toBe("Lock: free");
+		expect(lines[5]).toBe("Lock: free");
 	});
 
-	// 迁移标记缺失（上一次迁移失败）或读不懂 → 都按「还没迁移」报告，下次 session_start 会重试。
-	it("/memory reports a pending migration when the marker is missing or unreadable", async () => {
+	it("leaves legacy 1.x topic files untouched and reports no migration", async () => {
+		await writeFile(join(dir, "debugging.md"), LEGACY_TOPIC, "utf8");
 		const notify = vi.fn();
-		const { pi, commands, handlers } = createFakePi();
+		const { pi, tools, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		await handlers["session_start"][0]({}, uiCtx(uiWith(notify)));
+
+		expect(notify).not.toHaveBeenCalled();
+		expect(await readdir(dir)).toContain("debugging.md");
+		expect(await readdir(dir)).not.toContain(".migrated");
+
+		await commands["memory"].handler("", uiCtx(uiWith(notify)));
+		expect(notify.mock.calls[0][0].split("\n")).toHaveLength(6);
+
+		// legacy 文件对记忆视图不可见：list 返回空清单文案（src/memory-tool.ts:262）
+		const listed = await tools[0].execute("c1", { action: "list" }, undefined, undefined, undefined);
+		expect(listed.content[0].text).toBe("No memories yet.");
+	});
+
+	it("keeps a valid v2 entry with several ## sections visible", async () => {
+		await writeFile(
+			join(dir, "v2.md"),
+			[
+				"---",
+				"name: v2",
+				"description: v2 entry",
+				"type: project",
+				"created: 2026-01-01",
+				"modified: 2026-01-02T00:00:00.000Z",
+				"---",
+				"",
+				"## 小节一",
+				"",
+				"正文一",
+				"",
+				"## 小节二",
+				"",
+				"正文二",
+			].join("\n"),
+			"utf8",
+		);
+		const { pi, tools, handlers } = createFakePi();
 		memoryFactory(pi as any);
 		await handlers["session_start"][0]({}, uiCtx());
-		const ctx = () => uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } });
 
-		await rm(join(dir, ".migrated"));
-		await commands["memory"].handler("", ctx());
-		await writeFile(join(dir, ".migrated"), "{oops", "utf8");
-		await commands["memory"].handler("", ctx());
-
-		expect(notify.mock.calls[0][0].split("\n")[5]).toBe("Migration: pending");
-		expect(notify.mock.calls[1][0].split("\n")[5]).toBe("Migration: pending");
+		const listed = await tools[0].execute("c1", { action: "list" }, undefined, undefined, undefined);
+		expect(listed.content[0].text).toBe("- v2 (project, modified 2026-01-02T00:00:00.000Z) — v2 entry [v2.md]");
 	});
 
 	it("/memory points at /memory unlock when the lock record is unreadable", async () => {
@@ -1490,25 +1529,27 @@ describe("index wiring (integration)", () => {
 
 		await commands["memory"].handler("", uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } }));
 
-		expect(notify.mock.calls[0][0].split("\n")[6]).toBe("Lock: unreadable — run /memory unlock");
+		expect(notify.mock.calls[0][0].split("\n")[5]).toBe("Lock: unreadable — run /memory unlock");
 	});
 
-	it("/memory off is reflected in the status output", async () => {
+	it("/memory on and /memory off are no longer subcommands", async () => {
 		const notify = vi.fn();
-		const { pi, commands, handlers } = createFakePi();
+		const { pi, tools, commands, handlers } = createFakePi();
 		memoryFactory(pi as any);
 		await handlers["session_start"][0]({}, uiCtx());
-		const ctx = () => uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } });
+		const ctx = () => uiCtx(uiWith(notify));
+		const registered = tools.length;
 
 		await commands["memory"].handler("off", ctx());
-		await commands["memory"].handler("", ctx());
 		await commands["memory"].handler("on", ctx());
-		await commands["memory"].handler("", ctx());
 
-		expect(notify.mock.calls[0]).toEqual(["Memory off", "info"]);
-		expect(notify.mock.calls[1][0].split("\n")[0]).toBe("Memory: disabled");
-		expect(notify.mock.calls[2]).toEqual(["Memory on", "info"]);
-		expect(notify.mock.calls[3][0].split("\n")[0]).toBe("Memory: enabled");
+		// 两者都落到状态分支：不发开关通知、不改变初始化状态
+		expect(notify).toHaveBeenCalledTimes(2);
+		for (const call of notify.mock.calls) {
+			expect(call[1]).toBe("info");
+			expect(call[0].split("\n")[0]).toBe("Memory: enabled");
+		}
+		expect(tools).toHaveLength(registered);
 	});
 
 	it("/memory says it is not initialized before session_start", async () => {
@@ -1615,8 +1656,8 @@ describe("index wiring (integration)", () => {
 		expect(await readdir(join(dir, ".lock"))).toContain("inner");
 	});
 
-	// ── Plan D（D1）：禁用启动的会话也能初始化 + 跨 session 状态复位 ──────────────
-	it("/memory reports a not-initialized directory when the session booted disabled", async () => {
+	// ── Plan D（D1）：禁用启动的会话状态（unlock / 状态行）与跨 session 复位 ──────
+	it("/memory reports the disabled switch when the session booted disabled", async () => {
 		mockConfigValue.enabled = false;
 		const notify = vi.fn();
 		const { pi, commands, handlers } = createFakePi();
@@ -1629,7 +1670,7 @@ describe("index wiring (integration)", () => {
 		expect(notify.mock.calls[0][1]).toBe("info");
 		expect(notify.mock.calls[0][0].split("\n")).toEqual([
 			"Memory: disabled",
-			"Dir: not initialized (run /memory on)",
+			'Dir: not initialized — set "enabled": true in memory.json and restart',
 		]);
 	});
 
@@ -1680,79 +1721,6 @@ describe("index wiring (integration)", () => {
 		expect(notify).not.toHaveBeenCalled();
 	});
 
-	it("/memory on initialises a session that booted disabled", async () => {
-		mockConfigValue.enabled = false;
-		const notify = vi.fn();
-		const { pi, tools, commands, handlers } = createFakePi();
-		memoryFactory(pi as any);
-		await handlers["session_start"][0]({}, uiCtx());
-		// 禁用启动：既没有 store，也不注册工具
-		expect(tools).toHaveLength(0);
-
-		await commands["memory"].handler("on", uiCtx(uiWith(notify)));
-
-		expect(notify).toHaveBeenCalledWith("Memory on", "info");
-		expect(tools).toHaveLength(1);
-		expect(tools[0].parameters.properties.action.enum).toEqual(["add", "replace", "remove", "list", "search"]);
-
-		// 工具真的能写（不再一律 "Memory not initialized"）
-		const result = await tools[0].execute(
-			"c1",
-			{ action: "add", name: "After on", description: "d", content: "正文" },
-			undefined,
-			undefined,
-			undefined,
-		);
-		expect(result.content[0].text).toBe('Saved "After on" (After-on.md).');
-		expect(await readFile(join(dir, "After-on.md"), "utf8")).toContain("name: After on");
-
-		// 索引快照已经构建，并照旧无条件写进 sections（值是 session_start 那一刻的磁盘索引）
-		const event = sectionsEvent();
-		await handlers["before_agent_start"][0](event, uiCtx());
-		expect(event.systemPromptOptions.sections["memory_index"]).toBe(DISK_INDEX);
-
-		// 状态命令回到完整七行
-		const status = vi.fn();
-		await commands["memory"].handler("", uiCtx(uiWith(status)));
-		const lines = status.mock.calls[0][0].split("\n");
-		expect(lines).toHaveLength(7);
-		expect(lines[0]).toBe("Memory: enabled");
-		expect(lines[1]).toBe(`Dir: ${dir}`);
-		expect(lines[3]).toBe("Entries: 1");
-	});
-
-	// Review Focus #2：上一个 session 是 enabled 的（dir A），本 session 以 disabled 启动且
-	// cwd 不同。不清空残留状态的话 `/memory on` 会继续往 A 的目录写。
-	it("/memory on after a disabled restart points at the new cwd, not the previous session", async () => {
-		const dirB = await mkdtemp(join(tmpdir(), "mem-wiring-b-"));
-		const notify = vi.fn();
-		const ctxB = () => uiCtx({ cwd: dirB, hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } });
-		try {
-			const { pi, commands, handlers } = createFakePi();
-			memoryFactory(pi as any);
-			await handlers["session_start"][0]({}, uiCtx()); // enabled，dir A = dir
-
-			dirOverrideRef.current = (cwd) => join(cwd, ".memory");
-			mockConfigValue.enabled = false;
-			await mkdir(join(dirB, ".memory"), { recursive: true });
-			await writeFile(join(dirB, ".memory", "MEMORY.md"), "- [B](B.md) — from B\n", "utf8");
-			await handlers["session_start"][0]({}, uiCtx({ cwd: dirB }));
-
-			await commands["memory"].handler("on", ctxB());
-			await commands["memory"].handler("", ctxB());
-
-			expect(notify.mock.calls[0]).toEqual(["Memory on", "info"]);
-			const lines = notify.mock.calls[1][0].split("\n");
-			expect(lines).toHaveLength(7);
-			expect(lines[1]).toBe(`Dir: ${join(dirB, ".memory")}`);
-			expect(lines[1]).not.toContain(dir);
-			expect(lines[2]).toMatch(/^Index: 1\/200 lines, \d+\/25600 bytes, 0 unrecognized lines$/);
-		} finally {
-			mockConfigValue.enabled = true;
-			await rm(dirB, { recursive: true, force: true });
-		}
-	});
-
 	// Plan E/next #2(a)：disabled 重启必须把上一 session 的 memoryDir 清掉 —— 光靠状态行的
 	// 两行输出只能证明「memoryDir 与 store 至少有一个被清了」（`/memory` 的守卫是 `||`），
 	// 所以这里再用 `/memory unlock` 钉一次 memoryDir 本身：它拿到的必须是**本 cwd** 的目录，
@@ -1778,7 +1746,7 @@ describe("index wiring (integration)", () => {
 			expect(notify.mock.calls[0][1]).toBe("info");
 			expect(notify.mock.calls[0][0].split("\n")).toEqual([
 				"Memory: disabled",
-				"Dir: not initialized (run /memory on)",
+				'Dir: not initialized — set "enabled": true in memory.json and restart',
 			]);
 			expect(notify.mock.calls[0][0]).not.toContain(dir);
 
@@ -1827,34 +1795,10 @@ describe("index wiring (integration)", () => {
 		}
 	});
 
-	// Review Focus #1：初始化中途抛错不得留下「enabled=true 但没有 store」的半状态。
-	it("/memory on rolls the switch back when initialisation fails", async () => {
-		mockConfigValue.enabled = false;
-		const notify = vi.fn();
-		const { pi, tools, commands, handlers } = createFakePi();
-		memoryFactory(pi as any);
-		await handlers["session_start"][0]({}, uiCtx());
-		dirOverrideRef.current = () => {
-			throw new Error("no writable home");
-		};
-
-		await commands["memory"].handler("on", uiCtx(uiWith(notify)));
-
-		expect(notify).toHaveBeenCalledTimes(1);
-		expect(notify.mock.calls[0]).toEqual(["Failed to initialize memory: no writable home", "error"]);
-		expect(tools).toHaveLength(0);
-
-		// 回滚是可观测的：状态行说 disabled，而且没有半初始化的目录
-		await commands["memory"].handler("", uiCtx(uiWith(notify)));
-		expect(notify.mock.calls[1][0].split("\n")).toEqual([
-			"Memory: disabled",
-			"Dir: not initialized (run /memory on)",
-		]);
-	});
-
-	// Review Focus #2 的另一半：disabled 启动必须清掉上一 session 的 injectedFiles，
-	// 否则 `/memory on` 之后同一条 entry 在本会话再也不会浮现。
-	it("a disabled restart clears the injected-file set", async () => {
+	// per-session 去重（v3 设计：集合在 session_start 时初始化）：每次 session_start 都必须把
+	// 上一 session 的 injectedFiles 清掉，否则新会话里同一条 entry 会因旧集合而被静默压掉。
+	// 这一条用 enabled → disabled → enabled 三次启动钉住它（去掉 clear 就会第二次观测到 ssh.md）。
+	it("clears the injected-file set on every session_start", async () => {
 		const injectedAtCall: Array<Set<string>> = [];
 		scanEntriesMock.mockResolvedValue([
 			{ file: "ssh.md", name: "SSH", description: "d", type: "project", modified: "2026-01-01T00:00:00.000Z" },
@@ -1866,40 +1810,25 @@ describe("index wiring (integration)", () => {
 		});
 		injectSurfacedContentMock.mockResolvedValue("<relevant_memories>x</relevant_memories>");
 
-		const { pi, commands, handlers } = createFakePi();
+		const { pi, handlers } = createFakePi();
 		memoryFactory(pi as any);
 		await handlers["session_start"][0]({}, uiCtx());
 		await handlers["before_agent_start"][0](sectionsEvent("ssh?"), uiCtx());
 
 		mockConfigValue.enabled = false;
 		await handlers["session_start"][0]({}, uiCtx());
-		await commands["memory"].handler("on", uiCtx(uiWith()));
+		// 中途 `/memory on` 已删除：重新启用只有「改配置 + 重启」一条路（新的 session_start）。
+		// 去重集合是 per-session 的（v3 设计：`injectedTopics` 在 session_start 时初始化，
+		// 同一 session 内每个 entry 最多注入一次）。`resetSessionState()` 在每次 session_start
+		// 开头无条件清空它，所以这里的 enabled 重启同样从空集合开始 —— 断言钉住的正是这一点：
+		// 去掉那次 clear，第二次观测就会看到上一轮注入过的 `ssh.md`，用例变红。
+		mockConfigValue.enabled = true;
+		await handlers["session_start"][0]({}, uiCtx());
 		await handlers["before_agent_start"][0](sectionsEvent("ssh?"), uiCtx());
 
 		expect(injectedAtCall).toHaveLength(2);
 		expect(injectedAtCall[0]).toEqual(new Set());
 		expect(injectedAtCall[1]).toEqual(new Set());
-	});
-
-	it("tool execute throws when memory is disabled", async () => {
-		mockConfigValue.enabled = false;
-		const { createMemoryTool } = await import("../src/memory-tool");
-		const tool = createMemoryTool({
-			getMemoryDir: () => dir,
-			getStore: () => null,
-			getConfig: () => ({
-				memIndexMaxLines: 200,
-				memIndexMaxBytes: 25600,
-				sessionSearch: { maxSessions: 10, maxMatches: 5 },
-			}),
-			getEnabled: () => false,
-			searchSessions: async () => "",
-			cwd: () => dir,
-		});
-
-		await expect(
-			tool.execute("id", { action: "list" }, undefined, undefined, undefined as any),
-		).rejects.toThrow("Memory is disabled (run /memory on)");
 	});
 
 	it("tool execute throws when the store is not initialized", async () => {
@@ -1912,7 +1841,6 @@ describe("index wiring (integration)", () => {
 				memIndexMaxBytes: 25600,
 				sessionSearch: { maxSessions: 10, maxMatches: 5 },
 			}),
-			getEnabled: () => true,
 			searchSessions: async () => "",
 			cwd: () => dir,
 		});
@@ -1920,5 +1848,324 @@ describe("index wiring (integration)", () => {
 		await expect(
 			tool.execute("id", { action: "list" }, undefined, undefined, undefined as any),
 		).rejects.toThrow("Memory not initialized (no session_start yet)");
+	});
+
+	// ── 模型校验（设计 §2）─────────────────────────────────────────────
+	it("reports missing models and does not initialise anything", async () => {
+		mockConfigValue.defaults = { sessionPersistence: { enabled: false } };
+		mockConfigValue.autoSurfacing.enabled = true;
+		const notify = vi.fn();
+		const { pi, tools, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		await handlers["session_start"][0]({}, uiCtx(uiWith(notify)));
+
+		expect(tools).toHaveLength(0);
+		expect(notify).toHaveBeenCalledTimes(1);
+		expect(notify.mock.calls[0][1]).toBe("error");
+		expect(notify.mock.calls[0][0].split("\n")).toEqual([
+			"pi-memory config error:",
+			'- no model for dream — set "dream.model" or "defaults.model" in memory.json',
+			'- no model for autoSurfacing — set "autoSurfacing.model" or "defaults.model" in memory.json',
+		]);
+
+		// `Memory: misconfigured` + 同样的错误行，且不解析目录
+		await commands["memory"].handler("", uiCtx(uiWith(notify)));
+		const status = notify.mock.calls[1][0].split("\n");
+		expect(status.slice(0, 2)).toEqual(["Memory: misconfigured", "Dir: not initialized"]);
+		expect(status.slice(2)).toEqual([
+			'- no model for dream — set "dream.model" or "defaults.model" in memory.json',
+			'- no model for autoSurfacing — set "autoSurfacing.model" or "defaults.model" in memory.json',
+		]);
+	});
+
+	it("reports a configured but unresolvable model", async () => {
+		mockConfigValue.dream.model = "nope/nope";
+		const notify = vi.fn();
+		const { pi, tools, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		await handlers["session_start"][0]({}, uiCtx(uiWith(notify)));
+
+		expect(tools).toHaveLength(0);
+		expect(notify.mock.calls[0][1]).toBe("error");
+		expect(notify.mock.calls[0][0]).toBe(
+			'pi-memory config error:\n- model "nope/nope" for dream is not resolvable (unknown id or missing credentials)',
+		);
+	});
+
+	it("reports a configured model that the registry cannot see (no credentials)", async () => {
+		const notify = vi.fn();
+		const { pi, tools, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		// getAll 认得 test/model，getAvailable 里没有它 = 模型存在但没凭据
+		await handlers["session_start"][0](
+			{},
+			uiCtx({ ...uiWith(notify), modelRegistry: fakeRegistry(["test/model"], []) }),
+		);
+
+		expect(tools).toHaveLength(0);
+		expect(notify.mock.calls[0][1]).toBe("error");
+		expect(notify.mock.calls[0][0]).toContain('model "test/model" for dream is not resolvable');
+	});
+
+	// 上一条走的是 resolveModel 的「一个可用模型都没有」早退；这一条让 getAvailable 非空，
+	// 真正走到「精确匹配只认 available 集合 → 模糊匹配也匹不上」那条路径（同样是 missing credentials）。
+	it("reports a model that is in getAll but not in getAvailable while other models are available", async () => {
+		const notify = vi.fn();
+		const { pi, tools, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		await handlers["session_start"][0](
+			{},
+			uiCtx({ ...uiWith(notify), modelRegistry: fakeRegistry(["test/model", "other/thing"], ["other/thing"]) }),
+		);
+
+		expect(tools).toHaveLength(0);
+		expect(notify.mock.calls[0][1]).toBe("error");
+		expect(notify.mock.calls[0][0]).toContain(
+			'model "test/model" for dream is not resolvable (unknown id or missing credentials)',
+		);
+	});
+
+	it("initialises when only defaults.model is set", async () => {
+		mockConfigValue.extractMemories.enabled = true;
+		const notify = vi.fn();
+		const { pi, tools, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		await handlers["session_start"][0]({}, uiCtx(uiWith(notify)));
+
+		expect(tools).toHaveLength(1);
+		expect(notify).not.toHaveBeenCalled();
+	});
+
+	it("reports nothing when memory is disabled even with no models configured", async () => {
+		mockConfigValue.enabled = false;
+		mockConfigValue.defaults = { sessionPersistence: { enabled: false } };
+		const notify = vi.fn();
+		const { pi, tools, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		await handlers["session_start"][0]({}, uiCtx(uiWith(notify)));
+
+		expect(tools).toHaveLength(0);
+		expect(notify).not.toHaveBeenCalled();
+		await commands["memory"].handler("", uiCtx(uiWith(notify)));
+		expect(notify.mock.calls[0][0].split("\n")).toEqual([
+			"Memory: disabled",
+			'Dir: not initialized — set "enabled": true in memory.json and restart',
+		]);
+	});
+
+	it("turns an initialisation failure into the config error state", async () => {
+		dirOverrideRef.current = () => {
+			throw new Error("no writable home");
+		};
+		const notify = vi.fn();
+		const { pi, tools, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		await expect(handlers["session_start"][0]({}, uiCtx(uiWith(notify)))).resolves.toBeUndefined();
+
+		expect(tools).toHaveLength(0);
+		expect(notify.mock.calls[0][1]).toBe("error");
+		expect(notify.mock.calls[0][0]).toBe(
+			"pi-memory config error:\n- Failed to initialize memory: no writable home",
+		);
+		await commands["memory"].handler("", uiCtx(uiWith(notify)));
+		expect(notify.mock.calls[1][0].split("\n")[0]).toBe("Memory: misconfigured");
+	});
+
+	// 宿主契约之外的抛错（registry 既没有 getAvailable 也没有 getAll，或 loadConfig 里的
+	// getAgentDir 炸了）必须在**复位之后**才发生：否则 session_start 一抛出，三条复位路径一条都
+	// 不会跑，上一 session 的 store / memoryDir 就留在**已注册**的 `memory` 工具背后 ——
+	// 项目 B 的 agent 能写进项目 A 的目录（Plan C ledger R51）。
+	it("clears the previous session's state when the model registry violates the contract", async () => {
+		const notify = vi.fn();
+		const confirm = vi.fn().mockResolvedValue(true);
+		const ctxUI = () => uiCtx({ hasUI: true, ui: { notify, confirm, setStatus: vi.fn() } });
+		const { pi, tools, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		// ① 健康会话：工具已注册、store 已建
+		await handlers["session_start"][0]({}, ctxUI());
+		expect(tools).toHaveLength(1);
+		notify.mockClear();
+
+		// ② 换一个既没有 getAvailable 也没有 getAll 的 registry：resolveModel 里 `registry.getAll()`
+		//    直接 TypeError。session_start 不得 reject，而是落到同一个配置错误态。
+		await expect(
+			handlers["session_start"][0]({}, { ...ctxUI(), modelRegistry: { find: () => undefined } as any }),
+		).resolves.toBeUndefined();
+		expect(notify.mock.calls[0][1]).toBe("error");
+		expect(notify.mock.calls[0][0]).toContain("pi-memory config error:\n- Failed to initialize memory:");
+
+		// ③ 上一 session 的目录 / store 必须已经清空：工具虽然还注册着（只注册一次），现在也必须
+		//    拒绝，而不是写进上一个 session 的目录；`/memory` 说 misconfigured；`/dream` 拒绝。
+		await expect(
+			tools[0].execute("c1", { action: "list" }, undefined, undefined, undefined),
+		).rejects.toThrow(/Memory not initialized/);
+		await commands["memory"].handler("", ctxUI());
+		expect(notify.mock.calls[1][0].split("\n").slice(0, 2)).toEqual([
+			"Memory: misconfigured",
+			"Dir: not initialized",
+		]);
+		expect(notify.mock.calls[1][0]).not.toContain(dir);
+		await commands["dream"].handler("", ctxUI());
+		expect(notify.mock.calls[2]).toEqual(["Memory not initialized.", "info"]);
+		expect(runDreamMock).not.toHaveBeenCalled();
+		expect(tools).toHaveLength(1);
+	});
+
+	// loadConfig 本身抛错时 session_start 仍然 reject（契约不变），但复位已经在它**之前**跑完 ——
+	// 把 `resetSessionState()` 挪回 `await loadConfig(ctx)` 之后，本用例就变红。
+	it("clears the previous session's state when loadConfig itself throws", async () => {
+		const notify = vi.fn();
+		const ctxUI = () => uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } });
+		const { pi, tools, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		await handlers["session_start"][0]({}, ctxUI());
+		expect(tools).toHaveLength(1);
+		notify.mockClear();
+
+		vi.mocked(loadConfig).mockImplementationOnce(async () => {
+			throw new Error("getAgentDir failed");
+		});
+		await expect(handlers["session_start"][0]({}, ctxUI())).rejects.toThrow("getAgentDir failed");
+
+		await expect(
+			tools[0].execute("c1", { action: "list" }, undefined, undefined, undefined),
+		).rejects.toThrow(/Memory not initialized/);
+		await commands["memory"].handler("", ctxUI());
+		expect(notify.mock.calls[0][0].split("\n")[1]).toMatch(/^Dir: not initialized/);
+		expect(notify.mock.calls[0][0]).not.toContain(dir);
+	});
+
+	// ── 错误态的跨 session 生命周期（design §2.5）──────────────────────────
+	// 同一个工厂（= 同一个常驻进程）里 healthy → misconfigured → healthy：
+	// · misconfigured 那次重启必须**不沿用**上一 session 的目录（`/memory` 只能说 not initialized，
+	//   `/dream` 必须拒绝，否则会对上一个项目的目录起一轮 dream）；
+	// · 改好配置再重启必须回到 `Memory: enabled` —— `session_start` 里的 `configError = null`
+	//   是这一行为的唯一实现（少了它，错误态会一直粘在工厂作用域里）；
+	// · 工具只在第一次健康会话注册一次（`tools` 恒为 1，钉住不重复注册）。
+	it("/memory flips back to enabled after a misconfigured session is fixed and restarted", async () => {
+		const notify = vi.fn();
+		const confirm = vi.fn().mockResolvedValue(true);
+		const ctxUI = () => uiCtx({ hasUI: true, ui: { notify, confirm, setStatus: vi.fn() } });
+		const errorLines = [
+			'- no model for dream — set "dream.model" or "defaults.model" in memory.json',
+			'- no model for autoSurfacing — set "autoSurfacing.model" or "defaults.model" in memory.json',
+		];
+		const { pi, tools, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		// ① 健康会话：状态块首行是 enabled
+		await handlers["session_start"][0]({}, ctxUI());
+		expect(tools).toHaveLength(1);
+		await commands["memory"].handler("", ctxUI());
+		expect(notify).toHaveBeenCalledTimes(1);
+		expect(notify.mock.calls[0][1]).toBe("info");
+		expect(notify.mock.calls[0][0].split("\n")[0]).toBe("Memory: enabled");
+		expect(notify.mock.calls[0][0]).toContain(`Dir: ${dir}`);
+		notify.mockClear();
+
+		// ② 用户删掉模型配置后重启：misconfigured，且不得沿用上一 session 的目录
+		mockConfigValue.defaults = { sessionPersistence: { enabled: false } };
+		await handlers["session_start"][0]({}, ctxUI());
+		expect(notify.mock.calls[0][1]).toBe("error");
+		expect(notify.mock.calls[0][0].split("\n")).toEqual(["pi-memory config error:", ...errorLines]);
+
+		await commands["memory"].handler("", ctxUI());
+		expect(notify.mock.calls[1][0].split("\n")).toEqual([
+			"Memory: misconfigured",
+			"Dir: not initialized",
+			...errorLines,
+		]);
+		expect(notify.mock.calls[1][0]).not.toContain(dir);
+
+		// confirm 返回 true：守卫若失效，`/dream` 就会真的对上一 session 的目录跑一轮
+		await commands["dream"].handler("", ctxUI());
+		expect(notify.mock.calls[2]).toEqual(["Memory not initialized.", "info"]);
+		expect(runDreamMock).not.toHaveBeenCalled();
+		expect(confirm).not.toHaveBeenCalled();
+		// 已注册的工具不会因为错误态再注册一次
+		expect(tools).toHaveLength(1);
+		notify.mockClear();
+
+		// ③ 改好配置再重启：错误态被清掉，状态块回到 enabled
+		mockConfigValue.defaults = { model: "test/model", sessionPersistence: { enabled: false } };
+		await handlers["session_start"][0]({}, ctxUI());
+		expect(notify).not.toHaveBeenCalled();
+		await commands["memory"].handler("", ctxUI());
+		expect(notify).toHaveBeenCalledTimes(1);
+		expect(notify.mock.calls[0][0].split("\n")[0]).toBe("Memory: enabled");
+		expect(notify.mock.calls[0][0]).not.toContain("misconfigured");
+		expect(tools).toHaveLength(1);
+	});
+
+	// `configError = null` 在 `!config.enabled` 早退**之前**：用户「修好配置」的另一条路是直接
+	// 关掉 memory，这一 session 既不该继承上一 session 的错误态（否则状态行会说 misconfigured
+	// 而不是 disabled，把人指错方向），也不该继承目录。删掉那一行 → 本用例变红。
+	it("/memory reports disabled, not the stale config error, after a misconfigured session restarts disabled", async () => {
+		const notify = vi.fn();
+		const ctxUI = () => uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } });
+		const { pi, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		mockConfigValue.defaults = { sessionPersistence: { enabled: false } };
+		await handlers["session_start"][0]({}, ctxUI());
+		expect(notify.mock.calls[0][1]).toBe("error");
+		expect(notify.mock.calls[0][0].split("\n")[0]).toBe("pi-memory config error:");
+		await commands["memory"].handler("", ctxUI());
+		expect(notify.mock.calls[1][0].split("\n")[0]).toBe("Memory: misconfigured");
+		notify.mockClear();
+
+		mockConfigValue.enabled = false;
+		await handlers["session_start"][0]({}, ctxUI());
+		expect(notify).not.toHaveBeenCalled();
+
+		await commands["memory"].handler("", ctxUI());
+		expect(notify).toHaveBeenCalledTimes(1);
+		expect(notify.mock.calls[0][1]).toBe("info");
+		expect(notify.mock.calls[0][0].split("\n")).toEqual([
+			"Memory: disabled",
+			'Dir: not initialized — set "enabled": true in memory.json and restart',
+		]);
+	});
+
+	// 约束「`/memory unlock` 在每种状态下都可用」在 misconfigured 态同样成立：错误态下
+	// memoryDir 为 null，unlock 走 resolveMemoryDir 兜底，仍然只清本 cwd 的 `.lock`。
+	// 钉住两处易碎点：unlock 分支必须**在**状态分支之前，且 resetSessionState 不得清 `config`。
+	it("/memory unlock removes the lock in a session that booted misconfigured", async () => {
+		mockConfigValue.defaults = { sessionPersistence: { enabled: false } };
+		const notify = vi.fn();
+		const confirm = vi.fn().mockResolvedValue(true);
+		const { pi, tools, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx(uiWith(notify)));
+		expect(notify.mock.calls[0][1]).toBe("error");
+		expect(tools).toHaveLength(0);
+
+		await writeFile(
+			join(dir, ".lock"),
+			JSON.stringify({ pid: process.pid, hostname: "h", startedAt: "2026-10-02T01:02:03.000Z", op: "dream" }),
+			"utf8",
+		);
+		await writeFile(join(dir, "keep.md"), "not a lock", "utf8");
+		notify.mockClear();
+
+		await commands["memory"].handler("unlock", uiCtx({ hasUI: true, ui: { notify, confirm, setStatus: vi.fn() } }));
+
+		expect(confirm).toHaveBeenCalledWith(
+			"Memory lock",
+			`Remove the memory lock file? It is held by dream (pid ${process.pid} on h, started 2026-10-02T01:02:03.000Z). Only do this if no memory operation is running.`,
+		);
+		expect(await readdir(dir)).not.toContain(".lock");
+		expect(await readdir(dir)).toContain("keep.md");
+		expect(notify).toHaveBeenCalledWith("Memory lock removed.", "info");
+		expect(tools).toHaveLength(0);
 	});
 });

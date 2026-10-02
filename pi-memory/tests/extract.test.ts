@@ -48,6 +48,7 @@ function opts(over: Partial<RunExtractOpts> = {}): RunExtractOpts {
 		maxContextTokens: 2000,
 		maxToolResultChars: 500,
 		maxAssistantChars: 2000,
+		model: "deepseek/deepseek-v4-flash",
 		modelRegistry: {} as any,
 		customTools: [],
 		...over,
@@ -571,7 +572,6 @@ describe("runExtract", () => {
 			opts({
 				customTools,
 				model: "deepseek/deepseek-v4-flash",
-				parentModel: { id: "parent" } as any,
 				sessionPersistence: { enabled: true },
 			}),
 		);
@@ -589,7 +589,6 @@ describe("runExtract", () => {
 				noTools: "builtin",
 				customTools,
 				model: "deepseek/deepseek-v4-flash",
-				parentModel: { id: "parent" },
 				sessionPersistence: { enabled: true },
 			}),
 		);

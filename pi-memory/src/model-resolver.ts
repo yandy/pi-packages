@@ -10,7 +10,7 @@ interface ModelEntry {
 /**
  * Resolve a model string to a Model instance.
  * Tries exact "provider/modelId" match (only available models), then fuzzy match.
- * Returns the Model on success, or undefined on failure (caller falls back to parent model).
+ * Returns the Model on success, or undefined（调用方报错，不回退父模型）。
  */
 export function resolveModel(input: string, registry: ModelRegistry): Model<any> | undefined {
 	if (!input) return undefined;

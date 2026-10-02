@@ -1,6 +1,5 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { Model } from "@earendil-works/pi-ai";
 import type { ModelRegistry, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { runHeadlessAgent } from "./agent-runner";
 import type { SessionPersistenceConfig, ThinkLevel } from "./config";
@@ -52,7 +51,8 @@ Work only through the \`memory\` tool. When done, output a concise summary of wh
 }
 
 export interface RunDreamOpts {
-	model?: string;
+	/** 必填：模型来自显式配置（启动校验已保证可解析），没有父模型回退。 */
+	model: string;
 	thinkLevel: ThinkLevel;
 	memoryDir: string;
 	/** 唯一写入通道。dream 的整轮互斥与快照都挂在它上面。 */
@@ -60,7 +60,6 @@ export interface RunDreamOpts {
 	/** 索引行数硬上限（= `config.memIndexMaxLines`），写进 prompt 让 dream 承担容量管理。 */
 	maxLines: number;
 	modelRegistry: ModelRegistry;
-	parentModel?: Model<any>;
 	sessionPersistence?: SessionPersistenceConfig;
 	/** dream 专属的 7-action `memory` 工具（D12）：只注入这个 headless session，不进主 agent 的 schema。 */
 	customTools: ToolDefinition[];
@@ -72,7 +71,7 @@ export interface RunDreamOpts {
  * - `.backups`（目录）跳过 —— 快照不套快照；不带 `withFileTypes` 时它会被 `cp` 递归复制。
  * - `sessions/`（目录，`sessionPersistence.enabled` 时存在）跳过 —— 同理，而且它可能很大。
  *   `createSnapshot` 的 `cp` 遇到目录会抛 `ERR_FS_EISDIR`（非 ENOENT → fail-closed 上抛 → dream 直接失败）。
- * - `.lock` / `.migrated` / `.dream-meta.json` 跳过（都是 dotfile）：锁记录与标记不属于记忆内容。
+ * - `.lock` / `.dream-meta.json` 跳过（都是 dotfile）：锁记录与元数据不属于记忆内容。
  * - 其余全部 `*.md`（entry 文件 + `MEMORY.md`）都会被快照。
  */
 async function snapshotFiles(memoryDir: string): Promise<string[]> {
@@ -112,7 +111,6 @@ export async function runDream(opts: RunDreamOpts): Promise<string> {
 			cwd: opts.memoryDir,
 			modelRegistry: opts.modelRegistry,
 			model: opts.model,
-			parentModel: opts.parentModel,
 			thinkLevel: opts.thinkLevel,
 			maxTurns: undefined,
 			timeoutMs: 600_000,

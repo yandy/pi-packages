@@ -351,7 +351,7 @@ describe("WriteOptions.skipSnapshot", () => {
 	});
 });
 
-describe("addEntry 的 created 入参（迁移用）", () => {
+describe("addEntry 的 created 入参", () => {
 	it("uses the caller-supplied created date", async () => {
 		const { file } = await store.addEntry({ name: "A", body: "正文", created: "2025-01-02" });
 		expect(parseEntryFile(await readFile(join(dir, file), "utf8"))?.meta.created).toBe("2025-01-02");

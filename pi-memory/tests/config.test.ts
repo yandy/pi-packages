@@ -2,7 +2,7 @@ import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { DEFAULT_CONFIG, loadConfig } from "../src/config";
+import { DEFAULT_CONFIG, loadConfig, modelConfigErrors, requiredModel, requiredModels, type MemoryConfig } from "../src/config";
 
 describe("DEFAULT_CONFIG", () => {
 	it("has expected defaults", () => {
@@ -13,7 +13,9 @@ describe("DEFAULT_CONFIG", () => {
 		expect(DEFAULT_CONFIG.memIndexInjectMaxLines).toBe(200);
 		expect(DEFAULT_CONFIG.memIndexInjectMaxBytes).toBe(25600);
 		expect(DEFAULT_CONFIG.lock).toEqual({ timeoutMs: 5000, snapshotKeep: 5 });
-		expect(DEFAULT_CONFIG.defaults).toEqual({ model: "deepseek/deepseek-flash", sessionPersistence: { enabled: false } });
+		// 模型没有默认值：必须由用户显式配置，否则启动即报错（设计 §2.1）
+		expect(DEFAULT_CONFIG.defaults).toEqual({ sessionPersistence: { enabled: false } });
+		expect(DEFAULT_CONFIG.defaults?.model).toBeUndefined();
 		expect(DEFAULT_CONFIG.dream.model).toBeUndefined();
 		expect(DEFAULT_CONFIG.sessionSearch.maxSessions).toBe(10);
 		expect(DEFAULT_CONFIG.autoSurfacing.maxEntryBytes).toBe(3072);
@@ -211,22 +213,23 @@ describe("loadConfig", () => {
 			_globalDir: globalDir,
 			_configDirName: ".pi",
 		});
-		expect(cfg.defaults).toEqual({ model: "deepseek/deepseek-flash", sessionPersistence: { enabled: false } });
+		expect(cfg.defaults).toEqual({ sessionPersistence: { enabled: false } });
 		expect(cfg.dream.thinkLevel).toBe("high");
 		expect(cfg.dream.sessionPersistence).toBeUndefined();
 	});
 
-	it("defaults the shared model to deepseek/deepseek-flash", async () => {
+	// 模型没有默认值：必须由用户显式配置，否则启动即报错（设计 §2.1）
+	it("ships no model default, so models must be configured explicitly", async () => {
 		const cfg = await loadConfig({
 			cwd: projectDir,
 			isProjectTrusted: () => true,
 			_globalDir: globalDir,
 			_configDirName: ".pi",
 		});
-		expect(cfg.defaults?.model).toBe("deepseek/deepseek-flash");
+		expect(cfg.defaults?.model).toBeUndefined();
 	});
 
-	it("lets memory.json defaults.model override the shipped default", async () => {
+	it("lets memory.json defaults.model provide the shared model", async () => {
 		await writeFile(join(globalDir, "memory.json"), JSON.stringify({ defaults: { model: "other/model" } }));
 		const cfg = await loadConfig({
 			cwd: projectDir,
@@ -289,5 +292,68 @@ describe("loadConfig", () => {
 			maxToolResultChars: 200,
 			maxAssistantChars: 2000,
 		});
+	});
+});
+
+describe("model config", () => {
+	const cfg = (over: Partial<MemoryConfig> = {}): MemoryConfig => ({ ...DEFAULT_CONFIG, ...over });
+	const allOn = (over: Partial<MemoryConfig> = {}): MemoryConfig =>
+		cfg({
+			defaults: { sessionPersistence: { enabled: false } },
+			extractMemories: { ...DEFAULT_CONFIG.extractMemories, enabled: true },
+			autoSurfacing: { ...DEFAULT_CONFIG.autoSurfacing, enabled: true },
+			...over,
+		});
+
+	it("requires nothing when memory is disabled", () => {
+		const c = cfg({ enabled: false });
+		expect(requiredModels(c)).toEqual([]);
+		expect(modelConfigErrors(c, () => false)).toEqual([]);
+	});
+
+	it("only requires dream when extract and auto-surfacing are disabled", () => {
+		const c = allOn({
+			dream: { ...DEFAULT_CONFIG.dream, model: "test/dream" },
+			extractMemories: { ...DEFAULT_CONFIG.extractMemories, enabled: false },
+			autoSurfacing: { ...DEFAULT_CONFIG.autoSurfacing, enabled: false },
+		});
+		expect(requiredModels(c)).toEqual([{ task: "dream", value: "test/dream" }]);
+		expect(modelConfigErrors(c, () => true)).toEqual([]);
+	});
+
+	it("lets defaults.model satisfy every task", () => {
+		const c = allOn({ defaults: { model: "test/shared", sessionPersistence: { enabled: false } } });
+		expect(requiredModels(c)).toEqual([
+			{ task: "dream", value: "test/shared" },
+			{ task: "extractMemories", value: "test/shared" },
+			{ task: "autoSurfacing", value: "test/shared" },
+		]);
+		expect(modelConfigErrors(c, () => true)).toEqual([]);
+	});
+
+	it("reports every missing model with the exact wording and order", () => {
+		expect(modelConfigErrors(allOn(), () => true)).toEqual([
+			'no model for dream — set "dream.model" or "defaults.model" in memory.json',
+			'no model for extractMemories — set "extractMemories.model" or "defaults.model" in memory.json',
+			'no model for autoSurfacing — set "autoSurfacing.model" or "defaults.model" in memory.json',
+		]);
+	});
+
+	it("reports the per-task value when it overrides defaults.model", () => {
+		const c = allOn({
+			defaults: { model: "test/shared", sessionPersistence: { enabled: false } },
+			dream: { ...DEFAULT_CONFIG.dream, model: "bad/dream" },
+		});
+		expect(modelConfigErrors(c, (v) => v !== "bad/dream")).toEqual([
+			'model "bad/dream" for dream is not resolvable (unknown id or missing credentials)',
+		]);
+	});
+
+	it("requiredModel returns the resolved value and throws when missing", () => {
+		const c = allOn({ defaults: { model: "test/shared", sessionPersistence: { enabled: false } } });
+		expect(requiredModel(c, "extractMemories")).toBe("test/shared");
+		expect(() => requiredModel(allOn(), "dream")).toThrow(
+			'no model for dream — set "dream.model" or "defaults.model" in memory.json',
+		);
 	});
 });

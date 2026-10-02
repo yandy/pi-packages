@@ -94,7 +94,7 @@ describe("runHeadlessAgent", () => {
 			task: "do something",
 			cwd: "/mem",
 			modelRegistry: fakeRegistry,
-			parentModel: { id: "parent-model" } as any,
+			model: "deepseek/deepseek-v4-flash",
 			thinkLevel: "high",
 		});
 
@@ -106,27 +106,6 @@ describe("runHeadlessAgent", () => {
 		expect(opts.sessionManager).toBeDefined(); // inMemory
 		// disposed
 		expect(disposeMock).toHaveBeenCalledTimes(1);
-	});
-
-	it("inherits parentModel when model is undefined", async () => {
-		subscribeMock.mockImplementation((listener: any) => {
-			queueMicrotask(() => {
-				listener({ type: "message_end", message: {} });
-				listener({ type: "turn_end", message: {}, toolResults: [] });
-				listener({ type: "agent_end", messages: [], willRetry: false });
-			});
-			return () => {};
-		});
-
-		await runHeadlessAgent({
-			task: "x",
-			cwd: "/mem",
-			modelRegistry: fakeRegistry,
-			parentModel: { id: "parent-model" } as any,
-		});
-
-		const opts = createAgentSessionMock.mock.calls[0][0];
-		expect(opts.model).toEqual({ id: "parent-model" });
 	});
 
 	it("resolves configured model string via resolver", async () => {
@@ -144,7 +123,6 @@ describe("runHeadlessAgent", () => {
 			cwd: "/mem",
 			modelRegistry: fakeRegistry,
 			model: "deepseek/deepseek-v4-flash",
-			parentModel: { id: "parent" } as any,
 		});
 
 		const opts = createAgentSessionMock.mock.calls[0][0];
@@ -158,7 +136,7 @@ describe("runHeadlessAgent", () => {
 				task: "x",
 				cwd: "/mem",
 				modelRegistry: fakeRegistry,
-				parentModel: {} as any,
+				model: "deepseek/deepseek-v4-flash",
 			}),
 		).rejects.toThrow("boom");
 		expect(disposeMock).toHaveBeenCalledTimes(1);
@@ -187,7 +165,7 @@ describe("runHeadlessAgent", () => {
 			task: "x",
 			cwd: "/mem",
 			modelRegistry: fakeRegistry,
-			parentModel: {} as any,
+			model: "deepseek/deepseek-v4-flash",
 			signal: controller.signal,
 		});
 		// Let createAgentSession + subscribe events drain
@@ -211,7 +189,7 @@ describe("runHeadlessAgent", () => {
 				task: "x",
 				cwd: "/mem",
 				modelRegistry: fakeRegistry,
-				parentModel: {} as any,
+				model: "deepseek/deepseek-v4-flash",
 				timeoutMs: 50,
 			}),
 		).rejects.toThrow(/timed out after 50ms/);
@@ -238,7 +216,7 @@ describe("runHeadlessAgent", () => {
 			task: "x",
 			cwd: "/mem",
 			modelRegistry: fakeRegistry,
-			parentModel: {} as any,
+			model: "deepseek/deepseek-v4-flash",
 			maxTurns: 2,
 		});
 
@@ -284,7 +262,7 @@ describe("runHeadlessAgent", () => {
 			task: "x",
 			cwd: "/mem",
 			modelRegistry: fakeRegistry,
-			parentModel: {} as any,
+			model: "deepseek/deepseek-v4-flash",
 		});
 		const opts = createAgentSessionMock.mock.calls[0][0];
 		expect(opts.tools).toEqual(["read", "write", "edit", "ls"]);
@@ -305,7 +283,7 @@ describe("runHeadlessAgent", () => {
 			task: "x",
 			cwd: "/mem",
 			modelRegistry: fakeRegistry,
-			parentModel: {} as any,
+			model: "deepseek/deepseek-v4-flash",
 			tools: [],
 			customTools: [customTool],
 		});
@@ -329,7 +307,7 @@ describe("runHeadlessAgent", () => {
 			task: "x",
 			cwd: "/mem",
 			modelRegistry: fakeRegistry,
-			parentModel: {} as any,
+			model: "deepseek/deepseek-v4-flash",
 			noTools: "builtin",
 			customTools: [customTool],
 		});
@@ -354,7 +332,7 @@ describe("runHeadlessAgent", () => {
 			task: "x",
 			cwd: "/mem",
 			modelRegistry: fakeRegistry,
-			parentModel: {} as any,
+			model: "deepseek/deepseek-v4-flash",
 			sessionPersistence: { enabled: true },
 		});
 
@@ -376,11 +354,22 @@ describe("runHeadlessAgent", () => {
 			task: "x",
 			cwd: "/mem",
 			modelRegistry: fakeRegistry,
-			parentModel: {} as any,
+			model: "deepseek/deepseek-v4-flash",
 			sessionPersistence: { enabled: true, sessionDir: "/custom/sessions" },
 		});
 
 		expect(createSessionMock).toHaveBeenCalledWith("/mem", "/custom/sessions");
 		expect(inMemoryMock).not.toHaveBeenCalled();
+	});
+
+	it("throws when the configured model cannot be resolved", async () => {
+		await expect(
+			runHeadlessAgent({
+				task: "x",
+				cwd: "/mem",
+				modelRegistry: fakeRegistry,
+				model: "nope/nope",
+			}),
+		).rejects.toThrow('model "nope/nope" is not resolvable (unknown id or missing credentials)');
 	});
 });

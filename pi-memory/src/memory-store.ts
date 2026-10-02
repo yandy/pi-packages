@@ -17,9 +17,8 @@ export const BACKUP_DIR = ".backups";
  *
  * 吞错会让调用方拿到「删除成功」的假信号：removeEntry 已删索引行、已失效缓存但文件还在，
  * 下次 rebuildIndex（dream 会常规调用）会把它加回来 —— 删除被静默回滚。
- * 生产调用点：`MemoryStore` 的 removeEntry / replaceEntry，以及 `migrate.ts` 删除已迁移的
- * legacy topic 文件。导出也供测试直接覆盖：这条语义无法在 Linux 上经由 MemoryStore 的公开
- * API 触发（锁的临时文件与 entry 文件同目录，目录不可写时会在获取锁阶段先失败）。
+ * 生产调用点：`MemoryStore` 的 removeEntry / replaceEntry。导出也供测试直接覆盖：这条语义无法在
+ * Linux 上经由 MemoryStore 的公开 API 触发（锁的临时文件与 entry 文件同目录，目录不可写时会在获取锁阶段先失败）。
  */
 export async function unlinkStrict(path: string): Promise<void> {
 	try {
@@ -43,12 +42,12 @@ export async function sameFile(a: string, b: string): Promise<boolean> {
 /**
  * 写原语的调用选项。
  *
- * `skipLogicalLock` 供**整轮持有者**使用：dream / 迁移先用 `withLogicalLock()` 包住整轮，
+ * `skipLogicalLock` 供**整轮持有者**使用：dream 先用 `withLogicalLock()` 包住整轮，
  * 它内部再调用原语时若还去抢同一把进程内锁就会自锁。默认值（不传）= 自己拿锁，这对
  * 「一次调用一个作用域」的调用方（主 agent 工具、extract）是安全的默认。
  *
  * `skipSnapshot` 供「整轮已经自己拍过一次全目录快照」的持有者使用：dream 进入时快照整个目录
- * （spec §6）、迁移自建 `.backups/migrate-<ts>/`（spec §15.3）。它们内部每个原语再各拍一次，
+ * （spec §6）。它内部每个原语再各拍一次，
  * 会让同一批变更产生 N 份重复备份，并把 `snapshotKeep`（默认 5）的名额挤光 —— 用户还想用来做
  * 崩溃恢复的 `write` 快照会被 `pruneSnapshots` 删掉。
  */
@@ -91,14 +90,14 @@ function compareSummaries(a: EntrySummary, b: EntrySummary): number {
 /**
  * 进程级唯一写入通道。所有对 memory 目录的修改必须经它。
  *
- * 已知崩溃窗口（由写前快照兜底，消费方属 Plan B 的恢复/迁移工具）：`replaceEntry` 改名时
+ * 已知崩溃窗口（由写前快照兜底；快照保存在 `.backups/`，恢复靠手工取用）：`replaceEntry` 改名时
  * 先写新文件、再删旧文件、最后重写索引；若在「删旧文件」与「重写索引」之间进程退出，
  * `MEMORY.md` 会残留一条指向已删文件的死链。`upsertIndexLine` 以 file 为键，因此这条死链
  * 不会被后续写入自动覆盖 —— 只能从 `.backups/` 快照恢复。
  *
- * 锁契约（Plan B 的 dream / 迁移必须遵守）：
+ * 锁契约（dream 等整轮持有者必须遵守）：
  * - **两级锁，作用域不同**：进程内**逻辑锁**（`process-lock.ts`，按 `memoryDir` 分键）承担
- *   「逻辑作用域」（单次原语 = 该次调用；dream / 迁移 = 整轮）；跨进程 `.lock` 承担「毫秒级的
+ *   「逻辑作用域」（单次原语 = 该次调用；dream = 整轮）；跨进程 `.lock` 承担「毫秒级的
  *   物理写入」。因此 `.lock` 永远只被持有一瞬间，不需要 TTL / 续约 / 接管（见 fs-lock.ts）。
  * - 不做整轮的调用方（主 agent 工具、extract）**不必传任何选项** —— 默认就会自取逻辑锁。
  * - 需要整轮独占时：用 `withLogicalLock()` 包住整轮，且**其内部调用必须传
@@ -184,14 +183,13 @@ export class MemoryStore {
 	}
 
 	/**
-	 * 在「进程内逻辑锁」下跑一整轮（dream / 迁移）。持有期间调用原语必须传
+	 * 在「进程内逻辑锁」下跑一整轮（dream）。持有期间调用原语必须传
 	 * `{ skipLogicalLock: true }`，否则会自锁到超时。
 	 *
 	 * 整轮互斥放进程内、而不是让跨进程 `.lock` 持整轮，是刻意的：`.lock` 只承担毫秒级的物理写入，
 	 * 因而不需要 TTL / 续约 / 接管（见 fs-lock.ts）；而 dream 自己的原语调用也不会撞上自己的锁。
 	 *
-	 * `timeoutMs` 缺省为 `cfg.lock.timeoutMs`（5s）。整轮持有者可以显式放宽 —— 迁移用 30s
-	 * （spec §15.3 步骤 1），因为它要在锁内逐条重写整个目录。
+	 * `timeoutMs` 缺省为 `cfg.lock.timeoutMs`（5s）；整轮持有者可以显式放宽。
 	 */
 	async withLogicalLock<T>(fn: () => Promise<T>, timeoutMs?: number): Promise<T> {
 		return withProcessLock(this.#logicalKey, timeoutMs ?? this.cfg.lock.timeoutMs, fn);
@@ -321,8 +319,8 @@ export class MemoryStore {
 		if (value && /[\r\n]/.test(value)) throw new Error("description must be a single line");
 	}
 
-	/** `created` 只接受 `YYYY-MM-DD`（spec §3.1）。迁移会把旧 frontmatter 的 `updated` 归一到这个
-	 *  形状再传进来；非法值写出去会让 `parseEntryFile` 返回 null，整条记忆对 store 静默不可见。 */
+	/** `created` 只接受 `YYYY-MM-DD`（spec §3.1）；非法值写出去会让 `parseEntryFile` 返回 null，
+	 *  整条记忆对 store 静默不可见。 */
 	#validateCreated(value: string | undefined): void {
 		if (value === undefined) return;
 		if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error("created must be YYYY-MM-DD");
@@ -345,7 +343,7 @@ export class MemoryStore {
 				const summaries = await this.listEntries();
 				const existing = summaries.find((s) => s.name === name);
 				const file = existing?.file ?? (await this.#resolveTargetFile(name));
-				// 覆盖同名 entry 时**永远**保留磁盘上的 created（迁移重跑幂等的关键）；
+				// 覆盖同名 entry 时**永远**保留磁盘上的 created（幂等覆盖的关键）；
 				// 只有新建时才接受调用方传入的值，缺省是今天。
 				const created = existing
 					? ((await this.readEntry(existing.file))?.created ?? isoDate(new Date()))

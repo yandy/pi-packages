@@ -9,6 +9,8 @@ mkdir -p /tmp/mem-v2-test && cd /tmp/mem-v2-test && git init
 pi -e /path/to/pi-packages/pi-memory    # 临时加载本包
 ```
 
+> **模型必须显式配置**：2.0 没有默认模型，也没有父会话回退。开始前确保 `~/.pi/agent/memory.json`（或已信任项目的 `.pi/memory.json`）里有 registry 能解析的 `defaults.model`，否则会话启动即报 `pi-memory config error:`、什么都不初始化。下文示例写作 `provider/model-id`，请换成你自己 registry 里的 id。
+
 在 pi 里执行 `/memory`，把打印的 `Dir:` 记为 `$MEM`（下面所有路径都相对它）：
 
 ```bash
@@ -17,95 +19,46 @@ MEM=<上面 /memory 打印的目录>
 
 ---
 
-## 测试 1: 升级迁移（1.x → 2.x）实机验证
-
-先手工造一个 1.x 目录（**在启动 pi 之前**）：
-
-```bash
-mkdir -p "$MEM"
-cat > "$MEM/MEMORY.md" <<'EOF'
-# Memory Index
-
-- [debugging](debugging.md) — SSH 与 MySQL
-EOF
-cat > "$MEM/debugging.md" <<'EOF'
----
-name: debugging
-description: SSH 与 MySQL 的踩坑
-type: project
-updated: 2026-07-03
----
-
-## SSH Gotcha
-
-staging 的 SSH 用 2222 端口。
-
-## MySQL Timeout
-
-staging 的 MySQL 连接超时是 30s。
-EOF
-```
-
-启动 pi，观察 `session_start`：
-
-**预期通知**：`Migrated 2 memories from 1 topic files. Backup at <...>/.backups/migrate-<ts>`
-
-**验证**：
-
-```bash
-ls "$MEM"                       # debugging.md 已消失；多了 SSH-Gotcha.md、MySQL-Timeout.md、.migrated
-cat "$MEM/MEMORY.md"            # 两行索引，一行一条记忆，em dash 分隔
-cat "$MEM/SSH-Gotcha.md"        # frontmatter 五字段：name/description/type/created/modified（created=2026-07-03）
-ls "$MEM/.backups"/migrate-*/originals/   # debugging.md 的原文件在这里
-cat "$MEM/.migrated"            # {"migratedAt":...,"entries":2,"files":1,"backupDir":...}
-```
-
-**幂等**：退出并重启 pi，不应再出现迁移通知，`$MEM` 内容不变、不产生 `SSH-Gotcha (2).md` 之类的影子副本。
-
-**回滚演练**（做完请复原）：
-
-```bash
-cp "$MEM"/.backups/migrate-*/originals/*.md "$MEM/"
-rm "$MEM/.migrated"
-rm "$MEM/SSH-Gotcha.md" "$MEM/MySQL-Timeout.md"
-# 重启 pi → 迁移重新跑一次，结果与第一次一致
-```
-
----
-
-## 测试 2: `/memory` 输出
+## 测试 1: `/memory` 输出
 
 ```
 /memory
 ```
 
-**预期**（7 行，值随你的目录变化）：
+**预期**（6 行，值随你的目录变化）：
 
 ```
 Memory: enabled
 Dir: /home/you/.pi/memory/local/tmp__mem-v2-test
-Index: 3/200 lines, 114/25600 bytes, 1 unrecognized lines
-Entries: 2
+Index: 0/200 lines, 0/25600 bytes, 0 unrecognized lines
+Entries: 0
 Last dream: never
-Migration: migrated at 2026-10-02T03:11:22.444Z (2 entries from 1 files)
 Lock: free
 ```
 
 逐项核对：
 
-- `Index` 的行数 = `MEMORY.md` 的非空行数（`# Memory Index` 这行算 1 个 `unrecognized`）；字节数 = 文件真实字节数。
-- `Entries` = 目录里的 entry 文件数（不含 `MEMORY.md`）。
-- `Migration`：迁移过 → `migrated at …`；把 `.migrated` 删掉再看 → `pending`；`.migrated` 里写 `{"migratedAt":"x","entries":0,"files":0,"backupDir":""}` → `not needed`。
+- `Index` 的行数 = `MEMORY.md` 的非空行数（文件还不存在时是 0；`# Memory Index` 这行算 1 个 `unrecognized`）；字节数 = 文件真实字节数。
+- `Entries` = 目录里的 entry 文件数（不含 `MEMORY.md`）；空目录为 0。
+- `Last dream`：从未 dream 过时为 `never`。
 - `Lock`：见测试 5。
 
-开关：
+---
 
-```
-/memory off     → 通知 "Memory off"；/memory 第一行变成 "Memory: disabled"；再让 agent 记忆会报 "Memory is disabled (run /memory on)"
-/memory on      → 通知 "Memory on"
-```
+## 测试 2: 模型配置（启动校验）
 
-> 注意：以 `enabled: false` 启动的会话在启动时不初始化 store，`/memory` 报两行（`Memory: disabled` + `Dir: not initialized (run /memory on)`）；`/memory on` 会**当场**初始化（并注册 `memory` 工具），`/memory unlock` 不需要 store 也能清锁。初始化失败时通知 `Failed to initialize memory: …` 并把开关回滚成 off。
+改动 `memory.json` 后都要重启会话才生效（配置只在 `session_start` 读一次）。每条做完请恢复成可用的配置。
+
+1. **一个模型都不配**：把 `defaults.model` 与 `dream.model` / `extractMemories.model` / `autoSurfacing.model` 全部删掉 → 重启会话。
+   **预期**：error 通知 `pi-memory config error:` + 每个问题一行，形如 `- no model for dream — set "dream.model" or "defaults.model" in memory.json`（dream 恒有；extract / 侧查询在各自 enabled 时各占一行）；`/memory` 报 `Memory: misconfigured` + `Dir: not initialized` + 同样的行。
+2. **只配 defaults.model**（可解析的值）→ 重启会话。
+   **预期**：正常初始化、无错误通知，`memory` 工具可用。
+3. **配一个不存在的 id**：把 `defaults.model` 改成例如 `"nope/nope"` → 重启会话。
+   **预期**：error 通知里是 `model "nope/nope" for dream is not resolvable (unknown id or missing credentials)`（extract / 侧查询同一条文案，task 名不同）。
+4. **disabled 时不校验**：设 `enabled: false` 且不配任何模型 → 重启会话。
+   **预期**：无任何错误通知；`/memory` 两行 —— `Memory: disabled` + `Dir: not initialized — set "enabled": true in memory.json and restart`。
+
+测完把 `memory.json` 恢复成测试 1 用的那份（`enabled: true` + 可解析的 `defaults.model`）。
 
 ---
 
@@ -136,8 +89,8 @@ Lock: free
    **预期**：出现 `Recalled: N entries`（N = 本轮注入的块数），且 agent 答得出来。同一会话内同一条 entry 不会重复浮现（再问一次不再有 `Recalled`，除非发生过 compaction）。
 3. 聊一些**不显式说"记住"**的偏好（例如 `我以后都用 pnpm，别再用 npm 了`），等这一轮结束。
    **预期**：稍后出现 `Extracted 1 memory.`（或复数 `Extracted 2 memories.`）；`/memory` 的 `Entries` 增加；没有任何写入时**不会**弹通知。
-4. extract 失败限流：把 `memory.json` 里的 `extractMemories.model` 改成一个不存在的模型（例如 `"nope/nope"`），连问两轮。
-   **预期**：只出现**一次** `Extract failed: …`，第二轮不再重复；重启会话后配额恢复。测完记得改回来。
+4. extract 失败限流：模型 id 现在在 `session_start` 就校验，改成一个不存在的 id 只会让整个会话进入 misconfigured 态（见测试 2），触发不了运行时失败。改用一个**能解析、但请求时才失败**的模型：把 `extractMemories.model` 指向一个 provider key 已被吊销 / 已过期的模型（或者先正常启动会话，`session_start` 之后再把网络断开 / 关掉代理），然后聊一轮并等它结束。
+   **预期**：出现一条 error 通知 `Extract failed: <原因>`，而且**同一会话内最多一次** —— 再聊几轮不会重复弹（配额只在 `session_start` 重置）；`/memory` 的 `Entries` 不增加；下一轮模型恢复可用时 extract 照常工作。
 5. headless 不通知：`pi -p "记住：x"`（print 模式）不应弹出任何 `Saved:` / `Recalled:` 通知，但磁盘上确实写入了。
 
 ---
@@ -229,10 +182,10 @@ printf -- '- [Evil](evil.md) — 净化验证\n' >> "$MEM/MEMORY.md"
 
 | # | 场景 | ✓/✗ |
 |---|------|-----|
-| 1 | 1.x → 2.x 自动迁移（备份 / 五字段 / 幂等 / 可回滚） | |
-| 2 | `/memory` 七行状态（Index / Entries / Migration / Lock）+ on / off | |
+| 1 | `/memory` 六行状态（Index / Entries / Last dream / Lock） | |
+| 2 | 模型配置（全缺 / 只配 defaults / 不可解析 / disabled 不校验） | |
 | 3 | `memory_index` section、会话内冻结、compaction 才刷新、resume 用录制值 | |
-| 4 | `Saved:` / `Recalled:` / `Extracted N memories.` / 失败限流一次 / headless 静默 | |
+| 4 | `Saved:` / `Recalled:` / `Extracted N memories.` / headless 静默 | |
 | 5 | 逻辑锁与 `.lock` 冲突的可读错误、`/memory unlock` 两路、锁永不自动回收 | |
 | 6 | dream 全流程（整轮锁 + 快照 + 七 action + 摘要 + 提醒） | |
 | 7 | 注入净化生效且磁盘原文不变 | |

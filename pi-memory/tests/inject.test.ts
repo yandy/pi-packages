@@ -98,8 +98,8 @@ describe("buildIndexSection", () => {
 		await rm(dir, { recursive: true, force: true });
 	});
 
-	// v1 的索引快照函数会自己补一份 `# Memory Index`；v2 的 MEMORY.md 由 rebuildIndex /
-	// 迁移写入该标题 —— 再补一次，注入文本里就有两份。
+	// v1 的索引快照函数会自己补一份 `# Memory Index`；v2 的 MEMORY.md 由 rebuildIndex
+	// 写入该标题 —— 再补一次，注入文本里就有两份。
 	it("keeps exactly one title when MEMORY.md already has one", async () => {
 		await writeFile(join(dir, "MEMORY.md"), "# Memory Index\n\n- [A](a.md) — desc a\n", "utf8");
 
@@ -425,8 +425,7 @@ describe("runSideQuery", () => {
 			new Set(),
 			5,
 			"off",
-			undefined,
-			{} as any,
+			"deepseek/deepseek-v4-flash",
 			{} as any,
 			"/mem",
 		);
@@ -447,7 +446,6 @@ describe("runSideQuery", () => {
 			"off",
 			"deepseek/deepseek-v4-flash",
 			{} as any,
-			{} as any,
 			"/mem",
 		);
 		expect(runHeadlessAgentMock.mock.calls[0][0]).toMatchObject({
@@ -464,8 +462,7 @@ describe("runSideQuery", () => {
 			new Set(),
 			5,
 			"off",
-			undefined,
-			{} as any,
+			"deepseek/deepseek-v4-flash",
 			{} as any,
 			"/mem",
 		);
@@ -480,8 +477,7 @@ describe("runSideQuery", () => {
 			new Set(),
 			5,
 			"off",
-			undefined,
-			{} as any,
+			"deepseek/deepseek-v4-flash",
 			{} as any,
 			"/mem",
 		);
@@ -496,8 +492,7 @@ describe("runSideQuery", () => {
 			new Set(),
 			5,
 			"off",
-			undefined,
-			{} as any,
+			"deepseek/deepseek-v4-flash",
 			{} as any,
 			"/mem",
 		);
@@ -505,7 +500,7 @@ describe("runSideQuery", () => {
 	});
 
 	it("returns [] when no candidates remain", async () => {
-		const result = await runSideQuery([], "some prompt", new Set(), 5, "off", undefined, {} as any, {} as any, "/mem");
+		const result = await runSideQuery([], "some prompt", new Set(), 5, "off", "deepseek/deepseek-v4-flash", {} as any, "/mem");
 		expect(result).toEqual([]);
 		expect(runHeadlessAgentMock).not.toHaveBeenCalled();
 	});
@@ -518,8 +513,7 @@ describe("runSideQuery", () => {
 			new Set(["a.md"]),
 			5,
 			"off",
-			undefined,
-			{} as any,
+			"deepseek/deepseek-v4-flash",
 			{} as any,
 			"/mem",
 		);
