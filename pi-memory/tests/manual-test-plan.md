@@ -50,7 +50,7 @@ Lock: free
 改动 `memory.json` 后都要重启会话才生效（配置只在 `session_start` 读一次）。每条做完请恢复成可用的配置。
 
 1. **一个模型都不配**：把 `defaults.model` 与 `dream.model` / `extractMemories.model` / `autoSurfacing.model` 全部删掉 → 重启会话。
-   **预期**：error 通知 `pi-memory config error:` + 每个问题一行，形如 `- no model for dream — set "dream.model" or "defaults.model" in memory.json`（dream 恒有；extract / 侧查询在各自 enabled 时各占一行）；`/memory` 报 `Memory: misconfigured` + `Dir: not initialized` + 同样的行。
+   **预期**：error 通知 `pi-memory config error:` + 每个问题一行，形如 `- no model for dream — set "dream.model" or "defaults.model" in memory.json`（dream 恒有；侧查询默认 enabled，占一行；extract 默认关闭，开启后才多一行）；`/memory` 报 `Memory: misconfigured` + `Dir: not initialized` + 同样的行。
 2. **只配 defaults.model**（可解析的值）→ 重启会话。
    **预期**：正常初始化、无错误通知，`memory` 工具可用。
 3. **配一个不存在的 id**：把 `defaults.model` 改成例如 `"nope/nope"` → 重启会话。
@@ -82,6 +82,8 @@ Lock: free
 ---
 
 ## 测试 4: Saved / Recalled / Extracted 通知
+
+> **前置**：extract 默认关闭。先在 `memory.json` 里设 `"extractMemories": { "enabled": true }` 并重启会话（`extractMemories.model` 或 `defaults.model` 需可解析），否则步骤 3/4 不会触发。
 
 1. `记住：这个项目的测试命令是 npm test，不是 npm run test`
    **预期**：agent 调用 `memory add` 成功后，右下角出现 `Saved: <name>`（`<name>` 是它取的标题）。

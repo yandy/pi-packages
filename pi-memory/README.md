@@ -6,6 +6,10 @@ Aligned with Claude Code's auto memory mechanism: **one memory = one file**, a `
 
 > ## ⚠️ Breaking changes
 >
+> **After 2.1.1 (unreleased):**
+>
+> - **`extractMemories.enabled` now defaults to `false`.** Per-turn extraction is opt-in: once enabled, every turn ends with a headless model call. Configs that already set `"extractMemories": { "enabled": true }` are unaffected.
+>
 > **In 2.1.0:**
 >
 > - **Models must be configured explicitly.** There is no shipped default and no parent-model fallback: `defaults.model` (or a per-task `model`) must exist and be resolvable, or `session_start` reports a config error and initialises **nothing**. See [Model configuration](#model-configuration).
@@ -26,7 +30,7 @@ Aligned with Claude Code's auto memory mechanism: **one memory = one file**, a `
 - **`memory_index` prompt section, frozen per session** ⭐ — the index goes into `event.systemPromptOptions.sections["memory_index"]` and its value **does not change for the rest of the session**; only compaction re-reads it from disk. Because pi diffs sections and appends nothing when they are unchanged, the system prompt stays byte-identical turn after turn and the provider's prefix cache keeps hitting. `resume` / `fork` / `reload` replay the **recorded** value from the transcript instead of reading disk, so restoring a session does not rewrite its head.
 - **Injection sanitising** — everything injected (index lines, surfaced entry bodies and names) has invisible/bidi characters stripped and `<` `>` escaped, so a memory can never forge `</relevant_memories>`, `<system>`, `<project_instructions>`, `<active_agent …>` or `<memory_index>`. Sanitising happens **at injection time only**: your files on disk are never rewritten (they stay readable and hand-editable).
 - **Auto-surfacing** ⭐ — on every user turn a lightweight side query selects up to `maxFiles` **entries** (selected from `description` alone) and injects their bodies inside `<relevant_memories>`. Already-injected files are deduplicated per session; the manifest is served from an in-process `mtime` cache, so a turn costs one `readdir` plus one `stat` per file. Disabled inside subagents.
-- **Extract memories** ⭐ — after each run an async headless agent receives a **structured rendering of the whole conversation** (every user message in full, assistant text and tool calls, tool results with error flags), not just two messages. It writes through the same `memory` primitives, under a whole-round logical lock it never waits for: if a dream is running, that turn is simply skipped.
+- **Extract memories** ⭐ — after each run an async headless agent receives a **structured rendering of the whole conversation** (every user message in full, assistant text and tool calls, tool results with error flags), not just two messages. It writes through the same `memory` primitives, under a whole-round logical lock it never waits for: if a dream is running, that turn is simply skipped. This feature is **off by default** — set `extractMemories.enabled: true` to turn it on.
 - **`/dream`** — a headless consolidation agent (Orient → Gather Signal → Consolidate → Prune & Index) that merges duplicates, resolves contradictions, renames entries and rebuilds the index. It has **no raw file access**: it only gets the seven `memory` actions, holds the logical lock for the whole round, and snapshots the entire directory on entry.
 - **Dream nudge** — after N sessions or N hours a notification suggests `/dream`.
 - **`/memory`** — full status (switch, directory, index capacity, entry count, last dream, lock state including the holder), plus `unlock`.
@@ -134,7 +138,7 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
     "maxInjectionBytes": 10240
   },
   "extractMemories": {
-    "enabled": true,
+    "enabled": false,
     "thinkLevel": "high",
     "maxContextTokens": 2000,
     "maxToolResultChars": 500,
@@ -172,7 +176,7 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
 | `autoSurfacing.maxEntryBytes` | `3072` | ⭐ Max bytes of a single injected entry body (truncated). Replaces 1.x's `maxTopicBytes`, which is ignored |
 | `autoSurfacing.maxInjectionBytes` | `10240` | ⭐ Max total bytes of injected content per turn |
 | `autoSurfacing.sessionPersistence.*` | inherits `defaults` | Persist side-query sessions to disk |
-| `extractMemories.enabled` | `true` | ⭐ Enable per-turn memory extraction |
+| `extractMemories.enabled` | `false` | ⭐ Enable per-turn memory extraction. **Off by default** (opt-in): once enabled, every turn ends with a headless model call |
 | `extractMemories.model` | — | ⭐ Model for the extraction agent. Falls back to `defaults.model`; required unless `defaults.model` is set (must be resolvable, no parent-model fallback) |
 | `extractMemories.thinkLevel` | `"high"` | ⭐ Thinking effort for extraction |
 | `extractMemories.maxContextTokens` | `2000` | ⭐ Budget for the rendered conversation (`× 4` characters; the middle is trimmed first, head and tail are kept, user messages are dropped last) |
@@ -207,7 +211,7 @@ Fix `memory.json` and restart the session — the config is read once at session
 |---|---|
 | `session_start` | Load config → validate the required models (a failure means nothing is initialised) → resolve the memory directory → **pick the index value and freeze it** (disk for `startup`/`new`; the recorded transcript value for `resume`/`fork`/`reload`) → register the `memory` tool (once, five actions) → rebuild the manifest cache → dream nudge |
 | `before_agent_start` | Write the frozen value into `sections["memory_index"]` (**unconditionally, every turn**), then auto-surfacing (main session, not a subagent) |
-| `agent_end` | Fire the async extractor; notify `Extracted N memories.` when it wrote something, or `Extract failed: …` once per session |
+| `agent_end` | With `extractMemories.enabled`, fire the async extractor; notify `Extracted N memories.` when it wrote something, or `Extract failed: …` once per session |
 | `session_compact` | Clear the injected-file set **and re-read the index from disk** — the only in-session refresh point |
 | `session_shutdown` | Wait for in-flight writes to finish (bounded by `lock.timeoutMs`) so a quit does not leave a stale `.lock` |
 
@@ -227,6 +231,8 @@ If the host pi is older than the sections API, pi-memory falls back to appending
 4. Injected file names are remembered for the session, and the set is cleared on compaction. You get a `Recalled: N entries` notification.
 
 ### Extract memories
+
+> **Off by default.** Set `"extractMemories": { "enabled": true }` in `memory.json` first (config is read once at `session_start`, so a restart is needed), and make sure `extractMemories.model` or `defaults.model` resolves.
 
 The extractor receives a structured rendering instead of a lossy two-message summary:
 

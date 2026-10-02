@@ -6,6 +6,10 @@ pi coding agent 的文件系统持久记忆层。把项目知识（事实、偏�
 
 > ## ⚠️ 破坏性变更
 >
+> **2.1.1 之后（未发布）：**
+>
+> - **`extractMemories.enabled` 默认改为 `false`。** 每轮自动提取现在是 opt-in：开启后每轮结束都会跑一次 headless 模型调用。已经显式写了 `"extractMemories": { "enabled": true }` 的配置不受影响。
+>
 > **2.1.0：**
 >
 > - **模型必须显式配置。** 没有内置默认值，也没有父会话模型回退：`defaults.model`（或 per-task `model`）必须存在且可解析，否则 `session_start` 会报配置错误并且**什么都不初始化**。详见[模型配置](#模型配置)。
@@ -26,7 +30,7 @@ pi coding agent 的文件系统持久记忆层。把项目知识（事实、偏�
 - **`memory_index` section，会话内冻结** ⭐ —— 索引写进 `event.systemPromptOptions.sections["memory_index"]`，其值在**整个会话内不再变化**，只有 compaction 会从磁盘重读。pi 对 sections 做 diff，值没变就一条消息都不追加，于是 system prompt 逐轮逐字节相同，provider 的 prefix cache 一直命中。`resume` / `fork` / `reload` 用 transcript 里的**录制值**重放，而不是读磁盘，因此恢复会话不会改写它的头部。
 - **注入净化** —— 所有注入内容（索引行、浮现的 entry 正文与 name）都会剥离不可见/bidi 字符并转义 `<` `>`，因此记忆无法伪造 `</relevant_memories>`、`<system>`、`<project_instructions>`、`<active_agent …>` 或 `<memory_index>`。净化**只发生在注入时**：磁盘上的文件永远不会被改写（保持可读、可手工编辑）。
 - **自动浮现（auto-surfacing）** ⭐ —— 每个用户回合由一次轻量侧查询挑出至多 `maxFiles` 条 **entry**（只看 `description`），把正文注入 `<relevant_memories>`。同一会话内按文件名去重；清单来自进程内的 `mtime` 缓存，每回合只付一次 `readdir` + 每文件一次 `stat`。子 agent 中不启用。
-- **自动提取（extract memories）** ⭐ —— 每轮结束后一个异步 headless agent 拿到的是**整轮对话的结构化渲染**（user 消息全文、assistant 文本与 tool_call、tool_result 及其错误标记），而不是两条消息。它经同一套 `memory` 原语写入，并且**从不排队等锁**：dream 正在整轮持锁时，本回合直接跳过。
+- **自动提取（extract memories）** ⭐ —— 每轮结束后一个异步 headless agent 拿到的是**整轮对话的结构化渲染**（user 消息全文、assistant 文本与 tool_call、tool_result 及其错误标记），而不是两条消息。它经同一套 `memory` 原语写入，并且**从不排队等锁**：dream 正在整轮持锁时，本回合直接跳过。该功能**默认关闭**，需要显式设 `extractMemories.enabled: true`。
 - **`/dream`** —— headless 整理 agent（Orient → Gather Signal → Consolidate → Prune & Index），合并重复、消解矛盾、改名、重建索引。它**没有裸文件权限**：只有七个 `memory` action，整轮持有逻辑锁，进入时先对整个目录拍一次快照。
 - **Dream 提醒** —— 距上次 dream 超过 N 个会话或 N 小时后提示 `/dream`。
 - **`/memory`** —— 完整状态（开关、目录、索引容量、entry 数、上次 dream、锁状态含持有者），以及 `unlock`。
@@ -134,7 +138,7 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
     "maxInjectionBytes": 10240
   },
   "extractMemories": {
-    "enabled": true,
+    "enabled": false,
     "thinkLevel": "high",
     "maxContextTokens": 2000,
     "maxToolResultChars": 500,
@@ -172,7 +176,7 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
 | `autoSurfacing.maxEntryBytes` | `3072` | ⭐ 单条 entry 正文的注入字节上限（超出截断）。取代 1.x 的 `maxTopicBytes`（旧键已失效） |
 | `autoSurfacing.maxInjectionBytes` | `10240` | ⭐ 每回合注入内容的总字节上限 |
 | `autoSurfacing.sessionPersistence.*` | 继承 `defaults` | 把侧查询会话落盘 |
-| `extractMemories.enabled` | `true` | ⭐ 开启每轮自动提取 |
+| `extractMemories.enabled` | `false` | ⭐ 开启每轮自动提取。**默认关闭**（opt-in）：开启后每轮结束都会跑一次 headless 模型调用 |
 | `extractMemories.model` | — | ⭐ 提取 agent 用的模型。回退 `defaults.model`；没有 `defaults.model` 时必填（必须可解析，不回退父会话模型） |
 | `extractMemories.thinkLevel` | `"high"` | ⭐ 提取的思考强度 |
 | `extractMemories.maxContextTokens` | `2000` | ⭐ 渲染后对话的预算（`× 4` 个字符；超出时先裁中段、首尾优先保留，user 消息最后才动） |
@@ -207,7 +211,7 @@ headless 会话默认落在 `<项目记忆目录>/sessions/` —— 在项目记
 |---|---|
 | `session_start` | 加载配置 → 校验必需模型（失败即什么都不初始化）→ 解析记忆目录 → **确定索引值并冻结**（`startup`/`new` 读磁盘；`resume`/`fork`/`reload` 重放 transcript 取录制值）→ 注册 `memory` 工具（仅首次，5 个 action）→ 重建清单缓存 → dream 提醒检查 |
 | `before_agent_start` | 把冻结值写进 `sections["memory_index"]`（**每一轮、无条件**），然后做 auto-surfacing（主会话且非子 agent） |
-| `agent_end` | 触发异步 extract；写入成功通知 `Extracted N memories.`，失败通知 `Extract failed: …`（每会话一次） |
+| `agent_end` | `extractMemories.enabled` 开启时触发异步 extract；写入成功通知 `Extracted N memories.`，失败通知 `Extract failed: …`（每会话一次） |
 | `session_compact` | 清空已注入集合，**并从磁盘重读索引** —— 会话内唯一的刷新点 |
 | `session_shutdown` | 等在途写入收尾（上限 `lock.timeoutMs`），避免退出时留下 stale 的 `.lock` |
 
@@ -227,6 +231,8 @@ pi 用有序的 sections 构建 system prompt，只对**值发生变化**的 sec
 4. 注入过的文件名在本会话内记住，compaction 时清空。你会看到 `Recalled: N entries` 通知。
 
 ### 自动提取
+
+> **默认关闭。** 先在 `memory.json` 里设 `"extractMemories": { "enabled": true }`（配置只在 `session_start` 读一次，改动需重启会话），并确保 `extractMemories.model` 或 `defaults.model` 可解析。
 
 extract 拿到的是结构化渲染，而不是有损的两条消息摘要：
 
