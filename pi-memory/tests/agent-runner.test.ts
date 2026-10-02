@@ -313,6 +313,33 @@ describe("runHeadlessAgent", () => {
 		expect(opts.tools).toEqual([]);
 		expect(opts.customTools).toEqual([customTool]);
 	});
+
+	it("forwards noTools and leaves tools undefined so custom tools are not filtered out", async () => {
+		subscribeMock.mockImplementation((listener: any) => {
+			queueMicrotask(() => {
+				listener({ type: "message_end", message: {} });
+				listener({ type: "turn_end", message: {}, toolResults: [] });
+				listener({ type: "agent_end", messages: [], willRetry: false });
+			});
+			return () => {};
+		});
+
+		const customTool = { name: "memory", label: "Memory", description: "primitives", parameters: {}, execute: async () => ({ details: {}, content: [] }) };
+		await runHeadlessAgent({
+			task: "x",
+			cwd: "/mem",
+			modelRegistry: fakeRegistry,
+			parentModel: {} as any,
+			noTools: "builtin",
+			customTools: [customTool],
+		});
+
+		const opts = createAgentSessionMock.mock.calls[0][0];
+		expect(opts.noTools).toBe("builtin");
+		// tools 必须是 undefined：白名单（哪怕空数组）会把 customTools 一起滤掉。
+		expect(opts.tools).toBeUndefined();
+		expect(opts.customTools).toEqual([customTool]);
+	});
 	it("uses SessionManager.create when sessionPersistence.enabled is true", async () => {
 		subscribeMock.mockImplementation((listener: any) => {
 			queueMicrotask(() => {

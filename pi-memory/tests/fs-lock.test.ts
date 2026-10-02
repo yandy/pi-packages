@@ -1,9 +1,9 @@
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { MemoryLockedError, tryWithLock, withLock, type LockInfo } from "../src/fs-lock";
+import { MemoryLockedError, readLockStatus, tryWithLock, withLock, type LockInfo } from "../src/fs-lock";
 
 let dir: string;
 let lockPath: string;
@@ -151,5 +151,56 @@ describe("tryWithLock", () => {
 
 	it("runs the body when the lock is free", async () => {
 		await expect(tryWithLock(lockPath, "extract", FAST, async () => "ran")).resolves.toBe("ran");
+	});
+});
+
+// ── Plan C（`/memory` 的锁诊断）新增 ──────────────────────────────────────────
+describe("readLockStatus", () => {
+	it("reports absent when there is no lock file", async () => {
+		expect(await readLockStatus(lockPath)).toEqual({ kind: "absent" });
+	});
+
+	it("reports held together with the whole holder record", async () => {
+		await writeLock({ pid: process.pid, op: "dream", startedAt: "2026-10-02T01:02:03.000Z" });
+
+		expect(await readLockStatus(lockPath)).toEqual({
+			kind: "held",
+			holder: {
+				pid: process.pid,
+				hostname: hostname(),
+				startedAt: "2026-10-02T01:02:03.000Z",
+				op: "dream",
+			},
+		});
+	});
+
+	// Review Focus #5：三态必须可读 —— 「不存在」与「存在但读不懂」是不同的处置。
+	it("reports unreadable for garbage, an empty file and a wrong shape", async () => {
+		for (const raw of ["not json", "", "123", "{}", JSON.stringify({ pid: "x" }), "[]"]) {
+			await writeFile(lockPath, raw, "utf8");
+			expect(await readLockStatus(lockPath), raw).toEqual({ kind: "unreadable" });
+		}
+	});
+
+	it("reports a directory at the lock path as unreadable rather than absent", async () => {
+		await mkdir(lockPath, { recursive: true });
+		await writeFile(join(lockPath, "inner"), "x", "utf8");
+
+		expect(await readLockStatus(lockPath)).toEqual({ kind: "unreadable" });
+	});
+
+	it("reports held even for a dead process — liveness is the caller's business", async () => {
+		await writeLock({ pid: deadPid(), op: "dream" });
+
+		const status = await readLockStatus(lockPath);
+		expect(status.kind).toBe("held");
+	});
+
+	it("agrees with the acquire path: what it calls absent can be taken immediately", async () => {
+		expect(await readLockStatus(lockPath)).toEqual({ kind: "absent" });
+		await expect(
+			withLock(lockPath, "add", FAST, async () => "ok"),
+		).resolves.toBe("ok");
+		await expect(readLockStatus(lockPath)).resolves.toEqual({ kind: "absent" });
 	});
 });

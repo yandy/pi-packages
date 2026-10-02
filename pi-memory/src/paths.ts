@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { join, normalize, resolve, sep } from "node:path";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 const execFileP = promisify(execFile);
@@ -174,17 +174,4 @@ export async function projectIdentity(cwd: string): Promise<ProjectIdentity> {
 export async function resolveMemoryDir(config: { memoryDir: string }, cwd: string): Promise<string> {
 	const { kind, key } = await projectIdentity(cwd);
 	return join(config.memoryDir, kind, projectDirName(key));
-}
-
-export function safeTopicPath(memoryDir: string, topic: string): string {
-	const normalized = normalize(topic);
-	if (normalized.includes("..") || normalized.startsWith(sep)) {
-		throw new Error(`Unsafe topic path: ${topic}`);
-	}
-	const resolved = resolve(memoryDir, normalized);
-	const resolvedMemoryDir = resolve(memoryDir);
-	if (!resolved.startsWith(resolvedMemoryDir + sep) && resolved !== resolvedMemoryDir) {
-		throw new Error(`Topic escapes memory dir: ${topic}`);
-	}
-	return resolved;
 }
