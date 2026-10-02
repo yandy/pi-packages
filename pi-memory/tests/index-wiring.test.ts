@@ -1841,6 +1841,7 @@ describe("index wiring (integration)", () => {
 				memIndexMaxBytes: 25600,
 				sessionSearch: { maxSessions: 10, maxMatches: 5 },
 			}),
+			getUnavailableMessage: () => null,
 			searchSessions: async () => "",
 			cwd: () => dir,
 		});
@@ -2042,6 +2043,38 @@ describe("index wiring (integration)", () => {
 		await commands["memory"].handler("", ctxUI());
 		expect(notify.mock.calls[0][0].split("\n")[1]).toMatch(/^Dir: not initialized/);
 		expect(notify.mock.calls[0][0]).not.toContain(dir);
+	});
+
+	it("tells the tool caller the real reason when a later session is misconfigured", async () => {
+		const notify = vi.fn();
+		const { pi, tools, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx()); // healthy：工具已注册
+		expect(tools).toHaveLength(1);
+
+		// 同一个工厂再来一个配置错误的会话：模型一个都不配（extract 默认 disabled，故错误行是 dream + autoSurfacing）
+		mockConfigValue.defaults = { sessionPersistence: { enabled: false } };
+		await handlers["session_start"][0]({}, uiCtx(uiWith(notify)));
+
+		await expect(
+			tools[0].execute("c1", { action: "list" }, undefined, undefined, undefined),
+		).rejects.toThrow(
+			'Memory not initialized — no model for dream — set "dream.model" or "defaults.model" in memory.json; run /memory for details',
+		);
+	});
+
+	it("tells the tool caller that memory is disabled after a disabled restart", async () => {
+		const { pi, tools, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx()); // healthy：工具已注册
+		expect(tools).toHaveLength(1);
+
+		mockConfigValue.enabled = false;
+		await handlers["session_start"][0]({}, uiCtx()); // disabled：store 被清空，configError 为 null
+
+		await expect(
+			tools[0].execute("c1", { action: "list" }, undefined, undefined, undefined),
+		).rejects.toThrow('Memory is disabled — set "enabled": true in memory.json and restart');
 	});
 
 	// ── 错误态的跨 session 生命周期（design §2.5）──────────────────────────

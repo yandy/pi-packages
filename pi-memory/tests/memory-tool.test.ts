@@ -33,6 +33,7 @@ function deps(over: Partial<MemoryToolDeps> = {}): MemoryToolDeps {
 			memIndexMaxBytes: store.cfg.indexMaxBytes,
 			sessionSearch: { maxSessions: 10, maxMatches: 5 },
 		}),
+		getUnavailableMessage: () => null,
 		searchSessions: async () => "session hits",
 		cwd: () => dir,
 		...over,
@@ -364,6 +365,19 @@ describe("guards 与写选项透传", () => {
 	it("throws when the store is not initialized yet", async () => {
 		const tool = createMemoryTool(deps({ getStore: () => null }));
 		await expect(run(tool, { action: "list" })).rejects.toThrow("Memory not initialized (no session_start yet)");
+	});
+
+	it("prints the unavailable message verbatim when the caller supplies one", async () => {
+		const tool = createMemoryTool(
+			deps({
+				getStore: () => null,
+				getUnavailableMessage: () =>
+					'Memory is disabled — set "enabled": true in memory.json and restart',
+			}),
+		);
+		await expect(run(tool, { action: "list" })).rejects.toThrow(
+			'Memory is disabled — set "enabled": true in memory.json and restart',
+		);
 	});
 
 	it("passes skipLogicalLock and skipSnapshot through to the store", async () => {

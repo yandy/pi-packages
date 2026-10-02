@@ -4,13 +4,19 @@ File-system driven persistent memory layer for pi coding agent. Stores project k
 
 Aligned with Claude Code's auto memory mechanism: **one memory = one file**, a `MEMORY.md` index with exactly one line per memory, relevance-based auto-surfacing, per-turn memory extraction, and typed memory categories.
 
-> ## ⚠️ 2.0.0 is a breaking storage change
+> ## ⚠️ Breaking changes
+>
+> **After 2.0.0 (unreleased):**
+>
+> - **Models must be configured explicitly.** There is no shipped default and no parent-model fallback: `defaults.model` (or a per-task `model`) must exist and be resolvable, or `session_start` reports a config error and initialises **nothing**. See [Model configuration](#model-configuration).
+> - **`/memory on` and `/memory off` are gone.** `enabled` is a `memory.json` switch read once at session start — changing it needs a session restart.
+> - **Automatic 1.x → 2.0 migration has been removed.** Legacy topic files stay on disk untouched but are **invisible** to the memory system (they fail `parseEntryFile`'s five-field v2 frontmatter check). See [1.x data](#1x-data).
+>
+> **In 2.0.0:**
 >
 > - The index is now **one line per memory** (1.x had one line per *topic file*, with many `## entries` inside it).
 > - Each memory lives in **its own file** with five frontmatter fields: `name`, `description`, `type`, `created`, `modified` (1.x used `updated`).
 > - The index is injected as a **system-prompt section** (`memory_index`) that is frozen for the whole session, instead of being appended to the system prompt string.
->
-> Automatic 1.x → 2.0 migration has been **removed**. Legacy topic files stay on disk untouched but are **invisible** to the memory system — they fail `parseEntryFile`'s five-field v2 frontmatter check. See [1.x data](#1x-data).
 
 ## Features
 
@@ -25,7 +31,7 @@ Aligned with Claude Code's auto memory mechanism: **one memory = one file**, a `
 - **Dream nudge** — after N sessions or N hours a notification suggests `/dream`.
 - **`/memory`** — full status (switch, directory, index capacity, entry count, last dream, lock state including the holder), plus `unlock`.
 - **Two-level locking** — an in-process logical lock carries the *logical* scope (one primitive call, or a whole dream round); the cross-process `.lock` file is held for **milliseconds only** and is **never reclaimed automatically**. There is no TTL, no heartbeat and no takeover, so mutual exclusion is a hard guarantee; the price is that a lock left behind by a crashed process must be removed by a human (`/memory unlock`).
-- **Snapshots** — every write leaves a rollback point under `.backups/<ts>-<label>/`, keeping the last `lock.snapshotKeep` (directories named `migrate-*` — pre-2.0 originals from earlier migrations — are never pruned). `/dream` is the exception: it snapshots the whole directory **once on entry**, and the primitives inside that round skip their per-file snapshots (one round, one rollback point).
+- **Snapshots** — every write leaves a rollback point under `.backups/<ts>-<label>/`, keeping the last `lock.snapshotKeep` (directories named `migrate-*` — whole-directory snapshots from an earlier 1.x migration, whose `originals/` subdirectory holds the pre-2.0 topic files — are never pruned). `/dream` is the exception: it snapshots the whole directory **once on entry**, and the primitives inside that round skip their per-file snapshots (one round, one rollback point).
 - **Session search** — `memory search scope=sessions` queries past conversation history.
 - **Readable, clone-safe layout** — memory lives under `~/.pi/memory/git/<host__owner__repo>/` for git repos with an http(s)/ssh/git remote (including scp-style and `git+ssh`/`git+https`), and `~/.pi/memory/local/<absolute-path>/` otherwise — clones and worktrees of the same repo share memory (a fork has its own remote, so it gets its own directory).
 
@@ -51,7 +57,7 @@ Or add to `~/.pi/agent/settings.json`:
   SSH-port-on-staging.md
   Test-command.md      — one file per memory
   .lock                — cross-process write lock (held for milliseconds, never auto-reclaimed)
-  .backups/            — rollback points: <ISO-ts>-<label>/ (plus migrate-<ts>/ dirs from earlier 1.x migrations)
+  .backups/            — rollback points: <ISO-ts>-<label>/ (plus migrate-<ts>/ whole-directory snapshots from earlier 1.x migrations)
   .dream-meta.json     — last dream timestamp + session count (drives the nudge)
   sessions/            — persisted headless sessions, only when sessionPersistence is enabled
 ```
@@ -117,7 +123,7 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
   "memIndexInjectMaxLines": 200,
   "memIndexInjectMaxBytes": 25600,
   "lock": { "timeoutMs": 5000, "snapshotKeep": 5 },
-  "defaults": { "model": "deepseek/deepseek-flash", "sessionPersistence": { "enabled": false } },
+  "defaults": { "model": "provider/model-id", "sessionPersistence": { "enabled": false } },
   "dream": { "nudgeAfterSessions": 5, "nudgeAfterHours": 24, "thinkLevel": "high" },
   "sessionSearch": { "maxSessions": 10, "maxMatches": 5 },
   "autoSurfacing": {
@@ -137,6 +143,8 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
 }
 ```
 
+> Every `model` value must resolve in your registry — there is no default. A missing or unresolvable model makes `session_start` report a config error and initialise nothing. See [Model configuration](#model-configuration).
+
 | Key | Default | Description |
 |-----|---------|-------------|
 | `enabled` | `true` | Toggle the entire memory system on/off. Read once at session start — changing it requires restarting the session |
@@ -146,7 +154,7 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
 | `memIndexInjectMaxLines` | `200` | Injection budget: max lines of the index put into the `memory_index` section. Same scale as the write capacity on purpose — a smaller budget would hide memories that were written successfully |
 | `memIndexInjectMaxBytes` | `25600` | Injection budget: max bytes of the index section (truncated with a `[truncated: …]` marker) |
 | `lock.timeoutMs` | `5000` | How long a write waits for the logical lock (single primitive) or the cross-process `.lock`. Also the upper bound `session_shutdown` waits for in-flight writes |
-| `lock.snapshotKeep` | `5` | Rollback points kept in `.backups/` (directories named `migrate-*` — pre-2.0 originals from earlier migrations — are never pruned) |
+| `lock.snapshotKeep` | `5` | Rollback points kept in `.backups/` (directories named `migrate-*` — whole-directory snapshots from an earlier 1.x migration, whose `originals/` subdirectory holds the pre-2.0 topic files — are never pruned) |
 | `defaults.model` | `— (required)` | Shared model for dream / extract / side query. **No default**: every task that will run must resolve a model, otherwise `session_start` fails (see [Model configuration](#model-configuration)). A per-task `model` overrides it |
 | `defaults.sessionPersistence.enabled` | `false` | Shared fallback: headless sub-sessions (extract / dream / side query) stay in memory by default |
 | `defaults.sessionPersistence.sessionDir` | `<project memory dir>/sessions/` | Custom directory for persisted headless sessions |
