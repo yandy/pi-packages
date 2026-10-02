@@ -962,6 +962,7 @@ describe("ask_user", () => {
 				question: "Which option should we use?",
 				options: ["A", "B"],
 				allowFreeform: true,
+				allowComment: false,
 			},
 			undefined,
 			undefined,
@@ -1080,6 +1081,7 @@ describe("ask_user", () => {
 				question: "Which option should we use?",
 				options: ["Alpha", "Beta", "Gamma"],
 				allowFreeform: false,
+				allowComment: false,
 			},
 			undefined,
 			undefined,
@@ -1275,6 +1277,7 @@ describe("ask_user", () => {
 				question: "Which option should we use?",
 				options: ["Alpha", "Beta"],
 				allowFreeform: true,
+				allowComment: false,
 			},
 			undefined,
 			undefined,
@@ -1400,6 +1403,7 @@ describe("ask_user", () => {
 				question: "Which option should we use?",
 				options: ["Alpha", "Beta"],
 				allowFreeform: true,
+				allowComment: false,
 			},
 			undefined,
 			undefined,
@@ -1501,6 +1505,81 @@ describe("ask_user", () => {
 		expect(result.isError).not.toBe(true);
 		expect(result.details.response).toEqual({ kind: "selection", selections: ["Alpha"] });
 		expect(result.details.cancelled).toBe(false);
+	});
+
+	it("shows the comment toggle by default when allowComment is omitted", async () => {
+		const tool = await setupTool();
+		let rendered = "";
+
+		const result = await tool.execute(
+			"tool-call-id",
+			{
+				question: "Which option should we use?",
+				options: ["Alpha", "Beta"],
+			},
+			undefined,
+			undefined,
+			{
+				hasUI: true,
+				ui: {
+					custom: async (factory: any) => {
+						let resolved: string | null | undefined;
+						const component = factory(
+							{ requestRender() {}, terminal: { rows: 24 } },
+							createTheme(),
+							createKeybindings(),
+							(value: string | null) => {
+								resolved = value;
+							},
+						);
+
+						rendered = ((component as any).singleSelectList as any).render(120).join("\n");
+						return resolved ?? null;
+					},
+				},
+			},
+		);
+
+		expect(result.isError).not.toBe(true);
+		expect(rendered).toContain("[ ] Add extra context after selection");
+	});
+
+	it("does not render the comment toggle when allowComment is false", async () => {
+		const tool = await setupTool();
+		let rendered = "";
+
+		const result = await tool.execute(
+			"tool-call-id",
+			{
+				question: "Which option should we use?",
+				options: ["Alpha", "Beta"],
+				allowComment: false,
+			},
+			undefined,
+			undefined,
+			{
+				hasUI: true,
+				ui: {
+					custom: async (factory: any) => {
+						let resolved: string | null | undefined;
+						const component = factory(
+							{ requestRender() {}, terminal: { rows: 24 } },
+							createTheme(),
+							createKeybindings(),
+							(value: string | null) => {
+								resolved = value;
+							},
+						);
+
+						rendered = ((component as any).singleSelectList as any).render(120).join("\n");
+						return resolved ?? null;
+					},
+				},
+			},
+		);
+
+		expect(result.isError).not.toBe(true);
+		expect(rendered).not.toContain("Add extra context after selection");
 	});
 
 	it("toggles extra context with the ctrl+g key and shows it in help text", async () => {
@@ -1895,6 +1974,7 @@ describe("ask_user", () => {
 					question: "Pick colors",
 					options: ["Red", "Blue", "Green"],
 					allowMultiple: true,
+					allowComment: false,
 				},
 				undefined,
 				undefined,
@@ -1917,6 +1997,41 @@ describe("ask_user", () => {
 			expect(inputTitle).toContain("1. Red");
 			expect(inputTitle).toContain("2. Blue");
 			expect(inputTitle).toContain("3. Green");
+		});
+
+		it("collects an optional comment by default when the custom UI is unavailable", async () => {
+			const tool = await setupTool();
+			const inputTitles: string[] = [];
+
+			const result = await tool.execute(
+				"tool-call-id",
+				{
+					question: "Pick a color",
+					options: ["Red", "Blue"],
+				},
+				undefined,
+				undefined,
+				{
+					hasUI: true,
+					ui: {
+						custom: async () => undefined,
+						select: async () => "Blue",
+						input: async (title: string) => {
+							inputTitles.push(title);
+							return "Prefer the darker shade.";
+						},
+					},
+				},
+			);
+
+			expect(result.isError).not.toBe(true);
+			expect(inputTitles).toHaveLength(1);
+			expect(result.details.response).toEqual({
+				kind: "selection",
+				selections: ["Blue"],
+				comment: "Prefer the darker shade.",
+			});
+			expect(result.details.cancelled).toBe(false);
 		});
 
 		it("single-select can collect an optional comment after choosing an option", async () => {

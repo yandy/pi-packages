@@ -58,7 +58,7 @@ pi install npm:@yandy0725/pi-ask-user
 | `options` | `(string \| {title, description?})[]?` | `[]` | 多选选项 |
 | `allowMultiple` | `boolean?` | `false` | 启用多选模式 |
 | `allowFreeform` | `boolean?` | `true` | 添加"自定义输入"自由文本选项 |
-| `allowComment` | `boolean?` | `false` | 在自定义 UI 中提供可切换的额外上下文选项（`ctrl+g` 或切换行），并在回退对话框中收集可选注释 |
+| `allowComment` | `boolean?` | `true` | 在自定义 UI 中提供可切换的额外上下文选项（`ctrl+g` 或切换行），并在回退对话框中收集可选注释 |
 | `displayMode` | `"overlay" \| "inline"?` | 环境变量或 `"overlay"` | 控制自定义 UI 渲染：`overlay` 显示居中模态框（当前行为），`inline` 不显示叠加框架渲染 |
 | `overlayToggleKey` | `string?` | 环境变量或 `"alt+o"` | 隐藏/显示叠加弹窗的快捷键（仅 overlay 模式）。Pi-TUI 键位格式，例如 `"alt+o"`、`"ctrl+shift+h"`。传入 `"off"` 禁用。 |
 | `commentToggleKey` | `string?` | 环境变量或 `"ctrl+g"` | 当 `allowComment: true` 时切换可选注释/额外上下文行的快捷键。传入 `"off"` 禁用。 |
