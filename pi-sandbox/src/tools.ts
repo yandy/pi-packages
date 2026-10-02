@@ -60,15 +60,25 @@ function configForCall(deps: SandboxToolDeps, sessionCwd: string): SandboxConfig
 	return deps.getConfig?.() ?? getSandboxConfig(sessionCwd);
 }
 
-/** 提权参数对（三个工具共用）。 */
+/** 提权参数对（三个工具共用）。
+ *  `Type.Null()` 是刻意的：strict 提供商（pi 的 `constrainedSampling: {type:"json_schema"}` + `compat.supportsStrictMode`）
+ *  会把所有 property 塞进 `required`，并对“不允许 null”的字段补 `anyOf[X,{type:"null"}]`——模型于是必须给值。
+ *  显式声明 null 后，“不提权”有一个 schema 认可、文案也认可的取值，而不是靠模型去猜字符串 `"null"`；
+ *  同时 pi 的 strict 转换不再补包裹层（`schemaAllowsNull` 递归识别），JSON null 也不会被
+ *  `normalizeOptionalNulls` 剥掉，而是原样送达 execute 的归一化。后两条是宿主（pi ≥1.0.0）行为：
+ *  本仓 devDependency 是 0.80.2（无严格转换 / 无参数校验），单测只能钉 declared schema——
+ *  实测记录见 docs/superpowers/specs/2026-10-02-denial-first-escalation-design.md §4.3。 */
 export const ESCALATION_PROPS = {
-	sandbox_permissions: Type.Optional(Type.Union([Type.Literal("workspace-write"), Type.Literal("danger-full-access")])),
-	justification: Type.Optional(Type.String()),
+	sandbox_permissions: Type.Optional(
+		Type.Union([Type.Literal("workspace-write"), Type.Literal("danger-full-access"), Type.Null()]),
+	),
+	justification: Type.Optional(Type.Union([Type.String(), Type.Null()])),
 };
 
 interface EscalationParams {
-	sandbox_permissions?: string;
-	justification?: string;
+	/** JSON null = “不提权”（schema 显式声明，strict 提供商会原样送达）。 */
+	sandbox_permissions?: string | null;
+	justification?: string | null;
 }
 
 interface ToolCtxLike {
@@ -209,7 +219,7 @@ function extendParams(base: TSchema): TSchema {
  * （denial hint / 校验错误 / 批准后标记）。
  */
 const SANDBOX_NOTE =
-	"Sandbox: confined to the current mode; workspace-write already allows the workspace and /tmp. Pass escalation fields only when retrying a denial (never null); others are ignored.";
+	"Sandbox: confined to the current mode; workspace-write already allows the workspace and /tmp. Unless retrying a denial, omit these fields or send JSON null.";
 
 function escalationDescription(base: string): string {
 	return [base, "", SANDBOX_NOTE].join("\n");

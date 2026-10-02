@@ -34,7 +34,7 @@
 | **D2** | **一次性消费**：进入审批对话前消费记录（Allow / Deny / 取消都算用掉）；一次拒绝 = 一笔提权重试机会 |
 | **D3** | **kind 隔离**：bash 的拒绝只放行 bash 提权（`command`），write/edit 的只放行其自身（`operation`） |
 | **D4** | 门禁**只作用于严格更宽的请求**；同档免审批与"非法目标报 not-strictly-wider 错误"逐字不变 |
-| **D5** | **参数归一化**：`null` / `"null"`（trim、大小写无关）/ 空串 / 纯空白 → 视为未提供、按普通调用执行；真正的畸形（如只给 justification）仍报既有 malformed 错误 |
+| **D5** | **参数归一化**：`null` / `"null"`（trim、大小写无关）/ 空串 / 纯空白 → 视为未提供、按普通调用执行；真正的畸形（如只给 justification）仍报既有 malformed 错误（pi ≥1.0.0 下可达性按字段不同，见 §4.3 修订注记） |
 | **D6** | **Deny 可选理由**（用户追加）：两步式 `select → input`；理由可选（回车跳过）、sanitize（折叠空白、截断 500 字符）、随拒绝错误回传模型 |
 | **D7** | 忽略提权时**不弹窗、不报错**：按当前档位执行，结果附 `[sandbox: escalation fields were ignored …]`（原位反馈） |
 | **D8** | **无配置开关**：不引入 escalation policy 配置项（用户明确未选方案 3） |
@@ -108,6 +108,13 @@ interface DenialLedger {
 
 `ResolvedCall` 增加 `ignoredEscalation`；三个 `execute` 在 ignored 时对结果追加 `escalationIgnoredMarker`。
 
+> **2026-10-02 修订注记（pi 1.0.0 的参数校验层：占位符归一化按字段可达）**：第 1 步仍必需，但**可达性不同**——pi ≥1.0.0 在 extension `execute` 之前跑 `validateToolArguments`，而它校验的是 **declared schema**（不是下发给模型的 strict wire schema）。实测结论：
+> - `justification` 的字符串臂是 `Type.String()`（字段本身为 `string | null`）：字符串占位符 `"null"` / `""` / 空白都是合法值，**真的会到达 `execute`** → 归一化是 load-bearing 的。删掉它，一笔普通调用会被误判成 `justification was sent without sandbox_permissions`；真提权还会带着 `Reason: null` 进审批弹窗。
+> - `sandbox_permissions`（两个字面量枚举）：字符串形态在 pi 的参数校验期就被拒（`execute` 不会跑），只有“省略”和 schema 显式声明的 JSON `null` 会到达；后者是本次新增的（§4.6 与 09-29 §“工具 schema 扩展”）。
+> - 校验对 declared schema 做 → “省略”永远放行，与 strict wire schema 的 `required` 无关；JSON `null` 之所以曾“没事”，是 `normalizeOptionalNulls` 把 optional 且不允许 null 的字段直接删键。声明 `Type.Null()` 后它不再被删，而是原样送达归一化——这条分支从“靠 pi 的补丁”变成契约内行为。
+>
+> 第 2–6 步与 `ResolvedCall` 契约不变。
+
 ### 4.4 记账点
 
 - **bash**：`SandboxBashOpts.onDenial?: () => void`，在 `classifyDenial` 命中分支调用（runner failure 不触发——那是沙箱不可用，不是拒绝）；`tools.ts` 注入 `record(sessionId, "command")`；
@@ -127,13 +134,15 @@ interface DenialLedger {
 - `ESCALATION_GUIDELINE`（system prompt rules，付 1 份）：新增 `Never send escalation fields before a denial — such requests are ignored and the call runs confined.`，并写明 Deny 可附理由。
 - 提示预算闸（β′）：`tool.description` 中 `Sandbox:` 行三工具合计 ≤ 560 字符（不变）。
 
+> **2026-10-02 修订注记（原文案与 strict schema 自相矛盾）**：`SANDBOX_NOTE` 第二句改为 `Unless retrying a denial, omit these fields or send JSON null.`（同日二次修订：去掉首稿的负向子句 `— never the string "null"`，只留正向表述，三工具合计预算从 546 降到 468）。原文案 `Pass escalation fields only when retrying a denial (never null); others are ignored.` 的问题：strict 提供商下模型看到的 schema 把两个字段列为 `required`，“省略”在协议上不可表达，而 `(never null)` 又禁止了唯一合法的“不提权”取值——模型只能去写字符串 `"null"`，那在 pi 的参数校验期就硬失败（错误文案与沙箱无关，反而把模型推向真提权）。“先发制人会被忽略”的语义删去不丢信息：`ESCALATION_GUIDELINE`（付 1 份）里已写明 “such requests are ignored and the call runs confined” 与 `escalationIgnoredMarker`。三工具合计预算仍 ≤ 560（实测 468）。
+
 ## 5. 时序
 
 **先发制人（被忽略）**：模型带 `danger-full-access` + justification → 归一化 → 门禁（无记录）→ ignored → 按 effective 执行 → 成功则结果附 ignored 标记；失败则 denial marker + hint（bash 走 throw，见 §8）。
 
 **真实拒绝后重试（放行）**：命令被拒 → 记账 → 模型原样重试 → 门禁命中并消费 → 审批对话（Allow once / Deny + 可选理由）→ 一次性更宽执行 → 结果附 one-shot 标记。
 
-**占位符**：`sandbox_permissions: null` / `"null"` → 归一化 `undefined` → 普通调用（无弹窗、无报错）。
+**占位符**：JSON `null`（或省略）→ 归一化 `undefined` → 普通调用（无弹窗、无报错）；`justification` 的字符串占位符 `"null"` / `""` 走同一条路（它们能过 pi 的参数校验）。`sandbox_permissions` 的字符串形态例外：pi ≥1.0.0 在校验期就拒（execute 不跑），见 §4.3 修订注记。
 
 **子代理**：子会话各记各的账；子被拒 → 记账 → 重试 → 门禁命中 → 转发父会话弹窗（09-30 链路不变）；子会话 disposed 时账本 `forget`。
 
@@ -147,7 +156,7 @@ interface DenialLedger {
 | 有记录 + 更宽请求 + 用户 Deny | 消费记录；错误文案含可选理由；再提权因无记录被忽略（模型被告知 stop and explain） |
 | 同档请求（含 `/permission` 已放宽） | 免审批，不触达门禁（不受记录影响） |
 | 非法目标（更窄 / 未知） | 既有 not-strictly-wider 错误（不进门禁、不静默降级） |
-| 占位符参数 | 视为未提供，普通调用 |
+| 占位符参数（可达者） | 视为未提供，普通调用（`sandbox_permissions` 的字符串形态在 pi ≥1.0.0 校验期被拒，见 §4.3） |
 | 真畸形（只给一个字段 / 空 justification） | 既有 malformed 错误（nothing ran + 修复配方） |
 | 读不到 sessionId（窄 ctx / 异常宿主） | 无记录可证 → 忽略（不抛 TypeError，fail-closed 方向） |
 | headless（有会话身份、无通道） | 有记录时走既有 no approval channel 错误；无记录时忽略 |
@@ -197,7 +206,7 @@ interface DenialLedger {
 | 消费一次性 | 首次放行、二次忽略 | 同上 |
 | kind 隔离（operation 记录不放行 command） | 同上 | 同上 |
 | 同档 / 非法请求不受门禁影响 | 免审批 / not-strictly-wider | 同上 |
-| 归一化（`null` / `"null"` / 空白） | 普通调用、不抛 malformed | 同上 |
+| 归一化（JSON `null` 值 / 省略 / `justification` 的 `"null"`・空白） | 普通调用、不抛 malformed | 同上 |
 | write 围栏内 + 无记录提权 | 落地成功 + ignored 标记 + 零弹窗 | 同上 |
 | 全链路：忽略 → fence 拒绝 → 重试弹窗 → 落盘 | 真实拒绝后恢复标准审批 | 同上 |
 | bash `onDenial` 记账（命中 / runner failure 不触发） | 调用次数断言 | `tests/bash-ops.test.ts` |

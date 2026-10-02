@@ -26,7 +26,7 @@ export const ESCALATION_OPTIONS = ["Allow once", "Deny"] as const;
  */
 const MALFORMED_ESCALATION = "invalid escalation: this call was rejected before execution (nothing ran).";
 const ESCALATION_FIX =
-	'Fix: to run without escalation, omit BOTH fields (never null / "null" / ""); to escalate, send sandbox_permissions ("workspace-write" | "danger-full-access") with a one-sentence justification.';
+	'Fix: to run without escalation, omit BOTH fields or send JSON null for BOTH; to escalate, send sandbox_permissions ("workspace-write" | "danger-full-access") with a one-sentence justification.';
 
 export function validateEscalationArgs(sandboxPermissions: string | undefined, justification: string | undefined): void {
 	if (sandboxPermissions !== undefined && justification === undefined) {
@@ -41,9 +41,16 @@ export function validateEscalationArgs(sandboxPermissions: string | undefined, j
 }
 
 /**
- * 提权参数的占位符归一化：LLM 常把可选字段填成 null / "null" / 空串——这些都不是提权请求，
- * 而是"没填"。归一化成 undefined 后走无提权路径：报 MALFORMED 会让模型误判为"沙箱拒绝了我"，
- * 转而升级成真正的最大档提权（denial-first 门禁要消除的正是这类噪声）。
+ * 提权参数的占位符归一化：`null` / `"null"`（trim、大小写无关）/ 空串 / 纯空白都不是提权请求，而是“没填”。
+ * 归一化成 undefined 后走无提权路径：报 MALFORMED 会让模型误判为“沙箱拒绝了我”，转而升级成真正的最大档提权。
+ *
+ * 可达性按字段不同（pi ≥1.0.0 实测，execute 之前有 `validateToolArguments`，校验对象是 declared schema）：
+ * - `justification` 的字符串臂是 `Type.String()`（字段本身为 `string | null`）：字符串占位符（`"null"` / `""`）是合法值，
+ *   **会真的到达 execute**，
+ *   所以这几个分支是 load-bearing 的（否则一笔普通调用会被误判成 MALFORMED，真提权还会带着
+ *   `Reason: null` 进审批弹窗）；
+ * - `sandbox_permissions` 是两个字面量枚举：字符串占位符在 pi 的参数校验期就被拒（execute 不会跑），
+ *   只有“省略”和 schema 显式声明的 JSON `null` 会到达——非字符串分支同样是 load-bearing 的。
  * 只识别占位符；真正的畸形（如只给 justification）仍交 validateEscalationArgs 报错。
  */
 export function normalizeEscalationValue(value: unknown): string | undefined {

@@ -44,7 +44,7 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 
 - 严格更宽的请求只在**本会话真实发生过同类沙箱拒绝**后（bash ↔ `command`，write/edit ↔ `operation`）才会弹审批；没有前置拒绝时提权参数会被**忽略**，调用按当前档位正常执行，结果附一行 `[sandbox: escalation fields were ignored …]` 告诉模型参数没生效——这消除了模型"先发制人"带提权参数造成的弹窗轰炸；
 - 拒绝记录**一次性消费**：一次拒绝只放行一笔提权重试（批准仍只对那一次调用生效）；
-- 占位符参数（`null` / `"null"` / 空白）一律视为"未提供"，按普通调用执行（不再误报畸形参数错误）。
+- 占位符参数按字段归一化：省略或传 JSON `null` 都表示"不提权"，参数 schema 也显式声明了 `null`——因此 strict schema 提供商（pi 会把这两个字段标成必填）下的模型有一个合法的"不提权"取值可传；`justification` 上的 `"null"` / 空白字符串同样归一化为"未提供"。
 
 弹窗提供 **Allow once / Deny**；选 Deny 后可再填一句**可选理由**（回车跳过），理由会随拒绝错误回传给模型，让它明白为什么被拒、不要换写法反复试探。subagent 子会话（前台与后台都算）的提权会转发到父会话弹窗（同进程 pi-subagents，且父会话需有 UI）；无父通道时（headless、跨进程子代理）提权一律拒绝（fail-closed），此时用 `/permission` 放宽进程档位解救。
 

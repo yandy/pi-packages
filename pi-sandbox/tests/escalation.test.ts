@@ -42,24 +42,36 @@ describe("validateEscalationArgs", () => {
 		expect(() => validateEscalationArgs("danger-full-access", "   "))
 			.toThrow(/nothing ran.*Cause: justification was empty/);
 	});
+	// 2026-10-02 二次修订：配方只给正向表述，不再列负向子句（删掉 `never the string "null" or ""`）。
+	it("fix recipe 只给正向配方：省略或 JSON null（不含与 strict schema 矛盾的 “never null”）", () => {
+		expect(() => validateEscalationArgs("danger-full-access", undefined))
+			.toThrow(/omit BOTH fields or send JSON null for BOTH/);
+		expect(() => validateEscalationArgs("danger-full-access", undefined)).not.toThrow(/never null/);
+		expect(() => validateEscalationArgs("danger-full-access", undefined)).not.toThrow(/never the string/);
+	});
 	it("both absent: ok (a plain call)", () => {
 		expect(() => validateEscalationArgs(undefined, undefined)).not.toThrow();
 	});
 });
 
-describe("normalizeEscalationValue（占位符归一化：LLM 常把可选字段填成 null / \"null\" / 空白）", () => {
-	it("null / 非字符串 → 未提供", () => {
+describe('normalizeEscalationValue（占位符归一化，按字段可达性定生死）', () => {
+	// pi ≥1.0.0 实测：execute 之前有 validateToolArguments（针对 declared schema）。
+	// - justification 的字符串臂是 Type.String()（字段本身为 string | null）："null" / "NULL" / "" 都是合法字符串
+	//   → **真的会到达 execute**，归一化是 load-bearing 的（否则普通调用会被误判 MALFORMED，或带着 Reason: null 弹审批）；
+	// - sandbox_permissions 是两个字面量枚举：字符串形态在校验期就被拒（execute 不会跑），只有 JSON null
+	//   （schema 已显式声明）和“省略”能到达 —— 这两个分支同样由本函数处理。
+	it("null / 非字符串（含 JSON null）→ 未提供", () => {
 		expect(normalizeEscalationValue(null)).toBeUndefined();
 		expect(normalizeEscalationValue(undefined)).toBeUndefined();
 		expect(normalizeEscalationValue(42)).toBeUndefined();
 		expect(normalizeEscalationValue({})).toBeUndefined();
 	});
-	it('字符串 "null"（大小写与包裹空白）→ 未提供', () => {
+	it('字符串 "null"（大小写与包裹空白）→ 未提供（justification 上真实可达）', () => {
 		expect(normalizeEscalationValue("null")).toBeUndefined();
 		expect(normalizeEscalationValue("NULL")).toBeUndefined();
 		expect(normalizeEscalationValue("  Null  ")).toBeUndefined();
 	});
-	it("空串 / 纯空白 → 未提供", () => {
+	it("空串 / 纯空白 → 未提供（justification 上真实可达）", () => {
 		expect(normalizeEscalationValue("")).toBeUndefined();
 		expect(normalizeEscalationValue("   ")).toBeUndefined();
 	});
