@@ -1,10 +1,12 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { loadConfig, type MemoryConfig, type SessionPersistenceConfig } from "./src/config";
 import { runDream } from "./src/dream";
+import { indexCapacity, parseEntryIndex } from "./src/entry-index";
 import { runExtract } from "./src/extract";
+import { readLockStatus } from "./src/fs-lock";
 import { readRecordedMemoryIndex } from "./src/index-source";
 import { applyIndexSection, buildIndexSection, buildInjection, injectSurfacedContent, runSideQuery, scanEntries } from "./src/inject";
 import {
@@ -13,8 +15,8 @@ import {
 	MAIN_AGENT_ACTIONS,
 	type MemoryToolDeps,
 } from "./src/memory-tool";
-import { MemoryStore } from "./src/memory-store";
-import { migrateIfNeeded } from "./src/migrate";
+import { LOCK_FILE, MemoryStore } from "./src/memory-store";
+import { MIGRATED_FILE, migrateIfNeeded } from "./src/migrate";
 import { readDreamMeta, shouldNudge, writeDreamMeta } from "./src/nudge";
 import { resolveMemoryDir } from "./src/paths";
 import { searchSessions } from "./src/session-search";
@@ -39,6 +41,72 @@ function sleep(ms: number): Promise<void> {
  */
 function countInjectedBlocks(content: string): number {
 	return Math.max(0, content.split("\n## ").length - 1);
+}
+
+/**
+ * `/memory` 的迁移状态行（spec §14）。`.migrated` 由迁移在**最后一步**写（§15.3 步骤 6），
+ * 所以「标记不在」= 还没迁完 = `pending`（下次 session_start 会重试）；
+ * 标记读不懂也按 `pending` 报 —— 宁可让用户多看到一次重试，不可假装已经迁完。
+ * `files`/`entries` 都是 0 则是「扫过了、根本没东西要迁」= `not needed`。
+ */
+async function readMigrationStatus(memoryDir: string): Promise<string> {
+	try {
+		const marker = JSON.parse(await readFile(join(memoryDir, MIGRATED_FILE), "utf8")) as {
+			migratedAt?: unknown;
+			entries?: unknown;
+			files?: unknown;
+		};
+		if (
+			typeof marker.migratedAt !== "string" ||
+			typeof marker.entries !== "number" ||
+			typeof marker.files !== "number"
+		) {
+			return "pending";
+		}
+		if (marker.files === 0 && marker.entries === 0) return "not needed";
+		return `migrated at ${marker.migratedAt} (${marker.entries} entries from ${marker.files} files)`;
+	} catch {
+		return "pending";
+	}
+}
+
+/**
+ * `/memory` 的锁状态行。只读不碰 —— `.lock` **永不自动回收**（spec §5.1），
+ * 人工清除只有 `/memory unlock` 一个入口。
+ */
+async function lockStatusLine(memoryDir: string): Promise<string> {
+	const status = await readLockStatus(join(memoryDir, LOCK_FILE));
+	if (status.kind === "absent") return "free";
+	if (status.kind === "unreadable") return "unreadable — run /memory unlock";
+	return `held by ${status.holder.op} (pid ${status.holder.pid}, started ${status.holder.startedAt})`;
+}
+
+/**
+ * `/memory unlock`：崩溃遗留的 `.lock` 的**唯一**人工清除入口（spec §19 风险表）。
+ * 必须显式 confirm，而且只删 `.lock` 本身 —— 删错了就是两个写入者同时持有锁。
+ */
+async function unlockMemory(memoryDir: string, ui: ExtensionUIContext): Promise<void> {
+	const lockPath = join(memoryDir, LOCK_FILE);
+	if ((await readLockStatus(lockPath)).kind === "absent") {
+		ui.notify("No lock present.", "info");
+		return;
+	}
+	const ok = await ui.confirm(
+		"Memory lock",
+		"Remove the memory lock file? Only do this if no memory operation is running.",
+	);
+	if (!ok) return;
+	try {
+		await unlink(lockPath);
+		ui.notify("Memory lock removed.", "info");
+	} catch (e) {
+		// confirm 到 unlink 之间锁自己消失了：那正是想要的结果
+		if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+			ui.notify("No lock present.", "info");
+			return;
+		}
+		ui.notify(`Failed to remove memory lock: ${(e as Error).message}`, "error");
+	}
 }
 
 function resolveDefault(cfg: MemoryConfig, task: "dream" | "autoSurfacing" | "extractMemories", key: "model"): string | undefined;
@@ -352,9 +420,10 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("memory", {
-		description: "Show memory status, toggle enabled, or open files",
+		description: "Show memory status, toggle enabled, or remove a stale lock",
 		handler: async (args, ctx) => {
-			if (!config || !memoryDir) {
+			const activeStore = store;
+			if (!config || !memoryDir || !activeStore) {
 				ctx.ui.notify("Memory not initialized.", "info");
 				return;
 			}
@@ -363,16 +432,23 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify(`Memory ${args}`, "info");
 				return;
 			}
-			const files = (await readdir(memoryDir).catch(() => [])).filter((f) => f.endsWith(".md"));
-			const indexRaw = await readFile(join(memoryDir, "MEMORY.md"), "utf8").catch(() => "");
-			const lineCount = indexRaw ? indexRaw.split("\n").filter(Boolean).length : 0;
-			const meta = await readDreamMeta(memoryDir);
+			if (args === "unlock") {
+				await unlockMemory(memoryDir, ctx.ui);
+				return;
+			}
+			// 容量用写入那一侧的口径（memIndexMax*）：用户要知道的是「还能不能写」，
+			// 而注入口径（memIndexInject*）默认与它同值（D3）。unrecognized 是索引里非空但
+			// 解析不了的行数 —— 手写标题/分组/被 Windows 编辑器改坏的行都在这里露出来。
+			const indexRaw = await activeStore.readIndex();
+			const cap = indexCapacity(indexRaw, config.memIndexMaxLines, config.memIndexMaxBytes);
 			const summary = [
 				`Memory: ${config.enabled ? "enabled" : "disabled"}`,
 				`Dir: ${memoryDir}`,
-				`Index: ${lineCount}/${config.memIndexMaxLines} lines`,
-				`Topic files: ${files.filter((f) => f !== "MEMORY.md").join(", ") || "none"}`,
-				`Last dream: ${meta?.lastDreamAt ?? "never"}`,
+				`Index: ${cap.lineCount}/${config.memIndexMaxLines} lines, ${cap.byteLength}/${config.memIndexMaxBytes} bytes, ${parseEntryIndex(indexRaw).unrecognized} unrecognized lines`,
+				`Entries: ${(await activeStore.listEntries()).length}`,
+				`Last dream: ${(await readDreamMeta(memoryDir))?.lastDreamAt ?? "never"}`,
+				`Migration: ${await readMigrationStatus(memoryDir)}`,
+				`Lock: ${await lockStatusLine(memoryDir)}`,
 			].join("\n");
 			ctx.ui.notify(summary, "info");
 		},

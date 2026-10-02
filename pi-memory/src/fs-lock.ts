@@ -106,6 +106,19 @@ async function readLockState(lockPath: string): Promise<LockRead> {
 	}
 }
 
+/**
+ * 锁的诊断视图（spec §14 的 `/memory`）。
+ *
+ * **复用私有的 `readLockState`**，不另写一份读逻辑：三态必须与获取路径同源，
+ * 否则会出现「`/memory` 说 free，下一次写入却报 locked」这种无法诊断的矛盾。
+ * 它**不判断存活、也不删任何东西**（永不自动回收）；持有者是否已死由调用方自己看 pid。
+ */
+export async function readLockStatus(
+	lockPath: string,
+): Promise<{ kind: "absent" } | { kind: "unreadable" } | { kind: "held"; holder: LockInfo }> {
+	return readLockState(lockPath);
+}
+
 type AcquireOutcome =
 	| { acquired: true }
 	| { acquired: false; holder: LockInfo | null; abandoned: boolean };

@@ -34,7 +34,7 @@ const { mockConfigValue, dirRef } = vi.hoisted(() => ({
 	dirRef: { current: "" },
 }));
 
-const { scanEntriesMock, runSideQueryMock, injectSurfacedContentMock, runExtractMock, runDreamMock, shouldNudgeMock, readRecordedMemoryIndexMock } =
+const { scanEntriesMock, runSideQueryMock, injectSurfacedContentMock, runExtractMock, runDreamMock, shouldNudgeMock, readRecordedMemoryIndexMock, readDreamMetaMock } =
 	vi.hoisted(() => ({
 		scanEntriesMock: vi.fn(),
 		runSideQueryMock: vi.fn(),
@@ -43,6 +43,7 @@ const { scanEntriesMock, runSideQueryMock, injectSurfacedContentMock, runExtract
 		runDreamMock: vi.fn().mockResolvedValue("consolidated"),
 		shouldNudgeMock: vi.fn(),
 		readRecordedMemoryIndexMock: vi.fn(),
+		readDreamMetaMock: vi.fn(),
 	}));
 
 vi.mock("../src/config", () => ({
@@ -56,7 +57,7 @@ vi.mock("../src/paths", () => ({
 vi.mock("../src/nudge", () => ({
 	shouldNudge: shouldNudgeMock,
 	writeDreamMeta: vi.fn().mockResolvedValue(undefined),
-	readDreamMeta: vi.fn().mockResolvedValue({ lastDreamAt: null }),
+	readDreamMeta: readDreamMetaMock,
 }));
 
 vi.mock("../src/session-search", () => ({
@@ -180,6 +181,8 @@ describe("index wiring (integration)", () => {
 		shouldNudgeMock.mockResolvedValue({ nudge: false, message: "", sessions: 0, newEntries: 0 });
 		readRecordedMemoryIndexMock.mockReset();
 		readRecordedMemoryIndexMock.mockReturnValue(null);
+		readDreamMetaMock.mockReset();
+		readDreamMetaMock.mockResolvedValue({ lastDreamAt: null });
 	});
 
 	afterEach(async () => {
@@ -1178,6 +1181,197 @@ describe("index wiring (integration)", () => {
 		expect(confirm).toHaveBeenCalled();
 		expect(runDreamMock).toHaveBeenCalledTimes(1);
 		expect(runDreamMock.mock.calls[0][0].customTools[0].parameters.properties.action.enum).toHaveLength(7);
+	});
+
+	// ── Plan C（spec §14 `/memory` 状态与 `/memory unlock`）─────────────────
+	it("/memory prints the whole status block", async () => {
+		readDreamMetaMock.mockResolvedValue({ lastDreamAt: "2026-10-01T00:00:00.000Z", sessionCountAtDream: 3 });
+		const notify = vi.fn();
+		const confirm = vi.fn();
+		const { pi, tools, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		await tools[0].execute(
+			"c1",
+			{ action: "add", name: "DB rules", description: "d", content: "正文" },
+			undefined,
+			undefined,
+			undefined,
+		);
+		const index = await readFile(join(dir, "MEMORY.md"), "utf8");
+		await writeFile(join(dir, "MEMORY.md"), `# Memory Index\n\n${index}手写的一行\n`, "utf8");
+		await writeFile(
+			join(dir, ".migrated"),
+			JSON.stringify({ migratedAt: "2026-09-30T00:00:00.000Z", entries: 4, files: 2, backupDir: "/x" }),
+			"utf8",
+		);
+		await writeFile(
+			join(dir, ".lock"),
+			JSON.stringify({ pid: process.pid, hostname: "h", startedAt: "2026-10-02T01:02:03.000Z", op: "dream" }),
+			"utf8",
+		);
+
+		await commands["memory"].handler("", uiCtx({ hasUI: true, ui: { notify, confirm, setStatus: vi.fn() } }));
+
+		expect(notify).toHaveBeenCalledTimes(1);
+		expect(notify.mock.calls[0][1]).toBe("info");
+		const lines = notify.mock.calls[0][0].split("\n");
+		expect(lines).toHaveLength(7);
+		expect(lines[0]).toBe("Memory: enabled");
+		expect(lines[1]).toBe(`Dir: ${dir}`);
+		expect(lines[2]).toMatch(/^Index: 4\/200 lines, \d+\/25600 bytes, 2 unrecognized lines$/);
+		expect(lines[3]).toBe("Entries: 1");
+		expect(lines[4]).toBe("Last dream: 2026-10-01T00:00:00.000Z");
+		expect(lines[5]).toBe("Migration: migrated at 2026-09-30T00:00:00.000Z (4 entries from 2 files)");
+		expect(lines[6]).toBe(`Lock: held by dream (pid ${process.pid}, started 2026-10-02T01:02:03.000Z)`);
+	});
+
+	it("/memory reports a fresh directory as free / never / not needed", async () => {
+		const notify = vi.fn();
+		const { pi, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		await commands["memory"].handler("", uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } }));
+
+		const lines = notify.mock.calls[0][0].split("\n");
+		expect(lines[2]).toBe(
+			`Index: 1/200 lines, ${Buffer.byteLength(DISK_INDEX, "utf8")}/25600 bytes, 0 unrecognized lines`,
+		);
+		expect(lines[3]).toBe("Entries: 0");
+		expect(lines[4]).toBe("Last dream: never");
+		expect(lines[5]).toBe("Migration: not needed");
+		expect(lines[6]).toBe("Lock: free");
+	});
+
+	// 迁移标记缺失（上一次迁移失败）或读不懂 → 都按「还没迁移」报告，下次 session_start 会重试。
+	it("/memory reports a pending migration when the marker is missing or unreadable", async () => {
+		const notify = vi.fn();
+		const { pi, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+		const ctx = () => uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } });
+
+		await rm(join(dir, ".migrated"));
+		await commands["memory"].handler("", ctx());
+		await writeFile(join(dir, ".migrated"), "{oops", "utf8");
+		await commands["memory"].handler("", ctx());
+
+		expect(notify.mock.calls[0][0].split("\n")[5]).toBe("Migration: pending");
+		expect(notify.mock.calls[1][0].split("\n")[5]).toBe("Migration: pending");
+	});
+
+	it("/memory points at /memory unlock when the lock record is unreadable", async () => {
+		const notify = vi.fn();
+		const { pi, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+		await writeFile(join(dir, ".lock"), "not json", "utf8");
+
+		await commands["memory"].handler("", uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } }));
+
+		expect(notify.mock.calls[0][0].split("\n")[6]).toBe("Lock: unreadable — run /memory unlock");
+	});
+
+	it("/memory off is reflected in the status output", async () => {
+		const notify = vi.fn();
+		const { pi, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+		const ctx = () => uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } });
+
+		await commands["memory"].handler("off", ctx());
+		await commands["memory"].handler("", ctx());
+		await commands["memory"].handler("on", ctx());
+		await commands["memory"].handler("", ctx());
+
+		expect(notify.mock.calls[0]).toEqual(["Memory off", "info"]);
+		expect(notify.mock.calls[1][0].split("\n")[0]).toBe("Memory: disabled");
+		expect(notify.mock.calls[2]).toEqual(["Memory on", "info"]);
+		expect(notify.mock.calls[3][0].split("\n")[0]).toBe("Memory: enabled");
+	});
+
+	it("/memory says it is not initialized before session_start", async () => {
+		const notify = vi.fn();
+		const { pi, commands } = createFakePi();
+		memoryFactory(pi as any);
+
+		await commands["memory"].handler("", uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } }));
+
+		expect(notify).toHaveBeenCalledWith("Memory not initialized.", "info");
+	});
+
+	// Review Focus #5：删锁必须显式确认，而且只删 `.lock`。
+	it("/memory unlock removes only the lock file, after an explicit confirm", async () => {
+		const notify = vi.fn();
+		const confirm = vi.fn().mockResolvedValue(true);
+		const { pi, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+		await writeFile(
+			join(dir, ".lock"),
+			JSON.stringify({ pid: process.pid, hostname: "h", startedAt: "2026-10-02T01:02:03.000Z", op: "dream" }),
+			"utf8",
+		);
+		await writeFile(join(dir, "keep.md"), "not a lock", "utf8");
+
+		await commands["memory"].handler("unlock", uiCtx({ hasUI: true, ui: { notify, confirm, setStatus: vi.fn() } }));
+
+		expect(confirm).toHaveBeenCalledWith(
+			"Memory lock",
+			"Remove the memory lock file? Only do this if no memory operation is running.",
+		);
+		expect(await readdir(dir)).not.toContain(".lock");
+		expect(await readdir(dir)).toContain("keep.md");
+		expect(notify).toHaveBeenCalledWith("Memory lock removed.", "info");
+	});
+
+	it("/memory unlock leaves the lock alone when the user declines", async () => {
+		const notify = vi.fn();
+		const confirm = vi.fn().mockResolvedValue(false);
+		const { pi, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+		await writeFile(join(dir, ".lock"), JSON.stringify({ pid: process.pid, hostname: "h", startedAt: "x", op: "dream" }), "utf8");
+
+		await commands["memory"].handler("unlock", uiCtx({ hasUI: true, ui: { notify, confirm, setStatus: vi.fn() } }));
+
+		expect(confirm).toHaveBeenCalled();
+		expect(await readdir(dir)).toContain(".lock");
+		expect(notify).not.toHaveBeenCalled();
+	});
+
+	it("/memory unlock does not even ask when there is no lock", async () => {
+		const notify = vi.fn();
+		const confirm = vi.fn();
+		const { pi, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		await commands["memory"].handler("unlock", uiCtx({ hasUI: true, ui: { notify, confirm, setStatus: vi.fn() } }));
+
+		expect(confirm).not.toHaveBeenCalled();
+		expect(notify).toHaveBeenCalledWith("No lock present.", "info");
+	});
+
+	it("/memory unlock reports a failure instead of pretending the lock is gone", async () => {
+		const notify = vi.fn();
+		const confirm = vi.fn().mockResolvedValue(true);
+		const { pi, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+		// `.lock` 是一个非空目录：readLockStatus 报 unreadable，unlink 会失败
+		await mkdir(join(dir, ".lock"), { recursive: true });
+		await writeFile(join(dir, ".lock", "inner"), "x", "utf8");
+
+		await commands["memory"].handler("unlock", uiCtx({ hasUI: true, ui: { notify, confirm, setStatus: vi.fn() } }));
+
+		expect(confirm).toHaveBeenCalled();
+		expect(notify).toHaveBeenCalledTimes(1);
+		expect(notify.mock.calls[0][0]).toMatch(/^Failed to remove memory lock: /);
+		expect(notify.mock.calls[0][1]).toBe("error");
+		expect(await readdir(join(dir, ".lock"))).toContain("inner");
 	});
 
 	it("tool execute throws when memory is disabled", async () => {
