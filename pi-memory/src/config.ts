@@ -35,6 +35,7 @@ export interface AutoSurfacingConfig {
 }
 
 export interface ExtractMemoriesConfig {
+	/** 每轮自动提取。opt-in：默认 `false` —— 开启后每轮结束都会跑一次 headless 模型调用。 */
 	enabled: boolean;
 	model?: string;
 	thinkLevel: ThinkLevel;
@@ -106,7 +107,8 @@ export const DEFAULT_CONFIG: MemoryConfig = {
 		maxInjectionBytes: 10240,
 	},
 	extractMemories: {
-		enabled: true,
+		// 每轮结束都要跑一次 headless 模型调用，代价必须由用户显式承担：默认关闭。
+		enabled: false,
 		thinkLevel: "high",
 		maxContextTokens: 2000,
 		maxToolResultChars: 500,

@@ -19,6 +19,8 @@ describe("DEFAULT_CONFIG", () => {
 		expect(DEFAULT_CONFIG.dream.model).toBeUndefined();
 		expect(DEFAULT_CONFIG.sessionSearch.maxSessions).toBe(10);
 		expect(DEFAULT_CONFIG.autoSurfacing.maxEntryBytes).toBe(3072);
+		// extract 是 opt-in：每轮都要跑一次模型调用，默认关闭。
+		expect(DEFAULT_CONFIG.extractMemories.enabled).toBe(false);
 		expect(DEFAULT_CONFIG.extractMemories.maxToolResultChars).toBe(500);
 		expect(DEFAULT_CONFIG.extractMemories.maxAssistantChars).toBe(2000);
 	});
@@ -105,12 +107,27 @@ describe("loadConfig", () => {
 	it("has extractMemories defaults", async () => {
 		const cfg = await loadConfig({ cwd: "/tmp", isProjectTrusted: () => false, _globalDir: globalDir, _configDirName: ".pi" });
 		expect(cfg.extractMemories).toEqual({
-			enabled: true,
+			enabled: false,
 			thinkLevel: "high",
 			maxContextTokens: 2000,
 			maxToolResultChars: 500,
 			maxAssistantChars: 2000,
 		});
+	});
+
+	it("lets memory.json opt back into extractMemories", async () => {
+		await writeFile(join(globalDir, "memory.json"), JSON.stringify({ extractMemories: { enabled: true } }));
+		const cfg = await loadConfig({
+			cwd: projectDir,
+			isProjectTrusted: () => true,
+			_globalDir: globalDir,
+			_configDirName: ".pi",
+		});
+		// 默认关闭只是默认值：显式 true 必须能覆盖它（deepMerge 的正路径）。
+		expect(cfg.extractMemories.enabled).toBe(true);
+		expect(cfg.extractMemories.thinkLevel).toBe("high");
+		// 模型校验跟着开关走：开启后 extract 也要模型。
+		expect(requiredModels(cfg).map((m) => m.task)).toContain("extractMemories");
 	});
 
 	it("loads config from memory.json not pi-memory.json", async () => {
@@ -286,7 +303,7 @@ describe("loadConfig", () => {
 			_configDirName: ".pi",
 		});
 		expect(cfg.extractMemories).toEqual({
-			enabled: true,
+			enabled: false,
 			thinkLevel: "high",
 			maxContextTokens: 2000,
 			maxToolResultChars: 200,
