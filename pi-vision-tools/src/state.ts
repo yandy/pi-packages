@@ -1,5 +1,6 @@
 import type { Model } from "@earendil-works/pi-ai";
 import type { VisionConfig } from "./config.js";
+import type { ResolveResult } from "./vision.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: generic Model type parameter
 export function callingModelHasVision(model: Model<any> | undefined): boolean {
@@ -13,8 +14,8 @@ export function effectiveEnabled(config: VisionConfig, model: Model<any> | undef
 	return !callingModelHasVision(model);
 }
 
-export function footerLabel(config: VisionConfig, enabled: boolean): string | undefined {
-	if (!enabled) return undefined;
-	if (!config.provider || !config.model) return undefined;
-	return `👁 ${config.provider}/${config.model}`;
+/** Footer indicator for the resolved vision model. Hidden while the tool is off or the model cannot be resolved. */
+export function footerLabel(enabled: boolean, resolved: ResolveResult | undefined): string | undefined {
+	if (!enabled || !resolved?.ok) return undefined;
+	return `👁 ${resolved.model.provider}/${resolved.model.id}`;
 }

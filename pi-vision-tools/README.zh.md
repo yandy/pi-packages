@@ -6,6 +6,7 @@
 
 - **一个工具**（`describe_image`），将图像 + 提示词发送给支持视觉的模型，并将文本结果返回给调用方模型
 - **调用方模型按需控制成本/质量**：`compress`（开关）、`reasoning`（从 off 到 xhigh）以及提示词本身——无需预配置
+- **模糊模型选择**：按名称（`"haiku"`、`"qwen vl"`）或精确 `provider/id` 配置视觉模型；只考虑支持图像输入的模型
 - **按调用方模型模态自动开关**：如果当前模型已支持图像输入，工具自动禁用；否则启用
 - **页脚指示器**（`👁 provider/model`），在工具激活且视觉模型已配置时可见
 - **无需 `/reload`**：配置更改即时生效
@@ -47,15 +48,26 @@ pi install npm:@yandy0725/pi-vision-tools
 
 | 命令 | 功能 |
 |---------|------|
-| `/vision` 或 `/vision status` | 显示当前配置：provider/model、启用状态、生效开关、调用方模型是否支持视觉 |
-| `/vision config provider <p>` | 设置视觉模型提供商（如 `openai`、`anthropic`） |
-| `/vision config model <m>` | 设置视觉模型 ID（如 `gpt-4o`、`claude-sonnet-4-20250514`） |
+| `/vision` 或 `/vision status` | 显示当前配置：解析后的 provider/model、启用状态、生效开关、调用方模型是否支持视觉 |
+| `/vision config model <m>` | 设置视觉模型：精确 `provider/id`（如 `openai/gpt-4o`）或模糊名（如 `haiku`、`qwen vl`） |
 | `/vision config default-reasoning <level>` | 设置默认推理深度：`off`、`minimal`、`low`、`medium`、`high`、`xhigh` |
 | `/vision on` | 强制启用工具（即使调用方模型支持视觉） |
 | `/vision off` | 强制禁用工具 |
 | `/vision auto` | 自动模式：仅当调用方模型不支持图像输入时启用（默认） |
 
 配置持久化到 `~/.pi/agent/vision-tools.json`，即时生效——无需 `/reload`。
+
+### 模型选择
+
+`model` 可以填精确的 `provider/id`，也可以填模糊名。模糊匹配会对所有**可用且支持图像输入**的模型打分：精确 id > id/完整名包含 > 展示名包含 > 所有分词都出现。因此 `haiku`、`qwen vl`、`anthropic haiku` 都能解析到具体模型（前提是它已配置鉴权）。不支持图像输入的模型永远不会被选中；没有任何匹配时，报错会列出所有可用的视觉模型。
+
+`/vision status`、`/vision config model` 的确认信息和页脚指示器都显示**解析后**的 `provider/id`，所以用模糊名时你始终能看到它实际选了什么：
+
+```json
+{ "model": "haiku", "enabled": "auto" }
+```
+
+只读取 `model` 一个字段——没有单独的 `provider` 配置。想锁定某个 provider 时把它写进值里：`"model": "anthropic/claude-haiku-4-5"`。
 
 ### 可选：sharp
 

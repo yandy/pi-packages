@@ -6,6 +6,7 @@ Lets non-multimodal models analyze images by delegating to a configured vision m
 
 - **One tool** (`describe_image`) that sends an image + prompt to a vision-capable model and returns the text result to the calling model
 - **Calling model controls cost/quality per call**: `compress` (on/off), `reasoning` (off through xhigh), and the prompt itself — no preconfiguration needed
+- **Fuzzy model selection** — configure the vision model by name (`"haiku"`, `"qwen vl"`) or exact `provider/id`; only models that accept image input are considered
 - **Auto enable/disable** by calling model modality: if the current model already has image input, the tool disables itself; otherwise it's on
 - **Footer indicator** (`👁 provider/model`) visible when the tool is active and a vision model is configured
 - **No `/reload` required**: config changes take effect immediately
@@ -47,15 +48,26 @@ Or add to `~/.pi/agent/settings.json`:
 
 | Command | What it does |
 |---------|-------------|
-| `/vision` or `/vision status` | Show current config: provider/model, enabled state, effective on/off, whether the calling model has vision |
-| `/vision config provider <p>` | Set the vision model provider (e.g. `openai`, `anthropic`) |
-| `/vision config model <m>` | Set the vision model ID (e.g. `gpt-4o`, `claude-sonnet-4-20250514`) |
+| `/vision` or `/vision status` | Show current config: resolved provider/model, enabled state, effective on/off, whether the calling model has vision |
+| `/vision config model <m>` | Set the vision model: exact `provider/id` (e.g. `openai/gpt-4o`) or a fuzzy name (e.g. `haiku`, `qwen vl`) |
 | `/vision config default-reasoning <level>` | Set default reasoning depth: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
 | `/vision on` | Force-enable the tool (even if the calling model has vision) |
 | `/vision off` | Force-disable the tool |
 | `/vision auto` | Auto mode: tool enabled only when the calling model lacks image input (default) |
 
 Config is persisted to `~/.pi/agent/vision-tools.json` and takes effect immediately — no `/reload` needed.
+
+### Model selection
+
+The `model` entry is either an exact `provider/id` or a fuzzy name. Fuzzy matching scores every available model that accepts image input: exact id > id/full substring > display-name substring > all words present. So `haiku`, `qwen vl`, or `anthropic haiku` all resolve to a concrete model, as long as auth for it is configured. Models without image input are never chosen; when nothing matches, the error lists the available vision models.
+
+`/vision status`, the `/vision config model` confirmation, and the footer indicator all show the **resolved** `provider/id`, so a fuzzy name always tells you what it picked:
+
+```json
+{ "model": "haiku", "enabled": "auto" }
+```
+
+Only `model` is read — there is no separate `provider` setting. To pin one specific provider, put it in the value: `"model": "anthropic/claude-haiku-4-5"`.
 
 ### Optional: sharp
 
