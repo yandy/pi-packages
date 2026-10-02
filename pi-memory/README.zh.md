@@ -118,7 +118,7 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
   "memIndexInjectMaxLines": 200,
   "memIndexInjectMaxBytes": 25600,
   "lock": { "timeoutMs": 5000, "snapshotKeep": 5 },
-  "defaults": { "sessionPersistence": { "enabled": false } },
+  "defaults": { "model": "deepseek/deepseek-flash", "sessionPersistence": { "enabled": false } },
   "dream": { "nudgeAfterSessions": 5, "nudgeAfterHours": 24, "thinkLevel": "high" },
   "sessionSearch": { "maxSessions": 10, "maxMatches": 5 },
   "autoSurfacing": {
@@ -148,7 +148,7 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
 | `memIndexInjectMaxBytes` | `25600` | 注入口径：section 的最大字节数（超出则截断并带 `[truncated: …]` 标记） |
 | `lock.timeoutMs` | `5000` | 单次原语等逻辑锁 / 等跨进程 `.lock` 的上限。迁移固定用 30s（它要在锁内重写整个目录）。同时也是 `session_shutdown` 等在途写入的上限 |
 | `lock.snapshotKeep` | `5` | `.backups/` 保留的回滚点数量（`migrate-` 前缀的目录永不裁剪） |
-| `defaults.model` | — | 所有子任务共享的模型回退；各任务自己的 `model` 优先，都没配则回退父会话模型 |
+| `defaults.model` | `"deepseek/deepseek-flash"` | 所有子任务（dream / extract / 侧查询）共享的模型；各任务自己的 `model` 优先，不可解析或未设置时回退父会话模型 |
 | `defaults.sessionPersistence.enabled` | `false` | 共享回退：headless 子会话（extract / dream / 侧查询）默认只在内存里跑 |
 | `defaults.sessionPersistence.sessionDir` | `<项目记忆目录>/sessions/` | headless 会话的自定义落盘目录 |
 | `dream.nudgeAfterSessions` | `5` | 距上次 dream 多少个会话后开始提醒 |

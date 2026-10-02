@@ -546,7 +546,7 @@ Map<filename, { mtimeMs: number; name: string; description: string; type: string
     "timeoutMs": 5000,
     "snapshotKeep": 5
   },
-  "defaults": { "sessionPersistence": { "enabled": false } },   // defaults.model 保留：缺省时回退父会话模型
+  "defaults": { "model": "deepseek/deepseek-flash", "sessionPersistence": { "enabled": false } },   // 共享默认 model；不可解析时回退父会话模型
   "dream": { "nudgeAfterSessions": 5, "nudgeAfterHours": 24, "model": "auto", "thinkLevel": "high" },
   "sessionSearch": { "maxSessions": 10, "maxMatches": 5 },
   "autoSurfacing": {

@@ -118,7 +118,7 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
   "memIndexInjectMaxLines": 200,
   "memIndexInjectMaxBytes": 25600,
   "lock": { "timeoutMs": 5000, "snapshotKeep": 5 },
-  "defaults": { "sessionPersistence": { "enabled": false } },
+  "defaults": { "model": "deepseek/deepseek-flash", "sessionPersistence": { "enabled": false } },
   "dream": { "nudgeAfterSessions": 5, "nudgeAfterHours": 24, "thinkLevel": "high" },
   "sessionSearch": { "maxSessions": 10, "maxMatches": 5 },
   "autoSurfacing": {
@@ -148,7 +148,7 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
 | `memIndexInjectMaxBytes` | `25600` | Injection budget: max bytes of the index section (truncated with a `[truncated: …]` marker) |
 | `lock.timeoutMs` | `5000` | How long a write waits for the logical lock (single primitive) or the cross-process `.lock`. Migration uses a fixed 30s because it rewrites the whole directory inside the lock. Also the upper bound `session_shutdown` waits for in-flight writes |
 | `lock.snapshotKeep` | `5` | Rollback points kept in `.backups/` (directories named `migrate-*` are never pruned) |
-| `defaults.model` | — | Shared model fallback for all sub-tasks; a per-task `model` overrides it, and an unset model falls back to the parent session's model |
+| `defaults.model` | `"deepseek/deepseek-flash"` | Shared model for all sub-tasks (dream / extract / side query); a per-task `model` overrides it, and an unresolvable or unset model falls back to the parent session's model |
 | `defaults.sessionPersistence.enabled` | `false` | Shared fallback: headless sub-sessions (extract / dream / side query) stay in memory by default |
 | `defaults.sessionPersistence.sessionDir` | `<project memory dir>/sessions/` | Custom directory for persisted headless sessions |
 | `dream.nudgeAfterSessions` | `5` | Sessions since the last dream before the nudge is shown |

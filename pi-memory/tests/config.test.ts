@@ -13,7 +13,7 @@ describe("DEFAULT_CONFIG", () => {
 		expect(DEFAULT_CONFIG.memIndexInjectMaxLines).toBe(200);
 		expect(DEFAULT_CONFIG.memIndexInjectMaxBytes).toBe(25600);
 		expect(DEFAULT_CONFIG.lock).toEqual({ timeoutMs: 5000, snapshotKeep: 5 });
-		expect(DEFAULT_CONFIG.defaults).toEqual({ sessionPersistence: { enabled: false } });
+		expect(DEFAULT_CONFIG.defaults).toEqual({ model: "deepseek/deepseek-flash", sessionPersistence: { enabled: false } });
 		expect(DEFAULT_CONFIG.dream.model).toBeUndefined();
 		expect(DEFAULT_CONFIG.sessionSearch.maxSessions).toBe(10);
 		expect(DEFAULT_CONFIG.autoSurfacing.maxEntryBytes).toBe(3072);
@@ -211,9 +211,30 @@ describe("loadConfig", () => {
 			_globalDir: globalDir,
 			_configDirName: ".pi",
 		});
-		expect(cfg.defaults).toEqual({ sessionPersistence: { enabled: false } });
+		expect(cfg.defaults).toEqual({ model: "deepseek/deepseek-flash", sessionPersistence: { enabled: false } });
 		expect(cfg.dream.thinkLevel).toBe("high");
 		expect(cfg.dream.sessionPersistence).toBeUndefined();
+	});
+
+	it("defaults the shared model to deepseek/deepseek-flash", async () => {
+		const cfg = await loadConfig({
+			cwd: projectDir,
+			isProjectTrusted: () => true,
+			_globalDir: globalDir,
+			_configDirName: ".pi",
+		});
+		expect(cfg.defaults?.model).toBe("deepseek/deepseek-flash");
+	});
+
+	it("lets memory.json defaults.model override the shipped default", async () => {
+		await writeFile(join(globalDir, "memory.json"), JSON.stringify({ defaults: { model: "other/model" } }));
+		const cfg = await loadConfig({
+			cwd: projectDir,
+			isProjectTrusted: () => true,
+			_globalDir: globalDir,
+			_configDirName: ".pi",
+		});
+		expect(cfg.defaults?.model).toBe("other/model");
 	});
 
 	it("has lock defaults", async () => {
