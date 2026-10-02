@@ -29,6 +29,18 @@ export const DREAM_ACTIONS: MemoryAction[] = [
 	"rebuild_index",
 ];
 
+/**
+ * 会改动磁盘的 action。只有它们成功完成后才回调 `onWrite`（spec §14：「extract 完成且有
+ * 写入 → 通知写入条数」）—— `list` / `search` 是读，不算。
+ */
+const WRITE_ACTIONS: ReadonlySet<MemoryAction> = new Set<MemoryAction>([
+	"add",
+	"replace",
+	"remove",
+	"rename",
+	"rebuild_index",
+]);
+
 export interface MemoryToolConfig {
 	memIndexMaxLines: number;
 	memIndexMaxBytes: number;
@@ -56,6 +68,12 @@ export interface MemoryToolOptions {
 	skipLogicalLock?: boolean;
 	/** dream 传 true：进入时已对整目录拍过一次快照，内部每个原语不再各拍一次。 */
 	skipSnapshot?: boolean;
+	/**
+	 * 每次**成功**的写 action 之后回调（读 action 不回调，失败抛错也不回调）。
+	 * index.ts 用它给 extract 统计本轮写入条数（spec §14）—— 工具跑在 headless 子会话里，
+	 * 自己看不到 UI，只能把「写了几条」回报给宿主。
+	 */
+	onWrite?: (info: { action: MemoryAction; name?: string }) => void;
 }
 
 interface MemoryParams {
@@ -164,7 +182,7 @@ export function createMemoryTool(deps: MemoryToolDeps, options: MemoryToolOption
 			return new Text(theme.fg("success", "✓ ") + theme.fg("muted", text.split("\n")[0]), 0, 0);
 		},
 		// biome-ignore lint/suspicious/noExplicitAny: execute params
-		async execute(_id: string, params: any, _signal: AbortSignal | undefined, _onUpdate: any, _ctx: any) {
+		async execute(_id: string, params: any, _signal: AbortSignal | undefined, _onUpdate: any, ctx: any) {
 			if (!deps.getEnabled()) throw new Error("Memory is disabled (run /memory on)");
 			const store = deps.getStore();
 			if (!store) throw new Error("Memory not initialized (no session_start yet)");
@@ -191,6 +209,9 @@ export function createMemoryTool(deps: MemoryToolDeps, options: MemoryToolOption
 					// 让它去重写索引。抛错会让模型以为记忆没存下来而重复写。
 					if (r.capacityWarning) text += `\n\n${r.capacityWarning}`;
 					details = { file: r.file, capacityWarning: r.capacityWarning };
+					// spec §14：写成功了要让用户看见。headless 会话（extract / dream）hasUI=false，
+					// 天然不通知；旧调用形状完全不传 ctx，所以用 `?.`。
+					if (ctx?.hasUI) ctx.ui.notify(`Saved: ${p.name.trim()}`, "info");
 					break;
 				}
 				case "replace": {
@@ -259,6 +280,9 @@ export function createMemoryTool(deps: MemoryToolDeps, options: MemoryToolOption
 				default:
 					throw new Error(`Unknown action: ${String(p.action)}`);
 			}
+
+			// 写在 switch 之后：任何抛错都会跳过它，于是「成功完成写 action」是唯一触发条件。
+			if (WRITE_ACTIONS.has(p.action)) options.onWrite?.({ action: p.action, name: p.name?.trim() });
 
 			return { content: [{ type: "text", text }], details };
 		},

@@ -5,7 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseEntryFile } from "../src/entry-file";
 import { parseEntryIndex } from "../src/entry-index";
 import { MemoryStore, type StoreConfig } from "../src/memory-store";
-import { createMemoryTool, DREAM_ACTIONS, MAIN_AGENT_ACTIONS, type MemoryToolDeps } from "../src/memory-tool";
+import {
+	createMemoryTool,
+	DREAM_ACTIONS,
+	MAIN_AGENT_ACTIONS,
+	type MemoryAction,
+	type MemoryToolDeps,
+} from "../src/memory-tool";
 
 let dir: string;
 let store: MemoryStore;
@@ -35,9 +41,12 @@ function deps(over: Partial<MemoryToolDeps> = {}): MemoryToolDeps {
 	};
 }
 
-/** 跑一次工具调用并取回文本。`tool` 用 any：ToolDefinition 的 execute 第五参是必填的 ExtensionContext。 */
-async function run(tool: any, params: Record<string, unknown>): Promise<string> {
-	const result = await tool.execute("call-1", params, undefined, undefined, undefined);
+/**
+ * 跑一次工具调用并取回文本。`tool` 用 any：ToolDefinition 的 execute 第五参在类型上是必填的
+ * ExtensionContext，而测试只需要塞 UI 相关的两三个字段（`ctx` 缺省 = 无 UI）。
+ */
+async function run(tool: any, params: Record<string, unknown>, ctx?: unknown): Promise<string> {
+	const result = await tool.execute("call-1", params, undefined, undefined, ctx);
 	const first = result.content?.[0];
 	return first?.type === "text" ? first.text : "";
 }
@@ -387,5 +396,105 @@ describe("guards 与写选项透传", () => {
 		const tool = createMemoryTool(deps());
 		await run(tool, { action: "add", name: "A", content: "正文" });
 		expect(await readdir(join(dir, ".backups"))).toHaveLength(1);
+	});
+});
+
+// ── Plan C（spec §14 通知）新增 ───────────────────────────────────────────────
+describe("onWrite 回调与 Saved 通知", () => {
+	/** 带 UI 的假 ExtensionContext（execute 的第 5 个参数）。 */
+	function uiContext(notify = vi.fn()) {
+		return { hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } };
+	}
+
+	it("fires once per successful write action, with the action and the name", async () => {
+		const onWrite = vi.fn();
+		const tool = createMemoryTool(deps(), { actions: DREAM_ACTIONS, onWrite });
+
+		await run(tool, { action: "add", name: "A", description: "d", content: "正文" });
+		await run(tool, { action: "replace", name: "A", content: "新正文" });
+		await run(tool, { action: "rename", name: "A", new_name: "B" });
+		await run(tool, { action: "remove", name: "B" });
+		await run(tool, { action: "rebuild_index" });
+
+		expect(onWrite.mock.calls.map((call) => call[0])).toEqual([
+			{ action: "add", name: "A" },
+			{ action: "replace", name: "A" },
+			{ action: "rename", name: "A" },
+			{ action: "remove", name: "B" },
+			{ action: "rebuild_index", name: undefined },
+		]);
+	});
+
+	it("never fires for read actions", async () => {
+		const onWrite = vi.fn();
+		const tool = createMemoryTool(deps(), { onWrite });
+		await run(tool, { action: "add", name: "A", description: "d", content: "正文" });
+		onWrite.mockClear();
+
+		await run(tool, { action: "list" });
+		await run(tool, { action: "search", query: "A" });
+		await run(tool, { action: "search", query: "A", scope: "sessions" });
+
+		expect(onWrite).not.toHaveBeenCalled();
+	});
+
+	it("does not fire when the write is rejected", async () => {
+		const onWrite = vi.fn();
+		const tool = createMemoryTool(deps(), { onWrite });
+
+		await expect(run(tool, { action: "add", name: "", content: "x" })).rejects.toThrow("name is required for add");
+		await expect(run(tool, { action: "add", name: "A", content: "" })).rejects.toThrow(
+			"content is required for add",
+		);
+		await expect(run(tool, { action: "remove", name: "不存在" })).rejects.toThrow();
+
+		expect(onWrite).not.toHaveBeenCalled();
+	});
+
+	it("notifies 'Saved: <name>' after a successful add when the context has a UI", async () => {
+		const notify = vi.fn();
+		const tool = createMemoryTool(deps());
+
+		await run(tool, { action: "add", name: "SSH port on staging", description: "d", content: "正文" }, uiContext(notify));
+
+		expect(notify).toHaveBeenCalledTimes(1);
+		expect(notify).toHaveBeenCalledWith("Saved: SSH port on staging", "info");
+	});
+
+	it("trims the name in the Saved notification", async () => {
+		const notify = vi.fn();
+		const tool = createMemoryTool(deps());
+
+		await run(tool, { action: "add", name: "  Padded  ", description: "d", content: "正文" }, uiContext(notify));
+
+		expect(notify).toHaveBeenCalledWith("Saved: Padded", "info");
+	});
+
+	// Review Focus #4：headless 会话不弹通知。
+	it("does not notify without a UI (headless extract / dream sessions)", async () => {
+		const notify = vi.fn();
+		const tool = createMemoryTool(deps());
+		const headless = { hasUI: false, ui: { notify } };
+
+		await run(tool, { action: "add", name: "A", description: "d", content: "正文" }, headless);
+		// ctx 完全缺失（旧的调用形状）也不能炸
+		await run(tool, { action: "add", name: "B", description: "d", content: "正文" });
+
+		expect(notify).not.toHaveBeenCalled();
+		expect(await store.listEntries()).toHaveLength(2);
+	});
+
+	it("notifies for add only — replace / rename / remove stay quiet", async () => {
+		const notify = vi.fn();
+		const ctx = uiContext(notify);
+		const tool = createMemoryTool(deps(), { actions: DREAM_ACTIONS });
+
+		await run(tool, { action: "add", name: "A", description: "d", content: "正文" }, ctx);
+		await run(tool, { action: "replace", name: "A", content: "新正文" }, ctx);
+		await run(tool, { action: "rename", name: "A", new_name: "B" }, ctx);
+		await run(tool, { action: "remove", name: "B" }, ctx);
+		await run(tool, { action: "rebuild_index" }, ctx);
+
+		expect(notify.mock.calls).toEqual([["Saved: A", "info"]]);
 	});
 });

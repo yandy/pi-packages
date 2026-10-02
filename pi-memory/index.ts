@@ -32,6 +32,15 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * `<relevant_memories>` 里实际注入的块数（每块以 `\n## ` 开头）。
+ * 近似值：正文里自己以 `## ` 开头的行会被多算 —— 它只用于一条通知文案（spec §14），
+ * 而把 `injectSurfacedContent` 的返回值改成结构体反而会弄脏 Plan B 已钉住的接口。
+ */
+function countInjectedBlocks(content: string): number {
+	return Math.max(0, content.split("\n## ").length - 1);
+}
+
 function resolveDefault(cfg: MemoryConfig, task: "dream" | "autoSurfacing" | "extractMemories", key: "model"): string | undefined;
 function resolveDefault(cfg: MemoryConfig, task: "dream" | "autoSurfacing" | "extractMemories", key: "sessionPersistence"): SessionPersistenceConfig | undefined;
 function resolveDefault(cfg: MemoryConfig, task: "dream" | "autoSurfacing" | "extractMemories", key: "model" | "sessionPersistence"): string | SessionPersistenceConfig | undefined {
@@ -51,6 +60,8 @@ export default function (pi: ExtensionAPI) {
 	/** 本 session 已注入过的 entry **文件名**（spec §9.3）。session_compact 会清空它。 */
 	const injectedFiles = new Set<string>();
 	let lastSystemPrompt = "";
+	/** extract 失败通知的限流（spec §14：同一 session 最多 1 次）。session_start 重置。 */
+	let extractErrorNotified = false;
 	/**
 	 * 在途的后台写操作（dream / extract）。`session_shutdown` 等它们收尾，上限
 	 * `lock.timeoutMs`（spec §10）—— 进程在写入中途被杀会留下永远没人释放的 `.lock`。
@@ -82,6 +93,7 @@ export default function (pi: ExtensionAPI) {
 		config = await loadConfig(ctx);
 		if (!config.enabled) return;
 		currentCwd = ctx.cwd;
+		extractErrorNotified = false;
 		memoryDir = await resolveMemoryDir(config, ctx.cwd);
 		store = new MemoryStore({
 			memoryDir,
@@ -222,6 +234,10 @@ export default function (pi: ExtensionAPI) {
 						if (content) {
 							for (const f of selected) injectedFiles.add(f);
 							injectedMessage = { customType: "memory-auto-surfacing", content, display: false };
+							// spec §14：让用户看见「这一轮想起了什么」。headless 会话不通知。
+							if (ctx.hasUI) {
+								ctx.ui.notify(`Recalled: ${countInjectedBlocks(content)} entries`, "info");
+							}
 						}
 					}
 				}
@@ -271,6 +287,8 @@ export default function (pi: ExtensionAPI) {
 		const extractConfig = config.extractMemories;
 		if (!extractConfig?.enabled) return;
 		if (!event.messages || event.messages.length === 0) return;
+		// 本轮经 extract 的工具真实写入了几条（工具的 onWrite 回调计数，spec §14）。
+		let written = 0;
 		const extractRun = runExtract({
 			agentsMdBlocks: extractAgentsMdBlocks(lastSystemPrompt),
 			model: resolveDefault(config, "extractMemories", "model"),
@@ -287,14 +305,32 @@ export default function (pi: ExtensionAPI) {
 			parentModel: ctx.model,
 			// extract 的工具集与主 agent 相同（5 个 action，D12），且**只**注入它自己的 headless session。
 			// 不开 skipSnapshot：extract 没有整轮快照，它的每次写入都该留下自己的回滚点。
-			customTools: [createMemoryTool(toolDeps, { actions: MAIN_AGENT_ACTIONS, skipLogicalLock: true })],
+			customTools: [
+				createMemoryTool(toolDeps, {
+					actions: MAIN_AGENT_ACTIONS,
+					skipLogicalLock: true,
+					onWrite: () => {
+						written += 1;
+					},
+				}),
+			],
 			sessionPersistence: resolveDefault(config, "extractMemories", "sessionPersistence"),
 		});
 		track(extractRun);
-		void extractRun.catch(() => {
-			// Plan C 会把这里换成限流的用户可见通知（spec §14：「extract 失败 → 通知错误」）。
-			// Plan B 先保持静默：runExtract 自己已经不再吞错，这里只是避免未处理的 rejection 撕下整个进程。
-		});
+		void extractRun
+			.then((result) => {
+				// 只有「没被锁跳过」且「真的写了东西」才报数：否则每轮都弹一条空通知。
+				if (!result.skipped && written > 0 && ctx.hasUI) {
+					ctx.ui.notify(`Extracted ${written} ${written === 1 ? "memory" : "memories"}.`, "info");
+				}
+			})
+			.catch((e: unknown) => {
+				// spec §14：失败不再被静默吞掉，但同一 session 只报一次（extract 每轮都跑，
+				// 模型挂了的时候不能把用户淹没在重复通知里）。
+				if (extractErrorNotified || !ctx.hasUI) return;
+				extractErrorNotified = true;
+				ctx.ui.notify(`Extract failed: ${(e as Error).message}`, "error");
+			});
 	});
 
 	pi.registerCommand("memory", {

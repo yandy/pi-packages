@@ -508,6 +508,203 @@ describe("index wiring (integration)", () => {
 		expect(Date.now() - started).toBeLessThan(500);
 	});
 
+	// ── Plan C（spec §14 通知）────────────────────────────────────────────
+	/** 把待处理的微任务与定时器回调全部排空（extract 的 .then/.catch 是异步的）。 */
+	async function flush(): Promise<void> {
+		await new Promise((resolve) => setTimeout(resolve, 0));
+	}
+
+	function uiWith(notify = vi.fn()) {
+		return { hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } };
+	}
+
+	it("agent_end counts the writes made through the extract tool and notifies once", async () => {
+		mockConfigValue.extractMemories.enabled = true;
+		let resolveExtract: ((value: { skipped: boolean; result?: string }) => void) | undefined;
+		runExtractMock.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveExtract = resolve;
+				}),
+		);
+		const notify = vi.fn();
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		await handlers["agent_end"][0]({ messages: [{ role: "user", content: "hi" }] }, uiCtx(uiWith(notify)));
+
+		// customTools[0] 就是传给 extract 的真工具：直接跑它，onWrite 就是唯一的计数通道
+		const tool = runExtractMock.mock.calls[0][0].customTools[0];
+		await tool.execute("c1", { action: "add", name: "A", description: "d", content: "正文 A" }, undefined, undefined, undefined);
+		await tool.execute("c2", { action: "add", name: "B", description: "d", content: "正文 B" }, undefined, undefined, undefined);
+		await tool.execute("c3", { action: "list" }, undefined, undefined, undefined);
+		await flush();
+		expect(notify).not.toHaveBeenCalled();
+
+		resolveExtract?.({ skipped: false, result: "ok" });
+		await flush();
+
+		expect(notify).toHaveBeenCalledTimes(1);
+		expect(notify).toHaveBeenCalledWith("Extracted 2 memories.", "info");
+	});
+
+	it("agent_end uses the singular form for exactly one write", async () => {
+		mockConfigValue.extractMemories.enabled = true;
+		let resolveExtract: ((value: { skipped: boolean; result?: string }) => void) | undefined;
+		runExtractMock.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveExtract = resolve;
+				}),
+		);
+		const notify = vi.fn();
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		await handlers["agent_end"][0]({ messages: [{ role: "user", content: "hi" }] }, uiCtx(uiWith(notify)));
+		const tool = runExtractMock.mock.calls[0][0].customTools[0];
+		await tool.execute("c1", { action: "add", name: "A", description: "d", content: "正文" }, undefined, undefined, undefined);
+
+		resolveExtract?.({ skipped: false, result: "ok" });
+		await flush();
+
+		expect(notify).toHaveBeenCalledWith("Extracted 1 memory.", "info");
+	});
+
+	// Review Focus #4：没写东西就不该弹通知；被锁跳过也不该弹。
+	it("agent_end stays quiet when extract wrote nothing or was skipped", async () => {
+		mockConfigValue.extractMemories.enabled = true;
+		const notify = vi.fn();
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		runExtractMock.mockResolvedValueOnce({ skipped: false, result: "nothing to save" });
+		await handlers["agent_end"][0]({ messages: [{ role: "user", content: "hi" }] }, uiCtx(uiWith(notify)));
+		await flush();
+
+		runExtractMock.mockResolvedValueOnce({ skipped: true });
+		await handlers["agent_end"][0]({ messages: [{ role: "user", content: "hi" }] }, uiCtx(uiWith(notify)));
+		await flush();
+
+		expect(notify).not.toHaveBeenCalled();
+	});
+
+	it("agent_end does not notify a headless session about extracted memories", async () => {
+		mockConfigValue.extractMemories.enabled = true;
+		let resolveExtract: ((value: { skipped: boolean; result?: string }) => void) | undefined;
+		runExtractMock.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveExtract = resolve;
+				}),
+		);
+		const notify = vi.fn();
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		await handlers["agent_end"][0](
+			{ messages: [{ role: "user", content: "hi" }] },
+			uiCtx({ hasUI: false, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } }),
+		);
+		const tool = runExtractMock.mock.calls[0][0].customTools[0];
+		await tool.execute("c1", { action: "add", name: "A", description: "d", content: "正文" }, undefined, undefined, undefined);
+
+		resolveExtract?.({ skipped: false, result: "ok" });
+		await flush();
+
+		expect(notify).not.toHaveBeenCalled();
+	});
+
+	it("reports an extract failure once per session and resets the quota on session_start", async () => {
+		mockConfigValue.extractMemories.enabled = true;
+		runExtractMock.mockImplementation(() => Promise.reject(new Error("model exploded")));
+		const notify = vi.fn();
+		const ui = uiWith(notify);
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		const failed = () => notify.mock.calls.filter((call) => String(call[0]).startsWith("Extract failed:"));
+
+		await handlers["agent_end"][0]({ messages: [{ role: "user", content: "a" }] }, uiCtx(ui));
+		await flush();
+		await handlers["agent_end"][0]({ messages: [{ role: "user", content: "b" }] }, uiCtx(ui));
+		await flush();
+		await handlers["agent_end"][0]({ messages: [{ role: "user", content: "c" }] }, uiCtx(ui));
+		await flush();
+
+		expect(failed()).toEqual([["Extract failed: model exploded", "error"]]);
+
+		// 新 session 重新给一次配额
+		await handlers["session_start"][0]({}, uiCtx());
+		await handlers["agent_end"][0]({ messages: [{ role: "user", content: "d" }] }, uiCtx(ui));
+		await flush();
+
+		expect(failed()).toHaveLength(2);
+	});
+
+	it("does not report an extract failure to a headless session", async () => {
+		mockConfigValue.extractMemories.enabled = true;
+		runExtractMock.mockImplementation(() => Promise.reject(new Error("model exploded")));
+		const notify = vi.fn();
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		await handlers["agent_end"][0](
+			{ messages: [{ role: "user", content: "a" }] },
+			uiCtx({ hasUI: false, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } }),
+		);
+		await flush();
+
+		expect(notify).not.toHaveBeenCalled();
+	});
+
+	it("notifies Recalled with the number of injected blocks", async () => {
+		const notify = vi.fn();
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		scanEntriesMock.mockResolvedValue([
+			{ file: "ssh.md", name: "SSH", description: "d", type: "project", modified: "2026-01-01T00:00:00.000Z" },
+			{ file: "db.md", name: "DB", description: "d", type: "project", modified: "2026-01-01T00:00:00.000Z" },
+		]);
+		runSideQueryMock.mockResolvedValue(["ssh.md", "db.md"]);
+		injectSurfacedContentMock.mockResolvedValue("<relevant_memories>\n## SSH\nx\n\n## DB\ny\n</relevant_memories>");
+
+		await handlers["before_agent_start"][0](sectionsEvent("ssh?"), uiCtx(uiWith(notify)));
+
+		expect(notify).toHaveBeenCalledWith("Recalled: 2 entries", "info");
+	});
+
+	it("stays quiet about Recalled when headless or when nothing was injected", async () => {
+		const notify = vi.fn();
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		scanEntriesMock.mockResolvedValue([
+			{ file: "ssh.md", name: "SSH", description: "d", type: "project", modified: "2026-01-01T00:00:00.000Z" },
+		]);
+		runSideQueryMock.mockResolvedValue(["ssh.md"]);
+		injectSurfacedContentMock.mockResolvedValue("");
+
+		await handlers["before_agent_start"][0](sectionsEvent("ssh?"), uiCtx(uiWith(notify)));
+		expect(notify).not.toHaveBeenCalled();
+
+		injectSurfacedContentMock.mockResolvedValue("<relevant_memories>\n## SSH\nx\n</relevant_memories>");
+		await handlers["before_agent_start"][0](
+			sectionsEvent("ssh?"),
+			uiCtx({ hasUI: false, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } }),
+		);
+		expect(notify).not.toHaveBeenCalled();
+	});
+
 	it("runs auto-surfacing through the store for main agents", async () => {
 		const { pi, handlers } = createFakePi();
 		memoryFactory(pi as any);
