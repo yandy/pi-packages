@@ -6,7 +6,7 @@ pi coding agent 的文件系统持久记忆层。把项目知识（事实、偏�
 
 > ## ⚠️ 破坏性变更
 >
-> **2.1.1 之后（未发布）：**
+> **2.2.0：**
 >
 > - **`extractMemories.enabled` 默认改为 `false`。** 每轮自动提取现在是 opt-in：开启后每轮结束都会跑一次 headless 模型调用。已经显式写了 `"extractMemories": { "enabled": true }` 的配置不受影响。
 >

@@ -6,7 +6,7 @@ Aligned with Claude Code's auto memory mechanism: **one memory = one file**, a `
 
 > ## ⚠️ Breaking changes
 >
-> **After 2.1.1 (unreleased):**
+> **In 2.2.0:**
 >
 > - **`extractMemories.enabled` now defaults to `false`.** Per-turn extraction is opt-in: once enabled, every turn ends with a headless model call. Configs that already set `"extractMemories": { "enabled": true }` are unaffected.
 >
