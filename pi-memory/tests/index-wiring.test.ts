@@ -1795,9 +1795,10 @@ describe("index wiring (integration)", () => {
 		}
 	});
 
-	// Review Focus #2 的另一半：disabled 启动必须清掉上一 session 的 injectedFiles，
-	// 否则改配置重启重新启用后，同一条 entry 在新会话也不会浮现。
-	it("a disabled restart clears the injected-file set", async () => {
+	// per-session 去重（v3 设计：集合在 session_start 时初始化）：每次 session_start 都必须把
+	// 上一 session 的 injectedFiles 清掉，否则新会话里同一条 entry 会因旧集合而被静默压掉。
+	// 这一条用 enabled → disabled → enabled 三次启动钉住它（去掉 clear 就会第二次观测到 ssh.md）。
+	it("clears the injected-file set on every session_start", async () => {
 		const injectedAtCall: Array<Set<string>> = [];
 		scanEntriesMock.mockResolvedValue([
 			{ file: "ssh.md", name: "SSH", description: "d", type: "project", modified: "2026-01-01T00:00:00.000Z" },
@@ -1817,8 +1818,10 @@ describe("index wiring (integration)", () => {
 		mockConfigValue.enabled = false;
 		await handlers["session_start"][0]({}, uiCtx());
 		// 中途 `/memory on` 已删除：重新启用只有「改配置 + 重启」一条路（新的 session_start）。
-		// 这条 enabled 重启**不会**再清 injectedFiles（只有 disabled 分支调 resetSessionState），
-		// 所以下一次 surfacing 看到的集合就是 disabled 重启留下的结果。
+		// 去重集合是 per-session 的（v3 设计：`injectedTopics` 在 session_start 时初始化，
+		// 同一 session 内每个 entry 最多注入一次）。`resetSessionState()` 在每次 session_start
+		// 开头无条件清空它，所以这里的 enabled 重启同样从空集合开始 —— 断言钉住的正是这一点：
+		// 去掉那次 clear，第二次观测就会看到上一轮注入过的 `ssh.md`，用例变红。
 		mockConfigValue.enabled = true;
 		await handlers["session_start"][0]({}, uiCtx());
 		await handlers["before_agent_start"][0](sectionsEvent("ssh?"), uiCtx());
