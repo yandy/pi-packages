@@ -5,9 +5,9 @@ Lets non-multimodal models analyze images by delegating to a configured vision m
 ## Features
 
 - **One tool** (`describe_image`) that sends an image + prompt to a vision-capable model and returns the text result to the calling model
-- **Calling model controls cost/quality per call**: `compress` (on/off), `reasoning` (off through xhigh), and the prompt itself — no preconfiguration needed
+- **Calling model controls cost/quality per call**: `compress` (on/off), `thinkLevel` (off through xhigh), and the prompt itself — no preconfiguration needed
 - **Fuzzy model selection** — configure the vision model by name (`"haiku"`, `"qwen vl"`) or exact `provider/id`; only models that accept image input are considered
-- **Auto enable/disable** by calling model modality: if the current model already has image input, the tool disables itself; otherwise it's on
+- **Always follows the calling model's modality**: if the current model already has image input, the tool disables itself; otherwise it's on
 - **Footer indicator** (`👁 provider/model`) visible when the tool is active and a vision model is configured
 - **No `/reload` required**: config changes take effect immediately
 
@@ -48,14 +48,14 @@ Or add to `~/.pi/agent/settings.json`:
 
 | Command | What it does |
 |---------|-------------|
-| `/vision` or `/vision status` | Show current config: resolved provider/model, enabled state, effective on/off, whether the calling model has vision |
+| `/vision` or `/vision status` | Show current config: resolved provider/model, default think level, whether the tool is active, whether the calling model has vision |
 | `/vision config model <m>` | Set the vision model: exact `provider/id` (e.g. `openai/gpt-4o`) or a fuzzy name (e.g. `haiku`, `qwen vl`) |
-| `/vision config default-reasoning <level>` | Set default reasoning depth: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
-| `/vision on` | Force-enable the tool (even if the calling model has vision) |
-| `/vision off` | Force-disable the tool |
-| `/vision auto` | Auto mode: tool enabled only when the calling model lacks image input (default) |
+| `/vision config default-think-level <level>` | Set the default think level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`. The `thinkLevel` tool parameter overrides it; invalid values are rejected without writing |
 
 Config is persisted to `~/.pi/agent/vision-tools.json` and takes effect immediately — no `/reload` needed.
+
+Activation is always automatic: `describe_image` is removed from the tool list when the calling model accepts image input, and enabled otherwise — there is no force switch.
+Legacy keys (`enabled`, `defaultReasoning`) are ignored on load; set your think level again after upgrading if you relied on the old key.
 
 ### Model selection
 
@@ -64,10 +64,10 @@ The `model` entry is either an exact `provider/id` or a fuzzy name. Fuzzy matchi
 `/vision status`, the `/vision config model` confirmation, and the footer indicator all show the **resolved** `provider/id`, so a fuzzy name always tells you what it picked:
 
 ```json
-{ "model": "haiku", "enabled": "auto" }
+{ "model": "haiku" }
 ```
 
-Only `model` is read — there is no separate `provider` setting. To pin one specific provider, put it in the value: `"model": "anthropic/claude-haiku-4-5"`.
+Only `model` and `defaultThinkLevel` are read — there is no separate `provider` setting. To pin one specific provider, put it in the value: `"model": "anthropic/claude-haiku-4-5"`.
 
 ### Optional: sharp
 
@@ -91,7 +91,7 @@ Set `compress: false` on any call to skip compression for pixel-perfect needs (r
 ## Tool reference
 
 ```
-describe_image(image_path: string, prompt: string, compress?: boolean, reasoning?: string)
+describe_image(image_path: string, prompt: string, compress?: boolean, thinkLevel?: string)
 ```
 
 | Parameter | Required | Default | Description |
@@ -99,7 +99,7 @@ describe_image(image_path: string, prompt: string, compress?: boolean, reasoning
 | `image_path` | yes | — | File path, `data:` URL, or raw base64 (>100 chars) |
 | `prompt` | yes | — | Instruction for the vision model |
 | `compress` | no | `true` | Compress before sending; set `false` for pixel-perfect |
-| `reasoning` | no | `off` | Reasoning effort: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
+| `thinkLevel` | no | `off` | Think level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
 
 ### Example tool call
 
@@ -108,7 +108,7 @@ describe_image(image_path: string, prompt: string, compress?: boolean, reasoning
   "image_path": "/home/user/screenshot.png",
   "prompt": "Describe what you see in this screenshot.",
   "compress": true,
-  "reasoning": "high"
+  "thinkLevel": "high"
 }
 ```
 
