@@ -9,7 +9,6 @@ import {
 	buildSideQueryTask,
 	type EntryManifest,
 	injectSurfacedContent,
-	loadIndexSnapshot,
 	runSideQuery,
 	SIDE_QUERY_MAX_ENTRIES,
 	scanEntries,
@@ -99,7 +98,7 @@ describe("buildIndexSection", () => {
 		await rm(dir, { recursive: true, force: true });
 	});
 
-	// v1 的 loadIndexSnapshot 会自己补一份 `# Memory Index`；v2 的 MEMORY.md 由 rebuildIndex /
+	// v1 的索引快照函数会自己补一份 `# Memory Index`；v2 的 MEMORY.md 由 rebuildIndex /
 	// 迁移写入该标题 —— 再补一次，注入文本里就有两份。
 	it("keeps exactly one title when MEMORY.md already has one", async () => {
 		await writeFile(join(dir, "MEMORY.md"), "# Memory Index\n\n- [A](a.md) — desc a\n", "utf8");
@@ -190,33 +189,6 @@ describe("applyIndexSection", () => {
 		expect(applyIndexSection(null, "v")).toBe(false);
 		expect(applyIndexSection({ sections: null }, "v")).toBe(false);
 		expect(applyIndexSection({ sections: "nope" }, "v")).toBe(false);
-	});
-});
-
-describe("loadIndexSnapshot", () => {
-	let dir: string;
-	beforeEach(async () => {
-		dir = await mkdtemp(join(tmpdir(), "mem-inj-"));
-	});
-	afterEach(async () => {
-		await rm(dir, { recursive: true, force: true });
-	});
-
-	it("returns empty string when MEMORY.md missing", async () => {
-		expect(await loadIndexSnapshot(dir, 200, 25600)).toBe("");
-	});
-
-	it("returns truncated content when MEMORY.md exists", async () => {
-		await writeFile(join(dir, "MEMORY.md"), "- [A](a.md) — desc a\n- [B](b.md) — desc b");
-		const snap = await loadIndexSnapshot(dir, 200, 25600);
-		expect(snap).toContain("# Memory Index");
-		expect(snap).toContain("- [A](a.md)");
-	});
-
-	it("truncates to limits", async () => {
-		const many = Array.from({ length: 10 }, (_, i) => `- [T${i}](t${i}.md) — d${i}`).join("\n");
-		await writeFile(join(dir, "MEMORY.md"), many);
-		expect(await loadIndexSnapshot(dir, 3, 25600)).toContain("[truncated:");
 	});
 });
 

@@ -60,14 +60,26 @@ const middleMarkerLabel = (omitted: number): string => `[truncated: ${omitted} c
  */
 const middleMarker = (omitted: number): string => `\n${middleMarkerLabel(omitted)}\n`;
 
-function clipMiddle(text: string, maxChars: number): string {
+/**
+ * 字符串级的中段裁减：只剩 user 块仍超预算时的回退。
+ *
+ * `alreadyOmitted` 是块级裁减已经丢掉的字符数，它并入标记里的 N，并且**不再插入第二个标记**
+ * —— 输出里 `[truncated: …]` 恒为一个。旧实现直接对「已含块级标记的文本」再裁一次，
+ * 于是极端预算下会出现两个标记，而且回退标记的 N 把旧标记自身的长度也算成「省略的正文」
+ * （Plan B ledger 的 Minor）。
+ */
+function clipMiddle(text: string, maxChars: number, alreadyOmitted = 0): string {
 	if (maxChars <= 0 || text.length <= maxChars) return text;
+	// 块级标记自己占的字符既不是被省略的正文，也不该在输出里出现第二次。
+	// 它可能是独立一行（后面跟着 `\n`），也可能被 `assemble` 追加在末尾（后面没有 `\n`）。
+	const label = alreadyOmitted > 0 ? middleMarkerLabel(alreadyOmitted) : "";
+	const body = label === "" ? text : text.replace(`${label}\n`, "").replace(label, "");
 	// 给标记文本预留位置（按一个六位数省略量估算），避免「裁减之后反而更长」。
 	const budget = Math.max(0, maxChars - middleMarker(999999).length);
-	const head = Math.ceil(budget / 2);
-	const tail = budget - head;
-	const omitted = text.length - head - tail;
-	return `${text.slice(0, head)}${middleMarker(omitted)}${text.slice(text.length - tail)}`;
+	const head = Math.min(Math.ceil(budget / 2), body.length);
+	const tail = Math.min(budget - head, Math.max(0, body.length - head));
+	const omitted = alreadyOmitted + (body.length - head - tail);
+	return `${body.slice(0, head)}${middleMarker(omitted)}${body.slice(body.length - tail)}`;
 }
 
 /** 从字符串或内容块数组里抠出文本。`joiner`/`images` 供 custom 消息（空格连接、不要图片占位）使用。 */
@@ -260,7 +272,8 @@ export function renderConversation(messages: ExtractMessage[], limits: Conversat
 			}
 		}
 		// 只剩 user 块：回退到字符串中段裁减（首尾各约一半并预留标记长度）。
-		if (target === -1) return clipMiddle(text, maxChars);
+		// 把块级已经省略的量交下去，输出里只会留一个标记。
+		if (target === -1) return clipMiddle(text, maxChars, omitted);
 
 		const [dropped] = remaining.splice(target, 1);
 		// N 含被丢块的换行（spec §11.2 的逐字格式）。

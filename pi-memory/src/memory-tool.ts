@@ -15,11 +15,22 @@ import type { MemoryStore } from "./memory-store";
  */
 export type MemoryAction = "add" | "replace" | "remove" | "list" | "search" | "rename" | "rebuild_index";
 
-/** 主 agent（`pi.registerTool`）与 extract 子会话共用的 5 个 action。 */
-export const MAIN_AGENT_ACTIONS: MemoryAction[] = ["add", "replace", "remove", "list", "search"];
+/**
+ * 主 agent（`pi.registerTool`）与 extract 子会话共用的 5 个 action。
+ *
+ * **冻结**：`StringEnum` 按引用持有这个数组，谁 `push` 一下就会静默拓宽**已经注册**的
+ * enum（D12 的注册范围是硬约束，不能靠约定守）。
+ */
+export const MAIN_AGENT_ACTIONS: readonly MemoryAction[] = Object.freeze([
+	"add",
+	"replace",
+	"remove",
+	"list",
+	"search",
+]);
 
-/** dream 子会话专属的 7 个 action（额外 `rename` / `rebuild_index`）。 */
-export const DREAM_ACTIONS: MemoryAction[] = [
+/** dream 子会话专属的 7 个 action（额外 `rename` / `rebuild_index`）。同样冻结。 */
+export const DREAM_ACTIONS: readonly MemoryAction[] = Object.freeze([
 	"add",
 	"replace",
 	"remove",
@@ -27,7 +38,7 @@ export const DREAM_ACTIONS: MemoryAction[] = [
 	"search",
 	"rename",
 	"rebuild_index",
-];
+]);
 
 /**
  * 会改动磁盘的 action。只有它们成功完成后才回调 `onWrite`（spec §14：「extract 完成且有
@@ -63,7 +74,7 @@ export interface MemoryToolDeps {
 
 export interface MemoryToolOptions {
 	/** 本 session 可见的 action 子集。缺省 = 主 agent 的 5 个。 */
-	actions?: MemoryAction[];
+	actions?: readonly MemoryAction[];
 	/** 整轮逻辑锁持有者（dream / extract）传 true：它们的原语调用不得再去抢自己已持有的锁。 */
 	skipLogicalLock?: boolean;
 	/** dream 传 true：进入时已对整目录拍过一次快照，内部每个原语不再各拍一次。 */
@@ -93,7 +104,7 @@ const TYPE_VALUES = ["user", "feedback", "project", "reference"] as const;
  * 参数 schema 由 `actions` **动态构建**：不在集合里的 action 不出现在枚举里，
  * `new_name` 也只在含 `rename` 的 schema（= dream）里存在。这是 D12 的执行点。
  */
-function buildParameters(actions: MemoryAction[]) {
+function buildParameters(actions: readonly MemoryAction[]) {
 	const props: Record<string, TSchema> = {
 		action: StringEnum(actions, { description: "Which memory operation to perform." }),
 		name: Type.Optional(
@@ -250,6 +261,8 @@ export function createMemoryTool(deps: MemoryToolDeps, options: MemoryToolOption
 					if (!p.query?.trim()) throw new Error("query is required for search");
 					if (p.scope === "sessions") {
 						text = await deps.searchSessions(deps.cwd(), p.query, cfg.sessionSearch);
+						// 与其余分支一致：details 不再留空（Plan B ledger 的 Minor）
+						details = { scope: "sessions", query: p.query.trim() };
 						break;
 					}
 					const hits = await store.searchEntries(p.query);

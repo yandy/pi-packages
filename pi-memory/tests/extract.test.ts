@@ -328,6 +328,10 @@ describe("renderConversation", () => {
 		expect(out).toContain("chars omitted from the middle");
 		expect(out).not.toContain("MID");
 		expect(out.length).toBeLessThan(600);
+		// 块级丢了一块、字符串回退又裁了一次：输出里仍然只能有一个标记，
+		// N = 块级省略 + 字符串省略（旧实现报 327，因为它把块级标记丢在了裁掉的中段里）。
+		expect(out.match(/\[truncated:/g)).toHaveLength(1);
+		expect(out).toContain("[truncated: 599 chars omitted from the middle]");
 	});
 
 	// spec §11.2「优先保留全部 user 消息」：中段裁减只丢非 user 块，中间的纠正必须留下。
@@ -357,6 +361,41 @@ describe("renderConversation", () => {
 		expect(out).toContain("TAIL");
 		expect(out).toContain("chars omitted from the middle");
 		expect(out.length).toBeLessThanOrEqual(400);
+	});
+
+	// Plan B ledger 的 Minor：块级标记被 `assemble` 追加在末尾时，字符串回退会在它之外
+	// 再插一个标记（输出里出现两个 `[truncated: …]`），而且回退标记的 N 把旧标记自身的
+	// 长度也算成「省略的正文」。
+	it("emits exactly one middle marker when the fallback runs after a trailing block drop", () => {
+		const messages: ExtractMessage[] = [
+			{ role: "user", text: `ONE${"u".repeat(300)}` },
+			{ role: "user", text: `TWO${"v".repeat(300)}` },
+			{ role: "assistant", text: `MID${"a".repeat(300)}` },
+		];
+
+		const out = renderConversation(messages, { ...LIMITS, maxContextTokens: 100 });
+
+		expect(out.match(/\[truncated:/g)).toHaveLength(1);
+		expect(out).toContain("[truncated: 598 chars omitted from the middle]");
+		expect(out).toContain("[1] user: ONE");
+		expect(out).toContain("v".repeat(100)); // 结尾的 user 块优先保留
+		expect(out).not.toContain("MID");
+		expect(out.length).toBeLessThanOrEqual(400);
+	});
+
+	it("keeps one marker and honours an extreme budget", () => {
+		const messages: ExtractMessage[] = [
+			{ role: "user", text: "u".repeat(500) },
+			{ role: "toolResult", toolName: "bash", text: "t".repeat(500) },
+			{ role: "user", text: "v".repeat(500) },
+		];
+
+		const out = renderConversation(messages, { ...LIMITS, maxContextTokens: 20 });
+
+		expect(out.match(/\[truncated:/g)).toHaveLength(1);
+		expect(out).toContain("[truncated: 1510 chars omitted from the middle]");
+		expect(out).toContain("[1] user: u");
+		expect(out.length).toBeLessThanOrEqual(80);
 	});
 
 	it("leaves a short conversation untouched", () => {

@@ -498,3 +498,61 @@ describe("onWrite 回调与 Saved 通知", () => {
 		expect(notify.mock.calls).toEqual([["Saved: A", "info"]]);
 	});
 });
+
+// ── Plan C 清理项（Plan B ledger 分诊给 Plan C 的低风险 Minor）─────────────────
+describe("action 集合是冻结的（D12 的注册范围不得被静默拓宽）", () => {
+	it("freezes both action sets", () => {
+		expect(Object.isFrozen(MAIN_AGENT_ACTIONS)).toBe(true);
+		expect(Object.isFrozen(DREAM_ACTIONS)).toBe(true);
+	});
+
+	// `StringEnum` 按引用持有这个数组：谁 push 一下，已经注册出去的 enum 就跟着变宽。
+	it("refuses a push so a registered schema can never widen", () => {
+		expect(() => (MAIN_AGENT_ACTIONS as MemoryAction[]).push("rebuild_index")).toThrow(TypeError);
+		expect(() => (DREAM_ACTIONS as MemoryAction[]).splice(0, 1)).toThrow(TypeError);
+
+		expect(MAIN_AGENT_ACTIONS).toEqual(["add", "replace", "remove", "list", "search"]);
+		expect(DREAM_ACTIONS).toEqual([
+			"add",
+			"replace",
+			"remove",
+			"list",
+			"search",
+			"rename",
+			"rebuild_index",
+		]);
+	});
+
+	it("still builds both schemas from the frozen sets", () => {
+		expect(schemaOf(createMemoryTool(deps())).properties.action.enum).toEqual([...MAIN_AGENT_ACTIONS]);
+		expect(schemaOf(createMemoryTool(deps(), { actions: DREAM_ACTIONS })).properties.action.enum).toEqual([
+			...DREAM_ACTIONS,
+		]);
+	});
+});
+
+describe("search 的 sessions 分支也填 details", () => {
+	it("reports the scope and the trimmed query instead of an empty object", async () => {
+		const tool = createMemoryTool(deps()) as any;
+
+		const result = await tool.execute(
+			"c1",
+			{ action: "search", query: "  ssh  ", scope: "sessions" },
+			undefined,
+			undefined,
+			undefined,
+		);
+
+		expect(result.details).toEqual({ scope: "sessions", query: "ssh" });
+		expect(result.content[0].text).toBe("session hits");
+	});
+
+	it("keeps the memory scope details as they were", async () => {
+		const tool = createMemoryTool(deps()) as any;
+		await tool.execute("c0", { action: "add", name: "A", description: "d", content: "正文" }, undefined, undefined, undefined);
+
+		const result = await tool.execute("c1", { action: "search", query: "正文" }, undefined, undefined, undefined);
+
+		expect(result.details).toEqual({ count: 1 });
+	});
+});

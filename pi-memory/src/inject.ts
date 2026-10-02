@@ -1,5 +1,3 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import type { Model } from "@earendil-works/pi-ai";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { runHeadlessAgent } from "./agent-runner";
@@ -35,16 +33,6 @@ export function truncateForInjection(
 	return { ok: !truncated, content: out, truncated };
 }
 
-export async function loadIndexSnapshot(memoryDir: string, maxLines: number, maxBytes: number): Promise<string> {
-	try {
-		const raw = await readFile(join(memoryDir, "MEMORY.md"), "utf8");
-		const { content } = truncateForInjection(raw, maxLines, maxBytes);
-		return content ? `# Memory Index\n${content}` : "";
-	} catch {
-		return "";
-	}
-}
-
 export function buildInjection(systemPrompt: string, snapshot: string): string {
 	if (!snapshot) return systemPrompt;
 	return `${systemPrompt}\n\n${snapshot}`;
@@ -53,7 +41,7 @@ export function buildInjection(systemPrompt: string, snapshot: string): string {
 /**
  * `memory_index` section 的值（spec §9.1 / D13）：读索引 → 截断 → 净化。
  *
- * **不再自己加 `# Memory Index\n` 前缀**：v1 的 `loadIndexSnapshot` 会补一份头部，而 v2 的
+ * **不再自己加 `# Memory Index\n` 前缀**：v1 的索引快照函数会补一份头部，而 v2 的
  * `MEMORY.md` 由 `rebuildIndex`（默认头部就是 `# Memory Index`）与迁移写入 —— 再补一次
  * 注入文本里就有两份标题。
  *

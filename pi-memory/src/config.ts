@@ -53,9 +53,13 @@ export interface MemoryConfig {
 	memIndexMaxLines: number;
 	/** Write capacity: max bytes of serialized MEMORY.md index. */
 	memIndexMaxBytes: number;
-	/** Injection truncation: max lines of MEMORY.md injected into system prompt. */
+	/**
+	 * 注入截断：`memory_index` section 最多带多少**行**索引。
+	 * 与 `memIndexMaxLines` **读写同口径**（D3）：v2 一行 = 一条 entry，注入预算若小于写入
+	 * 上限，写满的记忆就有一部分永远看不见。
+	 */
 	memIndexInjectMaxLines: number;
-	/** Injection truncation: max bytes of MEMORY.md injected into system prompt. */
+	/** 注入截断：`memory_index` section 最多带多少**字节**（与 `memIndexMaxBytes` 同口径，D3）。 */
 	memIndexInjectMaxBytes: number;
 	/**
 	 * 两级锁的参数（spec §5.2）。结构与 `StoreConfig["lock"]` 逐字一致，因此可以原样传给
@@ -86,9 +90,9 @@ export const DEFAULT_CONFIG: MemoryConfig = {
 	memoryDir: join(homedir(), CONFIG_DIR_NAME, "memory"),
 	memIndexMaxLines: 200,
 	memIndexMaxBytes: 25600,
-	// 注入口径（20 / 3072）在 Plan B 保持不变：改成 200 / 25600 属 D3，与 sections 注入一起在 Plan C 落地。
-	memIndexInjectMaxLines: 20,
-	memIndexInjectMaxBytes: 3072,
+	// 读写同口径（D3）：200 行 = 200 条记忆，写满时注入也看得到全部。
+	memIndexInjectMaxLines: 200,
+	memIndexInjectMaxBytes: 25600,
 	lock: { timeoutMs: 5000, snapshotKeep: 5 },
 	dream: { nudgeAfterSessions: 5, nudgeAfterHours: 24, thinkLevel: "high" },
 	sessionSearch: { maxSessions: 10, maxMatches: 5 },

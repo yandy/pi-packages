@@ -191,6 +191,8 @@ describe("index wiring (integration)", () => {
 		delete (mockConfigValue.autoSurfacing as any).sessionPersistence;
 		mockConfigValue.extractMemories.enabled = false;
 		mockConfigValue.lock = { timeoutMs: 5000, snapshotKeep: 5 };
+		// 防测试重排踩坑：有用例会把 enabled 改成 false
+		mockConfigValue.enabled = true;
 	});
 
 	it("registers exactly one memory tool with the five main-agent actions", async () => {
@@ -1393,7 +1395,6 @@ describe("index wiring (integration)", () => {
 		await expect(
 			tool.execute("id", { action: "list" }, undefined, undefined, undefined as any),
 		).rejects.toThrow("Memory is disabled (run /memory on)");
-		mockConfigValue.enabled = true;
 	});
 
 	it("tool execute throws when the store is not initialized", async () => {

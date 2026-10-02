@@ -9,9 +9,9 @@ describe("DEFAULT_CONFIG", () => {
 		expect(DEFAULT_CONFIG.enabled).toBe(true);
 		expect(DEFAULT_CONFIG.memIndexMaxLines).toBe(200);
 		expect(DEFAULT_CONFIG.memIndexMaxBytes).toBe(25600);
-		// Plan B 不动注入口径（20 / 3072）：改成 200 / 25600 是 D3 = Plan C 的事。
-		expect(DEFAULT_CONFIG.memIndexInjectMaxLines).toBe(20);
-		expect(DEFAULT_CONFIG.memIndexInjectMaxBytes).toBe(3072);
+		// D3：读写同口径
+		expect(DEFAULT_CONFIG.memIndexInjectMaxLines).toBe(200);
+		expect(DEFAULT_CONFIG.memIndexInjectMaxBytes).toBe(25600);
 		expect(DEFAULT_CONFIG.lock).toEqual({ timeoutMs: 5000, snapshotKeep: 5 });
 		expect(DEFAULT_CONFIG.defaults).toEqual({ sessionPersistence: { enabled: false } });
 		expect(DEFAULT_CONFIG.dream.model).toBeUndefined();
@@ -19,6 +19,13 @@ describe("DEFAULT_CONFIG", () => {
 		expect(DEFAULT_CONFIG.autoSurfacing.maxEntryBytes).toBe(3072);
 		expect(DEFAULT_CONFIG.extractMemories.maxToolResultChars).toBe(500);
 		expect(DEFAULT_CONFIG.extractMemories.maxAssistantChars).toBe(2000);
+	});
+
+	// D3 的实质：一个 entry 一行索引，注入预算必须与写入上限同量级，
+	// 否则写满 200 条时模型只看得到最旧的一批。
+	it("keeps the injection budget at the same scale as the write capacity (D3)", () => {
+		expect(DEFAULT_CONFIG.memIndexInjectMaxLines).toBe(DEFAULT_CONFIG.memIndexMaxLines);
+		expect(DEFAULT_CONFIG.memIndexInjectMaxBytes).toBe(DEFAULT_CONFIG.memIndexMaxBytes);
 	});
 });
 
