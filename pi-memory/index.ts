@@ -144,6 +144,9 @@ export default function (pi: ExtensionAPI) {
 	 */
 	const inFlight = new Set<Promise<unknown>>();
 
+	/** `enabled: false` 时给用户的唯一动作。工具文案与 `/memory` 状态共用同一份，避免两处漂移。 */
+	const ENABLE_HINT = 'set "enabled": true in memory.json and restart';
+
 	/**
 	 * 清空本 session 的运行时状态。三条早退路径（disabled / 配置错误 / 初始化失败）共用：
 	 * 残留上一 session 的 store 会让后续写入落到别的项目目录（Plan C ledger R51）。
@@ -183,7 +186,7 @@ export default function (pi: ExtensionAPI) {
 			configError
 				? `Memory not initialized — ${configError.split("\n")[0]}; run /memory for details`
 				: config?.enabled === false
-					? 'Memory is disabled — set "enabled": true in memory.json and restart'
+					? `Memory is disabled — ${ENABLE_HINT}`
 					: null,
 		searchSessions,
 		cwd: () => currentCwd,
@@ -239,14 +242,24 @@ export default function (pi: ExtensionAPI) {
 		extractErrorNotified = false;
 		configError = null;
 		resetSessionState();
-		config = await loadConfig(ctx);
+		// `loadConfig` 抛错（`getAgentDir` / `isProjectTrusted` 属宿主契约）与初始化失败同一处理：
+		// 转成配置错误态，不把裸 reject 冒给宿主（spec §2.4）。用局部变量承接是为了让后面的收窄
+		// 不受 `config` 这个工厂作用域 let 影响。（nudge 块仍可能抛错，属既有暴露面，不在本次范围。）
+		let loaded: MemoryConfig;
+		try {
+			loaded = await loadConfig(ctx);
+		} catch (e) {
+			failConfig([`Failed to load memory config: ${e instanceof Error ? e.message : String(e)}`], ctx);
+			return;
+		}
+		config = loaded;
 		// 状态已经干净，disabled 直接早退即可。
-		if (!config.enabled) return;
+		if (!loaded.enabled) return;
 		try {
 			// 启动校验（spec §2.3）：模型键缺失 / 不可解析 → 本会话**完全不初始化**
 			//（不解析目录、不建 store、不注册工具），错误态由 `/memory` 重复显示。
 			// 校验本身抛错（registry 不合契约）也走同一个 catch：failConfig 自己会复位运行时。
-			const errors = modelConfigErrors(config, (value) => resolveModel(value, ctx.modelRegistry) !== undefined);
+			const errors = modelConfigErrors(loaded, (value) => resolveModel(value, ctx.modelRegistry) !== undefined);
 			if (errors.length > 0) {
 				failConfig(errors, ctx);
 				return;
@@ -492,7 +505,16 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("memory", {
 		description: "Show memory status or remove a stale lock",
 		handler: async (args, ctx) => {
+			// 配置都读不出来（`loadConfig` 抛错）时也要报真实原因，而不是笼统的「未初始化」——
+			// `/memory` 是重读错误态的唯一入口。首次会话就失败时 `config` 仍是 null，所以这里先看错误态。
 			if (!config) {
+				if (configError) {
+					ctx.ui.notify(
+						["Memory: misconfigured", "Dir: not initialized", ...configError.split("\n").map((e) => `- ${e}`)].join("\n"),
+						"info",
+					);
+					return;
+				}
 				ctx.ui.notify("Memory not initialized.", "info");
 				return;
 			}
@@ -524,7 +546,7 @@ export default function (pi: ExtensionAPI) {
 				// 否则只可能是配置里 enabled 为假。
 				const lines = configError
 					? ["Memory: misconfigured", "Dir: not initialized", ...configError.split("\n").map((e) => `- ${e}`)]
-					: ["Memory: disabled", 'Dir: not initialized — set "enabled": true in memory.json and restart'];
+					: ["Memory: disabled", `Dir: not initialized — ${ENABLE_HINT}`];
 				ctx.ui.notify(lines.join("\n"), "info");
 				return;
 			}
