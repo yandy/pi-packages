@@ -167,6 +167,8 @@ bash / write / edit 各增加可选参数：
 - `sandbox_permissions?: 'workspace-write' | 'danger-full-access'`（封闭目标词汇 `ESCALATION_TARGETS`；`read-only` 是底线，不可作为目标）
 - `justification?: string`
 
+> **2026-10-02 修订注记（strict schema 下的合法“不提权”取值）**：两个字段现在都显式包含 `Type.Null()`（`ESCALATION_PROPS`），即 `sandbox_permissions?: 'workspace-write' | 'danger-full-access' | null`、`justification?: string | null`。原因：strict 提供商（pi 内置工具的 `constrainedSampling: {type:"json_schema"}` + 模型 `compat.supportsStrictMode`，如 deepseek-flash）下 pi 的 `makeJsonSchemaNodeStrict` 会把**所有** property 塞进 `required`，并对“不允许 null”的字段补一层 `anyOf[X,{type:"null"}]`——模型在协议上无法“省略”，只能给 `null` 或乱写字符串 `"null"`。显式声明后有四个好处：模型拿到的是 schema 认可的取值；`schemaAllowsNull` 递归识别 → pi 不再补包裹层；JSON `null` 不再被 `normalizeOptionalNulls` 剥掉，而是原样送达 `resolveCall` 的归一化；非 strict provider 下 `required` 仍不含这两个字段（可省略）。可达性细节与实测见 `2026-10-02-denial-first-escalation-design.md` §4.3。
+
 参数描述与 `promptGuidelines` 写明提权规则（deepseek `sandboxPermissionsDescription` 语义）："被沙箱拒绝后，用最小够用的更宽模式把**原调用原样重试一次**，会弹用户审批"。
 
 落地形态按"提示预算"分面（2026-10-01 调整）：`tool.description` 与参数 schema 是**按工具**进每次请求的（同一句写进 bash/write/edit 就付 3 份），`promptGuidelines` 进 system prompt 的 rules 且 pi 按字符串去重（只付 1 份）。因此常驻面只保留**一句**跨工具规则 `SANDBOX_NOTE`（正常调用两个提权字段都不传、workspace-write 已包含工作区与 /tmp，`src/tools.ts`）；协议细节一律放按需面——拒绝标记、畸形参数报错、批准后标记（`src/escalation.ts`）。
@@ -192,7 +194,7 @@ bash / write / edit 各增加可选参数：
 ### approveEscalation 校验顺序（执行前；无可解析通道时全部 fail-closed）
 
 1. 配对校验：`sandbox_permissions` 与 `justification` 必须同时出现，justification 非空，否则 malformed 错误
-   - 文案契约（按需面）：`invalid escalation: this call was rejected before execution (nothing ran).` + `Cause: ...` + `Fix: to run without escalation, omit BOTH fields (never null / "null" / ""); ...`。动机是实际事故：模型把 malformed 错误误判为"沙箱拒绝"，进而要求最大档；错误必须自报"什么都没执行"并给出精确重试配方。
+   - 文案契约（按需面）：`invalid escalation: this call was rejected before execution (nothing ran).` + `Cause: ...` + `Fix: to run without escalation, omit BOTH fields or send JSON null (never the string "null" or ""); ...`。动机是实际事故：模型把 malformed 错误误判为“沙箱拒绝”，进而要求最大档；错误必须自报"什么都没执行"并给出精确重试配方。
 2. 目标 == effective mode → 免审批，按当前模式执行
 3. 目标不在 `WIDER_MODES[effective]` 中（更窄或非法）→ 抛错 "not strictly wider than this call's current <mode> mode"
    - `WIDER_MODES = { 'read-only': ['workspace-write','danger-full-access'], 'workspace-write': ['danger-full-access'] }`

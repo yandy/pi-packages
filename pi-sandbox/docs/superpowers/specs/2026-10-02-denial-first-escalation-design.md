@@ -108,6 +108,13 @@ interface DenialLedger {
 
 `ResolvedCall` 增加 `ignoredEscalation`；三个 `execute` 在 ignored 时对结果追加 `escalationIgnoredMarker`。
 
+> **2026-10-02 修订注记（pi 1.0.0 的参数校验层：占位符归一化按字段可达）**：第 1 步仍必需，但**可达性不同**——pi ≥1.0.0 在 extension `execute` 之前跑 `validateToolArguments`，而它校验的是 **declared schema**（不是下发给模型的 strict wire schema）。实测结论：
+> - `justification`（`Type.String()`）：字符串占位符 `"null"` / `""` / 空白都是合法值，**真的会到达 `execute`** → 归一化是 load-bearing 的。删掉它，一笔普通调用会被误判成 `justification was sent without sandbox_permissions`；真提权还会带着 `Reason: null` 进审批弹窗。
+> - `sandbox_permissions`（两个字面量枚举）：字符串形态在 pi 的参数校验期就被拒（`execute` 不会跑），只有“省略”和 schema 显式声明的 JSON `null` 会到达；后者是本次新增的（§4.6 与 09-29 §“工具 schema 扩展”）。
+> - 校验对 declared schema 做 → “省略”永远放行，与 strict wire schema 的 `required` 无关；JSON `null` 之所以曾“没事”，是 `normalizeOptionalNulls` 把 optional 且不允许 null 的字段直接删键。声明 `Type.Null()` 后它不再被删，而是原样送达归一化——这条分支从“靠 pi 的补丁”变成契约内行为。
+>
+> 第 2–6 步与 `ResolvedCall` 契约不变。
+
 ### 4.4 记账点
 
 - **bash**：`SandboxBashOpts.onDenial?: () => void`，在 `classifyDenial` 命中分支调用（runner failure 不触发——那是沙箱不可用，不是拒绝）；`tools.ts` 注入 `record(sessionId, "command")`；
@@ -126,6 +133,8 @@ interface DenialLedger {
 - `SANDBOX_NOTE`（每工具，付 3 份）：`Pass escalation fields only when retrying a denial (never null); others are ignored.`
 - `ESCALATION_GUIDELINE`（system prompt rules，付 1 份）：新增 `Never send escalation fields before a denial — such requests are ignored and the call runs confined.`，并写明 Deny 可附理由。
 - 提示预算闸（β′）：`tool.description` 中 `Sandbox:` 行三工具合计 ≤ 560 字符（不变）。
+
+> **2026-10-02 修订注记（原文案与 strict schema 自相矛盾）**：`SANDBOX_NOTE` 第二句改为 `Unless retrying a denial, omit these fields or send JSON null — never the string "null".`。原文案 `Pass escalation fields only when retrying a denial (never null); others are ignored.` 的问题：strict 提供商下模型看到的 schema 把两个字段列为 `required`，“省略”在协议上不可表达，而 `(never null)` 又禁止了唯一合法的“不提权”取值——模型只能去写字符串 `"null"`，那在 pi 的参数校验期就硬失败（错误文案与沙箱无关，反而把模型推向真提权）。“先发制人会被忽略”的语义删去不丢信息：`ESCALATION_GUIDELINE`（付 1 份）里已写明 “such requests are ignored and the call runs confined” 与 `escalationIgnoredMarker`。三工具合计预算仍 ≤ 560（实测 546）。
 
 ## 5. 时序
 

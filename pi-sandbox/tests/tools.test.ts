@@ -81,12 +81,38 @@ describe("createSandboxTools schemas", () => {
 		expect(props.sandbox_permissions).toBeDefined();
 		expect(props.justification).toBeDefined();
 	});
+	it("提权参数显式声明 null：strict 模式下模型拿到的是 schema 认可的“不提权”取值（而非猜字符串）", () => {
+		const { deps } = makeDeps();
+		const { bash, write, edit } = createSandboxTools(deps);
+		// 背景（pi 1.0.0 实测）：strict 提供商（如 deepseek-flash，compat.supportsStrictMode=true）下 pi 会把
+		// 所有 property 塞进 required，并对“不允许 null”的字段补 anyOf[X,{type:"null"}]。声明 null 后：
+		// ① 模型有显式的合法取值（JSON null）来表达“不提权”，不必与 “never null” 的文案打架去写字符串 "null"；
+		// ② pi 的 strict 转换不再补一层包裹（schemaAllowsNull 递归识别）；
+		// ③ JSON null 不会被 pi 的 normalizeOptionalNulls 剥掉，而是原样送达 execute（归一化分支保持可达）。
+		for (const tool of [bash, write, edit]) {
+			const props = (tool.parameters as { properties: Record<string, unknown> }).properties;
+			expect(JSON.parse(JSON.stringify(props.sandbox_permissions))).toEqual({
+				anyOf: [
+					{ type: "string", const: "workspace-write" },
+					{ type: "string", const: "danger-full-access" },
+					{ type: "null" },
+				],
+			});
+			expect(JSON.parse(JSON.stringify(props.justification))).toEqual({
+				anyOf: [{ type: "string" }, { type: "null" }],
+			});
+		}
+		// 声明仍是 optional：非 strict 提供商下 required 不含这两个字段，模型可以完全不传。
+		const required = (bash.parameters as { required?: string[] }).required ?? [];
+		expect(required).not.toContain("sandbox_permissions");
+		expect(required).not.toContain("justification");
+	});
 	it("description teaches the escalation contract within the per-tool budget (β′)", () => {
 		const { deps } = makeDeps();
 		const { bash, write, edit } = createSandboxTools(deps);
-		// 跨工具规则只留一句：正常调用两个提权字段都不传（never null），且非拒绝重试的提权会被忽略。
+		// 跨工具规则只留一句：不提权时省略或传 JSON null（字符串 "null" 不是合法取值），且非拒绝重试的提权会被忽略。
 		for (const tool of [bash, write, edit]) {
-			expect(tool.description).toContain("Pass escalation fields only when retrying a denial (never null); others are ignored.");
+			expect(tool.description).toContain('Unless retrying a denial, omit these fields or send JSON null — never the string "null".');
 			expect(tool.description).toContain("workspace-write already allows the workspace and /tmp");
 			// 旧版把这套协议写进每个 description（×3 重复）：不许回潮。
 			expect(tool.description).not.toContain("Writes outside the permitted roots are denied");
@@ -528,12 +554,25 @@ describe("denial-first 硬门禁（未经真实拒绝不提权）", () => {
 		)).rejects.toThrow(/not strictly wider/);
 	});
 
-	it("归一化：null / \"null\" / 空白提权参数 → 按普通调用执行（不再 MALFORMED）", async () => {
+	it("占位符归一化按字段可达性：JSON null 与 justification 的字符串形态是真实输入", async () => {
 		const { deps } = makeDeps();
-		expect(await resolveCall({ sandbox_permissions: null as never, justification: null as never }, toolCtx(), deps, "command", () => "x"))
-			.toEqual({ mode: "workspace-write", escalated: false, ignoredEscalation: false });
-		expect(await resolveCall({ sandbox_permissions: "null", justification: "null" }, toolCtx(), deps, "command", () => "x"))
-			.toEqual({ mode: "workspace-write", escalated: false, ignoredEscalation: false });
+		const plain = { mode: "workspace-write" as const, escalated: false, ignoredEscalation: false };
+		// JSON null：strict 提供商在声明 Type.Null() 后会原样送达 execute（不再被 pi 剥掉）→ 视作未提供。
+		expect(await resolveCall({ sandbox_permissions: null, justification: null }, toolCtx(), deps, "command", () => "x"))
+			.toEqual(plain);
+		// justification 是 Type.String()：字符串 "null"/"" 能过 pi 的参数校验、真的会到达 execute → 必须是未提供，
+		// 否则一笔普通调用会被判成 MALFORMED（"justification was sent without sandbox_permissions"）。
+		expect(await resolveCall({ justification: "null" }, toolCtx(), deps, "command", () => "x")).toEqual(plain);
+		expect(await resolveCall({ justification: "  NULL  " }, toolCtx(), deps, "command", () => "x")).toEqual(plain);
+	});
+
+	it("占位理由不是理由：真提权 + justification 占位符 → MALFORMED，且不弹审批", async () => {
+		const { deps } = makeDeps();
+		const ctx = toolCtx(true, "Allow once") as { ui: { select: ReturnType<typeof vi.fn> } };
+		await expect(resolveCall({ sandbox_permissions: "danger-full-access", justification: "null" }, ctx as never, deps, "command", () => "x"))
+			.rejects.toThrow(/nothing ran.*sent without justification/s);
+		// 无归一化时这笔请求会带着 Reason: null 进审批弹窗——弹窗本身就是故障信号。
+		expect(ctx.ui.select).not.toHaveBeenCalled();
 	});
 
 	it("write 工具：围栏内 + 无前置拒绝 → 照常写入，结果追加 ignored 标记且不弹窗", async () => {
