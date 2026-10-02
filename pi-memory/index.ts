@@ -225,22 +225,26 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 	pi.on("session_start", async (event, ctx) => {
-		// 先重置限流配额：冷启动与 disabled 会话都要有干净的一次失败通知配额。
+		// 复位必须在**任何可能抛错的调用之前**跑完：冷启动与 disabled 会话都要有干净的一次失败通知
+		// 配额、干净的错误态，以及**清空的运行时**。loadConfig（里面的 getAgentDir）与下面的
+		// modelConfigErrors（宿主给的 registry 可能既没有 getAvailable 也没有 getAll）都属于宿主契约
+		// 之外的部分：它们一旦抛出而复位还没跑，上一 session 的 store / memoryDir 就会留在**已经注册**
+		// 的 `memory` 工具背后 —— 项目 B 的 agent 能写进项目 A 的目录（Plan C ledger R51）。
 		extractErrorNotified = false;
-		config = await loadConfig(ctx);
 		configError = null;
-		if (!config.enabled) {
-			resetSessionState();
-			return;
-		}
-		// 启动校验（spec §2.3）：模型键缺失 / 不可解析 → 本会话**完全不初始化**
-		//（不解析目录、不建 store、不注册工具），错误态由 `/memory` 重复显示。
-		const errors = modelConfigErrors(config, (value) => resolveModel(value, ctx.modelRegistry) !== undefined);
-		if (errors.length > 0) {
-			failConfig(errors, ctx);
-			return;
-		}
+		resetSessionState();
+		config = await loadConfig(ctx);
+		// 状态已经干净，disabled 直接早退即可。
+		if (!config.enabled) return;
 		try {
+			// 启动校验（spec §2.3）：模型键缺失 / 不可解析 → 本会话**完全不初始化**
+			//（不解析目录、不建 store、不注册工具），错误态由 `/memory` 重复显示。
+			// 校验本身抛错（registry 不合契约）也走同一个 catch：failConfig 自己会复位运行时。
+			const errors = modelConfigErrors(config, (value) => resolveModel(value, ctx.modelRegistry) !== undefined);
+			if (errors.length > 0) {
+				failConfig(errors, ctx);
+				return;
+			}
 			await initMemory(ctx, (event as { reason?: string }).reason);
 		} catch (e) {
 			// spec §2.4：初始化失败走同一个错误态，不冒泡给宿主（那只会变成一条裸报错）。
@@ -415,6 +419,9 @@ export default function (pi: ExtensionAPI) {
 		const extractConfig = config.extractMemories;
 		if (!extractConfig?.enabled) return;
 		if (!event.messages || event.messages.length === 0) return;
+		// 守卫之后立刻取值：requiredModel 抛错必须发生在这里（agent_end 直接失败），而不是在
+		// runExtract({...}) 的字面量求值中途 —— 那时 track / .then 的收尾链已经无从挂上。
+		const extractModel = requiredModel(config, "extractMemories");
 		// 本轮经 extract 的工具真实写入了几条（工具的 onWrite 回调计数，spec §14）。
 		let written = 0;
 		// pi 的 `ExtensionContext` 是代理：`hasUI` / `ui` 的 getter 会先 `runner.assertActive()`，
@@ -424,7 +431,7 @@ export default function (pi: ExtensionAPI) {
 		const ui = ctx.hasUI ? ctx.ui : undefined;
 		const extractRun = runExtract({
 			agentsMdBlocks: extractAgentsMdBlocks(lastSystemPrompt),
-			model: requiredModel(config, "extractMemories"),
+			model: extractModel,
 			thinkLevel: extractConfig.thinkLevel,
 			memoryDir: dir,
 			store: activeStore,
@@ -547,9 +554,11 @@ export default function (pi: ExtensionAPI) {
 			const ok = await ctx.ui.confirm("Dream", "Consolidate all memory files? This rewrites them in-place.");
 			if (!ok) return;
 			const dir = memoryDir;
+			// 先取模型再改状态：requiredModel 抛错时不能把 "dream" 状态留在那儿（这条链没有 .finally）。
+			const dreamModel = requiredModel(config, "dream");
 			ui?.setStatus("dream", "Consolidating memory...");
 			const dreamRun = runDream({
-				model: requiredModel(config, "dream"),
+				model: dreamModel,
 				thinkLevel: config.dream.thinkLevel,
 				memoryDir,
 				store: activeStore,

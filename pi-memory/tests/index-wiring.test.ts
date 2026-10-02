@@ -108,6 +108,7 @@ vi.mock("../src/index-source", async (importOriginal) => {
 });
 
 import memoryFactory from "../index";
+import { loadConfig } from "../src/config";
 
 const LEGACY_TOPIC = [
 	"---",
@@ -147,15 +148,23 @@ function createFakePi() {
 	};
 }
 
-/** resolveModel 只用到这三个方法；ids 形如 "provider/id"。 */
-function fakeRegistry(ids: string[]) {
-	const models = ids.map((full) => {
-		const [provider, id] = full.split("/");
-		return { provider, id, name: id };
-	});
+/**
+ * resolveModel 只用到这三个方法；ids 形如 "provider/id"。
+ * `availableIds` 缺省与 `ids` 同值（= 全部可用）；显式传它就能造出「getAll 认得这个模型、
+ * getAvailable 里没有」的 registry —— 也就是模型存在但**没有凭据**（spec 风险表里的
+ * "missing credentials"），与「registry 完全不知道这个 id」是两回事。
+ */
+function fakeRegistry(ids: string[], availableIds: string[] = ids) {
+	const toModels = (list: string[]) =>
+		list.map((full) => {
+			const [provider, id] = full.split("/");
+			return { provider, id, name: id };
+		});
+	const models = toModels(ids);
+	const available = toModels(availableIds);
 	return {
 		getAll: () => models,
-		getAvailable: () => models,
+		getAvailable: () => available,
 		find: (provider: string, id: string) => models.find((m) => m.provider === provider && m.id === id),
 	} as any;
 }
@@ -1371,6 +1380,28 @@ describe("index wiring (integration)", () => {
 		expect(runDreamMock).not.toHaveBeenCalled();
 	});
 
+	// 取模型必须在改状态**之前**：requiredModel 抛错时不能把 "dream" 状态留在 UI 上
+	//（`/dream` 这条链只有 confirm 之后的 .finally，抛在它之前就没有人清）。
+	// 把 requiredModel 挖回 `runDream({...})` 的字面量里，本用例就变红。
+	it("/dream does not leave the dream status behind when the model disappeared mid-session", async () => {
+		const setStatus = vi.fn();
+		const confirm = vi.fn().mockResolvedValue(true);
+		const { pi, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		// 启动校验通过之后配置被改坏（loadConfig 的返回值是浅拷贝，改嵌套对象才能被会话内的
+		// config 看到）：真实场景就是用户在会话中途删了 `defaults.model`。
+		mockConfigValue.defaults.model = undefined;
+
+		await expect(
+			commands["dream"].handler("", uiCtx({ hasUI: true, ui: { notify: vi.fn(), confirm, setStatus } })),
+		).rejects.toThrow('no model for dream — set "dream.model" or "defaults.model" in memory.json');
+
+		expect(setStatus).not.toHaveBeenCalled();
+		expect(runDreamMock).not.toHaveBeenCalled();
+	});
+
 	it("the session_start nudge path passes the same dream arguments", async () => {
 		shouldNudgeMock.mockResolvedValue({ nudge: true, message: "💡 dream", sessions: 7, newEntries: 7 });
 		const confirm = vi.fn().mockResolvedValue(true);
@@ -1513,6 +1544,7 @@ describe("index wiring (integration)", () => {
 		await commands["memory"].handler("on", ctx());
 
 		// 两者都落到状态分支：不发开关通知、不改变初始化状态
+		expect(notify).toHaveBeenCalledTimes(2);
 		for (const call of notify.mock.calls) {
 			expect(call[1]).toBe("info");
 			expect(call[0].split("\n")[0]).toBe("Memory: enabled");
@@ -1864,11 +1896,34 @@ describe("index wiring (integration)", () => {
 		const { pi, tools, handlers } = createFakePi();
 		memoryFactory(pi as any);
 
-		await handlers["session_start"][0]({}, uiCtx({ ...uiWith(notify), modelRegistry: fakeRegistry([]) }));
+		// getAll 认得 test/model，getAvailable 里没有它 = 模型存在但没凭据
+		await handlers["session_start"][0](
+			{},
+			uiCtx({ ...uiWith(notify), modelRegistry: fakeRegistry(["test/model"], []) }),
+		);
 
 		expect(tools).toHaveLength(0);
 		expect(notify.mock.calls[0][1]).toBe("error");
 		expect(notify.mock.calls[0][0]).toContain('model "test/model" for dream is not resolvable');
+	});
+
+	// 上一条走的是 resolveModel 的「一个可用模型都没有」早退；这一条让 getAvailable 非空，
+	// 真正走到「精确匹配只认 available 集合 → 模糊匹配也匹不上」那条路径（同样是 missing credentials）。
+	it("reports a model that is in getAll but not in getAvailable while other models are available", async () => {
+		const notify = vi.fn();
+		const { pi, tools, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		await handlers["session_start"][0](
+			{},
+			uiCtx({ ...uiWith(notify), modelRegistry: fakeRegistry(["test/model", "other/thing"], ["other/thing"]) }),
+		);
+
+		expect(tools).toHaveLength(0);
+		expect(notify.mock.calls[0][1]).toBe("error");
+		expect(notify.mock.calls[0][0]).toContain(
+			'model "test/model" for dream is not resolvable (unknown id or missing credentials)',
+		);
 	});
 
 	it("initialises when only defaults.model is set", async () => {
@@ -1918,6 +1973,72 @@ describe("index wiring (integration)", () => {
 		);
 		await commands["memory"].handler("", uiCtx(uiWith(notify)));
 		expect(notify.mock.calls[1][0].split("\n")[0]).toBe("Memory: misconfigured");
+	});
+
+	// 宿主契约之外的抛错（registry 既没有 getAvailable 也没有 getAll，或 loadConfig 里的
+	// getAgentDir 炸了）必须在**复位之后**才发生：否则 session_start 一抛出，三条复位路径一条都
+	// 不会跑，上一 session 的 store / memoryDir 就留在**已注册**的 `memory` 工具背后 ——
+	// 项目 B 的 agent 能写进项目 A 的目录（Plan C ledger R51）。
+	it("clears the previous session's state when the model registry violates the contract", async () => {
+		const notify = vi.fn();
+		const confirm = vi.fn().mockResolvedValue(true);
+		const ctxUI = () => uiCtx({ hasUI: true, ui: { notify, confirm, setStatus: vi.fn() } });
+		const { pi, tools, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		// ① 健康会话：工具已注册、store 已建
+		await handlers["session_start"][0]({}, ctxUI());
+		expect(tools).toHaveLength(1);
+		notify.mockClear();
+
+		// ② 换一个既没有 getAvailable 也没有 getAll 的 registry：resolveModel 里 `registry.getAll()`
+		//    直接 TypeError。session_start 不得 reject，而是落到同一个配置错误态。
+		await expect(
+			handlers["session_start"][0]({}, { ...ctxUI(), modelRegistry: { find: () => undefined } as any }),
+		).resolves.toBeUndefined();
+		expect(notify.mock.calls[0][1]).toBe("error");
+		expect(notify.mock.calls[0][0]).toContain("pi-memory config error:\n- Failed to initialize memory:");
+
+		// ③ 上一 session 的目录 / store 必须已经清空：工具虽然还注册着（只注册一次），现在也必须
+		//    拒绝，而不是写进上一个 session 的目录；`/memory` 说 misconfigured；`/dream` 拒绝。
+		await expect(
+			tools[0].execute("c1", { action: "list" }, undefined, undefined, undefined),
+		).rejects.toThrow(/Memory not initialized/);
+		await commands["memory"].handler("", ctxUI());
+		expect(notify.mock.calls[1][0].split("\n").slice(0, 2)).toEqual([
+			"Memory: misconfigured",
+			"Dir: not initialized",
+		]);
+		expect(notify.mock.calls[1][0]).not.toContain(dir);
+		await commands["dream"].handler("", ctxUI());
+		expect(notify.mock.calls[2]).toEqual(["Memory not initialized.", "info"]);
+		expect(runDreamMock).not.toHaveBeenCalled();
+		expect(tools).toHaveLength(1);
+	});
+
+	// loadConfig 本身抛错时 session_start 仍然 reject（契约不变），但复位已经在它**之前**跑完 ——
+	// 把 `resetSessionState()` 挪回 `await loadConfig(ctx)` 之后，本用例就变红。
+	it("clears the previous session's state when loadConfig itself throws", async () => {
+		const notify = vi.fn();
+		const ctxUI = () => uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } });
+		const { pi, tools, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+
+		await handlers["session_start"][0]({}, ctxUI());
+		expect(tools).toHaveLength(1);
+		notify.mockClear();
+
+		vi.mocked(loadConfig).mockImplementationOnce(async () => {
+			throw new Error("getAgentDir failed");
+		});
+		await expect(handlers["session_start"][0]({}, ctxUI())).rejects.toThrow("getAgentDir failed");
+
+		await expect(
+			tools[0].execute("c1", { action: "list" }, undefined, undefined, undefined),
+		).rejects.toThrow(/Memory not initialized/);
+		await commands["memory"].handler("", ctxUI());
+		expect(notify.mock.calls[0][0].split("\n")[1]).toMatch(/^Dir: not initialized/);
+		expect(notify.mock.calls[0][0]).not.toContain(dir);
 	});
 
 	// ── 错误态的跨 session 生命周期（design §2.5）──────────────────────────
