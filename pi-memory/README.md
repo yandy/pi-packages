@@ -305,7 +305,7 @@ It cannot touch files directly: it only has the seven `memory` actions. A summar
 
 ## Migration from 1.x
 
-Automatic, on the first `session_start` after the upgrade:
+Automatic, on the first `session_start` after the upgrade (or on the first `/memory on` in a session that booted with memory disabled):
 
 1. take the logical lock for the whole round (30s);
 2. snapshot the directory into `.backups/migrate-<ts>/` and copy the original topic files into `.backups/migrate-<ts>/originals/`;
@@ -315,7 +315,7 @@ Automatic, on the first `session_start` after the upgrade:
 6. write `.migrated`;
 7. notify `Migrated N memories from M topic files. Backup at <path>`.
 
-A file whose frontmatter already has a `modified` field is **never** treated as a legacy topic file, even when its body contains several `## ` headings — that guard is what keeps a normal v2 entry from being split apart.
+A file that parses as a v2 entry (`name`, `description`, a valid `type`, `created`, `modified`) is **never** treated as a legacy topic file, even when its body contains several `## ` headings — that guard is what keeps a normal v2 entry from being split apart. A file that only *looks* like v2 (for example an invalid `type`) is not covered by the guard and may be migrated if it has `updated` or ≥ 2 `##` sections; the original always stays in `.backups/migrate-<ts>/originals/`.
 
 A re-run is safe: the marker is only written at the very end, and an entry whose name **and** body already exist is reused instead of being duplicated. If a step fails, nothing is marked, the backup is kept, and the error is reported — the next session retries.
 

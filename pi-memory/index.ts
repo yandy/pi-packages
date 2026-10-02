@@ -222,8 +222,7 @@ export default function (pi: ExtensionAPI) {
 			}
 		} catch (e) {
 			if (ctx.hasUI) {
-				// biome-ignore lint/suspicious/noExplicitAny: error catch
-				ctx.ui.notify(`Memory migration failed: ${(e as any).message}`, "error");
+				ctx.ui.notify(`Memory migration failed: ${e instanceof Error ? e.message : String(e)}`, "error");
 			}
 		}
 

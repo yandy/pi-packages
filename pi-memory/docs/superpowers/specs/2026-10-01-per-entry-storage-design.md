@@ -505,7 +505,7 @@ Map<filename, { mtimeMs: number; name: string; description: string; type: string
 
 ### 15.2 检测
 
-`MEMORY.md` 存在，且存在满足以下任一条件的 `.md` 文件（`MEMORY.md` 除外）：包含 ≥ 2 个 `## ` 段，或 frontmatter 含旧字段 `updated`（而非 `modified`）。
+`MEMORY.md` 存在，且存在满足以下任一条件的 `.md` 文件（`MEMORY.md` 除外）：包含 ≥ 2 个 `## ` 段，或 frontmatter 含旧字段 `updated`（`parseEntryFile` 能接受的文件永不视为 legacy）。
 
 ### 15.3 步骤
 

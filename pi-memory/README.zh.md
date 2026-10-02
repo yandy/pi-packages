@@ -305,7 +305,7 @@ Lock: free
 
 ## 从 1.x 迁移
 
-升级后第一次 `session_start` 自动执行：
+升级后第一次 `session_start` 自动执行（以 disabled 启动的会话则在第一次 `/memory on` 时执行）：
 
 1. 整轮取逻辑锁（30s）；
 2. 把整个目录快照到 `.backups/migrate-<ts>/`，并把原 topic 文件复制到 `.backups/migrate-<ts>/originals/`；
@@ -315,7 +315,7 @@ Lock: free
 6. 写 `.migrated`；
 7. 通知 `Migrated N memories from M topic files. Backup at <path>`。
 
-frontmatter 里已含 `modified` 字段的文件**永远不**会被当成 legacy topic 文件（即使正文里有多个 `## ` 小标题）—— 这道守卫正是为了避免正常的 v2 记忆被再次拆碎。
+能按 v2 entry 解析（`name`、`description`、合法 `type`、`created`、`modified`）的文件**永远不**会被当成 legacy topic 文件（即使正文里有多个 `## ` 小标题）—— 这道守卫正是为了避免正常的 v2 记忆被再次拆碎。只是「看起来像 v2」（例如 `type` 非法）的文件不在守卫范围内，若含 `updated` 或 ≥ 2 个 `## ` 段仍可能被迁移；原文件始终保留在 `.backups/migrate-<ts>/originals/`。
 
 重跑是安全的：标记只在最后写，而**同名且同正文**的条目会被复用而不是复制一份。任一步失败就不写标记、保留备份、上报错误 —— 下次会话重试。
 

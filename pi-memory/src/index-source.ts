@@ -98,8 +98,10 @@ function resolveConverter(): ((entry: unknown) => unknown[]) | null {
  * 复刻一份就会在极端会话上漂移（Plan C 终审 #4）。
  */
 function projectionMessages(sm: Partial<ReplayableSessionManager>): unknown[] | null {
-	if (typeof sm.buildSessionProjection !== "function") return null;
 	try {
+		// 特征探测也放进 try：宿主把该方法做成抛错的 getter / proxy 时同样只能回退，
+		// 不能让异常逃到 session_start。
+		if (typeof sm.buildSessionProjection !== "function") return null;
 		const messages = sm.buildSessionProjection()?.messages;
 		return Array.isArray(messages) ? messages : null;
 	} catch {
