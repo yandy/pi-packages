@@ -29,29 +29,29 @@ describe("resolveVisionModel", () => {
 	};
 
 	it("resolves a configured provider/id", () => {
-		const r = resolveVisionModel(registry, { model: "openai/gpt-4o", enabled: "auto" });
+		const r = resolveVisionModel(registry, { model: "openai/gpt-4o" });
 		expect(r.ok && r.model).toBe(gpt4o);
 	});
 
 	it("resolves a fuzzy model name", () => {
-		const r = resolveVisionModel(registry, { model: "haiku", enabled: "auto" });
+		const r = resolveVisionModel(registry, { model: "haiku" });
 		expect(r.ok && r.model).toBe(haiku);
 	});
 
 	it("errors when no model is configured", () => {
-		const r = resolveVisionModel(registry, { enabled: "auto" });
+		const r = resolveVisionModel(registry, {});
 		expect(r.ok).toBe(false);
 		expect((r as { error: string }).error).toMatch(/not configured/i);
 	});
 
 	it("errors when the model cannot be resolved", () => {
-		const r = resolveVisionModel(registry, { model: "nope", enabled: "auto" });
+		const r = resolveVisionModel(registry, { model: "nope" });
 		expect(r.ok).toBe(false);
 		expect((r as { error: string }).error).toMatch(/not found/i);
 	});
 
 	it("errors when the resolved model cannot accept images", () => {
-		const r = resolveVisionModel(registry, { model: "openai/text-only", enabled: "auto" });
+		const r = resolveVisionModel(registry, { model: "openai/text-only" });
 		expect(r.ok).toBe(false);
 		expect((r as { error: string }).error).toMatch(/image input/i);
 	});

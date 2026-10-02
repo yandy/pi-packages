@@ -123,7 +123,7 @@ describe_image(image_path: string, prompt: string, compress?: boolean, thinkLeve
 | Explain a diagram | `"Explain this architecture diagram step by step."` |
 | Analyze an error | `"What does this error message mean and how can it be fixed?"` |
 
-### Reasoning levels
+### Think levels
 
 | Level | When to use |
 |-------|-------------|

@@ -123,7 +123,7 @@ describe_image(image_path: string, prompt: string, compress?: boolean, thinkLeve
 | 解释图表 | `"请逐步解释这个架构图。"` |
 | 分析错误 | `"这个错误信息是什么意思，如何修复？"` |
 
-### 推理级别
+### think level
 
 | 级别 | 适用场景 |
 |-------|------|

@@ -9,6 +9,15 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 	getAgentDir: () => hoisted.agentDir,
 }));
 
+vi.mock("../src/vision.js", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../src/vision.js")>();
+	return { ...actual, callVision: async () => ({ text: "ok" }) };
+});
+
+vi.mock("../src/image.js", () => ({
+	decodeImage: async () => ({ data: Buffer.from("x"), mimeType: "image/png" }),
+}));
+
 import visionExtension from "../index.js";
 
 // ---- fakes ---------------------------------------------------------------
@@ -34,6 +43,7 @@ function fakeRegistry(models: any[] = []) {
 		getAll: () => models,
 		getAvailable: () => models,
 		find: (provider: string, id: string) => models.find((m) => m.provider === provider && m.id === id),
+		getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test-key" }),
 	};
 }
 
@@ -201,5 +211,58 @@ describe("describe_image tool schema", () => {
 		const props = Object.keys(tool.parameters.properties);
 		expect(props).toContain("thinkLevel");
 		expect(props).not.toContain("reasoning");
+	});
+});
+
+describe("describe_image think level flow", () => {
+	let dir: string;
+	let h: ReturnType<typeof createHarness>;
+
+	beforeEach(() => {
+		dir = mkdtempSync(join(tmpdir(), "vision-wiring-"));
+		hoisted.agentDir = dir;
+		h = createHarness();
+	});
+	afterEach(() => {
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	/** 先通过命令落盘 model（必要时带 default-think-level），再 session_start 读回配置，然后返回可用 registry。 */
+	const prepare = async (configDefault?: string) => {
+		const registry = fakeRegistry([fakeModel()]);
+		await h.commands.vision.handler("config model haiku", h.ctx({ registry }));
+		if (configDefault) await h.commands.vision.handler(`config default-think-level ${configDefault}`, h.ctx({ registry }));
+		await h.sessionStart({ model: fakeModel({ input: ["text"] }), registry });
+		return registry;
+	};
+
+	const runTool = async (registry: any, args: Record<string, unknown> = {}) => {
+		const tool = h.tools.find((t) => t.name === "describe_image");
+		return tool.execute(
+			"call-1",
+			{ image_path: "does-not-matter.png", prompt: "hi", compress: false, ...args },
+			undefined,
+			undefined,
+			h.ctx({ registry, model: fakeModel({ input: ["text"] }) }),
+		);
+	};
+
+	it("passes an explicit thinkLevel through to the result details", async () => {
+		const registry = await prepare();
+		const result = await runTool(registry, { thinkLevel: "high" });
+		expect(result.isError).not.toBe(true);
+		expect(result.details.thinkLevel).toBe("high");
+	});
+
+	it("falls back to the configured default think level", async () => {
+		const registry = await prepare("medium");
+		const result = await runTool(registry);
+		expect(result.details.thinkLevel).toBe("medium");
+	});
+
+	it("lets an explicit thinkLevel win over the configured default", async () => {
+		const registry = await prepare("high");
+		const result = await runTool(registry, { thinkLevel: "low" });
+		expect(result.details.thinkLevel).toBe("low");
 	});
 });
