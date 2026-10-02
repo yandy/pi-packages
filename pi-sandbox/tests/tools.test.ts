@@ -110,9 +110,10 @@ describe("createSandboxTools schemas", () => {
 	it("description teaches the escalation contract within the per-tool budget (β′)", () => {
 		const { deps } = makeDeps();
 		const { bash, write, edit } = createSandboxTools(deps);
-		// 跨工具规则只留一句：不提权时省略或传 JSON null（字符串 "null" 不是合法取值），且非拒绝重试的提权会被忽略。
+		// 跨工具规则只留一句：不提权时省略或传 JSON null，且非拒绝重试的提权会被忽略。
+		// （2026-10-02 二次修订：负向子句 `— never the string "null"` 移除，只留正向表述。）
 		for (const tool of [bash, write, edit]) {
-			expect(tool.description).toContain('Unless retrying a denial, omit these fields or send JSON null — never the string "null".');
+			expect(tool.description).toContain("Unless retrying a denial, omit these fields or send JSON null.");
 			expect(tool.description).toContain("workspace-write already allows the workspace and /tmp");
 			// 旧版把这套协议写进每个 description（×3 重复）：不许回潮。
 			expect(tool.description).not.toContain("Writes outside the permitted roots are denied");
@@ -120,7 +121,7 @@ describe("createSandboxTools schemas", () => {
 		}
 		// /tmp 已 bind 宿主（2026-10-01 决策）→ 常驻面不再需要任何 /tmp 专属措辞。
 		for (const tool of [bash, write, edit]) expect(tool.description).not.toContain("tmpfs");
-		// 预算回归闸（β′）：三个工具的常驻增量合计 ≤ 560 chars（当前 546，改前 1281 / 改稿前 510）。
+		// 预算回归闸（β′）：三个工具的常驻增量合计 ≤ 560 chars（当前 468，改前 1281 / 首稿 546）。
 		const added = [bash, write, edit].flatMap((t) =>
 			t.description.split("\n").filter((l) => l.startsWith("Sandbox:")),
 		);

@@ -26,7 +26,7 @@ export const ESCALATION_OPTIONS = ["Allow once", "Deny"] as const;
  */
 const MALFORMED_ESCALATION = "invalid escalation: this call was rejected before execution (nothing ran).";
 const ESCALATION_FIX =
-	'Fix: to run without escalation, omit BOTH fields or send JSON null for BOTH (never the string "null" or ""); to escalate, send sandbox_permissions ("workspace-write" | "danger-full-access") with a one-sentence justification.';
+	'Fix: to run without escalation, omit BOTH fields or send JSON null for BOTH; to escalate, send sandbox_permissions ("workspace-write" | "danger-full-access") with a one-sentence justification.';
 
 export function validateEscalationArgs(sandboxPermissions: string | undefined, justification: string | undefined): void {
 	if (sandboxPermissions !== undefined && justification === undefined) {

@@ -219,7 +219,7 @@ function extendParams(base: TSchema): TSchema {
  * （denial hint / 校验错误 / 批准后标记）。
  */
 const SANDBOX_NOTE =
-	'Sandbox: confined to the current mode; workspace-write already allows the workspace and /tmp. Unless retrying a denial, omit these fields or send JSON null — never the string "null".';
+	"Sandbox: confined to the current mode; workspace-write already allows the workspace and /tmp. Unless retrying a denial, omit these fields or send JSON null.";
 
 function escalationDescription(base: string): string {
 	return [base, "", SANDBOX_NOTE].join("\n");

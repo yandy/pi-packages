@@ -134,7 +134,7 @@ interface DenialLedger {
 - `ESCALATION_GUIDELINE`（system prompt rules，付 1 份）：新增 `Never send escalation fields before a denial — such requests are ignored and the call runs confined.`，并写明 Deny 可附理由。
 - 提示预算闸（β′）：`tool.description` 中 `Sandbox:` 行三工具合计 ≤ 560 字符（不变）。
 
-> **2026-10-02 修订注记（原文案与 strict schema 自相矛盾）**：`SANDBOX_NOTE` 第二句改为 `Unless retrying a denial, omit these fields or send JSON null — never the string "null".`。原文案 `Pass escalation fields only when retrying a denial (never null); others are ignored.` 的问题：strict 提供商下模型看到的 schema 把两个字段列为 `required`，“省略”在协议上不可表达，而 `(never null)` 又禁止了唯一合法的“不提权”取值——模型只能去写字符串 `"null"`，那在 pi 的参数校验期就硬失败（错误文案与沙箱无关，反而把模型推向真提权）。“先发制人会被忽略”的语义删去不丢信息：`ESCALATION_GUIDELINE`（付 1 份）里已写明 “such requests are ignored and the call runs confined” 与 `escalationIgnoredMarker`。三工具合计预算仍 ≤ 560（实测 546）。
+> **2026-10-02 修订注记（原文案与 strict schema 自相矛盾）**：`SANDBOX_NOTE` 第二句改为 `Unless retrying a denial, omit these fields or send JSON null.`（同日二次修订：去掉首稿的负向子句 `— never the string "null"`，只留正向表述，三工具合计预算从 546 降到 468）。原文案 `Pass escalation fields only when retrying a denial (never null); others are ignored.` 的问题：strict 提供商下模型看到的 schema 把两个字段列为 `required`，“省略”在协议上不可表达，而 `(never null)` 又禁止了唯一合法的“不提权”取值——模型只能去写字符串 `"null"`，那在 pi 的参数校验期就硬失败（错误文案与沙箱无关，反而把模型推向真提权）。“先发制人会被忽略”的语义删去不丢信息：`ESCALATION_GUIDELINE`（付 1 份）里已写明 “such requests are ignored and the call runs confined” 与 `escalationIgnoredMarker`。三工具合计预算仍 ≤ 560（实测 468）。
 
 ## 5. 时序
 

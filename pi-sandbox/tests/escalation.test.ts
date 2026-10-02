@@ -42,10 +42,12 @@ describe("validateEscalationArgs", () => {
 		expect(() => validateEscalationArgs("danger-full-access", "   "))
 			.toThrow(/nothing ran.*Cause: justification was empty/);
 	});
-	it("fix recipe 与 schema 一致：省略或 JSON null（不是与 strict schema 矛盾的 “never null”）", () => {
+	// 2026-10-02 二次修订：配方只给正向表述，不再列负向子句（删掉 `never the string "null" or ""`）。
+	it("fix recipe 只给正向配方：省略或 JSON null（不含与 strict schema 矛盾的 “never null”）", () => {
 		expect(() => validateEscalationArgs("danger-full-access", undefined))
-			.toThrow(/omit BOTH fields or send JSON null/);
+			.toThrow(/omit BOTH fields or send JSON null for BOTH/);
 		expect(() => validateEscalationArgs("danger-full-access", undefined)).not.toThrow(/never null/);
+		expect(() => validateEscalationArgs("danger-full-access", undefined)).not.toThrow(/never the string/);
 	});
 	it("both absent: ok (a plain call)", () => {
 		expect(() => validateEscalationArgs(undefined, undefined)).not.toThrow();

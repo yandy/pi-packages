@@ -194,7 +194,7 @@ bash / write / edit 各增加可选参数：
 ### approveEscalation 校验顺序（执行前；无可解析通道时全部 fail-closed）
 
 1. 配对校验：`sandbox_permissions` 与 `justification` 必须同时出现，justification 非空，否则 malformed 错误
-   - 文案契约（按需面）：`invalid escalation: this call was rejected before execution (nothing ran).` + `Cause: ...` + `Fix: to run without escalation, omit BOTH fields or send JSON null for BOTH (never the string "null" or ""); ...`。动机是实际事故：模型把 malformed 错误误判为"沙箱拒绝"，进而要求最大档；错误必须自报"什么都没执行"并给出精确重试配方。
+   - 文案契约（按需面）：`invalid escalation: this call was rejected before execution (nothing ran).` + `Cause: ...` + `Fix: to run without escalation, omit BOTH fields or send JSON null for BOTH; ...`。动机是实际事故：模型把 malformed 错误误判为"沙箱拒绝"，进而要求最大档；错误必须自报"什么都没执行"并给出精确重试配方。
 2. 目标 == effective mode → 免审批，按当前模式执行
 3. 目标不在 `WIDER_MODES[effective]` 中（更窄或非法）→ 抛错 "not strictly wider than this call's current <mode> mode"
    - `WIDER_MODES = { 'read-only': ['workspace-write','danger-full-access'], 'workspace-write': ['danger-full-access'] }`
