@@ -101,7 +101,7 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
 
 ### 容量：200 行索引 ≈ 199 条记忆
 
-索引上限是 `memIndexMaxLines`（200）个非空行与 `memIndexMaxBytes`（25600）字节。这 200 行是**索引行，不是记忆条数**：`rebuildIndex` 至少保证一行头部（已有手写头部时原样保留，否则写 `# Memory Index`），手写的标题、分组、注释同样占额度。因此重建后的索引最多约 **199 条记忆**（每个项目目录；若保留手写标题则更少）。超限时写入**不会失败**：写入照样成功，工具把一条可操作的警告回给模型，让它去合并或删除条目（超出上限的部分下次加载时不可见）。
+索引上限是 `memIndexMaxLines`（200）个非空行与 `memIndexMaxBytes`（25600）字节。这 200 行是**索引行，不是记忆条数**：`rebuildIndex` 至少保证一行头部（已有手写头部时原样保留 —— 首个条目之前的末尾空行会被去掉；否则写 `# Memory Index`），手写的标题、分组、注释同样占额度。因此重建后的索引最多约 **199 条记忆**（每个项目目录；若保留手写标题则更少）。超限时写入**不会失败**：写入照样成功，工具把一条可操作的警告回给模型，让它去合并或删除条目（超出上限的部分下次加载时不可见）。
 
 这也是 `/dream` 不再是「可选的整理」而是**容量管理必需**的原因。在接近 199 条之前跑一次（或者接受提醒）。
 
@@ -148,25 +148,25 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
 | `memIndexInjectMaxBytes` | `25600` | 注入口径：section 的最大字节数（超出则截断并带 `[truncated: …]` 标记） |
 | `lock.timeoutMs` | `5000` | 单次原语等逻辑锁 / 等跨进程 `.lock` 的上限。迁移固定用 30s（它要在锁内重写整个目录）。同时也是 `session_shutdown` 等在途写入的上限 |
 | `lock.snapshotKeep` | `5` | `.backups/` 保留的回滚点数量（`migrate-` 前缀的目录永不裁剪） |
-| `defaults.model` | `"deepseek/deepseek-flash"` | 所有子任务（dream / extract / 侧查询）共享的模型；各任务自己的 `model` 优先，不可解析或未设置时回退父会话模型 |
+| `defaults.model` | `"deepseek/deepseek-flash"` | 所有子任务（dream / extract / 侧查询）共享的模型；各任务自己的 `model` 优先；不可解析（既无精确 `"provider/id"` 匹配、注册表里也没有模糊匹配）或未设置时回退父会话模型 |
 | `defaults.sessionPersistence.enabled` | `false` | 共享回退：headless 子会话（extract / dream / 侧查询）默认只在内存里跑 |
 | `defaults.sessionPersistence.sessionDir` | `<项目记忆目录>/sessions/` | headless 会话的自定义落盘目录 |
 | `dream.nudgeAfterSessions` | `5` | 距上次 dream 多少个会话后开始提醒 |
 | `dream.nudgeAfterHours` | `24` | 距上次 dream 多少小时后开始提醒 |
-| `dream.model` | — | dream 用的模型（`"provider/id"`）。回退 `defaults.model` → 父会话模型 |
+| `dream.model` | — | dream 用的模型（`"provider/id"`）。回退 `defaults.model` → 父会话模型（不可解析时） |
 | `dream.thinkLevel` | `"high"` | dream 的思考强度：`off` / `minimal` / `low` / `medium` / `high` / `xhigh` |
 | `dream.sessionPersistence.*` | 继承 `defaults` | 把 dream 会话落盘（调试/审计用） |
 | `sessionSearch.maxSessions` | `10` | `search scope=sessions` 扫描的最大会话数 |
 | `sessionSearch.maxMatches` | `5` | 历史检索返回的最大命中数 |
 | `autoSurfacing.enabled` | `true` | ⭐ 开启每回合的 entry 自动注入 |
-| `autoSurfacing.model` | — | ⭐ 相关性侧查询用的模型。回退 `defaults.model` → 父会话模型 |
+| `autoSurfacing.model` | — | ⭐ 相关性侧查询用的模型。回退 `defaults.model` → 父会话模型（不可解析时） |
 | `autoSurfacing.thinkLevel` | `"off"` | ⭐ 侧查询的思考强度（`"off"` 最省） |
 | `autoSurfacing.maxFiles` | `3` | ⭐ 每回合最多注入几条 entry |
 | `autoSurfacing.maxEntryBytes` | `3072` | ⭐ 单条 entry 正文的注入字节上限（超出截断）。取代 1.x 的 `maxTopicBytes`（旧键已失效） |
 | `autoSurfacing.maxInjectionBytes` | `10240` | ⭐ 每回合注入内容的总字节上限 |
 | `autoSurfacing.sessionPersistence.*` | 继承 `defaults` | 把侧查询会话落盘 |
 | `extractMemories.enabled` | `true` | ⭐ 开启每轮自动提取 |
-| `extractMemories.model` | — | ⭐ 提取 agent 用的模型。回退 `defaults.model` → 父会话模型 |
+| `extractMemories.model` | — | ⭐ 提取 agent 用的模型。回退 `defaults.model` → 父会话模型（不可解析时） |
 | `extractMemories.thinkLevel` | `"high"` | ⭐ 提取的思考强度 |
 | `extractMemories.maxContextTokens` | `2000` | ⭐ 渲染后对话的预算（`× 4` 个字符；超出时先裁中段、首尾优先保留，user 消息最后才动） |
 | `extractMemories.maxToolResultChars` | `500` | ⭐ 单条 `tool_result` 渲染的字符上限 |
@@ -289,7 +289,7 @@ Lock: free
 
 - `Index` 用**写入**口径（`memIndexMax*`），并报告索引里有多少非空行解析不出（`# Memory Index` 头行与手写标题会计入）。CRLF（以及单独的 CR）行尾在解析前就被归一为 LF，下一次写入也一律输出 LF，因此被 Windows 编辑器改过行尾的 `MEMORY.md` **不会**推高这个计数。
 - `Migration` 有三种：`migrated at …`、`not needed`（标记显示当时没东西要迁）、`pending`（没有标记或标记读不懂 → 下次 `session_start` 重试）。
-- `Lock` 有三种：`free`、`held by <op> (pid N, started <ISO>)`、`unreadable — run /memory unlock`。
+- `Lock` 有三种：`free`、`held by <op> (pid N on <hostname>, started <ISO>)`、`unreadable — run /memory unlock`。`/memory unlock` 的确认框会显示同一行持有者信息。
 - 以 `enabled: false` 启动的会话在启动时不初始化任何东西：`/memory` 报两行（`Memory: disabled` + `Dir: not initialized (run /memory on)`），`/memory on` 会**当场**初始化 store（并为本次会话注册 `memory` 工具），`/memory unlock` 不需要 store 也能用。初始化失败时会明说（`Failed to initialize memory: …`）并把开关留在 off。
 
 ### `/dream`

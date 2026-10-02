@@ -162,7 +162,7 @@ printf '{"pid":%d,"hostname":"%s","startedAt":"2026-10-02T00:00:00.000Z","op":"d
 > **注意**：写入的 pid 是执行上面命令的 shell 的 `$$` —— 只有在**同一终端/进程还活着**时才能观察到 `Memory is locked by …`；该进程退出后，同一把锁会变成 `… is abandoned by …`，也就是 5d 的预期。
 
 - 让 agent 记一条东西 → **预期**报 `Memory is locked by dream (pid N, started 2026-10-02T00:00:00.000Z)`。
-- `/memory` → `Lock: held by dream (pid N, started 2026-10-02T00:00:00.000Z)`。
+- `/memory` → `Lock: held by dream (pid N on <hostname>, started 2026-10-02T00:00:00.000Z)`。
 - 换成一个读不懂的内容：`echo "garbage" > "$MEM/.lock"` → `/memory` 显示 `Lock: unreadable — run /memory unlock`。
 
 **（c）`/memory unlock`**
@@ -171,7 +171,7 @@ printf '{"pid":%d,"hostname":"%s","startedAt":"2026-10-02T00:00:00.000Z","op":"d
 /memory unlock
 ```
 
-- **预期**先弹确认框：标题 `Memory lock`，正文 `Remove the memory lock file? Only do this if no memory operation is running.`
+- **预期**先弹确认框：标题 `Memory lock`，正文 `Remove the memory lock file? It is held by dream (pid N on <hostname>, started 2026-10-02T00:00:00.000Z). Only do this if no memory operation is running.`（`held` 的锁必须点名持有者；`unreadable` 的锁只报一句通用正文）。
 - 选**取消** → `.lock` 仍在，没有任何通知。
 - 选**确认** → 通知 `Memory lock removed.`，`ls "$MEM"` 里没有 `.lock`，其它文件一个不少；再让 agent 记一条 → 成功。
 - 没有锁时执行 `/memory unlock` → 通知 `No lock present.`，**不弹**确认框。

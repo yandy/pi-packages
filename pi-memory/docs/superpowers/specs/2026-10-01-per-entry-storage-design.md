@@ -547,14 +547,14 @@ Map<filename, { mtimeMs: number; name: string; description: string; type: string
     "snapshotKeep": 5
   },
   "defaults": { "model": "deepseek/deepseek-flash", "sessionPersistence": { "enabled": false } },   // 共享默认 model；不可解析时回退父会话模型
-  "dream": { "nudgeAfterSessions": 5, "nudgeAfterHours": 24, "model": "auto", "thinkLevel": "high" },
+  "dream": { "nudgeAfterSessions": 5, "nudgeAfterHours": 24, "thinkLevel": "high" },
   "sessionSearch": { "maxSessions": 10, "maxMatches": 5 },
   "autoSurfacing": {
-    "enabled": true, "model": "auto", "thinkLevel": "off",
+    "enabled": true, "thinkLevel": "off",
     "maxFiles": 3, "maxEntryBytes": 3072, "maxInjectionBytes": 10240
   },
   "extractMemories": {
-    "enabled": true, "model": "auto", "thinkLevel": "high",
+    "enabled": true, "thinkLevel": "high",
     "maxContextTokens": 2000,
     "maxToolResultChars": 500,
     "maxAssistantChars": 2000
@@ -563,6 +563,7 @@ Map<filename, { mtimeMs: number; name: string; description: string; type: string
 ```
 
 - `autoSurfacing.maxTopicBytes` → 重命名为 `maxEntryBytes`（语义变化，旧键忽略）。
+- 各 task 的 `model` 是可选的 `"provider/id"`；示例里删掉了旧语义的 `"auto"`（它没有特殊含义，解析不出来就回退父会话模型）。
 - 新增 `lock` 段（含 `dreamTimeoutMs`）；新增 `extractMemories.maxToolResultChars` / `maxAssistantChars`。
 
 ---

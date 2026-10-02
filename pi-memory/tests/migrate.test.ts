@@ -109,6 +109,19 @@ describe("isLegacyTopicFile", () => {
 		expect(isLegacyTopicFile(topicFile("debugging", "project", "2026-07-03", [["Only", "一段"]]))).toBe(true);
 	});
 
+	// Plan E/next #5：只有 **1 个** `## ` 段 + 闭合行正常的 v1 frontmatter（含 `updated`、无
+	// `modified`/`created`）——「≥2 段」与「v2 解析通过」两条判据都不成立，只有 `updated` 分支
+	// 能判它；而 `parseLegacyEntries` 的 type 必须来自 frontmatter（整份正文兜底只会给 ""）。
+	it("detects a single-section v1 file by its updated field alone and keeps the frontmatter type", () => {
+		const raw = topicFile("only", "user", "2026-07-03", [["Only One", "唯一一段"]]);
+
+		expect(parseEntryFile(raw)).toBeNull();
+		expect(isLegacyTopicFile(raw)).toBe(true);
+		expect(parseLegacyEntries(raw)).toEqual([
+			{ title: "Only One", content: "唯一一段", type: "user", updated: "2026-07-03" },
+		]);
+	});
+
 	it("detects two or more ## sections without any frontmatter", () => {
 		expect(isLegacyTopicFile("## A\n\n正文 A\n\n## B\n\n正文 B\n")).toBe(true);
 	});

@@ -44,6 +44,13 @@ describe("stripInvisibleChars", () => {
 		expect(stripInvisibleChars(dirty)).toBe("记忆: staging uses 2222");
 	});
 
+	// Plan E/next #11：星光平面的 Cf（U+1D173 乐谱控制符、U+E0001 语言标签）同样要被剥离 ——
+	// 正则必须带 `u` 标志，否则 `\p{Cf}` 根本匹配不到代理对。
+	it("removes astral-plane Cf characters", () => {
+		expect(stripInvisibleChars("a\u{1D173}b\u{E0001}c")).toBe("abc");
+		expect(sanitizeForInjection("x\u{1D173}<y>\u{E0001}z")).toBe("x&lt;y&gt;z");
+	});
+
 	// `\n` / `\t` / 空格是 Cc 与 Zs，不是 Cf —— 排版必须原样保留，否则注入的索引会变成一行。
 	it("keeps newlines, tabs and ordinary spaces", () => {
 		const text = "- [A](a.md) — desc\n\t- indented\n\n";
@@ -100,11 +107,16 @@ describe("sanitizeForInjection", () => {
 		expect(sanitizeForInjection("")).toBe("");
 	});
 
-	it("is a pure function: same input, same output, no state between calls", () => {
+	it("is a pure function: the same hostile input always yields the same fixed point", () => {
 		const input = "<a> & \u200B";
-		expect(sanitizeForInjection(input)).toBe(sanitizeForInjection(input));
-		// D11：净化不得改磁盘 —— 模块里根本不该出现文件系统 import。
-		expect(input).toBe("<a> & \u200B");
+		const once = sanitizeForInjection(input);
+
+		// 同一输入重复调用 → 同一输出（纯函数），且输出是不动点（转义不会逐轮漂移）
+		expect(sanitizeForInjection(input)).toBe(once);
+		expect(sanitizeForInjection(once)).toBe(once);
+		expect(sanitizeForInjection(sanitizeForInjection(once))).toBe(once);
+		// 而且真的净化了：尖括号转义、零宽字符剥离、`&` 原样
+		expect(once).toBe("&lt;a&gt; & ");
 	});
 
 	it("does not touch the file system (D11: sanitising is injection-time only)", async () => {
