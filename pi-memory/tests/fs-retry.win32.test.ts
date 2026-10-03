@@ -22,8 +22,22 @@ describe.skipIf(process.platform !== "win32")("withFsRetry against a real Window
 		await writeFile(target, "initial", "utf8");
 	});
 	afterEach(async () => {
-		for (const holder of holders.splice(0)) holder.kill();
-		await rm(dir, { recursive: true, force: true });
+		// `kill()` 只发信号、**不等待**进程退出：Windows 上独占句柄要到进程拆除时才释放，
+		// 若不等 `exit` 就 rm，第二个用例（持有 8s）会让 rm 撞上共享冲突而抛 EPERM/EBUSY。
+		// 先挂 exit 监听再 kill，避免退出事件早于监听注册的竞态；已退出的子进程直接视为完成。
+		await Promise.all(
+			holders.splice(0).map((holder) => {
+				const exited = new Promise<void>((resolve) => {
+					if (holder.exitCode !== null || holder.signalCode !== null) resolve();
+					else holder.once("exit", () => resolve());
+				});
+				holder.kill();
+				return exited;
+			}),
+		);
+		// 第二道防线：进程退出与句柄真正可删除之间仍可能被杀软/索引器拖住，用 Node 自带的
+		// 退避重试兜住（与 snapshot.ts 的 pruneSnapshots 同一组参数）。
+		await rm(dir, { recursive: true, force: true, maxRetries: 6, retryDelay: 50 });
 	});
 
 	/** 后台独占 target `holdMs` 毫秒后释放；取得独占后写 ready 标记。 */
