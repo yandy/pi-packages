@@ -166,11 +166,8 @@ export default function (pi: ExtensionAPI) {
 	 */
 	const inFlight = new Set<Promise<unknown>>();
 
-	/** `enabled: false` 时给用户的唯一动作。工具文案与 `/memory` 状态共用同一份，避免两处漂移。 */
-	const ENABLE_HINT = 'set "enabled": true in memory.json and restart';
-
 	/**
-	 * 清空本 session 的运行时状态。三条早退路径（disabled / 配置错误 / 初始化失败）共用：
+	 * 清空本 session 的运行时状态。两条早退路径（配置错误 / 初始化失败）共用：
 	 * 残留上一 session 的 store 会让后续写入落到别的项目目录（Plan C ledger R51）。
 	 */
 	function resetSessionState(): void {
@@ -207,9 +204,7 @@ export default function (pi: ExtensionAPI) {
 		getUnavailableMessage: () =>
 			configError
 				? `Memory not initialized — ${configError.split("\n")[0]}; run /memory for details`
-				: config?.enabled === false
-					? `Memory is disabled — ${ENABLE_HINT}`
-					: null,
+				: null,
 		searchSessions,
 		cwd: () => currentCwd,
 	};
@@ -217,12 +212,12 @@ export default function (pi: ExtensionAPI) {
 	/**
 	 * 建立本 session 的记忆运行时：目录 → store → 索引来源 → 注册工具。
 	 *
-	 * 只在 `session_start` 调用，且调用方已确认 `config.enabled`（中途启用路径已随 `/memory on` 删除）。
+	 * 只在 `session_start` 调用，且调用方已通过模型校验。
 	 * 抛错 = 初始化失败，由调用方转成配置错误态（`configError`）。
 	 * `reason` 只有 `session_start` 会传：resume / fork / reload 用 transcript 的录制值（D14）。
 	 */
 	async function initMemory(ctx: ExtensionContext, reason?: string): Promise<void> {
-		// biome-ignore lint/style/noNonNullAssertion: 调用方已确认 enabled
+		// biome-ignore lint/style/noNonNullAssertion: 调用方已通过模型校验
 		const cfg = config!;
 		currentCwd = ctx.cwd;
 		const dir = await resolveMemoryDir(cfg, ctx.cwd);
@@ -275,8 +270,6 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 		config = loaded;
-		// 状态已经干净，disabled 直接早退即可。
-		if (!loaded.enabled) return;
 		try {
 			// 启动校验（spec §2.3）：模型键缺失 / 不可解析 → 本会话**完全不初始化**
 			//（不解析目录、不建 store、不注册工具），错误态由 `/memory` 重复显示。
@@ -355,7 +348,7 @@ export default function (pi: ExtensionAPI) {
 		lastSystemPrompt = event.systemPrompt;
 		// 先拷到 const：`store` 是工厂作用域的 let，在异步回调里 TS 不会保留它的外层收窄。
 		const activeStore = store;
-		if (!config?.enabled || !memoryDir || !activeStore) return;
+		if (!config || !memoryDir || !activeStore) return;
 
 		// 索引 section：**每一轮无条件**写入冻结值（含 resume / fork / reload）。
 		// 省略这个键 = pi 的 diffSystemPromptSections 生成 { memory_index: null } = 把索引从
@@ -424,7 +417,7 @@ export default function (pi: ExtensionAPI) {
 	// 的边际缓存损失最小，而长会话到这时候往往已经攒下了新记忆（spec §9.1(c) / §10）。
 	pi.on("session_compact", async () => {
 		const activeStore = store;
-		if (!config?.enabled || !activeStore) return;
+		if (!config || !activeStore) return;
 		// compaction 会把已注入的内容挤出上下文：不清空，这些 entry 本会话再也不会浮现。
 		injectedFiles.clear();
 		indexSnapshot = await buildIndexSection(
@@ -456,7 +449,7 @@ export default function (pi: ExtensionAPI) {
 		// 先拷到 const：`store` / `memoryDir` 是工厂作用域的 let，在异步回调里 TS 不保留外层收窄。
 		const activeStore = store;
 		const dir = memoryDir;
-		if (!config?.enabled || !dir || !activeStore) return;
+		if (!config || !dir || !activeStore) return;
 		const extractConfig = config.extractMemories;
 		if (!extractConfig?.enabled) return;
 		if (!event.messages || event.messages.length === 0) return;
@@ -541,7 +534,7 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 			if (args === "unlock") {
-				// `unlock` 只需要**目录**、不需要 store：以 disabled 启动的会话也要能清锁
+				// `unlock` 只需要**目录**、不需要 store：以配置错误启动的会话也要能清锁
 				//（它是崩溃遗留 `.lock` 的唯一人工入口，spec §19）。
 				let dir = memoryDir;
 				if (!dir) {
@@ -564,11 +557,10 @@ export default function (pi: ExtensionAPI) {
 			const activeStore = store;
 			const dir = memoryDir;
 			if (!dir || !activeStore) {
-				// configError 非空 = 校验或初始化失败（`/memory` 是用户重读错误的唯一入口）；
-				// 否则只可能是配置里 enabled 为假。
-				const lines = configError
-					? ["Memory: misconfigured", "Dir: not initialized", ...configError.split("\n").map((e) => `- ${e}`)]
-					: ["Memory: disabled", `Dir: not initialized — ${ENABLE_HINT}`];
+				// `config` 非 null 而 store 为 null 只可能来自 session_start 的两条早退路径，
+				// 因此 configError 在这里必非空；`/memory` 是用户重读错误态的唯一入口。
+				const lines = ["Memory: misconfigured", "Dir: not initialized"];
+				if (configError) lines.push(...configError.split("\n").map((e) => `- ${e}`));
 				ctx.ui.notify(lines.join("\n"), "info");
 				return;
 			}

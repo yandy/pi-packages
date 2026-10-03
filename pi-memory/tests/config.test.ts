@@ -6,7 +6,6 @@ import { DEFAULT_CONFIG, loadConfig, modelConfigErrors, requiredModel, requiredM
 
 describe("DEFAULT_CONFIG", () => {
 	it("has expected defaults", () => {
-		expect(DEFAULT_CONFIG.enabled).toBe(true);
 		expect(DEFAULT_CONFIG.memIndexMaxLines).toBe(200);
 		expect(DEFAULT_CONFIG.memIndexMaxBytes).toBe(25600);
 		// 注入口径**独立于**写入口径（v2.3.0 起）：窗口只取索引最新的 50 行。
@@ -48,8 +47,21 @@ describe("loadConfig", () => {
 
 	it("returns defaults when no config files exist", async () => {
 		const cfg = await loadConfig({ cwd: projectDir, isProjectTrusted: () => true, _globalDir: globalDir, _configDirName: ".pi" });
-		expect(cfg.enabled).toBe(true);
 		expect(cfg.memIndexMaxLines).toBe(200);
+	});
+
+	// 本次移除的回归钉子：包级 `enabled` 已不是 schema 的一部分。残留键会随 deepMerge 进入运行时
+	// 对象（与 v1 的 maxTopicBytes 同例），但不得影响任何行为 —— `requiredModels` 仍然列出 dream，
+	// 也就是「写 enabled: false 不再能免掉模型校验」。
+	it("ignores a leftover top-level enabled key", async () => {
+		await writeFile(
+			join(globalDir, "memory.json"),
+			JSON.stringify({ enabled: false, autoSurfacing: { enabled: false }, dream: { model: "test/dream" } }),
+		);
+		const cfg = await loadConfig({ cwd: projectDir, isProjectTrusted: () => true, _globalDir: globalDir, _configDirName: ".pi" });
+
+		expect(requiredModels(cfg)).toEqual([{ task: "dream", value: "test/dream" }]);
+		expect(modelConfigErrors(cfg, () => true)).toEqual([]);
 	});
 	it("merges global config over defaults", async () => {
 		await writeFile(join(globalDir, "memory.json"), JSON.stringify({ memIndexMaxLines: 100 }));
@@ -85,7 +97,6 @@ describe("loadConfig", () => {
 	it("handles malformed JSON gracefully", async () => {
 		await writeFile(join(globalDir, "memory.json"), "this is not json");
 		const cfg = await loadConfig({ cwd: projectDir, isProjectTrusted: () => true, _globalDir: globalDir, _configDirName: ".pi" });
-		expect(cfg.enabled).toBe(true);
 		expect(cfg.memIndexMaxLines).toBe(200);
 	});
 	it("expands bare ~ to homedir", async () => {
@@ -322,12 +333,6 @@ describe("model config", () => {
 			autoSurfacing: { ...DEFAULT_CONFIG.autoSurfacing, enabled: true },
 			...over,
 		});
-
-	it("requires nothing when memory is disabled", () => {
-		const c = cfg({ enabled: false });
-		expect(requiredModels(c)).toEqual([]);
-		expect(modelConfigErrors(c, () => false)).toEqual([]);
-	});
 
 	it("only requires dream when extract and auto-surfacing are disabled", () => {
 		const c = allOn({

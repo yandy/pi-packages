@@ -47,7 +47,6 @@ export interface ExtractMemoriesConfig {
 }
 
 export interface MemoryConfig {
-	enabled: boolean;
 	/** Shared defaults for model and sessionPersistence. Per-task configs override. */
 	defaults?: DefaultsConfig;
 	memoryDir: string;
@@ -87,7 +86,6 @@ export interface MemoryConfig {
 }
 
 export const DEFAULT_CONFIG: MemoryConfig = {
-	enabled: true,
 	// headless 子会话默认只在内存里跑：extract / dream / 侧查询都不该往用户的 sessions 目录里落盘。
 	// **没有模型默认值**：model 必须由用户显式配置（defaults.model 或 per-task），否则 session_start 报错。
 	defaults: { sessionPersistence: { enabled: false } },
@@ -128,12 +126,8 @@ export function taskModel(cfg: MemoryConfig, task: ModelTask): string | undefine
 	return cfg[task]?.model ?? cfg.defaults?.model;
 }
 
-/**
- * 会执行的任务及其模型值。`enabled: false` 的会话不执行任何一个任务 —— 包括 dream，
- * 因为 `/dream` 命令与 nudge 都被 `config.enabled` 挡住。
- */
+/** 会执行的任务及其模型值。dream 恒在执行集合内（没有包级开关可以让它不跑）。 */
 export function requiredModels(cfg: MemoryConfig): Array<{ task: ModelTask; value: string | undefined }> {
-	if (!cfg.enabled) return [];
 	const out: Array<{ task: ModelTask; value: string | undefined }> = [
 		{ task: "dream", value: taskModel(cfg, "dream") },
 	];
