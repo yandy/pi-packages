@@ -65,15 +65,18 @@ export const RUNNER_FAILURE_RULES = {
 	"windows-acl": [{ allowedExitCodes: [127], fatalSignatures: ["windows-acl-run: "] }],
 } as const satisfies Record<"bwrap" | "landlock" | "seatbelt" | "windows-acl", readonly RunnerFailureRule[]>;
 
-/** Windows 受限模式只支持 pwsh（Ruling 2）：bash 在任何受限模式下拒绝执行，绝不 spawn。 */
+/** Windows 受限模式只支持 pwsh（Ruling 2）：bash 在任何受限模式下拒绝执行，绝不 spawn。
+ *  文案只给**有效**指引：pi 在 win32 上默认只激活 powershell 工具（本包的 bash 在 win32 上以
+ *  `defaultActive: false` 注册，默认不出现在模型工具列表里），而 `defaultTools` 的 `-bash` 也去不掉
+ *  扩展注册的工具——所以不再教用户改 `defaultTools`，只说明“用 powershell、bash 保持 fail-closed、
+ *  danger-full-access 是唯一显式逃生门”。 */
 export class UnsupportedWindowsShellError extends Error {
 	constructor(shell: string) {
 		super(
 			`[sandbox: ${shell} is not supported on Windows]\n` +
-			`pi-sandbox confines Windows commands through the powershell tool only; the command was NOT executed.\n` +
-			`Enable it in ~/.pi/agent/settings.json (requires pi >= 1.0.0):\n` +
-			`  { "defaultTools": ["-bash", "+powershell"] }\n` +
-			`Then retry with the powershell tool, or set mode "danger-full-access" explicitly to run unsandboxed.`,
+			`pi-sandbox confines Windows commands through the powershell tool only (requires pi >= 1.0.0); use the powershell tool instead of bash — the command was NOT executed.\n` +
+			`bash stays fail-closed on Windows: enabling it explicitly does not unconfine it.\n` +
+			`"danger-full-access" remains the only explicit bypass.`,
 		);
 		this.name = "UnsupportedWindowsShellError";
 	}

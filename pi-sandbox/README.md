@@ -32,13 +32,9 @@ The `windows-acl` runner starts each confined command from a `WRITE_RESTRICTED` 
 - **reads are unconfined**: like every other runner here, a confined process can read everything you can read
 - **files tagged by another AppContainer tool's package SID are unreadable** to the Low-integrity child (remove the foreign ACE or reinstall the tree to recover)
 
-The confined shell is the **`powershell` tool only**. `bash` is refused in every confined mode (never spawned) with an actionable error; enable the tool in `~/.pi/agent/settings.json` (requires pi >= 1.0.0, the version that ships the `powershell` tool):
+The confined shell is the **`powershell` tool only**. pi activates only the `powershell` tool on Windows by default, and pi-sandbox registers its confined `bash` there with `defaultActive: false`: it stays out of the model's tool list unless named explicitly (`defaultTools`, `--tools`, or `setActiveTools()`), and even then it refuses every call in a confined mode (never spawned) with an actionable error — bash is never run unconfined on Windows unless you explicitly switch to `danger-full-access`, the only bypass (where it runs bare, as everywhere else).
 
-```json
-{ "defaultTools": ["-bash", "+powershell"] }
-```
-
-Until it is enabled pi-sandbox hints once at activation, and `/permission` shows `shell: powershell only (not activated)`. `danger-full-access` is the only bypass (it runs `bash` bare, as everywhere else).
+Known limitation: **`defaultTools` cannot deselect an extension-registered tool** (a `-name` entry only removes built-ins, and an extension tool is auto-activated unless it registers with `defaultActive: false`). This is why the refusal is a property of the tool registration rather than something users must configure away. If `powershell` is not active (older hosts, or a selection that leaves it out), pi-sandbox hints once at activation and `/permission` shows `shell: powershell only (not activated)`; `{ "defaultTools": ["+powershell"] }` (requires pi >= 1.0.0, the version that ships the `powershell` tool) adds it back.
 
 PowerShell language mode follows startup constraints, not the ACL boundary: under `read-only` PowerShell may degrade to ConstrainedLanguage (`Add-Type`/COM/reflection fail) because `%TEMP%` is not writable; `workspace-write` keeps FullLanguage.
 

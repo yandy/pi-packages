@@ -645,12 +645,12 @@ describe("windows-acl denial assertion guard (all platforms)", () => {
 
 /**
  * Runs everywhere: `assertShellAllowed` is a pure function of the injected
- * platform, and the refusal contract (fail-closed, settings snippet, pi
+ * platform, and the refusal contract (fail-closed, powershell-only guidance, pi
  * version premise) is part of spec §10.2. Kept here rather than only in
  * tests/confine.test.ts so the §10.2 mapping is complete in one file.
  */
 describe("windows-acl bash refusal (TypeScript layer, all platforms)", () => {
-	it("refuses bash in both win32 confined modes with the settings snippet", () => {
+	it("refuses bash in both win32 confined modes with powershell-only guidance", () => {
 		expect(() => assertShellAllowed("bash", "win32", "workspace-write")).toThrowError(UnsupportedWindowsShellError);
 		expect(() => assertShellAllowed("bash", "win32", "read-only")).toThrowError(UnsupportedWindowsShellError);
 		let message = "";
@@ -659,8 +659,11 @@ describe("windows-acl bash refusal (TypeScript layer, all platforms)", () => {
 		} catch (error) {
 			message = error instanceof Error ? error.message : String(error);
 		}
-		expect(message).toContain('{ "defaultTools": ["-bash", "+powershell"] }');
+		expect(message).toContain("powershell tool only");
+		expect(message).toContain("the command was NOT executed");
 		expect(message).toContain("requires pi >= 1.0.0");
+		expect(message).not.toContain("-bash");
+		expect(message).not.toContain("defaultTools");
 		// danger-full-access is the documented escape hatch; other platforms and
 		// the powershell shell are unaffected.
 		expect(() => assertShellAllowed("bash", "win32", "danger-full-access")).not.toThrow();

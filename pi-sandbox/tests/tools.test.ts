@@ -708,6 +708,17 @@ describe("windows tool wiring", () => {
 		expect((tools.powershell as { name?: string }).name).toBe("powershell");
 	});
 
+	it("registers bash as defaultActive:false on win32 and leaves the key unset elsewhere", () => {
+		// win32 工具接线：pi 在 win32 上默认只激活 powershell；bash 若仍自动激活，模型会先撞上拒绝。
+		// 但绝不能跳过注册（那会露出 pi 内置的未受限 bash，显式启用即 fail-open），所以是“注册但不默认激活”。
+		const win32 = createSandboxTools({ cwd: process.cwd(), permission: processPermissionState, platform: "win32" });
+		expect((win32.bash as { defaultActive?: boolean }).defaultActive).toBe(false);
+		// 非 win32 不设该键（既有行为不变：bash 必须默认激活）——按自有属性判定，避免真值判断漏掉 undefined。
+		const linux = createSandboxTools({ cwd: process.cwd(), permission: processPermissionState, platform: "linux" });
+		expect(Object.prototype.hasOwnProperty.call(linux.bash, "defaultActive")).toBe(false);
+		expect((linux.bash as { defaultActive?: boolean }).defaultActive).toBeUndefined();
+	});
+
 	it("does not register a powershell tool on POSIX platforms (builder present or not)", () => {
 		const build = vi.fn();
 		const tools = createSandboxTools({

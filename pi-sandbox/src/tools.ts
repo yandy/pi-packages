@@ -84,8 +84,9 @@ export interface SandboxToolDeps {
 	spawnFn?: SpawnFn;
 	/** 测试注入的预解析 runner；生产缺省走 selectRunner 缓存。 */
 	selected?: ReturnType<typeof selectRunner>;
-	/** 宿平台（默认 process.platform）：决定 pwsh 工具是否注册，并透传给 shell ops——
-	 *  bash 在 win32 上的拒绝由 bash-ops 的 guard（assertShellAllowed）实现，本文件只负责把 platform 送到。 */
+	/** 宿平台（默认 process.platform）：决定 pwsh 工具是否注册、bash 是否标记为默认不激活（win32），
+	 *  并透传给 shell ops——bash 在 win32 上的拒绝由 bash-ops 的 guard（assertShellAllowed）实现，
+	 *  本文件只负责把 platform 送到。 */
 	platform?: string;
 	/** 测试注入（testing.md「参数注入」）：替换缺省的 createSandboxBashOps；生产不传。 */
 	_buildBashOps?: typeof createSandboxBashOps;
@@ -378,8 +379,16 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 	// I2 fail-safe：构造抛错降级为“无 pwsh 覆盖”，绝不冒泡出 createSandboxTools（fail-open 防线）。
 	const basePowerShell = buildHostPowerShellBase(createHostPowerShell, deps.cwd);
 
+	// Windows 工具装配：pi 在 win32 上默认只激活 powershell 工具，而 pi 对扩展注册的工具默认自动激活
+	// （`defaultActive` 缺省为 true）——照旧注册会让 bash 在 win32 上也默认出现在模型工具列表里，
+	// 模型会先撞上 fail-closed 拒绝。但又绝不能改成“win32 上不注册 bash”：那会露出 pi 内置的
+	// （未受限）bash，用户显式启用 bash（defaultTools / --tools / setActiveTools）时模型就直接拿到
+	// 无沙箱 shell（fail-open）。所以 win32 上保留本覆盖定义、只标记 defaultActive: false：
+	// 默认不激活（模型只看到 pwsh），显式点名激活时命中的仍是本拒绝壳（fail-closed）。
+	// 非 win32 不设该键：bash 必须默认激活（既有行为不变）。
 	const bash = {
 		...baseBash,
+		...(platform === "win32" ? { defaultActive: false } : {}),
 		label: `${baseBash.label} (sandboxed)`,
 		description: escalationDescription(baseBash.description),
 		promptGuidelines: [...(baseBash.promptGuidelines ?? []), ESCALATION_GUIDELINE],

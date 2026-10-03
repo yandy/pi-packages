@@ -166,12 +166,18 @@ describe("windows-acl dialect", () => {
 		})).toThrowError(/win32 runner is not resolvable/);
 	});
 
-	it("documents the bash refusal with an actionable snippet", () => {
+	it("documents the bash refusal without a defaultTools snippet", () => {
+		// win32 工具接线：`defaultTools` 去不掉扩展注册的工具，也不再需要配置——文案只给有效指引：
+		// 用 powershell、bash 保持 fail-closed、danger-full-access 是唯一显式逃生门。
 		const error = new UnsupportedWindowsShellError("bash");
 		expect(error.message).toContain('[sandbox: bash is not supported on Windows]');
-		expect(error.message).toContain('{ "defaultTools": ["-bash", "+powershell"] }');
+		expect(error.message).toContain("the command was NOT executed");
+		expect(error.message).toContain("powershell tool only");
+		expect(error.message).toContain("fail-closed");
 		expect(error.message).toContain("pi >= 1.0.0");
 		expect(error.message).toContain("danger-full-access");
+		expect(error.message).not.toContain("-bash");
+		expect(error.message).not.toContain("defaultTools");
 	});
 
 	it("refuses bash on win32 confined modes and nothing else", () => {

@@ -32,13 +32,9 @@ bash 命令被包装进平台沙箱 runner 后在本地 spawn（**路径透明**
 - **读不受限**：与其他 runner 一致，受约束进程能读调用者可读的一切
 - **被其他 AppContainer 工具以包 SID 打标过的文件对 Low 完整性子进程不可读**（移除外来 ACE 或重装目录树可恢复）
 
-受限 shell 只有 **`powershell` 工具**。受限模式下 `bash` 一律被拒绝（绝不 spawn）并给出可执行的错误指引；在 `~/.pi/agent/settings.json` 中启用该工具（需要 pi >= 1.0.0，`powershell` 工具自该版本起提供）：
+受限 shell 只有 **`powershell` 工具**。pi 在 Windows 上默认只激活 `powershell` 工具，pi-sandbox 在 Windows 上把受限 `bash` 注册为 `defaultActive: false`：除非显式点名（`defaultTools`、`--tools` 或 `setActiveTools()`），它不会出现在模型的工具列表里；即使被显式激活，受限模式下的每次调用仍会被拒绝（绝不 spawn）并给出可执行的错误指引——除非显式切到 `danger-full-access`（唯一逃生门，与其他平台一样 `bash` 照常裸跑），沙箱绝不在 Windows 上非受限地运行 bash。
 
-```json
-{ "defaultTools": ["-bash", "+powershell"] }
-```
-
-未启用前 pi-sandbox 会在激活时提示一次，`/permission` 状态行显示 `shell: powershell only (not activated)`。`danger-full-access` 是唯一逃生门（与其他平台一样，`bash` 照常裸跑）。
+已知限制：**`defaultTools` 去不掉扩展注册的工具**（`-name` 条目只能移除内置工具；扩展工具若未声明 `defaultActive: false` 就会被自动激活）。所以这是工具注册本身的属性，不需要用户配置来规避。若 `powershell` 未激活（老宿主，或选择列表把它排除在外），pi-sandbox 会在激活时提示一次，`/permission` 状态行显示 `shell: powershell only (not activated)`；`{ "defaultTools": ["+powershell"] }`（需要 pi >= 1.0.0，`powershell` 工具自该版本起提供）可把它加回来。
 
 PowerShell 语言模式取决于启动约束，不是 ACL 边界的一部分：`read-only` 下 `%TEMP%` 不可写，pwsh 可能退化为 ConstrainedLanguage（`Add-Type`/COM/反射失败）；`workspace-write` 保持 FullLanguage。
 
