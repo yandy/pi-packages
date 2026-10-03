@@ -4,7 +4,7 @@ Pi package providing AST/LSP code-intelligence tools for pi.
 
 > ## ⚠️ Breaking changes
 >
-> **In 0.6.0 (unreleased):**
+> **In 0.6.0:**
 >
 > - **Built-in `ls`/`find`/`grep` are no longer activated.** This package now only provides the five AST/LSP tools below. pi's own default tool set is just `read`/`bash`/`edit`/`write`, so upgrading silently drops `ls`/`find`/`grep`.
 > - **Re-enable them yourself** in user (`~/.pi/agent/settings.json`) or project (`.pi/settings.json`) settings: `{ "defaultTools": ["+ls", "+find", "+grep"] }`. The `+name` form adds to the inherited default set instead of replacing it.
