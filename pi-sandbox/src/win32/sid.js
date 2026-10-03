@@ -2,13 +2,16 @@
  * Deterministic capability SIDs for the Windows ACL sandbox backend.
  *
  * The per-workspace write identity is a `S-1-4-x-y` SID derived from the
- * canonical workspace path, so every confined execution of the same workspace
- * — across sessions, server restarts, and calls — carries the SAME write SID
- * and the standing workspace ACE materializes once per workspace per machine.
- * Temporary directories get a separate, per-directory identity
- * (`S-1-4-x-y-1`) whose third sub-authority domain-separates it from every
- * two-sub-authority workspace SID; sharing the workspace identity with temp
- * would let sibling sessions write one another's temp trees.
+ * canonical workspace path: a deterministic per-workspace identity, so every
+ * confined execution of the same workspace — across sessions and restarts —
+ * carries the SAME write SID and the standing workspace ACE materializes once
+ * per workspace per machine. The temp write identity (`S-1-4-x-y-1`) is the
+ * deterministic identity of the granted temp root — the host `%TEMP%`, never a
+ * random private directory — whose fixed third sub-authority domain-separates
+ * it from every two-sub-authority workspace SID, so the two capabilities can
+ * never be confused. Neither identity carries session state: the runner
+ * replays both grants idempotently across sessions and restarts, and both ACEs
+ * are standing (never revoked).
  *
  * The callers pass canonical paths (`realpathSync.native`) — these functions
  * are pure and never touch the filesystem. `canonicalSidInput` only folds
@@ -65,14 +68,20 @@ function rootFloor(path) {
 }
 
 /**
- * Fold the spelling of a directory path so that every spelling of one
+ * Fold the spelling of a Windows directory path so that every spelling of one
  * directory derives the same capability SID. Strips trailing `\`/`/` (keeping
  * `C:\` and `\\server\share` roots), unifies `/` to `\`, and case-folds
  * Windows-spelled paths (on a win32 host, every path — NTFS is
  * case-insensitive) to the canonical drive-upper/rest-lower form. Performs no
  * filesystem access: the caller has already resolved the path with
  * `realpathSync.native`.
- * @param path - the canonical absolute directory path.
+ *
+ * Windows paths only: the output is not a valid POSIX path (a POSIX input
+ * comes back with its separators rewritten to `\`). Extended-length and
+ * device-prefixed spellings (`\\?\...`, `\\.\...`) and a bare drive letter
+ * with no separator (for example `c:`) are OUTSIDE this function's contract:
+ * they are not normalized to their canonical equivalents.
+ * @param path - a canonical absolute Windows directory path.
  * @returns the normalized spelling handed to the SID hash.
  */
 export function canonicalSidInput(path) {
@@ -102,10 +111,12 @@ export function workspaceWriteSid(workspaceRoot) {
 }
 
 /**
- * Derive one private temp directory's write SID. The random directory path is
- * the capability identity; a fixed third sub-authority (`-1`)
- * domain-separates the result from every two-sub-authority workspace SID.
- * @param tempDir - the private temp directory's absolute path.
+ * Derive the granted temp root's write SID. The absolute path of the granted
+ * temp root (canonicalized by the caller) is the capability identity; the
+ * fixed third sub-authority (`-1`) domain-separates the result from every
+ * two-sub-authority workspace SID.
+ * @param tempDir - the granted temp root's absolute path (canonicalized by the
+ * caller).
  * @returns the SDDL string form.
  */
 export function tempWriteSid(tempDir) {

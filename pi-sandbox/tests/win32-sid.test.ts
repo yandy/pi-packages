@@ -25,6 +25,12 @@ describe("win32 capability SIDs", () => {
 		expect(workspaceWriteSid(canonicalSidInput("c:\\WORK\\Demo"))).toBe(workspaceWriteSid(canonical));
 	});
 
+	it("keeps root spellings and sibling prefixes intact", () => {
+		expect(canonicalSidInput("C:\\")).toBe("C:\\");
+		expect(canonicalSidInput("\\\\server\\share\\")).toBe("\\\\server\\share");
+		expect(() => assertGrantRootsDisjoint("C:\\work", "C:\\workshop")).not.toThrow();
+	});
+
 	it("rejects a temp root nested inside the workspace", () => {
 		expect(() => assertGrantRootsDisjoint("C:\\work\\demo", "C:\\work\\demo\\tmp")).toThrowError(/temp root must not be inside the workspace/i);
 		expect(() => assertGrantRootsDisjoint("C:\\work", "C:\\Temp")).not.toThrow();
