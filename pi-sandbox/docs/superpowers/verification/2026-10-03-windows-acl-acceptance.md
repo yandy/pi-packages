@@ -554,7 +554,7 @@ icacls C:\pi-sandbox-accept\skill-demo /grant "*S-1-15-2-1234567890-1234567890:(
 **手工对照（可选，直接跑同一件事）**：
 
 ```powershell
-& 'C:\pi-packages\pi-sandbox\skills\diagnose-windows-sandbox-acl\scripts\diagnose-windows-sandbox-acl.ps1' `
+& 'C:\pi-packages\pi-sandbox\resources\skills\diagnose-windows-sandbox-acl\scripts\diagnose-windows-sandbox-acl.ps1' `
   -Path 'C:\pi-sandbox-accept\skill-demo' -AllowRoot 'C:\pi-sandbox-accept\skill-demo' -Out 'C:\pi-sandbox-accept\acl-out'
 exit $LASTEXITCODE     # 期望 0；stdout 末段有 RECAP / REPORT_FILE / SUMMARY FIXED=… GRANTED=… REFUSED=… RESTORED=…
 ```
