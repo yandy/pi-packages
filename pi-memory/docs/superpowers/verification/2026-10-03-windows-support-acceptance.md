@@ -58,9 +58,11 @@ Remove-Item vitest-win32.json
 
 **预期**
 
-- 尾部摘要：`Test Files  29 passed (29)`、`Tests  626 passed | 3 skipped (629)`。
-  （Linux 基线是 `28 passed | 1 skipped (29)` / `627 passed | 2 skipped (629)`；Windows 上 `tests/fs-retry.win32.test.ts` 从「整体跳过」变为**真实执行**（+2 例），而 3 条平台门用例转为跳过（−3 例），所以 `626 + 3 = 629`，与 Linux 总数一致。
-  ℹ️ 这两个数字是 2026-10-04 首次真机运行后校正的：总数从 630 变为 **629**（Ruling 12 回退到 `--show-toplevel` 时删掉了 MSYS 仿真用例），跳过从 4 条变为 **3 条**。）
+- 尾部摘要：`Test Files  29 passed (29)`、`Tests  629 passed | 3 skipped (632)`。
+  （本清单写作时的实测值；数字会随分支新增测试而变 —— 判据是下面的两条**不变量**，不必逐字对数字。）
+  - **不变量 1**：`failed = 0`。
+  - **不变量 2**：`skipped = 3`，名字恰好是下面这 3 条；且 `passed + skipped` = Linux 侧同一提交的总数（Linux：`630 passed | 2 skipped (632)`）。
+  - 校正历史（本文档已改过四次，因为验收期间陆续新增/删除了测试）：`618/4/622` → `626/4/630` → `626/3/629` → `629/3/632`。对不上时先看两条不变量，再核对是否拿到了预期提交。
 - 跳过用例**恰好**是下面 3 条（`describe` 与 `it` 名逐字一致；JSON 的 `fullName` 用空格连接两段）：
 
   1. `tests/memory-store-index.test.ts`
@@ -71,7 +73,7 @@ Remove-Item vitest-win32.json
      `unlinkStrict / sameFile` > `detects two names that point at the same inode`
 
 - 这三条都是 POSIX 权限/同 inode 语义（Windows 的 `chmod`/硬链接语义不同）。
-- 若总数不是 629、或跳过清单多/少了条目：原样粘贴并归类（多半是本机工作树还有别的改动，或依赖安装不完整）。
+- 若总数不是 632、或跳过清单多/少了条目：原样粘贴并归类（多半是本机工作树还有别的改动，或依赖安装不完整）。
 - 首次真机运行（2026-10-04）在**本条目**发现 3 条测试自带的平台假设（`readdir` 顺序 / 内部 `join` 出的默认 sessions 目录 / 大小写不敏感 FS 下的同名派生），已在分支上修好——它们都是**测试缺陷**，产品行为正确；修完本条目应当全绿。
 
 **实测（默认 reporter 的尾部摘要 + 跳过清单原文）**：
@@ -167,6 +169,19 @@ Linux:   /home/<user>/.pi/memory/git/github.com__yandy__pi-packages
 ```
 
 Linux 对照值由控制器在 Linux 上对同一仓库（同一 `origin`）跑出并提供；两边末两段（`git` + `github.com__yandy__pi-packages`）必须逐字相同。这条性质意味着：把同一个 `memoryDir`（同步盘/网络盘）在两端共享时，同一仓库会落到**同一个**项目记忆目录。若你的克隆 `origin` 不是这个 URL（例如用了 fork），按实际 remote 推导并注明实际值。
+
+- **本地 remote 的归类（2026-10-04 首次真机发现的缺陷，已修）**：把 `origin` 换成盘符本地路径再跑一次，确认它落在 `local/` 而不是 `git/`：
+
+```powershell
+cd C:\pi-packages
+git remote get-url origin                 # 记下原值，测完改回
+cd $env:USERPROFILE\pi-memory-probe   # 或任一新目录
+git init -q .; git remote add origin 'Z:\some.git'   # Z: 换成你真实存在的盘符路径
+pi -ne -e C:\pi-packages\pi-memory
+# 在 pi 里输入：/memory —— 期望 Dir: 以 \local\C_3a__... 结尾（不是 \git\z__...）
+```
+
+预期：盘符本地 remote（`Z:\some.git`、`Z:/some.git`、`C:\repos\foo.git`）在 Windows 上算**本地路径** → `local/<绝对路径>`；UNC（`\\server\share\repo.git`）、相对路径与 `file://` 同样落 `local/`。若出现 `\git\z__…` 这类名字，说明远程分类又退回了 scp 形态，按实现缺陷处理（spec Ruling 13）。
 
 **实测（Windows `Dir:` + Linux 对照值）**：
 

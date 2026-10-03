@@ -381,7 +381,7 @@ Lock: free
 - remote 是 http(s)、ssh（含 scp 写法 `[user@]host:owner/repo`，user 可省略）或 `git://`，以及 `git+ssh://` / `git+https://` 别名的 git 仓库 → `git/<host>__<owner>__<repo>`；端口、凭据、结尾的 `/` 与 `.git` 会被剥掉，host 转小写
 - remote URL 从原始 git config 读取（`remote.<name>.url`；先 `origin`，再按字母序，第一个可用的胜出），所以 `url.*.insteadOf` 重写不会影响映射
 - scheme 形式走 WHATWG URL 规范化（IDN host 转 punycode，百分号编码与 `.`/`..` 折叠生效，凭据/query/fragment 被丢弃），scp 形式保留原样路径 —— 等价但写法不同的 remote 可能映射到不同目录
-- 其余情况 —— 非 git 目录、没有 remote 的 git 仓库、`file://` 或本地路径 remote → `local/<absolute-path>`（git 仓库用仓库根；Windows 盘符形式的 remote 如 `C:/repos/foo.git` 在 POSIX 上按 scp 写法处理，与 git 一致）
+- 其余情况 —— 非 git 目录、没有 remote 的 git 仓库、`file://`、UNC（`\\server\share\repo.git`）、相对路径与本地路径 remote → `local/<absolute-path>`（git 仓库用仓库根）。Windows 盘符形式的 remote（`Z:\repos\foo.git`）**在 Windows 上算本地路径**，与 git 在那里的一致；同一串在 POSIX 上是 scp 写法（盘符字母是 host），仍映射到 `git/` 目录名，也与 git 一致
 - `/` 变成 `__`；文件名里不可移植的字符（`<>:"|?*`、控制字符）变成 `_XX` 十六进制转义
 - 超过 120 UTF-8 字节的名字在码点边界截断到 100 字节，再加 `__<hash8>` 后缀
 - 名字是平台感知的：Windows 上反斜杠是分隔符，并避开保留设备名与结尾点/空格；POSIX 上反斜杠仍是普通字符，上述 Windows 规则不适用。唯一在所有平台都生效的规则是「stem 形如设备名的 entry 文件名加 `_` 前缀」（见 [Windows](#windows)）

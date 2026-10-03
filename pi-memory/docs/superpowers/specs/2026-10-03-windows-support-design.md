@@ -74,6 +74,7 @@ pi-memory 之前只在 Linux/macOS 上验证过：`paths.ts` 明确声明命名�
 - **Ruling 9**：CRLF 相关的既有行为（读取归一、写回转 LF）**不得**为了「保留原风格」而改动；本设计只加测试与文档。
 - **Ruling 11**（2026-10-04，用户明确）：**验收与文档只面 PowerShell** —— Windows 用户只用 PowerShell，Git Bash 不在支持面内。因此：验收清单只给 PowerShell 命令，原「Git Bash 与 PowerShell 身份一致」条目改为「从仓库子目录启动得到同一记忆目录」（同一条代码路径，PowerShell 即可验证）；README 不再声明 Git Bash 可用。
 - **Ruling 12**（2026-10-04，用户明确，**撤销 Ruling 3**）：**仓库根回到 `git rev-parse --show-toplevel`**（main 的既有实现，4 行、一次 spawn、路径由 git 规范化）。为什么：Ruling 11 把 Git Bash 移出支持面后，cdup 的主要动机（MSYS 形态输出）消失；用户偏好回到与 main 一致的简单实现。随之删除：`--is-inside-work-tree` 判据（不再需要 —— `--show-toplevel` 在裸仓库 / cwd 在 `.git` 内部时以 `fatal: this operation must be run in a work tree`（exit 128）退出，天然返回 `null`，由两条 bare 用例与 `.git` 用例钉住）与 MSYS 仿真用例（它钉住的性质已被明确放弃）。**接受的代价**（已写入 §7）：若 PATH 上的 `git` 是 cygwin/MSYS 构建（对任何调用者都打印 `/cygdrive/c/...` 这类 POSIX 形态路径），`resolve()` 会得到错前缀 → 同一项目出现第二个记忆目录；Git for Windows 的 `git.exe` 打印原生路径，不受影响。验收清单第 3 条会打印 `--show-toplevel` 的原始输出，若它不是原生形态则归因环境差异。
+- **Ruling 13**（2026-10-04，首次真机验收发现，用户报）：**win32 上「盘符 + 分隔符」开头的 remote 算本地路径**。现象：remote 设为 `Z:\some.git` 时，`normalizeRemoteUrl` 走了 scp 分支（把 `Z` 当成 host），项目落入 `git/z__some` 而不是 `local/<绝对路径>`。为什么改：Git for Windows 把 `Z:\some.git` / `Z:/some.git` 当本地路径（用户会 `git clone Z:\some.git`），pi-memory 应当与 git 一致；POSIX 上同一串是**合法 scp 写法**（host `C`/`Z`），与那边 git 的行为也一致，故只在 win32 改判（符合 D2 的「平台差异只在明确的平台上生效」）。实现：`WINDOWS_DRIVE_PATH = /^[a-zA-Z]:[\\/]/`，win32 上命中即返回 `null` → 调用方继续看下一个 remote，最终落回 `local/<仓库根>`（UNC、相对路径与 `file://` 本来就走这条）。已知后果：同一仓库分别在 Windows（盘符 remote）与 Linux（同一串按 scp）打开时会得到**不同**身份 —— 但这条 remote 本就是「本地路径」，本地类目录已明确不要求跨机共享（D2），故接受。
 
 ## 3. 方案选择（被否决的路线）
 
@@ -134,6 +135,7 @@ POSIX 侧示例保持不变：`/home/yandy/proj` → `home__yandy__proj`，`/hom
   - 已知限制：git 输出必须是原生 Windows 形态；cygwin/MSYS 构建会打印 `/cygdrive/c/...`，`resolve()` 会把它变成错前缀（见 §7）。
   - `resolve(config.memoryDir)` 顺带把**相对路径**配置固化在解析时刻：相对值不再以「每个调用点的 cwd」为基准，而是以进程 cwd 解析一次后固定（逻辑锁的 key 用的是这个字符串，同一目录不应因写法不同而得到两把锁）。
 - `expandTilde(p, platform = process.platform)`：`~` → `homedir()`；`~/` 前缀（两端都认）；`~\` 前缀**仅 win32**。
+- `normalizeRemoteUrl(url, platform = process.platform)`：win32 上「盘符 + 分隔符」开头（`/^[a-zA-Z]:[\\/]/`）的 remote 视为本地路径 → 返回 `null`（Ruling 13）；UNC、相对路径、`file://` 本来就返回 `null`。`projectIdentity(cwd, platform = process.platform)` 把它传给分类。
 - `resolveMemoryDir` 兜底（D4）：
   ```ts
   const dir = join(base, kind, name);
@@ -248,7 +250,7 @@ export async function withFsRetry<T>(fn: () => Promise<T>, options?: { retries?:
 
 ### 5.4 真机验收套件
 
-见 `pi-memory/docs/superpowers/verification/2026-10-03-windows-support-acceptance.md`。覆盖（与 §8 记录表一一对应）：全量套件绿（含跳过清单）、`local/`/`git/` 两类目录名、**从仓库子目录启动得到同一记忆目录**、0 字节锁处置、**非 NTFS 卷上的锁**（`open(wx)` 的核心证明）、CRLF 存盘往返、大小写撞名、**`FileShare.None` 占住 `MEMORY.md` 触发瞬时 `EPERM` 重试**、快照与 `sessions/` 目录。`~\` 展开与 `/memory` 状态行不进清单：前者由注入平台的单测覆盖（`tests/config.test.ts`），而且清单里每一条的 `Dir:` 输出都会实际走一遍用户主目录路径；后者由 `tests/index-wiring.test.ts` 覆盖，并在清单各条里被反复读到。
+见 `pi-memory/docs/superpowers/verification/2026-10-03-windows-support-acceptance.md`。覆盖（与 §8 记录表一一对应）：全量套件绿（含跳过清单）、`local/`/`git/` 两类目录名、**remote 分类**（https/git/ssh → `git/…`；`file://`、UNC、相对路径、**win32 上的盘符本地路径** → `local/…`，见 Ruling 13）、**从仓库子目录启动得到同一记忆目录**、0 字节锁处置、**非 NTFS 卷上的锁**（`open(wx)` 的核心证明）、CRLF 存盘往返、大小写撞名、**`FileShare.None` 占住 `MEMORY.md` 触发瞬时 `EPERM` 重试**、快照与 `sessions/` 目录。`~\` 展开与 `/memory` 状态行不进清单：前者由注入平台的单测覆盖（`tests/config.test.ts`），而且清单里每一条的 `Dir:` 输出都会实际走一遍用户主目录路径；后者由 `tests/index-wiring.test.ts` 覆盖，并在清单各条里被反复读到。
 
 ### 5.5 验收流程
 
@@ -282,18 +284,20 @@ export async function withFsRetry<T>(fn: () => Promise<T>, options?: { retries?:
 
 ## 8. 验收记录表
 
-下表 11 条与真机验收清单的 11 条**一一对应**（清单：`pi-memory/docs/superpowers/verification/2026-10-03-windows-support-acceptance.md`）。状态：**待真机**（Linux CI 已全绿：28 files passed + 1 skipped，620 passed + 2 skipped）。
+下表 11 条与真机验收清单的 11 条**一一对应**（清单：`pi-memory/docs/superpowers/verification/2026-10-03-windows-support-acceptance.md`）。
 
-| # | 条目 | 命令 | 预期 | 实测输出 | 结论 |
-|---|---|---|---|---|---|
-| 1 | 全量套件 | `npx vitest run`（pi-memory 目录） | 全绿 + 跳过清单与 `skipIf(win32)` 条目一致 | （待填） | （待填） |
-| 2 | `local/` 目录名 | 见验收清单 | 单层 `C_3a__...` | （待填） | （待填） |
-| 3 | 从仓库子目录启动身份一致 | 见验收清单 | `Dir:` 与从仓库根启动逐字相同 | （待填） | （待填） |
-| 4 | `git/` 目录名与 Linux 一致 | 见验收清单 | `github.com__owner__repo` | （待填） | （待填） |
-| 5 | 0 字节锁处置 | 见验收清单 | 可操作错误 → `/memory unlock` 恢复 | （待填） | （待填） |
-| 6 | 非 NTFS 卷上的锁 | 见验收清单 | 写入成功 | （待填） | （待填） |
-| 7 | 瞬时 `EPERM` 重试 | 见验收清单 | 句柄释放后写入成功，无残留锁 | （待填） | （待填） |
-| 8 | CRLF 往返 | 见验收清单 | 索引计数不误报、记忆仍可见 | （待填） | （待填） |
-| 9 | 大小写撞名 | 见验收清单 | 两个文件、不互相覆盖 | （待填） | （待填） |
-| 10 | 保留设备名 entry | 见验收清单 | 文件名为 `_con.md`，可正常读取 | （待填） | （待填） |
-| 11 | 快照与 `sessions/` | 见验收清单 | `.backups/` 生成并裁剪、sessions 落入项目目录 | （待填） | （待填） |
+**状态（2026-10-04，首轮真机）**：11 条按用户汇总回复**全部通过**，第 6 条**不适用**（机器上没有非 NTFS 卷），并在第 4 条上发现 1 个实现缺陷（盘符本地 remote 归类，已修 —— 见 Ruling 13）。清单里各条的「实测」栏仍为空：用户给的是结论汇总而非原始输出，需要留档原文时可补齐回贴。
+
+| # | 条目 | 预期 | 实测输出 | 结论 |
+|---|---|---|---|---|
+| 1 | 全量套件（含跳过清单） | 全绿 + 跳过恰为 3 条 POSIX-only 用例 | `626 passed | 3 skipped (629)`（分支 `cd6fe8ab`）；用户：「测试都过了，数目也对」 | **通过** |
+| 2 | `local/` 目录名单层可读 | `…\local\C_3a__Users__<user>__pi-memory-probe` | 与预期一致 | **通过** |
+| 3 | 从仓库子目录启动身份一致 | 两次 `Dir:` 逐字相同；`--show-toplevel` 为原生形态 | 与预期一致 | **通过** |
+| 4 | `git/` 目录名与 Linux 一致 | `git\github.com__yandy__pi-packages` | 与预期一致；**同时发现**盘符本地 remote（`Z:\some.git`）被归入 `git/` 而非 `local/` | **通过，附 1 缺陷** → 已修（Ruling 13 + 3 条新用例） |
+| 5 | 0 字节锁处置 | 可操作错误 → `/memory unlock` 恢复 | 与预期一致 | **通过** |
+| 6 | 非 NTFS 卷上的锁 | 写入成功 | 机器上没有非 NTFS 卷（用户：「没有非 ntfs 环境」） | **不适用**（不记失败） |
+| 7 | 瞬时 `EPERM` 重试（win32 真句柄） | 2 例真实执行 | 与预期一致 | **通过** |
+| 8 | CRLF 存盘往返 | 索引计数不误报、记忆仍可见 | 与预期一致 | **通过** |
+| 9 | 大小写撞名 | 两个文件、不互相覆盖 | 与预期一致 | **通过** |
+| 10 | 保留设备名 entry | `_CON.md`、可正常读取 | 与预期一致 | **通过** |
+| 11 | 快照与 `sessions/` | `.backups/` 生成并裁剪、sessions 落入项目记忆目录 | 与预期一致 | **通过** |

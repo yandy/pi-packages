@@ -280,6 +280,24 @@ describe("normalizeRemoteUrl", () => {
 		expect(normalizeRemoteUrl("../repo")).toBeNull();
 		expect(normalizeRemoteUrl("")).toBeNull();
 	});
+
+	it("treats a Windows drive-letter remote as a local path on win32, and as scp on POSIX", () => {
+		// win32：Git for Windows 把 `Z:\some.git` 当本地路径（用户可以 clone 它），不应当成 scp 的 host `z`
+		expect(normalizeRemoteUrl("Z:\\some.git", "win32")).toBeNull();
+		expect(normalizeRemoteUrl("Z:/some.git", "win32")).toBeNull();
+		expect(normalizeRemoteUrl("C:\\repos\\foo.git", "win32")).toBeNull();
+		// POSIX：同一串是合法的 scp 写法（host `C` / `Z`），与 git 一致 —— 行为不变
+		expect(normalizeRemoteUrl("C:/repos/foo.git", "linux")).toBe("c/repos/foo");
+		expect(normalizeRemoteUrl("Z:\\some.git", "linux")).toBe("z/\\some");
+	});
+
+	it("keeps UNC, relative and file:// remotes out of the git kind on every platform", () => {
+		for (const platform of ["win32", "linux"] as const) {
+			expect(normalizeRemoteUrl("\\\\server\\share\\repo.git", platform), platform).toBeNull();
+			expect(normalizeRemoteUrl("..\\other.git", platform), platform).toBeNull();
+			expect(normalizeRemoteUrl("file:///srv/repo.git", platform), platform).toBeNull();
+		}
+	});
 	it("rejects URLs without a repository path", () => {
 		expect(normalizeRemoteUrl("https://github.com/")).toBeNull();
 		expect(normalizeRemoteUrl("https://github.com")).toBeNull();
@@ -404,6 +422,14 @@ describe("projectIdentity", () => {
 		// 仓库的 remote。必须保留既有的 local/<绝对路径> 身份，而不是因 remote 变成 git/<remote 身份>。
 		await initRepo(dir, "https://github.com/yandy/pi-packages.git");
 		expect(await projectIdentity(join(dir, ".git"))).toEqual({ kind: "local", key: resolve(join(dir, ".git")) });
+	});
+
+	it("falls back to local for a drive-letter remote on win32 (git treats it as a local path)", async () => {
+		await initRepo(dir, "Z:\\some.git");
+		// win32：本地路径 → local/<绝对路径>（而不是 git/z__some）
+		expect(await projectIdentity(dir, "win32")).toEqual({ kind: "local", key: resolve(dir) });
+		// POSIX：同一串仍是 scp 形式 → git 身份（与 git 自身行为一致，行为不变）
+		expect(await projectIdentity(dir, "linux")).toEqual({ kind: "git", key: "z/\\some" });
 	});
 
 	it("resolves the same identity from a subdirectory", async () => {

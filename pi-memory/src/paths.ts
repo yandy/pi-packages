@@ -99,6 +99,12 @@ export interface ProjectIdentity {
 
 const GIT_PROTOCOLS = new Set(["http", "https", "ssh", "git"]);
 const SCHEME_URL = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
+/**
+ * Windows 盘符路径（`Z:\…` / `Z:/…`）。在 win32 上这是**本地路径**，不是 scp 的 `host:path`：
+ * Git for Windows 就这么解释（用户可以 `git clone Z:\some.git`）；而 `resolve()` 会把它当成
+ * host `z`（spec Ruling 13）。POSIX 上同一串是合法的 scp 写法（host `C`），与 git 一致，不改判。
+ */
+const WINDOWS_DRIVE_PATH = /^[a-zA-Z]:[\\/]/;
 
 /** Lowercase and IDN-normalize a host the way the URL API does for https. */
 function normalizeHost(host: string): string {
@@ -112,11 +118,14 @@ function normalizeHost(host: string): string {
 /**
  * Normalize an http(s)/ssh/git remote URL to `host/path`.
  * Accepts `[user@]host:path` scp syntax and `git+ssh` / `git+https` aliases.
- * Returns null for file:// URLs, local paths and URLs without a repository path.
+ * Returns null for file:// URLs, local paths and URLs without a repository path
+ * （因此盘符本地 remote 在 win32 上也返回 null → 落回 `local/<绝对路径>`）。
  */
-export function normalizeRemoteUrl(url: string): string | null {
+export function normalizeRemoteUrl(url: string, platform: NodeJS.Platform = process.platform): string | null {
 	const raw = url.trim();
 	if (!raw) return null;
+	// win32 上「盘符 + 分隔符」开头的是本地路径，不是 scp 的 host（见 `WINDOWS_DRIVE_PATH`）。
+	if (platform === "win32" && WINDOWS_DRIVE_PATH.test(raw)) return null;
 
 	let host: string;
 	let path: string;
@@ -191,12 +200,15 @@ async function gitRemoteUrls(cwd: string): Promise<RemoteEntry[]> {
 	}
 }
 
-/** Resolve the project identity: normalized git remote, or the project root path. */
-export async function projectIdentity(cwd: string): Promise<ProjectIdentity> {
+/** Resolve the project identity: normalized git remote, or the project root path.
+ *
+ * `platform` 决定盘符远程的归类（win32 上当本地路径，见 `normalizeRemoteUrl`）；其余平台行为不变。
+ */
+export async function projectIdentity(cwd: string, platform: NodeJS.Platform = process.platform): Promise<ProjectIdentity> {
 	const toplevel = await gitToplevel(cwd);
 	if (!toplevel) return { kind: "local", key: resolve(cwd) };
 	for (const { url } of await gitRemoteUrls(cwd)) {
-		const key = normalizeRemoteUrl(url);
+		const key = normalizeRemoteUrl(url, platform);
 		if (key) return { kind: "git", key };
 	}
 	return { kind: "local", key: resolve(toplevel) };
