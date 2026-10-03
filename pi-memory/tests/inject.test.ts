@@ -179,6 +179,16 @@ describe("truncateIndexForInjection", () => {
 		expect((r.content.match(/^- \[/gm) ?? []).length).toBe(50);
 	});
 
+	// 未截断的 CRLF 索引走的是「逐字节返回原文」的近路，`\r` 只能靠该分支的显式归一挡下 ——
+	// 否则整份小索引原样进 system prompt，每行尾部都拖着噪音字符。
+	it("keeps carriage returns out of the injected section", () => {
+		const window = truncateIndexForInjection("# Memory Index\r\n- [A](A.md) — alpha\r\n", 50, 16384);
+
+		expect(window.truncated).toBe(false);
+		expect(window.content).not.toContain("\r");
+		expect(window.content).toContain("- [A](A.md) — alpha");
+	});
+
 	// 尾部多余空行是噪音（`rebuildIndex` 也把它们当噪音），不能白吃窗口行数。
 	it("does not let trailing blank lines eat window slots", () => {
 		const entries = Array.from({ length: 50 }, (_, i) => `- [M${i}](m${i}.md) — d${i}`);

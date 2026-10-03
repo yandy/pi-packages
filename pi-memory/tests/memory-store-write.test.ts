@@ -2,7 +2,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { parseEntryFile } from "../src/entry-file";
+import { parseEntryFile, serializeEntryFile } from "../src/entry-file";
 import { parseEntryIndex } from "../src/entry-index";
 import { MemoryStore, type StoreConfig } from "../src/memory-store";
 import { ProcessLockTimeoutError } from "../src/process-lock";
@@ -418,5 +418,36 @@ describe("逻辑锁的超时与 try 形态", () => {
 				`Memory operations for ${join(dir, "MEMORY.md")} are already running in this process`,
 			);
 		});
+	});
+});
+
+// 手工编辑 / Windows 编辑器存过的 CRLF 条目（D11 明确鼓励手改）：frontmatter 解析不做行尾归一的话，
+// 它从清单、搜索、replace/remove 定位里一起消失 —— 静默丢记忆；而写回必须是 LF，否则每次补丁都翻倍。
+describe("CRLF 条目", () => {
+	it("finds and rewrites entries stored with CRLF line endings", async () => {
+		const path = join(dir, "crlf.md");
+		await writeFile(
+			path,
+			serializeEntryFile(
+				{
+					name: "CRLF entry",
+					description: "d",
+					type: "feedback",
+					created: "2026-10-01",
+					modified: "2026-10-01T00:00:00.000Z",
+				},
+				"正文",
+			).replace(/\n/g, "\r\n"),
+			"utf8",
+		);
+
+		expect((await store.readEntry("CRLF entry"))?.body).toBe("正文");
+		expect((await store.searchEntries("正文")).map((e) => e.name)).toEqual(["CRLF entry"]);
+
+		await store.replaceEntry("CRLF entry", { body: "改过" });
+		expect(await readFile(path, "utf8")).not.toContain("\r");
+
+		await store.removeEntry("CRLF entry");
+		expect(await store.readEntry("CRLF entry")).toBeNull();
 	});
 });
