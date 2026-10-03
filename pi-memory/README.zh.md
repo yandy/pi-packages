@@ -6,6 +6,10 @@ pi coding agent 的文件系统持久记忆层。把项目知识（事实、偏�
 
 > ## ⚠️ 破坏性变更
 >
+> **2.2.0 之后（未发布）：**
+>
+> - **注入的索引窗口改为「最新的 50 行 / 16 KiB」。** `memIndexInjectMaxLines` 200 → 50、`memIndexInjectMaxBytes` 25600 → 16384。写入口径不变（200 行 / 25600 字节），因此比「最新 50 行」更旧的记忆不再进 system prompt —— 它们仍可由 auto-surfacing 与 `memory` 工具检索。已经显式配置 `memIndexInjectMax*` 的用户不受影响。
+>
 > **2.2.0：**
 >
 > - **`extractMemories.enabled` 默认改为 `false`。** 每轮自动提取现在是 opt-in：开启后每轮结束都会跑一次 headless 模型调用。已经显式写了 `"extractMemories": { "enabled": true }` 的配置不受影响。
@@ -112,7 +116,9 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
 
 索引上限是 `memIndexMaxLines`（200）个非空行与 `memIndexMaxBytes`（25600）字节。这 200 行是**索引行，不是记忆条数**：`rebuildIndex` 至少保证一行头部（已有手写头部时原样保留 —— 首个条目之前的末尾空行会被去掉；否则写 `# Memory Index`），手写的标题、分组、注释同样占额度。因此重建后的索引最多约 **199 条记忆**（每个项目目录；若保留手写标题则更少）。超限时写入**不会失败**：写入照样成功，工具把一条可操作的警告回给模型，让它去合并或删除条目（超出上限的部分下次加载时不可见）。
 
-这也是 `/dream` 不再是「可选的整理」而是**容量管理必需**的原因。在接近 199 条之前跑一次（或者接受提醒）。
+**真正进模型的是另一个更小的窗口**：`memIndexInjectMaxLines` / `memIndexInjectMaxBytes`（默认 50 行 / 16384 字节）。窗口取索引的**最新**一端 —— 即**文件底部**：`memory(action="add")` 追加到末尾、`/dream` 的 `rebuild_index` 按 `modified` 重排。两种例外值得知道：`memory(action="replace")` 是**原地**重写那一行，被改写的老记忆会保持原位（可能就留在窗口外）直到下次 `/dream` 重排；而文件顶部的手写标题/分组/注释是**位置**语义而不是时间语义，索引一旦超过 50 行，先被丢出窗口的正是这块手工整理的内容。因此写满的索引恰好注入**最新的 50 条记忆**（窗口一旦截断，`# Memory Index` 头行与它下面的空行就落在窗口外）；48 条及以下则整份注入。被略过的记忆**没有丢**：auto-surfacing、`memory(action="search")` 与 `/dream` 整理都还能看到它们。`/memory` 用两行区分两套口径：`Index:` 是写入口径（磁盘真相），`Inject:` 是进 system prompt 的窗口。
+
+这也是 `/dream` 不再是「可选的整理」而是**容量管理必需**的原因。两个阀值要分开看：prompt 可见性止于注入窗口，想让每条记忆都进 system prompt，就在**接近 48 条之前**整理；199 只是写入口径的硬上限，过了它索引自身就必须缩小。
 
 ## 配置
 
@@ -124,8 +130,8 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
   "memoryDir": "~/.pi/memory",
   "memIndexMaxLines": 200,
   "memIndexMaxBytes": 25600,
-  "memIndexInjectMaxLines": 200,
-  "memIndexInjectMaxBytes": 25600,
+  "memIndexInjectMaxLines": 50,
+  "memIndexInjectMaxBytes": 16384,
   "lock": { "timeoutMs": 5000, "snapshotKeep": 5 },
   "defaults": { "model": "provider/model-id", "sessionPersistence": { "enabled": false } },
   "dream": { "nudgeAfterSessions": 5, "nudgeAfterHours": 24, "thinkLevel": "high" },
@@ -155,8 +161,8 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
 | `memoryDir` | `~/.pi/memory` | 所有记忆数据的根目录 |
 | `memIndexMaxLines` | `200` | 写入口径：`MEMORY.md` 的最大非空行数（`# Memory Index` 头行与手写标题同样占额度，所以并不等于记忆条数） |
 | `memIndexMaxBytes` | `25600` | 写入口径：`MEMORY.md` 的最大字节数 |
-| `memIndexInjectMaxLines` | `200` | 注入口径：放进 `memory_index` section 的最大行数。**刻意与写入口径同量级** —— 预算更小会让「已经写成功」的记忆看不见 |
-| `memIndexInjectMaxBytes` | `25600` | 注入口径：section 的最大字节数（超出则截断并带 `[truncated: …]` 标记） |
+| `memIndexInjectMaxLines` | `50` | 注入口径：放进 `memory_index` section 的最大行数。窗口保留**最新**的行、丢弃**最旧**的行 —— 索引是纯时间序，窗口再小也不会藏住你刚写完的那条。**任一键写 `0` = 完全不注入索引**（section 保持空值） |
+| `memIndexInjectMaxBytes` | `16384` | 注入口径：section 的最大字节数（优先丢最旧的行，截断标记在**开头**） |
 | `lock.timeoutMs` | `5000` | 单次原语等逻辑锁 / 等跨进程 `.lock` 的上限。同时也是 `session_shutdown` 等在途写入的上限 |
 | `lock.snapshotKeep` | `5` | `.backups/` 保留的回滚点数量（`migrate-` 前缀的目录永不裁剪 —— 它们是旧版迁移留下的整目录快照，`originals/` 子目录里装着 2.0 之前的 topic 原文） |
 | `defaults.model` | —（必需） | 三个子任务的共享模型。**没有默认值**：会执行的任务必须能解析出模型，否则启动失败（见[模型配置](#模型配置)）。per-task 覆盖它 |
@@ -309,12 +315,16 @@ memory(action: "add" | "replace" | "remove" | "list" | "search",
 Memory: enabled
 Dir: /home/you/.pi/memory/git/github.com__owner__repo
 Index: 38/200 lines, 2841/25600 bytes, 1 unrecognized lines
+Inject: 39/50 lines, 2841/16384 bytes
 Entries: 37
+Modules: dream=on(provider/model-a) extractMemories=off autoSurfacing=on(provider/model-b)
 Last dream: 2026-10-01T22:10:04.882Z
 Lock: free
 ```
 
-- `Index` 用**写入**口径（`memIndexMax*`），并报告索引里有多少非空行解析不出（`# Memory Index` 头行与手写标题会计入）。CRLF（以及单独的 CR）行尾在解析前就被归一为 LF，下一次写入也一律输出 LF，因此被 Windows 编辑器改过行尾的 `MEMORY.md` **不会**推高这个计数。
+- `Index` 用**写入**口径（`memIndexMax*`），并报告索引里有多少非空行解析不出（`# Memory Index` 头行与手写标题会计入）。CRLF（以及单独的 CR）行尾在解析前就被归一为 LF，下一次写入也一律输出 LF，因此被 Windows 编辑器改过行尾的 `MEMORY.md` **不会**推高这个计数。注入侧同样做归一：CRLF 文件不会把 `\r` 送进 system prompt。
+- `Inject` 用**注入**口径（`memIndexInjectMax*`），统计窗口内的行数与字节数 —— 即真正会进 `memory_index` section 的索引文本（截断标记本身不计入）。它与真正注入的值由同一份窗口代码算出来，不可能漂移。注意两行的口径不同：`Index` 数的是**非空**行，`Inject` 数的是窗口内的**全部**行，所以规范索引（LF 行尾、以换行结尾、头部后有且仅有一个空行）下 `Inject` 会比 `Index` 多一行而字节数相同。system prompt 里的值是**会话内冻结**的（见[为什么索引是冻结的](#为什么索引是冻结的)）：`session_start` 之后写入的记忆会立刻出现在 `Index`，但要等 compaction 或下一个会话才出现在 `Inject`。
+- `Modules` 报三个模型驱动功能的激活状态：`on(<生效模型>)` / `off`。生效模型 = 该任务自己的 `model`，没有则用 `defaults.model`。`dream` 没有独立开关 —— memory 系统启用它就可用。
 - `Lock` 有三种：`free`、`held by <op> (pid N on <hostname>, started <ISO>)`、`unreadable — run /memory unlock`。`/memory unlock` 的确认框会显示同一行持有者信息。
 - 以 `enabled: false` 启动的会话在启动时不初始化任何东西：`/memory` 报两行（`Memory: disabled` + `Dir: not initialized — set "enabled": true in memory.json and restart`）；会话中途无法开启；`/memory unlock` 不需要 store 也能用。
 - 必需模型缺失或解析不出时不初始化任何东西，`/memory` 报 `Memory: misconfigured` + `Dir: not initialized` + 每行一条 `- <error>`；同样的错误在 session_start 时以 error 通知出现。

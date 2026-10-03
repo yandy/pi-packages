@@ -6,6 +6,10 @@ Aligned with Claude Code's auto memory mechanism: **one memory = one file**, a `
 
 > ## ⚠️ Breaking changes
 >
+> **After 2.2.0 (unreleased):**
+>
+> - **The injected index window is now the newest 50 lines / 16 KiB.** `memIndexInjectMaxLines` 200 → 50 and `memIndexInjectMaxBytes` 25600 → 16384. The write capacity is unchanged (200 lines / 25600 bytes), so memories older than the newest 50 index lines no longer reach the system prompt — they stay reachable through auto-surfacing and the `memory` tool. Configs that already set `memIndexInjectMax*` are unaffected.
+>
 > **In 2.2.0:**
 >
 > - **`extractMemories.enabled` now defaults to `false`.** Per-turn extraction is opt-in: once enabled, every turn ends with a headless model call. Configs that already set `"extractMemories": { "enabled": true }` are unaffected.
@@ -97,7 +101,7 @@ File names are derived from `name` (unsafe characters replaced, 100-byte cap, `-
 - [Test command](Test-command.md) — run npm test, not npm run test
 ```
 
-Writes are **surgical**: only the target line changes, hand-written headings, groups and comments are preserved byte-for-byte, and line order is stable. The one exception is line endings: CRLF (or lone CR) is normalised to LF before parsing, so the first write to a CRLF file rewrites it with LF.
+Writes are **surgical**: only the target line changes, hand-written headings, groups and comments are preserved byte-for-byte, and line order is stable. The one exception is line endings: CRLF (or lone CR) is normalised to LF before parsing, so the first write to a CRLF file rewrites it with LF. The injected index uses the same normalisation — a CRLF file never sends `\r` into the system prompt.
 
 ### Memory types
 
@@ -112,7 +116,9 @@ Writes are **surgical**: only the target line changes, hand-written headings, gr
 
 The index holds at most `memIndexMaxLines` (200) non-empty lines and `memIndexMaxBytes` (25600) bytes. Those 200 lines are **index lines, not memories**: `rebuildIndex` guarantees at least one header line — an existing hand-written header is kept verbatim (trailing blank lines before the first entry are dropped), otherwise it writes `# Memory Index` — and hand-written headings, groups and comments count too. A rebuilt index therefore holds at most about **199 memories per project directory** (fewer if you keep hand-written headings). Exceeding the limit does **not** fail the write: the write succeeds and the tool returns an actionable warning telling the model to merge or drop entries (everything past the limit is invisible on the next load).
 
-This is why `/dream` is no longer optional housekeeping — it is **capacity management**. Run it (or accept the nudge) before you approach 199 memories.
+**What reaches the model is a separate, smaller window:** `memIndexInjectMaxLines` / `memIndexInjectMaxBytes` (default 50 lines / 16384 bytes). The window is taken from the **newest** end of the index, i.e. from the **bottom of the file**: `memory(action="add")` appends, and `/dream`'s `rebuild_index` re-sorts by `modified`. Two exceptions matter — `memory(action="replace")` rewrites its line **in place**, so an edited older memory keeps its position (and can stay outside the window) until the next `/dream` re-sort; and hand-written headings, groups or notes at the top of the file are positional rather than chronological, so a curated top block is the first thing the window drops. A full index therefore injects the **50 newest memories** (the `# Memory Index` header and its blank line fall outside the window once it truncates); an index of 48 memories or fewer is injected whole. Omitted memories are **not lost**: auto-surfacing, `memory(action="search")` and `/dream` consolidation still see them. `/memory` prints both budgets apart: `Index:` is the write capacity (disk truth), `Inject:` is the window that goes into the system prompt.
+
+This is why `/dream` is no longer optional housekeeping — it is **capacity management**. Two thresholds matter: prompt visibility ends at the injection window, so consolidate **before you pass ~48 memories** if you want every entry in the system prompt, while 199 is only the hard write limit past which the index itself has to shrink.
 
 ## Configuration
 
@@ -124,8 +130,8 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
   "memoryDir": "~/.pi/memory",
   "memIndexMaxLines": 200,
   "memIndexMaxBytes": 25600,
-  "memIndexInjectMaxLines": 200,
-  "memIndexInjectMaxBytes": 25600,
+  "memIndexInjectMaxLines": 50,
+  "memIndexInjectMaxBytes": 16384,
   "lock": { "timeoutMs": 5000, "snapshotKeep": 5 },
   "defaults": { "model": "provider/model-id", "sessionPersistence": { "enabled": false } },
   "dream": { "nudgeAfterSessions": 5, "nudgeAfterHours": 24, "thinkLevel": "high" },
@@ -155,8 +161,8 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
 | `memoryDir` | `~/.pi/memory` | Root directory for all memory data |
 | `memIndexMaxLines` | `200` | Write capacity: max non-empty lines in `MEMORY.md` (the `# Memory Index` header and hand-written headings count too, so this is not exactly the memory count) |
 | `memIndexMaxBytes` | `25600` | Write capacity: max bytes of `MEMORY.md` |
-| `memIndexInjectMaxLines` | `200` | Injection budget: max lines of the index put into the `memory_index` section. Same scale as the write capacity on purpose — a smaller budget would hide memories that were written successfully |
-| `memIndexInjectMaxBytes` | `25600` | Injection budget: max bytes of the index section (truncated with a `[truncated: …]` marker) |
+| `memIndexInjectMaxLines` | `50` | Injection window: max lines of the index put into the `memory_index` section. The window keeps the **newest** lines and drops the **oldest** ones — the index is pure chronological order, so a smaller window never hides the memory you just wrote. **`0` (either key) injects no index at all** — the `memory_index` section stays empty |
+| `memIndexInjectMaxBytes` | `16384` | Injection window: max bytes of the index section (older lines are dropped first, with a `[truncated: …]` marker at the **top**) |
 | `lock.timeoutMs` | `5000` | How long a write waits for the logical lock (single primitive) or the cross-process `.lock`. Also the upper bound `session_shutdown` waits for in-flight writes |
 | `lock.snapshotKeep` | `5` | Rollback points kept in `.backups/` (directories named `migrate-*` — whole-directory snapshots from an earlier 1.x migration, whose `originals/` subdirectory holds the pre-2.0 topic files — are never pruned) |
 | `defaults.model` | `— (required)` | Shared model for dream / extract / side query. **No default**: every task that will run must resolve a model, otherwise `session_start` fails (see [Model configuration](#model-configuration)). A per-task `model` overrides it |
@@ -309,12 +315,16 @@ Status output:
 Memory: enabled
 Dir: /home/you/.pi/memory/git/github.com__owner__repo
 Index: 38/200 lines, 2841/25600 bytes, 1 unrecognized lines
+Inject: 39/50 lines, 2841/16384 bytes
 Entries: 37
+Modules: dream=on(provider/model-a) extractMemories=off autoSurfacing=on(provider/model-b)
 Last dream: 2026-10-01T22:10:04.882Z
 Lock: free
 ```
 
 - `Index` uses the **write** capacity (`memIndexMax*`) and reports how many non-empty lines could not be parsed as index lines (the `# Memory Index` header and hand-written headings count). CRLF (or lone CR) line endings are normalised to LF before parsing, and the next write emits LF too, so a `MEMORY.md` re-saved by a Windows editor does **not** raise this count.
+- `Inject` uses the **injection** window (`memIndexInjectMax*`) and counts the window's lines and bytes — the index text that goes into the `memory_index` section, taken from the **newest** end (the truncation marker itself is not counted). It is computed by the same window code that produces the injected value, so the two cannot drift. Note the two lines count different things: `Index` counts **non-empty** lines, `Inject` counts **every** line of the window, so on a canonical index (LF endings, trailing newline, one blank line after the header) `Inject` reports one more line than `Index` and the same byte count. The value in the system prompt is **frozen for the session** (see [Why the index is frozen](#why-the-index-is-frozen)): a memory written after `session_start` appears in `Index` immediately but in `Inject` only after compaction or in the next session.
+- `Modules` reports the activation state of the three model-driven features as `on(<effective model>)` / `off`. The effective model is the task's own `model`, otherwise `defaults.model`. `dream` has no switch of its own — it is on whenever the memory system is enabled.
 - `Lock` is `free`, `held by <op> (pid N on <hostname>, started <ISO>)`, or `unreadable — run /memory unlock`. `/memory unlock` shows the same holder line in its confirmation prompt.
 - In a session started with `enabled: false`, nothing is initialized at boot: `/memory` reports `Memory: disabled` plus `Dir: not initialized — set "enabled": true in memory.json and restart`, there is no way to enable it mid-session, and `/memory unlock` still works without a store.
 - If a required model is missing or cannot be resolved, nothing is initialized and `/memory` reports `Memory: misconfigured` and `Dir: not initialized`, followed by one `- <error>` line per problem. The same errors are shown as an error notification at session start.

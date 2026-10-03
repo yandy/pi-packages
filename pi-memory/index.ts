@@ -2,13 +2,13 @@ import { unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { loadConfig, modelConfigErrors, requiredModel, type MemoryConfig, type SessionPersistenceConfig } from "./src/config";
+import { loadConfig, modelConfigErrors, requiredModel, taskModel, type MemoryConfig, type SessionPersistenceConfig } from "./src/config";
 import { runDream } from "./src/dream";
 import { indexCapacity, parseEntryIndex } from "./src/entry-index";
 import { runExtract } from "./src/extract";
 import { readLockStatus, type LockInfo } from "./src/fs-lock";
 import { readRecordedMemoryIndex } from "./src/index-source";
-import { applyIndexSection, buildIndexSection, buildInjection, injectSurfacedContent, runSideQuery, scanEntries } from "./src/inject";
+import { applyIndexSection, buildIndexSection, buildInjection, indexInjectionCapacity, injectSurfacedContent, runSideQuery, scanEntries } from "./src/inject";
 import {
 	createMemoryTool,
 	DREAM_ACTIONS,
@@ -66,6 +66,28 @@ function dreamFailureMessage(e: unknown): string {
  */
 function countInjectedBlocks(content: string): number {
 	return Math.max(0, content.split("\n## ").length - 1);
+}
+
+/**
+ * `/memory` 的模块激活状态一行：`dream=on(model) extractMemories=off autoSurfacing=on(model)`。
+ *
+ * `dream` 没有独立开关 —— memory 系统启用（能走到状态分支）它就可用；另外两个直接反映各自的
+ * `enabled`。模型是**生效值**（per-task 优先，其次 `defaults.model`），关闭的模块不显示模型：
+ * 用户问「为什么没生效」时答案在开关上，而不在模型上。
+ *
+ * 导出供测试直接覆盖：正常会话里「模型解析不出」那条路径走不到（`session_start` 会先拦成
+ * misconfigured），只能直接调纯函数。
+ */
+export function moduleStatusLine(cfg: MemoryConfig): string {
+	return (["dream", "extractMemories", "autoSurfacing"] as const)
+		.map((task) => {
+			// `?.` 是防御：`deepMerge` 会把用户写的 `"extractMemories": null` 原样带进来，
+			// 那时 `cfg[task].enabled` 会抛错，把整个 `/memory` 命令带崩。
+			const enabled = task === "dream" ? true : cfg[task]?.enabled;
+			if (!enabled) return `${task}=off`;
+			return `${task}=on(${taskModel(cfg, task) ?? "no model"})`;
+		})
+		.join(" ");
 }
 
 /** `<op> (pid N on <hostname>, started <ISO>)` —— `/memory` 的 Lock 行与 unlock 确认框共用同一份描述。 */
@@ -550,16 +572,21 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify(lines.join("\n"), "info");
 				return;
 			}
-			// 容量用写入那一侧的口径（memIndexMax*）：用户要知道的是「还能不能写」，
-			// 而注入口径（memIndexInject*）默认与它同值（D3）。unrecognized 是索引里非空但
-			// 解析不了的行数 —— 手写标题/分组/被 Windows 编辑器改坏的行都在这里露出来。
+			// 两套口径都要报：`Index:` 是写入口径（用户要知道「还能不能写」），`Inject:` 是注入口径
+			// —— 窗口只取索引**最新**的 50 行，与写入口径解耦，只报前者会让用户以为 Entries 全在
+			// prompt 里。`indexInjectionCapacity` 与真正注入共用同一个窗口核心，数字不可能漂移。
+			// unrecognized 是索引里非空但解析不了的行数 —— 手写标题/分组/被 Windows 编辑器改坏的行
+			// 都在这里露出来。
 			const indexRaw = await activeStore.readIndex();
 			const cap = indexCapacity(indexRaw, config.memIndexMaxLines, config.memIndexMaxBytes);
+			const inject = indexInjectionCapacity(indexRaw, config.memIndexInjectMaxLines, config.memIndexInjectMaxBytes);
 			const summary = [
 				`Memory: ${config.enabled ? "enabled" : "disabled"}`,
 				`Dir: ${dir}`,
 				`Index: ${cap.lineCount}/${config.memIndexMaxLines} lines, ${cap.byteLength}/${config.memIndexMaxBytes} bytes, ${parseEntryIndex(indexRaw).unrecognized} unrecognized lines`,
+				`Inject: ${inject.lineCount}/${config.memIndexInjectMaxLines} lines, ${inject.byteLength}/${config.memIndexInjectMaxBytes} bytes`,
 				`Entries: ${(await activeStore.listEntries()).length}`,
+				`Modules: ${moduleStatusLine(config)}`,
 				`Last dream: ${(await readDreamMeta(dir))?.lastDreamAt ?? "never"}`,
 				`Lock: ${await lockStatusLine(dir)}`,
 			].join("\n");
