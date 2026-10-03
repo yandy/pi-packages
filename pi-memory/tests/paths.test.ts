@@ -457,7 +457,7 @@ describe("assertInsideRoot", () => {
 		expect(() => assertInsideRoot("/mem", "/mem")).toThrow(/escapes/);
 	});
 
-	it("rejects the exact name that the pre-fix Windows derivation produced", () => {
+	it("accepts the pre-fix multi-level name but rejects one that climbs out of the root", () => {
 		// 旧实现在 win32 上把 `C:\Users\yandy` 派生成 `C_3a\Users\yandy`，join 之后变成多级路径
 		const base = "C:\\mem";
 		const escaped = win32.resolve(win32.join(base, "local", "C_3a\\Users\\yandy"));

@@ -111,6 +111,7 @@ export async function runDream(opts: RunDreamOpts): Promise<string> {
 		const files = await snapshotFiles(opts.memoryDir, opts.store.cfg.platform);
 		await createSnapshot(join(opts.memoryDir, BACKUP_DIR), "dream", files, opts.memoryDir, {
 			keep: opts.store.cfg.lock.snapshotKeep,
+			platform: opts.store.cfg.platform,
 		});
 
 		return runHeadlessAgent({

@@ -10,7 +10,8 @@ import { withFsRetry } from "./fs-retry";
  * 也就不需要 TTL、续约心跳与存活探测。
  *
  * **永不自动回收**：另一个进程崩溃留下的锁没有任何人能释放它，但**也不会被自动删掉**。
- * 原因是「移走别人的锁」无法用 POSIX 原语做到可证明安全：锁路径不存在（`open(wx)`）正是
+ * 原因是「移走别人的锁」无法用 POSIX 原语做到可证明安全（Windows 同样没有 compare-and-delete
+ * 原语）：锁路径不存在（`open(wx)`）正是
  * 合法获取条件，所以任何「先移走旧锁、再建立自己的」的接管都会产生一个空窗，其它等待者
  * 可以合法地抢占它；一旦移走的其实是某个**活持有者**刚建立的记录，互斥就无法再恢复（把记录
  * 挪回去又会顶掉抢占者，而路径只能容纳一条记录）。实测：把 `rm` 换成原子 `rename` 仍然会双持有，
@@ -160,8 +161,9 @@ async function acquireOnce(lockPath: string, info: LockInfo): Promise<AcquireOut
  *
  * 与旧实现的差别：旧实现先把记录写进同目录的临时文件、再 `link` 到锁路径，因而内容原子出现；
  * 但 `link` **只支持 NTFS**（ReFS、部分网络共享与云盘目录都不支持），在那些卷上整把锁取不到
- * → 记忆完全不可写（spec §1.2 P4）。`open(wx)` 在任意卷上都原子，代价是「文件已建立、内容
- * 未写入」的极短窗口，由读取侧的 `empty` 态与 `/memory unlock` 兜底（spec §4.4）。
+ * → 记忆完全不可写（spec §1.2 P4）。`open(wx)` 的**建立**在任意卷上都原子 —— 原子的只是
+ * 「谁建了这个文件」，**不是记录内容**：内容随后才写，于是有「文件已建立、内容未写入」的极短
+ * 窗口，由读取侧的 `empty` 态与 `/memory unlock` 兜底（spec §4.4）。
  */
 async function createExclusive(lockPath: string, info: LockInfo): Promise<boolean> {
 	let handle: Awaited<ReturnType<typeof open>>;
@@ -172,7 +174,19 @@ async function createExclusive(lockPath: string, info: LockInfo): Promise<boolea
 		throw e;
 	}
 	try {
-		await withFsRetry(() => handle.writeFile(JSON.stringify(info), "utf8"));
+		const record = Buffer.from(JSON.stringify(info), "utf8");
+		await withFsRetry(async () => {
+			// 定长位置写 + 完整性校验：写入用显式偏移，重试不会续写（`writeFile` 会把第二次写入
+			// 追加到当前位置 → 两个 JSON 拼接 → 读者判 unreadable → 持有者自己也释放不掉这把锁）。
+			let written = 0;
+			while (written < record.length) {
+				const { bytesWritten } = await handle.write(record, written, record.length - written, written);
+				if (bytesWritten <= 0) {
+					throw Object.assign(new Error("lock record write made no progress"), { code: "EIO" });
+				}
+				written += bytesWritten;
+			}
+		});
 		// `close` 也可能失败（SMB/网络盘的延迟刷写错误、EIO），而它在记录**已落盘**之后发生：
 		// 若直接上抛，`withLock` 的 finally 不会执行（acquire 从未返回 true），锁会留在原地并指向
 		// 本进程 → 本进程此后每次获取都读到「活持有者」并自锁到 timeout。故与写入失败同一处置。

@@ -237,6 +237,7 @@ export class MemoryStore {
 	async #snapshot(label: string, files: string[]): Promise<void> {
 		await createSnapshot(join(this.cfg.memoryDir, BACKUP_DIR), label, files, this.cfg.memoryDir, {
 			keep: this.cfg.lock.snapshotKeep,
+			platform: this.#platform,
 		});
 	}
 

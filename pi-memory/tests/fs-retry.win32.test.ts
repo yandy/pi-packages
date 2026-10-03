@@ -14,11 +14,14 @@ describe.skipIf(process.platform !== "win32")("withFsRetry against a real Window
 	let target: string;
 	let ready: string;
 	const holders: ChildProcess[] = [];
+	/** 子进程启动失败（比如没有 powershell.exe）：记下来，由 waitForReady 报出真实原因。 */
+	const holderFailures: Error[] = [];
 
 	beforeEach(async () => {
 		dir = await mkdtemp(join(tmpdir(), "mem-retry-win-"));
 		target = join(dir, "target.txt");
 		ready = join(dir, "ready.txt");
+		holderFailures.length = 0;
 		await writeFile(target, "initial", "utf8");
 	});
 	afterEach(async () => {
@@ -42,18 +45,31 @@ describe.skipIf(process.platform !== "win32")("withFsRetry against a real Window
 
 	/** 后台独占 target `holdMs` 毫秒后释放；取得独占后写 ready 标记。 */
 	function startExclusiveHold(holdMs: number): void {
+		// 路径要插进 PowerShell 的单引号字符串：单引号按 PowerShell 规则写成两个。不转义的话，
+		// `C:\Users\O'Brien\…` 这种临时目录会把脚本截断，最后只表现成误导性的
+		// 「the exclusive holder never became ready」。
+		const psq = (p: string) => `'${p.replace(/'/g, "''")}'`;
 		const script = [
-			`$fs = [IO.File]::Open('${target}', 'Open', 'Read', 'None')`,
-			`[IO.File]::WriteAllText('${ready}', 'ready')`,
+			`$fs = [IO.File]::Open(${psq(target)}, 'Open', 'Read', 'None')`,
+			`[IO.File]::WriteAllText(${psq(ready)}, 'ready')`,
 			`Start-Sleep -Milliseconds ${holdMs}`,
 			"$fs.Close()",
 		].join("; ");
-		holders.push(execFile("powershell", ["-NoProfile", "-NonInteractive", "-Command", script]));
+		const holder = execFile("powershell", ["-NoProfile", "-NonInteractive", "-Command", script]);
+		// 没有 `error` 监听时，「根本没有 powershell.exe」会变成一个未处理的 'error' 事件。
+		holder.once("error", (e) => holderFailures.push(e));
+		holders.push(holder);
 	}
 
 	async function waitForReady(): Promise<void> {
 		for (let i = 0; i < 100; i++) {
-			const up = await readFile(ready, "utf8").then(() => true, () => false);
+			if (holderFailures.length > 0) {
+				throw new Error(`the exclusive holder never started: ${holderFailures[0].message}`);
+			}
+			const up = await readFile(ready, "utf8").then(
+				() => true,
+				() => false,
+			);
 			if (up) return;
 			await new Promise((resolve) => setTimeout(resolve, 50));
 		}
@@ -73,6 +89,6 @@ describe.skipIf(process.platform !== "win32")("withFsRetry against a real Window
 		const started = Date.now();
 		const err = await withFsRetry(() => writeFile(target, "written", "utf8")).catch((e: unknown) => e);
 		expect((err as NodeJS.ErrnoException).code).toMatch(/^(EPERM|EACCES|EBUSY)$/);
-		expect(Date.now() - started).toBeLessThan(5000);
+		expect(Date.now() - started).toBeLessThan(2000); // 重试预算 ≈900ms，远低于这个上限
 	});
 });
