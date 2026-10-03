@@ -49,7 +49,10 @@ npx vitest run
 **实测（粘贴 `npx vitest run tests/win32/e2e.test.ts` 与全量尾部摘要）**：
 
 ```text
-
+ Test Files  1 passed (1)
+      Tests  22 passed (22)
+   Start at  00:40:14
+   Duration  6.06s (tests 98%, transform 2%, import 1%)
 ```
 
 **验收会话的工作区**：新建一个专用目录并让 pi-sandbox 以它为 workspace（`pi` 从不 chdir，workspace = 启动 cwd）：
@@ -103,7 +106,10 @@ shell: powershell only
 **实测**：
 
 ```text
-
+sandbox mode: workspace-write (config default)
+runner: windows-acl (partial enforcement)
+workspace: C:\pi-sandbox-accept
+shell: powershell only
 ```
 
 ## 2. 模型工具列表里没有 `bash`，且显式点名也拿不到未受限 shell（D3 第三版：`exposure: "hidden"`）
@@ -132,7 +138,7 @@ pi -e C:\pi-packages\pi-sandbox --tools bash
 **实测**：
 
 ```text
-
+符合预期: 只有 powershell 没有 bash; 追加验证没有任何工具
 ```
 
 ## 3. `powershell` 覆盖注册被 pi 接受且默认激活（启动无扩展错误）
@@ -449,7 +455,7 @@ pi -e /c/pi-packages/pi-sandbox -p "List the exact names of all skills available
 
 **预期**：Windows 上输出包含 `diagnose-windows-sandbox-acl`。
 **非 Windows 对照**（同一份构建，在 Linux/macOS 上执行同一命令）：输出**不含** `diagnose-windows-sandbox-acl`（`aclSkillPaths(platform)` 仅在 win32 返回路径，其余平台返回 `[]`，pi 侧是 mergePaths 追加语义）。
-若 Windows 上未出现：先确认「非 Windows 对照」也正确，再检查相对路径解析（spec §4.10：pi 以扩展文件所在目录为 baseDir；失效时按设计回退 `import.meta.url` 绝对路径），归类为**实现缺陷**。
+若 Windows 上未出现：先确认「非 Windows 对照」也正确，再检查 `aclSkillPaths` 是否返回**绝对路径**（spec §4.10 真机修订：pi 把 `resources_discover` 返回的路径按**会话 cwd** 解析，`baseDir` 只用于来源标注——相对路径已在真机证伪），归类为**实现缺陷**。
 
 **实测（Windows + 非 Windows 两段输出）**：
 

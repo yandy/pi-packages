@@ -221,7 +221,7 @@ pi-sandbox/skills/diagnose-windows-sandbox-acl/
 ```
 
 - **不用**静态 `pi.skills` manifest 声明（那会在 Linux/macOS 上也进模型目录，白占 KV cache 并误导模型）。改为在 `index.ts` 里注册 `pi.on("resources_discover", …)`：handler 返回 `{ skillPaths: aclSkillPaths(process.platform) }`，win32 给 `["./skills/diagnose-windows-sandbox-acl"]`、其余平台给 `[]`（返回空 → pi 不会添加任何技能路径）。
-- 路径以**扩展文件所在目录**（包根）为基准解析（pi 的 `buildExtensionResourcePaths` 用 `dirname(extensionPath)` 作 baseDir，与 `pi.skills: ["./resources/skills"]` 的书写形式一致）。该解析行为列进真机验收清单；若相对路径在真机上未生效，回退为 `fileURLToPath(new URL("./skills/diagnose-windows-sandbox-acl", import.meta.url))` 的绝对路径。
+- **路径必须返回绝对路径**（真机修订，2026-10-03）：pi 对 `resources_discover` 返回的路径走 `normalizeExtensionPaths` → `resolveResourcePath(p) = resolvePath(p, this.cwd)`，即**相对路径按会话 cwd 解析**；`buildExtensionResourcePaths` 设的 `baseDir = dirname(extensionPath)` 只进来源标注（`metadata.baseDir`），**不参与解析**（`dist/core/resource-loader.js:608-614`、`:794-796`）。真机证据：从 `C:\pi-sandbox-accept` 启动 `pi -e C:\pi-packages\pi-sandbox` 时相对路径解析到 `C:\pi-sandbox-accept\skills\...`，技能不出现（§14 首跑 FAIL）。因此 `aclSkillPaths("win32")` 返回 `fileURLToPath(new URL("../../skills/diagnose-windows-sandbox-acl", import.meta.url))` 的**绝对路径**（`resolvePath` 对绝对路径原样返回）。
 - handler 抛错会被 pi 捕获为扩展错误（fail-safe），不会阻断启动；但技能缺失会直接体现在真机验收的目录断言里。
 - `files` 补 `skills/`（不改 `pi` manifest）。
 
