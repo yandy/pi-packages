@@ -63,6 +63,9 @@ const normalizeSeparators = (p: string) => (sep === "\\" ? p.replaceAll("/", "\\
 /** 尾部分隔符：win32 两种都去（盘根 "C:\\" → "C:"）；POSIX 只去 "/"——"\\" 在那里是合法文件名字符。 */
 const TRAILING_SEPARATORS = sep === "\\" ? /[\\/]+$/ : /\/+$/;
 
+/** 裸盘符（"C:"）：表示"每驱动器当前目录"（drive-relative），不是盘根；子路径必须由分隔符继续。 */
+const DRIVE_LETTER_PREFIX = /^[A-Za-z]:$/;
+
 /**
  * 词法包含判定：分隔符用 path.sep（win32 上 \ 与 / 都可能出现，先归一化），
  * 且必须落在分隔符边界上——C:\work\demo2 不是 C:\work\demo 的子路径。
@@ -72,8 +75,11 @@ const TRAILING_SEPARATORS = sep === "\\" ? /[\\/]+$/ : /\/+$/;
 function isLexicallyUnder(target: string, root: string, caseSensitive: boolean): boolean {
 	const t = comparablePath(normalizeSeparators(target), caseSensitive);
 	// 去尾部（重复）分隔符：根前缀不能带分隔符，否则 C:\work\demo2 会被误判为子路径。
-	// 盘根 "C:\" 去尾成 "C:"，边界检查会补回 \；POSIX "/" 去尾为空，连同空根一起保持根语义。
+	// POSIX "/" 去尾为空，连同空根一起保持根语义。
 	const r = comparablePath(normalizeSeparators(root).replace(TRAILING_SEPARATORS, "") || sep, caseSensitive);
+	// win32 盘根 "C:\\" 去尾后就是裸盘符 "C:"；裸盘符是"每驱动器当前目录"而非盘根，
+	// 因此必须由分隔符继续（C:\…）才可能是它的子路径——裸 "C:" 与 "C:work" 都不算。
+	if (DRIVE_LETTER_PREFIX.test(r)) return t.startsWith(`${r}${sep}`);
 	if (t === r) return true;
 	return t.startsWith(r === sep ? r : `${r}${sep}`);
 }
@@ -121,7 +127,7 @@ export interface FencePolicy {
 	workspaceRoot: string;
 	/** 测试注入（testing.md「参数注入」）：围栏比较是否大小写敏感；生产不传，缺省按 process.platform 推导。 */
 	caseSensitive?: boolean;
-	/** 测试注入（testing.md「参数注入」）：替换缺省的 "/tmp" + os.tmpdir() tmp 根；生产不传。 */
+	/** 测试注入（testing.md「参数注入」）：替换缺省 tmp 根（`defaultTmpRoots()`：win32 仅 `os.tmpdir()`，其余 `"/tmp"` + `os.tmpdir()`）；生产不传。 */
 	_tmpRoots?: readonly string[];
 }
 

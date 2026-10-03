@@ -99,6 +99,8 @@ describe("assertWriteAllowed", () => {
 });
 
 describe("win32 containment", () => {
+	// win32 字面 fixture 一律用真机上不会存在的 C:\__pi_sandbox_fixture__…：若 C:\work\demo
+	// 真存在，dev/ino 身份回退会命中仅大小写不同的拼写，case-sensitive 断言会假性失败。
 	// 宿主形状路径：分隔符与大小写比较都按宿主 path.sep 走。不能在 POSIX 上用 "C:\..."
 	// 字面路径做正例——"\" 在 POSIX 是合法文件名字符，把它当分隔符会让 /tmp/ws\..
 	// 这类真实目录被误判成 /tmp/ws 的子路径（真逃逸）；Windows 形状的等价断言见
@@ -116,7 +118,7 @@ describe("win32 containment", () => {
 	});
 
 	it("stays case-sensitive when told to", () => {
-		expect(isWithinRoots("C:\\Work\\Demo\\a.txt", ["C:\\work\\demo"], true)).toBe(false);
+		expect(isWithinRoots("C:\\__pi_sandbox_fixture__\\Demo\\a.txt", ["C:\\__pi_sandbox_fixture__\\demo"], true)).toBe(false);
 		expect(isWithinRoots(caseUnder, [caseRoot], true)).toBe(false);
 	});
 
@@ -129,18 +131,25 @@ describe("win32 containment", () => {
 	});
 
 	it("uses the platform separator instead of a hardcoded slash", () => {
-		expect(isWithinRoots("C:\\work\\demo", ["C:\\work\\demo"], false)).toBe(true);
-		expect(isWithinRoots("C:\\work\\demo2", ["C:\\work\\demo"], false)).toBe(false); // 前缀但不是子路径
+		expect(isWithinRoots("C:\\__pi_sandbox_fixture__\\demo", ["C:\\__pi_sandbox_fixture__\\demo"], false)).toBe(true);
+		expect(isWithinRoots("C:\\__pi_sandbox_fixture__\\demo2", ["C:\\__pi_sandbox_fixture__\\demo"], false)).toBe(false); // 前缀但不是子路径
 		expect(isWithinRoots(caseRoot, [caseRoot], false)).toBe(true);
 		expect(isWithinRoots(`${caseRoot}2`, [caseRoot], false)).toBe(false); // 前缀但不是子路径
 		expect(isWithinRoots(join(caseRoot, "sub", "f.txt"), [caseRoot], false)).toBe(true);
 	});
 
+	it("does not treat a bare drive letter as a drive root", () => {
+		// 裸 "C:" 是"每驱动器当前目录"（drive-relative），不是盘根 "C:\"：词法包含要求盘符后紧跟分隔符。
+		// 该结果与 path.sep 无关（POSIX 上根不存在、词法与身份回退都无命中），故不 gated，Linux 也执行；
+		// 正例（"C:\…" 落在 "C:\" 下）只在 win32 成立，放在下面的 win32-gated 用例里。
+		expect(isWithinRoots("C:", ["C:\\"], false)).toBe(false);
+	});
+
 	it.skipIf(process.platform !== "win32")("normalizes / to \\ and bounds on the platform separator (win32)", () => {
-		expect(isWithinRoots("C:\\Work\\Demo\\a.txt", ["C:\\work\\demo"], false)).toBe(true);
-		expect(isWithinRoots("C:/Work/Demo/a.txt", ["C:\\work\\demo"], false)).toBe(true);
-		expect(isWithinRoots("C:\\work\\demo2", ["C:\\work\\demo"], false)).toBe(false);
-		expect(isWithinRoots("C:\\work\\demo", ["C:\\"], false)).toBe(true); // 盘根：去尾后 "C:" 边界补回 \
+		expect(isWithinRoots("C:\\__pi_sandbox_fixture__\\Demo\\a.txt", ["C:\\__pi_sandbox_fixture__\\demo"], false)).toBe(true);
+		expect(isWithinRoots("C:/__pi_sandbox_fixture__/Demo/a.txt", ["C:\\__pi_sandbox_fixture__\\demo"], false)).toBe(true);
+		expect(isWithinRoots("C:\\__pi_sandbox_fixture__\\demo2", ["C:\\__pi_sandbox_fixture__\\demo"], false)).toBe(false);
+		expect(isWithinRoots("C:\\__pi_sandbox_fixture__\\demo", ["C:\\"], false)).toBe(true); // 盘根：去尾成 "C:" 后由分隔符继续
 		expect(isWithinRoots("C:work", ["C:\\"], false)).toBe(false); // 盘相对路径不是盘根子路径
 	});
 
