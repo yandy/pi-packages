@@ -6,6 +6,11 @@ Aligned with Claude Code's auto memory mechanism: **one memory = one file**, a `
 
 > ## ⚠️ Breaking changes
 >
+> **In 2.5.0:**
+>
+> - **Windows directory names changed shape.** `local/<project>` keys now split on `\` as well as `/`, so a Windows project directory is one readable component (`C_3a__Users__you__proj`) instead of a nested tree (`C_3a/Users/you/proj`). Memories stored under the old nested layout are orphaned — move them by hand: `move "<memoryDir>\local\C_3a" "<memoryDir>\local-tmp"` then rename the leaf directory's path into a single name, or simply re-add the memories. `git/<host>__<owner>__<repo>` names are unchanged, and POSIX output is byte-identical to before.
+> - **Entry files whose stem is a Windows reserved device name now get a `_` prefix** (`name: "CON"` → `_CON.md`) on every platform, so the name is safe in a shared `git/` directory. Only newly created files are affected — existing entries keep their file names.
+>
 > **In 2.4.0:**
 >
 > - **The package-level `enabled` switch is gone.** `memory.json` has no top-level `enabled` any more: a leftover key is ignored, and `{"enabled": false}` no longer disables anything — it used to skip model validation too, so a disabled config often had no model configured. Disable the extension the way you disable any pi package — by not loading it — see [Disabling the extension](#disabling-the-extension). `dream` is now a required task in every session.
@@ -161,7 +166,7 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `memoryDir` | `~/.pi/memory` | Root directory for all memory data |
+| `memoryDir` | `~/.pi/memory` | Root directory for all memory data. `~`, `~/` and (on Windows) `~\` are expanded; relative values are resolved against the working directory |
 | `memIndexMaxLines` | `200` | Write capacity: max non-empty lines in `MEMORY.md` (the `# Memory Index` header and hand-written headings count too, so this is not exactly the memory count) |
 | `memIndexMaxBytes` | `25600` | Write capacity: max bytes of `MEMORY.md` |
 | `memIndexInjectMaxLines` | `50` | Injection window: max lines of the index put into the `memory_index` section. The window keeps the **newest** lines and drops the **oldest** ones — the index is pure chronological order, so a smaller window never hides the memory you just wrote. **`0` (either key) injects no index at all** — the `memory_index` section stays empty |
@@ -272,7 +277,7 @@ It runs with the five main-agent actions (never `rename` / `rebuild_index`), no 
 | Level | Scope | Behaviour |
 |---|---|---|
 | In-process logical lock (per memory dir) | one primitive call; or a whole dream round | Waits up to `lock.timeoutMs`, then throws a readable error naming the directory. `extract` uses the non-waiting form and skips the turn |
-| Cross-process `.lock` | milliseconds, around the physical write | Acquired with `link` (atomic), **never reclaimed automatically**: no TTL, no heartbeat, no takeover |
+| Cross-process `.lock` | milliseconds, around the physical write | Acquired with `open(…, "wx")` (`O_CREAT|O_EXCL`) — atomic on NTFS, ReFS, exFAT/FAT32, network shares and synced folders; the holder record is written immediately after the file is created. **Never reclaimed automatically**: no TTL, no heartbeat, no takeover |
 
 A crash inside a write can therefore leave a `.lock` behind, and nothing will ever delete it for you — that is the deliberate price of a hard mutual-exclusion guarantee. The error names the pid, op and start time; `/memory unlock` is the one sanctioned way to clear it.
 
@@ -379,11 +384,22 @@ Directory names are derived as follows:
 - everything else — non-git directories, git repos without a remote, `file://` or local-path remotes → `local/<absolute-path>` (git repos use the repository root; a Windows-style drive-letter remote such as `C:/repos/foo.git` is treated as scp-style on POSIX, matching git)
 - `/` becomes `__`; characters that are not portable in file names (`<>:"|?*`, control characters) become `_XX` hex escapes
 - names longer than 120 UTF-8 bytes are truncated to 100 bytes on a code-point boundary plus a `__<hash8>` suffix
-- names target POSIX filesystems: a backslash is an ordinary character, and no Windows device-name or trailing-dot handling is applied
+- names are platform-aware: on Windows a backslash is a separator, and names avoid reserved device names and trailing dots/spaces; on POSIX a backslash stays an ordinary character and these Windows-only rules do not apply. The one rule applied everywhere is the `_` prefix for entry file stems that look like a device name (see [Windows](#windows))
 
 The mapping is not injective: underscores are kept as-is, so `/home/a__b` and `/home/a/b` both map to `home__a__b` (and share one memory directory). Changing or renaming a remote, adding a remote that sorts before the one currently in use, or moving a local directory changes the memory directory, orphaning the old one.
 
 **Older legacy layout:** versions before 1.x stored memory under `~/.pi/memory/<12-char-sha256>/`; those directories are no longer read or written. To migrate a project manually, compute the old hash with `printf '%s' "$(git rev-parse --show-toplevel)" | sha256sum | cut -c1-12` (use `$PWD` outside a git repo), then `mv` that directory to the new location (run `/memory` inside the project to see the new path) and split its topic files by hand (see [1.x data](#1x-data)).
+
+## Windows
+
+pi-memory runs natively on Windows (PowerShell, cmd and Git Bash) — no WSL required.
+
+- **Directory names.** The name derived from a project key is always a single, legal Windows component: `\` counts as a separator (so `C:\Users\you\proj` → `C_3a__Users__you__proj`), a trailing dot or space is hex-escaped (`proj.` → `proj_2e`), and a name whose first `.`-delimited label is a reserved device name gets a `_` prefix (`nul` → `_nul`). Directory names are always identical across platforms for `git/` keys, so a shared `memoryDir` keeps working when the same repository is opened from Linux and Windows.
+- **Repository root.** The root is resolved with `git rev-parse --show-cdup` resolved against the process cwd, so starting pi from Git Bash (where git prints MSYS-style `/c/...` paths) maps to the same memory directory as starting it from PowerShell.
+- **`memoryDir`.** `~`, `~/` and (on Windows) `~\` are expanded; relative values are resolved to absolute paths. Windows paths and UNC shares both work.
+- **Locking.** The cross-process lock is created with `open(…, "wx")` (`CREATE_NEW`), which is atomic on NTFS, ReFS, exFAT/FAT32, network shares and synced folders — a `memoryDir` on a non-NTFS volume is supported. A transient `EPERM`/`EACCES`/`EBUSY` from an antivirus scanner, an editor or a file indexer is retried with a short backoff; a persistent failure still reports the original error.
+- **Line endings.** Every file pi-memory reads tolerates CRLF and lone CR (they are normalised to LF before parsing), and every write emits LF. A `MEMORY.md` or entry file re-saved by Notepad or another Windows editor therefore neither disappears from the index nor inflates the unrecognised-line count.
+- **Known limitation.** A file whose name is a reserved device name (for example `con.md`, created by hand or by an older version on another platform) is skipped on Windows instead of being read, because opening that name reaches the console device rather than the file. Rename it with `\\?\` handling or re-create the memory under a new name.
 
 ## Notifications
 

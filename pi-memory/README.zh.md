@@ -6,6 +6,11 @@ pi coding agent 的文件系统持久记忆层。把项目知识（事实、偏�
 
 > ## ⚠️ 破坏性变更
 >
+> **2.5.0：**
+>
+> - **Windows 上的目录名形态变了。** `local/<项目>` 的 key 现在按 `\` 与 `/` 一起分段，因此 Windows 项目目录是一个可读的单分量名（`C_3a__Users__you__proj`），而不是嵌套的一棵树（`C_3a/Users/you/proj`）。旧嵌套布局下的记忆会变成孤儿目录 —— 手工搬过去（把叶子目录重命名进 `local/`，或重新写入这些记忆）。`git/<host>__<owner>__<repo>` 形态不变，POSIX 输出与之前逐字节一致。
+> - **stem 是 Windows 保留设备名的 entry 文件现在会加 `_` 前缀**（`name: "CON"` → `_CON.md`），**所有平台**都这样，这样名字在共享的 `git/` 目录里两边都安全。只影响**新建**文件 —— 既有 entry 保留原名。
+>
 > **2.4.0：**
 >
 > - **包级开关 `enabled` 已删除。** `memory.json` 不再有顶层 `enabled`：残留的键会被忽略，`{"enabled": false}` 不再能禁用任何东西 —— 它以前还会跳过模型校验，所以被禁用的配置往往也没配模型。要禁用整个扩展，请像禁用其他 pi package 一样「不加载它」，见[禁用本扩展](#禁用本扩展)。`dream` 现在是每个会话的必需任务。
@@ -161,7 +166,7 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
 
 | 键 | 默认值 | 说明 |
 |-----|---------|------|
-| `memoryDir` | `~/.pi/memory` | 所有记忆数据的根目录 |
+| `memoryDir` | `~/.pi/memory` | 所有记忆数据的根目录。`~`、`~/` 与（Windows 上）`~\` 会展开；相对路径按工作目录解析为绝对路径 |
 | `memIndexMaxLines` | `200` | 写入口径：`MEMORY.md` 的最大非空行数（`# Memory Index` 头行与手写标题同样占额度，所以并不等于记忆条数） |
 | `memIndexMaxBytes` | `25600` | 写入口径：`MEMORY.md` 的最大字节数 |
 | `memIndexInjectMaxLines` | `50` | 注入口径：放进 `memory_index` section 的最大行数。窗口保留**最新**的行、丢弃**最旧**的行 —— 索引是纯时间序，窗口再小也不会藏住你刚写完的那条。**任一键写 `0` = 完全不注入索引**（section 保持空值） |
@@ -272,7 +277,7 @@ extract 拿到的是结构化渲染，而不是有损的两条消息摘要：
 | 层级 | 作用域 | 行为 |
 |---|---|---|
 | 进程内逻辑锁（按记忆目录分键） | 单次原语；或 dream 的整轮 | 最多等 `lock.timeoutMs`，超时抛一条写明目录的可读错误。`extract` 用不等待的形态，直接跳过本回合 |
-| 跨进程 `.lock` | 毫秒级，只包住物理写入 | 用 `link` 原子获取，**永不自动回收**：没有 TTL、没有心跳、没有接管 |
+| 跨进程 `.lock` | 毫秒级，只包住物理写入 | 用 `open(…, "wx")`（`O_CREAT|O_EXCL`）建立 —— 在 NTFS、ReFS、exFAT/FAT32、网络共享与同步目录上都是原子的；持有者记录在文件建立后立即写入。**永不自动回收**：无 TTL、无心跳、无接管 |
 
 因此写入中途崩溃可能留下一个 `.lock`，而且**没有任何进程会替你删掉它** —— 这是「互斥是硬保证」的刻意代价。错误文案会写明 pid、op、开始时间与路径；`/memory unlock` 是唯一被认可的清除方式。
 
@@ -379,11 +384,22 @@ Lock: free
 - 其余情况 —— 非 git 目录、没有 remote 的 git 仓库、`file://` 或本地路径 remote → `local/<absolute-path>`（git 仓库用仓库根；Windows 盘符形式的 remote 如 `C:/repos/foo.git` 在 POSIX 上按 scp 写法处理，与 git 一致）
 - `/` 变成 `__`；文件名里不可移植的字符（`<>:"|?*`、控制字符）变成 `_XX` 十六进制转义
 - 超过 120 UTF-8 字节的名字在码点边界截断到 100 字节，再加 `__<hash8>` 后缀
-- 名字面向 POSIX 文件系统：反斜杠是普通字符，不做 Windows 设备名与结尾句点处理
+- 名字是平台感知的：Windows 上反斜杠是分隔符，并避开保留设备名与结尾点/空格；POSIX 上反斜杠仍是普通字符，上述 Windows 规则不适用。唯一在所有平台都生效的规则是「stem 形如设备名的 entry 文件名加 `_` 前缀」（见 [Windows](#windows)）
 
 映射不是单射：下划线原样保留，所以 `/home/a__b` 与 `/home/a/b` 都映射到 `home__a__b`（共享同一个记忆目录）。改动或重命名 remote、新增一个排序更靠前的 remote、移动本地目录，都会改变记忆目录，旧目录会被孤立。
 
 **更老的布局：** 1.x 之前的版本把记忆存在 `~/.pi/memory/<12-char-sha256>/`；这些目录不再被读写。要手工迁移，用 `printf '%s' "$(git rev-parse --show-toplevel)" | sha256sum | cut -c1-12` 算出旧 hash（不在 git 仓库里就用 `$PWD`），把那个目录 `mv` 到新位置（在项目里跑 `/memory` 可以看到新路径），其 topic 文件需要按 [1.x 数据](#1x-数据)手工拆分。
+
+## Windows
+
+pi-memory 在 Windows 上原生可用（PowerShell、cmd、Git Bash 都可以），不需要 WSL。
+
+- **目录名。** 由项目 key 派生的名字一定是单个、合法的 Windows 分量：`\` 被当作分隔符（`C:\Users\you\proj` → `C_3a__Users__you__proj`），结尾的点或空格被十六进制转义（`proj.` → `proj_2e`），而「第一个 `.` 之前的部分」是保留设备名的名字会加 `_` 前缀（`nul` → `_nul`）。`git/` 类 key 的目录名在所有平台上一致，因此共享 `memoryDir` 时同一仓库从 Linux 与 Windows 打开都会落到同一个目录。
+- **仓库根。** 用 `git rev-parse --show-cdup` 配合进程 cwd 求根，因此从 Git Bash 启动（git 在那里打印 MSYS 形态的 `/c/...` 路径）与从 PowerShell 启动会映射到同一个记忆目录。
+- **`memoryDir`。** `~`、`~/` 与（Windows 上）`~\` 都会展开；相对路径会被解析成绝对路径。Windows 路径与 UNC 共享都可用。
+- **锁。** 跨进程锁用 `open(…, "wx")`（`CREATE_NEW`）建立，在 NTFS、ReFS、exFAT/FAT32、网络共享与同步目录上都是原子的 —— `memoryDir` 放在非 NTFS 卷上也能用。杀软、编辑器或索引器造成的瞬时 `EPERM`/`EACCES`/`EBUSY` 会做短退避重试；持续失败仍按原始错误报出。
+- **换行符。** 读取一律容忍 CRLF 与孤立 CR（解析前归一为 LF），写入一律输出 LF。被记事本等 Windows 编辑器重新保存过的 `MEMORY.md` 或 entry 文件既不会从索引里消失，也不会推高「无法识别的行」计数。
+- **已知限制。** 名字是保留设备名的文件（例如 `con.md`，由手工创建或旧版本在别的平台上创建）在 Windows 上会被**跳过**而不是被读取 —— 按该名字打开会到达控制台设备而不是文件。请改名或换名字重新写入这条记忆。
 
 ## 通知
 
