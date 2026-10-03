@@ -974,8 +974,9 @@ describe("index wiring (integration)", () => {
 		await flush();
 		expect(firstNotify).toHaveBeenCalledWith("Extract failed: model exploded", "error");
 
-		// 新 session 以配置错误启动（session_start 走到 failConfig 就返回）：提前 return 之前，
-		// extractErrorNotified 必须已经复位。
+		// 新 session 以配置错误启动（session_start 走到 failConfig 就返回）。这里钉住的是「失败配额
+		// 按 session 重置」：去掉那次复位，第二个 session 就再也报不出失败通知。
+		// （复位相对早退的**先后**在两态模型下不可观测：错误态没有 store，agent_end 到不了 extract。）
 		breakModelConfig();
 		try {
 			await handlers["session_start"][0]({ reason: "reload" }, uiCtx());
@@ -1510,20 +1511,26 @@ describe("index wiring (integration)", () => {
 	// 本次移除的回归钉子（spec §5「新增」）：memory.json 里残留的 `enabled: false` 只是被忽略 ——
 	// 会话照常初始化、零通知（决策：不做运行时迁移提示），`/memory` 照常报 7 行健康态。
 	it("ignores a leftover enabled key instead of treating it as disabled", async () => {
+		// 共享 fixture 上临时放一个已移除的键（模拟 memory.json 里的残留）。必须在 finally 里删掉：
+		// 留着它会让后续用例带着脏 fixture 跑（用例顺序依赖）。
 		(mockConfigValue as Record<string, any>).enabled = false;
-		const notify = vi.fn();
-		const { pi, tools, commands, handlers } = createFakePi();
-		memoryFactory(pi as any);
+		try {
+			const notify = vi.fn();
+			const { pi, tools, commands, handlers } = createFakePi();
+			memoryFactory(pi as any);
 
-		await handlers["session_start"][0]({}, uiCtx(uiWith(notify)));
+			await handlers["session_start"][0]({}, uiCtx(uiWith(notify)));
 
-		expect(notify).not.toHaveBeenCalled();
-		expect(tools).toHaveLength(1);
+			expect(notify).not.toHaveBeenCalled();
+			expect(tools).toHaveLength(1);
 
-		await commands["memory"].handler("", uiCtx(uiWith(notify)));
-		const lines = notify.mock.calls[0][0].split("\n");
-		expect(lines).toHaveLength(7);
-		expect(lines[0]).toBe(`Dir: ${dir}`);
+			await commands["memory"].handler("", uiCtx(uiWith(notify)));
+			const lines = notify.mock.calls[0][0].split("\n");
+			expect(lines).toHaveLength(7);
+			expect(lines[0]).toBe(`Dir: ${dir}`);
+		} finally {
+			delete (mockConfigValue as Record<string, any>).enabled;
+		}
 	});
 
 	it("/memory reports a fresh directory as free / never / not needed", async () => {
@@ -2173,7 +2180,7 @@ describe("index wiring (integration)", () => {
 	// · 改好配置再重启必须回到 `Memory: enabled` —— `session_start` 里的 `configError = null`
 	//   是这一行为的唯一实现（少了它，错误态会一直粘在工厂作用域里）；
 	// · 工具只在第一次健康会话注册一次（`tools` 恒为 1，钉住不重复注册）。
-	it("/memory flips back to enabled after a misconfigured session is fixed and restarted", async () => {
+	it("/memory reports the healthy status block again after a misconfigured session is fixed and restarted", async () => {
 		const notify = vi.fn();
 		const confirm = vi.fn().mockResolvedValue(true);
 		const ctxUI = () => uiCtx({ hasUI: true, ui: { notify, confirm, setStatus: vi.fn() } });
@@ -2232,7 +2239,7 @@ describe("index wiring (integration)", () => {
 	// 约束「`/memory unlock` 在每种状态下都可用」在 misconfigured 态同样成立：错误态下
 	// memoryDir 为 null，unlock 走 resolveMemoryDir 兜底，仍然只清本 cwd 的 `.lock`。
 	// 钉住两处易碎点：unlock 分支必须**在**状态分支之前，且 resetSessionState 不得清 `config`。
-	it("/memory unlock removes the lock in a session that booted misconfigured", async () => {
+	it("/memory unlock runs before the status branch in a misconfigured session", async () => {
 		mockConfigValue.defaults = { sessionPersistence: { enabled: false } };
 		const notify = vi.fn();
 		const confirm = vi.fn().mockResolvedValue(true);

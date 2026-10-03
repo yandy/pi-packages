@@ -46,7 +46,7 @@
 | `pi-memory/tests/index-wiring.test.ts` | 删 3 条 disabled 语义用例；~5 条「用 disabled 造无 store 会话」的用例改用配置错误路径；新增残留键忽略的回归钉子；更新 `/memory` 输出断言（8 行 → 7 行） |
 | `pi-memory/tests/memory-tool.test.ts` | verbatim unavailable 用例的文案换成 misconfigured 文案 |
 | `pi-memory/README.md` / `README.zh.md` | 配置示例、配置表、模型表、`/memory` 输出示例与说明、新增「禁用本扩展 / Disabling」短节 |
-| `pi-memory/tests/manual-test-plan.md` | 删「disabled 时不校验」用例；`/memory` 期望输出改为 7 行 |
+| `pi-memory/tests/manual-test-plan.md` | **删除该文件**（final review 后用户决定：手动测试计划不再维护） |
 
 ## Design
 
@@ -173,7 +173,7 @@ Lock: <free | unreadable — run /memory unlock | held by …>
 - 删「以 `enabled: false` 启动的会话」条目与 `/memory on|off` 相关历史措辞里对当前行为无效的部分；功能列表里 `/memory` 的 “switch” 措辞去掉。
 - **新增「禁用本扩展 / Disabling」短节**：§4 的两种写法 + 一句「≤2.3.x 的 `enabled` 键已不再生效（写它不会禁用扩展）」。
 
-`tests/manual-test-plan.md`：删第 4 步「disabled 时不校验」（连同其「测完恢复 `enabled: true`」的收尾说明），`/memory` 期望改为 7 行输出。
+`tests/manual-test-plan.md`：**删除该文件**（2026-10-03 final review 后用户决定：该手动测试计划不再维护，不再随行为同步）。
 
 ## 风险
 
@@ -193,5 +193,5 @@ Lock: <free | unreadable — run /memory unlock | held by …>
 4. `memory.json` 写 `{"enabled": false}` 的会话正常初始化、零通知，且有测试钉住。
 5. 模块级开关（`autoSurfacing.enabled` / `extractMemories.enabled` / `sessionPersistence.enabled`）行为不变，其既有测试全绿。
 6. `npm test -w pi-memory`、`npm run typecheck`、`npm run lint` 全绿；全仓 `npm test` 只允许 pi-container-sandbox 的 2 个已知环境性失败（无 podman/docker）。
-7. `README.md` / `README.zh.md` / `tests/manual-test-plan.md` 与新行为一致，并含「禁用本扩展 / Disabling」短节。
+7. `README.md` / `README.zh.md` 与新行为一致，并含「禁用本扩展 / Disabling」短节；`tests/manual-test-plan.md` 已删除。
 8. 未改动 `pi-memory/package.json` 的 `version`，未新增版本化破坏性变更块。

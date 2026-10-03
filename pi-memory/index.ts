@@ -71,7 +71,7 @@ function countInjectedBlocks(content: string): number {
 /**
  * `/memory` 的模块激活状态一行：`dream=on(model) extractMemories=off autoSurfacing=on(model)`。
  *
- * `dream` 没有独立开关 —— memory 系统启用（能走到状态分支）它就可用；另外两个直接反映各自的
+ * `dream` 没有独立开关 —— 健康会话里（能走到状态分支）它就可用；另外两个直接反映各自的
  * `enabled`。模型是**生效值**（per-task 优先，其次 `defaults.model`），关闭的模块不显示模型：
  * 用户问「为什么没生效」时答案在开关上，而不在模型上。
  *
@@ -251,12 +251,14 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 	pi.on("session_start", async (event, ctx) => {
-		// 复位必须在**任何可能抛错的调用之前**跑完：冷启动与 disabled 会话都要有干净的一次失败通知
+		// 复位必须在**任何可能抛错的调用之前**跑完：冷启动与配置错误会话都要有干净的一次失败通知
 		// 配额、干净的错误态，以及**清空的运行时**。loadConfig（里面的 getAgentDir）与下面的
 		// modelConfigErrors（宿主给的 registry 可能既没有 getAvailable 也没有 getAll）都属于宿主契约
 		// 之外的部分：它们一旦抛出而复位还没跑，上一 session 的 store / memoryDir 就会留在**已经注册**
 		// 的 `memory` 工具背后 —— 项目 B 的 agent 能写进项目 A 的目录（Plan C ledger R51）。
 		extractErrorNotified = false;
+		// `configError = null` 是纯防御：所有把 store 置空的路径都会经 failConfig 覆写它，所以这次复位
+		// 本身不可观测 —— 没有测试钉它，删掉也不会让任何用例变红（2026-10-03 final review 的结论）。
 		configError = null;
 		resetSessionState();
 		// `loadConfig` 抛错（`getAgentDir` / `isProjectTrusted` 属宿主契约）与初始化失败同一处理：
