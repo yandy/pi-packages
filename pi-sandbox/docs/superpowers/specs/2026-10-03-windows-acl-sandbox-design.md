@@ -42,10 +42,21 @@
 | D7 | 依赖下限 | peer 保持 `>=0.80.2`，powershell 覆盖靠**运行时探测** `createPowerShellToolDefinition` → 版本走 **1.4.0** |
 | D8 | 诊断技能 | **本次包含**：`skills/diagnose-windows-sandbox-acl/`（SKILL.md + 保真移植的 PowerShell 修复脚本）；**仅 Windows 加载**，经 `resources_discover` 事件按平台注册（见 Ruling 9） |
 
-**D3 修订（2026-10-03 真机实测后，用户确认）**：原指定文案 `{ "defaultTools": ["-bash", "+powershell"] }` **无效且无必要** —— pi 1.0.0 在 Windows 默认只激活 `powershell`；用户看到的 `bash` 是 pi-sandbox 自己覆盖注册的（扩展注册的工具会被自动激活，而 `defaultTools` 的 `-name` 无法取消扩展工具）。因此改为：
+**D3 修订 1（第二版，2026-10-03 首轮真机实测后，用户确认；已被 D3 修订 2 取代）**：原指定文案 `{ "defaultTools": ["-bash", "+powershell"] }` **无效且无必要** —— pi 1.0.0 在 Windows 默认只激活 `powershell`；用户看到的 `bash` 是 pi-sandbox 自己覆盖注册的（扩展注册的工具会被自动激活，而 `defaultTools` 的 `-name` 无法取消扩展工具）。因此改为：
 
 1. win32 下我们的 `bash` 工具以 **`defaultActive: false`** 注册（模型默认看不到它，与 pi 的本意一致）；**但仍保留注册** —— 不注册就会露出 pi 内建的无沙箱 bash，显式 `defaultTools: ["bash"]` / `--tools bash` 会得到 fail-open；保留后显式激活仍是**拒绝**（fail-closed）。
 2. 面向模型/用户的指引只保留**有效**方向：`{ "defaultTools": ["+powershell"] }`（`+name` 激活是 pi 支持的语义），不再出现 `-bash`。
+
+**D3 修订 2（第三版，2026-10-03 第二轮真机实测后，用户确认；pi 1.0.0 源码逐行实证 + 本地 SDK 探针复现）**：第二版的 **`defaultActive: false` 无效**（真机证伪）。两代机制与为何前者无效：
+
+1. `_buildRuntime` 把默认激活名**写死**为 `["read","bash","edit","write"]`（`dist/core/agent-session.js:2889-2893`），`_refreshToolRegistry` 按**名字**从注册表取同名工具激活（扩展工具按名覆盖内建定义，本包注册的 `bash` 正落在这份默认名单内）；
+2. `defaultActive: false` 的类型文档语义正是“**被命名即激活**”（`_isActivatedOnRegistration`，`types.d.ts:471-475`）→ 它拦不住任何“按名激活”的路径（默认列表、`--tools`、`defaultTools`、`setActiveTools()`），本包 bash 照旧进入活动集并出现在模型工具列表里；
+3. 正解 **`exposure: "hidden"`**：`_applyToolLoadout` 构建声明集合时**丢弃** hidden（`agent-session.js:1124`），`_isDeclarable` 对 hidden 返回 false → 既**不声明**给模型，也**不可被命名激活**（pi 文档：`hidden` = *registered but unreachable*）；
+4. `hidden` **不解除按名遮蔽**：扩展注册仍覆盖内建 `bash` 定义 → 模型侧与“不注册”等效（看不到、叫不活），但 `bash` 这个名字被本包的拒绝壳占据，不存在“显式启用就拿到无沙箱 bash”的 fail-open 路径。
+
+**第三版落地**：win32 下 bash 包装以 `exposure: "hidden"` 注册（不再设 `defaultActive`——它在 pi 1.0.0 上无效；pi ≤0.80.x 既不认识 `exposure` 也不支持 `defaultActive`，含 `hidden` 定义会被自动激活并逐次拒绝，仍属 fail-closed）；`UnsupportedWindowsShellError` 拒绝壳**保留**作纵深防御（防未来宿主改变激活语义，或调用方直接使用该工具定义）。`powershell` 仍为 `direct` + 自动激活；非 win32 不变（bash 默认激活）。Ruling 2 的指引不变：只给 `{ "defaultTools": ["+powershell"] }`。
+
+**对 D3 修订 1 的事实更正**：修订 1 写的“pi 1.0.0 在 Windows 默认只激活 `powershell`”不准确——pi 的默认激活名是常量 `["read","bash","edit","write"]`（`settings-manager.js:35` 的 `DEFAULT_TOOL_NAMES`，平台无关，不含 `powershell`）。Windows 上“默认只有一个可用 shell（powershell）”是**本包覆盖注册的扩展工具被自动激活**的结果（扩展工具在 `_refreshToolRegistry` 的 `includeAllExtensionTools` 分支被加入活动集），而不是 pi 的平台默认；用户此前“只看到 powershell、bash 又是 pi-sandbox 注册的”观测，来自其 `-bash +powershell` 配置（`-bash` 对**内建** bash 生效）叠加本包当时的 bash 覆盖注册。
 
 ### 2.1 Rulings（实现与测试按编号引用）
 
@@ -56,7 +67,7 @@
 - **Ruling 5**：不重写 TMP/TEMP。
 - **Ruling 6**：win32 enforcement 恒为 `partial`；runner 失败规则 = `{allowedExitCodes:[127], fatalSignatures:["windows-acl-run: "]}`。
 - **Ruling 7**：拒绝方言 = `access is denied` / `access to the path` / `permission denied` / `operation not permitted`（大小写不敏感子串）。
-- **Ruling 8**（2026-10-03 修订）：win32 且 `pi.getActiveTools()` 不含 `powershell` 时，激活期提示一次（有 UI 走 `ctx.ui.notify`，无 UI 写 stderr），提示只给**有效**方向 `{ "defaultTools": ["+powershell"] }`；`/permission` 状态行显示 `shell: powershell only (not activated)`。默认态下 Windows 只激活 powershell，故该提示通常不会触发（保留作显式改配置后的兜底）。
+- **Ruling 8**（2026-10-03 修订，D3 修订 2 后再次限定）：win32 且 `pi.getActiveTools()` 不含 `powershell` 时，激活期提示一次（有 UI 走 `ctx.ui.notify`，无 UI 写 stderr），提示只给**有效**方向 `{ "defaultTools": ["+powershell"] }`；`/permission` 状态行显示 `shell: powershell only (not activated)`。**实现条件比本句更窄**：另要求 `bash ∈ active`（T15 实现时控制者给定），以免 ≤0.80.x 宿主每次都提示升级；D3 第三版后本包 bash 为 `hidden`、永不进活动列表，故该提示在 pi ≥1.0.0 上实际不再触发，只服务于老宿主（其 bash 自动激活且无 powershell 工具）。**已知边界（未裁决）**：pi ≥1.0.0 上显式排除 `powershell`（`defaultTools: ["-powershell"]` / `--exclude-tools powershell`）时不会提示；若要覆盖该状态，触发条件须放宽为“仅 `powershell ∉ active`”。
 - **Ruling 9**：诊断技能**只在 Windows 上加载**——由扩展在 `resources_discover` 事件里按平台返回 `skillPaths`（非 win32 返回空，即零目录条目），**不用**静态 `pi.skills` 清单声明。handler **只允许追加**（返回本技能路径，或空数组表示“什么也不加”），**绝不返回"完整集合"**：pi 侧是合并语义（`mergePaths(lastSkillPaths, …)`，已核实）。pi 从磁盘加载包，因此**不做** dsh 的 ASAR/SEA 临时提取，脚本按 skill 目录相对路径引用。技能场景本身需**不受限调用者**（修改安全描述符），靠已批准的 `danger-full-access` 承担。
 - **Ruling 10**：任何 Win32 失败都不得 spawn 未受限子进程；错误必须携带 API 名 + 精确 win32 码 + 系统文本 + 上下文。
 
@@ -172,7 +183,7 @@ parseArgs → requireDirectory(ws, temp) → win32()（koffi 懒加载）
 | `src/fence.ts` | win32 containment：大小写不敏感 + 用 `path.sep` 而非硬编码 `/`；保留 dev/ino 身份回退（覆盖 8.3 短名与 junction）。大小写判定经**参数注入**（由 `process.platform` 派生、单测可覆盖），使 win32 语义在 Linux 上可测（testing.md「参数注入」） |
 | `src/shell-ops.ts`（新） | 从 `bash-ops.ts` 抽出受限 ops 工厂（confine/spawn/超时/中止/denial 记账），bash 与 powershell 共用；`bash-ops.ts` 对外导出与行为**零变化**（现有测试即回归网）。平台判定同样经**注入点**，使 bash 的 win32 拒绝分支可在 Linux 单测 |
 | `src/powershell-ops.ts`（新） | PowerShell 专用 ops：`getPowerShellConfig()` 取 argv + pi 的 UTF-8 输出前缀。被拒时经与 bash **同一条** denial 记账路径（`onDenial` → ledger 的 `command` 类），使 pwsh 的拒绝能驱动 denial-first 提权重试 |
-| `src/tools.ts` | 注册 `powershell` 工具覆盖（运行时探测 `createPowerShellToolDefinition`）；win32 受限模式下 bash 拒绝（Ruling 2） |
+| `src/tools.ts` | 注册 `powershell` 工具覆盖（运行时探测 `createPowerShellToolDefinition`）；win32 下 bash 覆盖以 `exposure: "hidden"` 注册（D3 修订 2：不声明、不可命名激活、仍按名遮蔽内建）+ 受限模式拒绝壳（Ruling 2，纵深防御） |
 
 **宿主版本差异的接入规则（D7 的必然要求）**：pi 是 ESM（`"type": "module"`），因此对**版本门控**的宿主 API（`createPowerShellToolDefinition`、`getPowerShellConfig`、`getActiveTools`）**不得**用静态具名导入——在 0.80.2 上运行时会因缺失导出而链接失败（连扩展都加载不了）。一律用命名空间导入 + 属性访问 + `typeof === "function"` 探测：
 
@@ -316,7 +327,7 @@ pi-sandbox/skills/diagnose-windows-sandbox-acl/
 
 ### 10.2 Windows 真机套件（`describe.skipIf(process.platform !== "win32")`）
 
-真令牌 + 真 spawn：workspace 内写成功；外部写被拒；外部删除被拒（`cmd del`、`Remove-Item`、.NET `File::Delete`、Node `unlink` 四条路径且**宿主文件仍在**）；外部读成功；`NUL` 两模式可写（设备拼法 `\\.\NUL` / `> NUL`；相对 `NUL` 是普通文件名）；`read-only` 拒 workspace 写；`%TEMP%` 可写；同一 workspace 的两个进程互不越界；硬链接已知边界；pwsh 语言模式（workspace-write FullLanguage / read-only ConstrainedLanguage）；退出码镜像（含 `0xC0000005`）；超时与中止连孙进程一起死；runner 失败签名分类；围栏与 runner 语义一致；`bash` 拒绝文案含指定 JSON 片段；覆盖注册一个未激活的 `powershell` 工具被 pi 接受（不报错）。
+真令牌 + 真 spawn：workspace 内写成功；外部写被拒；外部删除被拒（`cmd del`、`Remove-Item`、.NET `File::Delete`、Node `unlink` 四条路径且**宿主文件仍在**）；外部读成功；`NUL` 两模式可写（设备拼法 `\\.\NUL` / `> NUL`；相对 `NUL` 是普通文件名）；`read-only` 拒 workspace 写；`%TEMP%` 可写；同一 workspace 的两个进程互不越界；硬链接已知边界；pwsh 语言模式（workspace-write FullLanguage / read-only ConstrainedLanguage）；退出码镜像（含 `0xC0000005`）；超时与中止连孙进程一起死；runner 失败签名分类；围栏与 runner 语义一致；`bash` 拒绝守卫（`assertShellAllowed`）在两种受限模式抛 `UnsupportedWindowsShellError`；覆盖注册 `powershell`（扩展工具，pi 会自动激活）被 pi 接受（不报错）。
 
 诊断技能的**平台门控**（真机侧）：启动一次会话，确认 `diagnose-windows-sandbox-acl` **出现在**可用技能目录中（若相对路径未生效则改用 `import.meta.url` 绝对路径，见 §4.10）；同一份构建在 Linux/macOS 上启动时不出现该技能。
 

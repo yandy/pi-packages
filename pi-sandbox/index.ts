@@ -45,9 +45,10 @@ function readActiveTools(pi: ExtensionAPI): string[] | undefined {
 }
 
 /** Ruling 8 的提示文案：必须点名修法与失败方向（未启用前 bash 命令被拒）。
- *  方向只给**有效**的那一半 `+powershell`：pi 在 win32 上默认只激活 powershell 工具，本包的 bash
- *  又是 `defaultActive: false`（默认不出现在活动列表）——`-bash` 既去不掉扩展注册的工具，也不是这
- *  里需要的动作。
+ *  方向只给**有效**的那一半 `+powershell`：win32 下未受限（沙箱受控）的 shell 是本包覆盖注册的
+ *  `powershell`（**扩展工具自动激活**；pi 内建的默认激活列表 `["read","bash","edit","write"]`
+ *  并不包含它），而本包的 bash 又以 `exposure: "hidden"` 注册（D3 第三版：不声明给模型、也不可被
+ *  命名激活）——`-bash` 既去不掉扩展注册的工具，也不是这里需要的动作。
  *  T15 修订：补上宿主前提 `requires pi >= 1.0.0`（措辞与 `src/confine.ts` 的
  *  `UnsupportedWindowsShellError` 一致）——低于 1.0.0 的宿主没有 `powershell` 工具，
  *  只让用户去 settings.json 打开一个不存在的工具是不可执行的。 */
@@ -66,9 +67,13 @@ let powershellHintShown = false;
 /**
  * Ruling 8：win32 上 pwsh 未激活时提示一次（有 UI 走 `ctx.ui.notify`，无 UI 写 stderr）。
  * 判决条件必须能明确判断：宿主有 `getActiveTools`，且 `bash` 在活动列表而 `powershell` 不在。
- * 在 pi ≥1.0.0 上本包的 bash 是 `defaultActive: false`（只有显式点名才激活，因为不注册会露出
- * 内置的未受限 bash、启用即 fail-open），所以这个提示只在“宿主自己仍把 bash 当默认 shell”时
- * 才可能触发（老宿主 / 显式把 bash 排进活动列表）。
+ * D3 第三版后本包的 bash 以 `exposure: "hidden"` 注册：`getActiveToolNames()` 只返回**被声明**的
+ * 工具，hidden 永不出现在活动列表里（也不可被命名激活）——因此这条提示在 pi ≥1.0.0 上没有可触发的
+ * 正常路径，保留它是为了**老宿主**（≤0.80.x：不认识 `exposure`、扩展工具一律自动激活、且该版本
+ * 根本没有 powershell 工具）——正是文案里 `requires pi >= 1.0.0` 前提要拦的场景。
+ * 已知边界（未裁决，先记录）：pi ≥1.0.0 上用户显式排除 powershell（`defaultTools: ["-powershell"]`
+ * 或 `--exclude-tools powershell`）时 bash 不在活动列表 → 本提示不触发；若认为该状态也需要提示，
+ * 触发条件应放宽为“仅 powershell ∉ active”（那会让 ≤0.80.x 宿主每次都提示升级）。
  * 任何取值失败（陈旧 ctx / 老宿主 / 取值器抛错）都静默——提示是锦上添花，绝不能阻断激活。
  */
 function maybeWarnMissingPowerShellTool(pi: ExtensionAPI, ctx: ExtensionContext): void {
@@ -92,8 +97,8 @@ function maybeWarnMissingPowerShellTool(pi: ExtensionAPI, ctx: ExtensionContext)
 }
 
 /**
- * Ruling 8 的 `/permission` 状态行：win32 上受限 shell 只有 PowerShell（pi 在 win32 上默认只激活
- * powershell；本包的 bash 以 `defaultActive: false` 注册，不在活动列表里）。
+ * Ruling 8 的 `/permission` 状态行：win32 上受限 shell 只有 PowerShell（本包覆盖注册的 `powershell`
+ * 作为扩展工具自动激活；本包的 bash 以 `exposure: "hidden"` 注册，永不进活动列表）。
  * 能判断出 pwsh 不在活动工具里就注明尚未激活——`/permission` 是用户排查“bash 为何被拒”的第一站。
  * 无法判断（老宿主没有 `getActiveTools`——此类宿主上 pwsh 工具根本不存在——或取值失败）时注明
  * `activation unknown`：不断言激活状态，避免裸 `shell: powershell only` 被读成“已启用”（T15 修订）。
@@ -114,8 +119,8 @@ export default function (pi: ExtensionAPI) {
 	// C1：/permission 覆盖用进程级模块单例（spec §9）——pi 对每个会话（含 subagent 子会话）
 	// 重新调用本 factory，activate 闭包不跨会话共享；模块单例才能覆盖父/子全部会话。
 	const tools = createSandboxTools({ cwd, permission: processPermissionState });
-	// win32 上 bash 是“默认不激活”的覆盖（tools.ts 按平台加 defaultActive: false）：既不默认出现在
-	// 模型工具列表里，又保证显式启用 bash 时命中的是本包的拒绝壳，而不是 pi 内置的未受限 bash。
+	// win32 上 bash 是“注册但模型不可达”的覆盖（tools.ts 按平台加 exposure: "hidden"）：既不进模型
+	// 工具列表、也不可被命名激活，又保证 bash 这个名字命中的是本包的拒绝壳，而不是 pi 内置的未受限 bash。
 	pi.registerTool(tools.bash as never);
 	pi.registerTool(tools.write as never);
 	pi.registerTool(tools.edit as never);

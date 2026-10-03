@@ -450,7 +450,7 @@ describe("T15: 平台门控与 pwsh 未激活提示（Ruling 8/9）", () => {
 			expect(message).toContain("~/.pi/agent/settings.json");
 			expect(message).toContain("requires pi >= 1.0.0"); // T15 修订：宿主前提与 UnsupportedWindowsShellError 同措辞
 			expect(message).toContain('"defaultTools"');
-			// 只给有效方向：pi 在 win32 上默认只激活 powershell，本包 bash 又是 defaultActive: false——
+			// 只给有效方向：pi 在 win32 上默认只激活 powershell，本包 bash 又以 exposure: "hidden" 注册——
 			// `-bash` 既去不掉扩展注册的工具，也不是这里需要的动作。
 			expect(message).toContain('{ "defaultTools": ["+powershell"] }');
 			expect(message).not.toContain("-bash");

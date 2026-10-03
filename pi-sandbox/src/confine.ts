@@ -66,10 +66,11 @@ export const RUNNER_FAILURE_RULES = {
 } as const satisfies Record<"bwrap" | "landlock" | "seatbelt" | "windows-acl", readonly RunnerFailureRule[]>;
 
 /** Windows 受限模式只支持 pwsh（Ruling 2）：bash 在任何受限模式下拒绝执行，绝不 spawn。
- *  文案只给**有效**指引：pi 在 win32 上默认只激活 powershell 工具（本包的 bash 在 win32 上以
- *  `defaultActive: false` 注册，默认不出现在模型工具列表里），而 `defaultTools` 的 `-bash` 也去不掉
- *  扩展注册的工具——所以不再教用户改 `defaultTools`，只说明“用 powershell、bash 保持 fail-closed、
- *  danger-full-access 是唯一显式逃生门”。 */
+ *  纵深防御：本包在 win32 上把 bash 注册为 `exposure: "hidden"`（D3 第三版：模型不可达、也无法被
+ *  `defaultTools`/`--tools` 命名激活），故正常路径下模型根本不会看到 bash；本类仍保留为**拒绝壳**，
+ *  以防未来宿主改变激活语义或有人直接调用该工具定义。
+ *  文案只给**有效**指引：`defaultTools` 的 `-bash` 去不掉扩展注册的工具——所以不再教用户改
+ *  `defaultTools`，只说明“用 powershell、bash 保持 fail-closed、danger-full-access 是唯一显式逃生门”。 */
 export class UnsupportedWindowsShellError extends Error {
 	constructor(shell: string) {
 		super(

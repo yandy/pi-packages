@@ -708,15 +708,17 @@ describe("windows tool wiring", () => {
 		expect((tools.powershell as { name?: string }).name).toBe("powershell");
 	});
 
-	it("registers bash as defaultActive:false on win32 and leaves the key unset elsewhere", () => {
-		// win32 工具接线：pi 在 win32 上默认只激活 powershell；bash 若仍自动激活，模型会先撞上拒绝。
-		// 但绝不能跳过注册（那会露出 pi 内置的未受限 bash，显式启用即 fail-open），所以是“注册但不默认激活”。
+	it("registers bash with exposure:hidden on win32 and leaves the key unset elsewhere", () => {
+		// win32 工具接线（D3 第三版）：pi 1.0.0 的默认激活列表按**名字**激活 ["read","bash","edit","write"]，
+		// 而 `defaultActive: false` 的语义恰是“被命名即激活”→ 挡不住默认列表（真机证伪）。因此改用
+		// `exposure: "hidden"`：_applyToolLoadout 丢弃 hidden、命名激活也不生效（registered but unreachable）。
+		// 但绝不能跳过注册（那会露出 pi 内置的未受限 bash，显式启用即 fail-open），所以是“注册 + hidden”。
 		const win32 = createSandboxTools({ cwd: process.cwd(), permission: processPermissionState, platform: "win32" });
-		expect((win32.bash as { defaultActive?: boolean }).defaultActive).toBe(false);
+		expect((win32.bash as { exposure?: string }).exposure).toBe("hidden");
 		// 非 win32 不设该键（既有行为不变：bash 必须默认激活）——按自有属性判定，避免真值判断漏掉 undefined。
 		const linux = createSandboxTools({ cwd: process.cwd(), permission: processPermissionState, platform: "linux" });
-		expect(Object.prototype.hasOwnProperty.call(linux.bash, "defaultActive")).toBe(false);
-		expect((linux.bash as { defaultActive?: boolean }).defaultActive).toBeUndefined();
+		expect(Object.prototype.hasOwnProperty.call(linux.bash, "exposure")).toBe(false);
+		expect((linux.bash as { exposure?: string }).exposure).toBeUndefined();
 	});
 
 	it("does not register a powershell tool on POSIX platforms (builder present or not)", () => {

@@ -94,10 +94,10 @@ pi -e /c/pi-packages/pi-sandbox
 sandbox mode: workspace-write (config default)
 runner: windows-acl (partial enforcement)
 workspace: C:\pi-sandbox-accept
-shell: powershell only (not activated)
+shell: powershell only
 ```
 
-其中 `runner:` 行必须逐字含 `windows-acl (partial enforcement)`；默认工具集（`powershell` 未启用）下 `shell:` 行含 `(not activated)`。
+其中 `runner:` 行必须逐字含 `windows-acl (partial enforcement)`。**默认会话的 `shell:` 行不带 `(not activated)`**：本包注册的 `powershell` 覆盖属**扩展工具、会被 pi 自动激活**（D3 第三版下它是 Windows 默认唯一可用的 shell）。`(not activated)` 只会在用户显式排除 powershell（`defaultTools: ["-powershell"]` / `--exclude-tools powershell`）时出现——那时 bash 也不可得（见第 2 条），会话里没有任何 shell 工具。
 
 **实测**：
 
@@ -105,25 +105,28 @@ shell: powershell only (not activated)
 
 ```
 
-## 2. 默认工具集下 `bash` 被拒绝并给出 settings 片段（fail-closed）
+## 2. 模型工具列表里没有 `bash`，且显式点名也拿不到未受限 shell（D3 第三版：`exposure: "hidden"`）
 
-**前置**：`~/.pi/agent/settings.json` 保持默认（未启用 `powershell` 工具），重启 pi。
+**前置**：不额外配置（本包的 `powershell` 覆盖会自动激活）；只要没有显式排除 `powershell`（`defaultTools: ["-powershell"]` / `--exclude-tools powershell`），用第 1 条的会话即可——你的 settings 里即使曾加过 `{ "defaultTools": ["+powershell"] }` 也不影响本条的结论。
 
 **命令**：在会话里对模型说
 
 ```text
-用 bash 工具执行：echo hello
+列出你当前可用的工具名称，不要调用任何工具。然后尝试用 bash 工具执行：echo hello
 ```
 
-**预期**：工具调用被拒绝、**没有执行任何命令**，错误文案含：
+**预期**：工具列表含 `read` / `write` / `edit` / `powershell`，**不含 `bash`**；模型无法调用 bash（工具不存在），`echo hello` 没有被执行。win32 下本包的 bash 注册为 `exposure: "hidden"`（pi 语义 *registered but unreachable*：不声明给模型、也不可被命名激活），同时按名**遮蔽** pi 内建的未受限 bash。
 
-```text
-[sandbox: bash is not supported on Windows]
-{ "defaultTools": ["+powershell"] }
-requires pi >= 1.0.0
+**追加验证（显式点名也不放行，fail-closed）**：在 Windows 上另外执行
+
+```powershell
+cd C:\pi-sandbox-accept
+pi -e C:\pi-packages\pi-sandbox --tools bash
 ```
 
-同时激活期只出现一次提示（有 UI 走通知，无 UI 走 stderr）：`pi-sandbox: on Windows the confined shell is PowerShell only...`。
+**预期**：会话里**同样没有** bash 工具（`--tools bash` 不能激活 hidden 工具：活动工具集为空，powershell 也因 allowlist 不在此列）——不存在“显式启用即拿到未受限 shell”的路径。旧版行为（`defaultActive: false`）在此会因默认列表按名激活而露出 sandboxed bash（且 `--tools bash` 本可激活它），故本步骤就是防该回归。
+
+**注**：拒绝壳 `UnsupportedWindowsShellError` 仍保留（纵深防御），由 `tests/tools.test.ts` 与 `tests/confine.test.ts` 单测覆盖；正常 pi 路径下已无法触达它，因此不再有对应的手动步骤。
 
 **实测**：
 
@@ -131,13 +134,13 @@ requires pi >= 1.0.0
 
 ```
 
-## 3. 未激活的 `powershell` 覆盖注册被 pi 接受（启动无扩展错误）
+## 3. `powershell` 覆盖注册被 pi 接受且默认激活（启动无扩展错误）
 
-**前置**：同上（`powershell` 未在 `defaultTools` 中激活）。
+**前置**：同上（默认配置）。
 
 **命令**：启动 pi（第 1 条的 `pi -e ...`），观察启动输出 / `/permission`。
 
-**预期**：扩展正常加载，无 `Extension error`、无工具注册冲突或 `registerTool` 报错；`/permission` 的 `shell:` 行为 `shell: powershell only (not activated)`。pi-sandbox 只在宿主提供 `createPowerShellToolDefinition` 时注册 `powershell` 覆盖；注册一个**未激活**的工具对 pi 无害。
+**预期**：扩展正常加载，无 `Extension error`、无工具注册冲突或 `registerTool` 报错；`/permission` 的 `shell:` 行为 `shell: powershell only`（无 `(not activated)`）。pi-sandbox 只在宿主提供 `createPowerShellToolDefinition`（pi >= 1.0.0）时注册 `powershell` 覆盖；**扩展注册的工具会被 pi 自动激活**——这正是 D3 第三版下 Windows 默认仍有一个可用 shell 的原因。
 
 **实测**：
 
@@ -145,21 +148,15 @@ requires pi >= 1.0.0
 
 ```
 
-## 4. 启用 `powershell` 工具后受限执行可用
+## 4. 受限 `powershell` 执行可用（默认即激活）
 
-**命令（PowerShell / git-bash 相同）**：编辑 `~/.pi/agent/settings.json`：
-
-```json
-{ "defaultTools": ["+powershell"] }
-```
-
-重启 pi，再输入 `/permission`；然后对模型说：
+**命令**：就在第 1 条的会话里对模型说：
 
 ```text
 用 powershell 工具执行：$PSVersionTable.PSVersion.ToString()
 ```
 
-**预期**：`/permission` 的 `shell:` 行变为 `shell: powershell only`（无 `(not activated)` 后缀）；工具成功返回 PowerShell 版本。
+**预期**：工具成功返回 PowerShell 版本；`/permission` 的 `shell:` 行已是 `shell: powershell only`。无需修改 `defaultTools`——扩展注册的工具自动激活；`{ "defaultTools": ["+powershell"] }` 只在曾显式排除 powershell 的情况下用于加回（pi >= 1.0.0）。
 
 **实测**：
 

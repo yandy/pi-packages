@@ -379,16 +379,21 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 	// I2 fail-safe：构造抛错降级为“无 pwsh 覆盖”，绝不冒泡出 createSandboxTools（fail-open 防线）。
 	const basePowerShell = buildHostPowerShellBase(createHostPowerShell, deps.cwd);
 
-	// Windows 工具装配：pi 在 win32 上默认只激活 powershell 工具，而 pi 对扩展注册的工具默认自动激活
-	// （`defaultActive` 缺省为 true）——照旧注册会让 bash 在 win32 上也默认出现在模型工具列表里，
-	// 模型会先撞上 fail-closed 拒绝。但又绝不能改成“win32 上不注册 bash”：那会露出 pi 内置的
-	// （未受限）bash，用户显式启用 bash（defaultTools / --tools / setActiveTools）时模型就直接拿到
-	// 无沙箱 shell（fail-open）。所以 win32 上保留本覆盖定义、只标记 defaultActive: false：
-	// 默认不激活（模型只看到 pwsh），显式点名激活时命中的仍是本拒绝壳（fail-closed）。
+	// Windows 工具装配（spec D3 第三版，pi 1.0.0 源码实证）：win32 上 bash 必须是“注册但模型不可达”。
+	// 机制两代教训：
+	//   ① `defaultActive: false` **无效**（真机证伪）：pi 1.0.0 的 _buildRuntime 把默认激活名写死为
+	//      ["read","bash","edit","write"]（agent-session.js:2889-2893），_refreshToolRegistry 按**名字**
+	//      从注册表取同名工具激活；而 `defaultActive:false` 的语义恰是“被命名即激活”
+	//      （_isActivatedOnRegistration，types.d.ts:471-475）——本包注册的同名 bash 照旧进入激活集。
+	//   ② 正解 `exposure: "hidden"`：_applyToolLoadout 构建声明集合时**丢弃** hidden
+	//      （agent-session.js:1124），_isDeclarable 对 hidden 返回 false → 自动激活与命名激活
+	//      （defaultTools / --tools / setActiveTools）都不生效；pi 文档：hidden = registered but unreachable。
+	// 同时**绝不能**“win32 上不注册 bash”：扩展工具按名覆盖内建定义（registry.set），不注册就会露出
+	// pi 内置的未受限 bash，显式启用即 fail-open。注册 + hidden = 名字被遮蔽、模型不可达，无 fail-open 路径。
 	// 非 win32 不设该键：bash 必须默认激活（既有行为不变）。
 	const bash = {
 		...baseBash,
-		...(platform === "win32" ? { defaultActive: false } : {}),
+		...(platform === "win32" ? { exposure: "hidden" as const } : {}),
 		label: `${baseBash.label} (sandboxed)`,
 		description: escalationDescription(baseBash.description),
 		promptGuidelines: [...(baseBash.promptGuidelines ?? []), ESCALATION_GUIDELINE],
