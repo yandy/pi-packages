@@ -11,6 +11,14 @@ import { PLACEHOLDER_KEYS } from "../src/escalation";
 import { getEscalationBroker, resetEscalationBrokerForTests } from "../src/escalation-broker";
 import { getDenialLedger, resetDenialLedgerForTests } from "../src/denial-ledger";
 
+// T14 修订（Fix 2）：把受限 pwsh ops 工厂替换成一个可识别的哨兵，使“builder 收到的 operations 是否
+// 来自沙箱工厂”成为可断言的身份问题。若实现误接了宿主的本地（未受限）ops 或任何别的对象，断言必红。
+const { powershellOpsSentinel, createSandboxPowerShellOpsMock } = vi.hoisted(() => {
+	const sentinel = { exec: vi.fn(async () => ({ exitCode: 0 })) };
+	return { powershellOpsSentinel: sentinel, createSandboxPowerShellOpsMock: vi.fn(() => sentinel) };
+});
+vi.mock("../src/powershell-ops", () => ({ createSandboxPowerShellOps: createSandboxPowerShellOpsMock }));
+
 let dir: string;
 let ws: string;
 /** 真·围栏外落点（既不在 workspace，也不在注入的 tmp 根内）。 */
@@ -742,8 +750,29 @@ describe("windows tool wiring", () => {
 		const result = await powershell!.execute("pwsh-1", { command: "Get-ChildItem" }, undefined, undefined, toolCtx());
 		expect(calls.length).toBe(2);
 		expect(calls[0].opts).toBeUndefined();
-		expect(calls[1].opts).toEqual(expect.objectContaining({ operations: expect.anything() }));
+		// 身份钉住（T14 修订）：build 时传到 builder 的必须是受限工厂的产物**本人**，而非宿主的本地（未受限）ops
+		// 或任何拷贝/包装（后者同样“是个 operations”，却会让 pwsh 在沙箱外执行，fail-open）。
+		// 必须用 toBe（引用相等）：toEqual/objectContaining 是结构比较，浅拷贝也能蒙混通过。
+		const executeOpts = calls[1].opts as { operations?: unknown } | undefined;
+		expect(executeOpts?.operations).toBe(powershellOpsSentinel);
+		expect(createSandboxPowerShellOpsMock).toHaveBeenCalledWith(expect.objectContaining({
+			platform: "win32",
+			onDenial: expect.any(Function),
+		}));
 		expect((result.content[0] as { text: string }).text).toBe("ran Get-ChildItem");
+	});
+
+	it("a throwing host pwsh builder degrades to no powershell tool without breaking bash/write/edit", () => {
+		// I2 fail-open 回归闸：构造期抛错若冒泡出 createSandboxTools，pi 会把整个扩展置 null，
+		// bash/write/edit 随即无沙箱裸跑。必须降级为“无 pwsh 覆盖”，三个基础工具照常注册。
+		const builder = vi.fn(() => {
+			throw new Error("host builder exploded");
+		});
+		const { deps } = makeDeps({ platform: "win32", _hostCreatePowerShellToolDefinition: builder });
+		const tools = createSandboxTools(deps);
+		expect(builder).toHaveBeenCalledTimes(1);
+		for (const name of ["bash", "write", "edit"] as const) expect(tools[name]).toBeDefined();
+		expect(tools.powershell).toBeUndefined();
 	});
 
 	it("powershell shares bash's command-kind denial gate and one-shot marker", async () => {

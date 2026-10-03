@@ -57,6 +57,24 @@ function hostCreatePowerShellToolDefinition(): HostCreatePowerShellToolDefinitio
 	return typeof candidate === "function" ? (candidate as HostCreatePowerShellToolDefinition) : undefined;
 }
 
+/**
+ * I2 fail-safe：宿主 builder 在**构造期**抛错时降级为“无 pwsh 覆盖”（undefined，与老宿主同一路径）。
+ * `createSandboxTools` 绝不能因此抛出——pi 会把整个扩展置 null，bash/write/edit 随即无沙箱裸跑
+ * （fail-open，见 index.ts 的 I2）。execute 期的 builder 抛错是另一回事：只影响那一次 pwsh 调用，
+ * 不涉及扩展装配。
+ */
+function buildHostPowerShellBase(
+	builder: HostCreatePowerShellToolDefinition | undefined,
+	cwd: string,
+): HostPowerShellToolDefinition | undefined {
+	if (builder === undefined) return undefined;
+	try {
+		return builder(cwd);
+	} catch {
+		return undefined;
+	}
+}
+
 export interface SandboxToolDeps {
 	cwd: string;
 	/** 测试注入用；生产缺省逐调用 getSandboxConfig(ctx.cwd)（C2）。 */
@@ -357,7 +375,8 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 	const baseEdit = createEditToolDefinition(deps.cwd);
 	// pwsh 的 base 只用于元数据（label/description/schema/prepareArguments），execute 会被下面的包装覆盖；
 	// 与 bash 一样，builder 在 execute 时按当次 mode 重新装配受限 ops。
-	const basePowerShell = createHostPowerShell?.(deps.cwd);
+	// I2 fail-safe：构造抛错降级为“无 pwsh 覆盖”，绝不冒泡出 createSandboxTools（fail-open 防线）。
+	const basePowerShell = buildHostPowerShellBase(createHostPowerShell, deps.cwd);
 
 	const bash = {
 		...baseBash,
