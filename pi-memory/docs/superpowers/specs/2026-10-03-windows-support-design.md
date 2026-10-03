@@ -131,6 +131,7 @@ POSIX 侧示例保持不变：`/home/yandy/proj` → `home__yandy__proj`，`/hom
 - `gitToplevel(cwd)`：`git rev-parse --show-cdup` → `resolve(cwd, cdup)`（仓库根处输出为空行 → `resolve(cwd)`）。
   - **「没有工作树」必须显式判掉**：`--show-cdup` 在裸仓库、以及 cwd 位于 `.git` 内部（含 `.git/objects`）时以 **exit 0 + 0 字节输出**返回（实测 git 2.55，不是非零退出），因此「空输出」不等于「在仓库根」。用 `git rev-parse --is-inside-work-tree` 判：`true` → 在仓库根，`resolve(cwd)`；`false`（裸仓库 / `.git` 内部 / `GIT_DIR` 指向工作树之外）→ 返回 `null`，让 `projectIdentity` 退回 `local/<绝对路径>`，与本次改动前（`--show-toplevel` 在这些场景 exit 128）逐字节一致。非仓库时两条命令都以非零退出 → 既有 catch 返回 `null`。
   - 为什么不带 `--show-toplevel` 兜底：Ruling 3。`--show-cdup` 自 git 1.5.4 起存在，无版本风险；「有无工作树」的判定不是「根的来源」，不受 Ruling 3 约束（`--is-inside-work-tree` 同样自 1.5.x 起存在）。
+  - `resolve(config.memoryDir)` 顺带把**相对路径**配置固化在解析时刻：相对值不再以「每个调用点的 cwd」为基准，而是以进程 cwd 解析一次后固定（逻辑锁的 key 用的是这个字符串，同一目录不应因写法不同而得到两把锁）。
 - `expandTilde(p, platform = process.platform)`：`~` → `homedir()`；`~/` 前缀（两端都认）；`~\` 前缀**仅 win32**。
 - `resolveMemoryDir` 兜底（D4）：
   ```ts
@@ -223,6 +224,8 @@ export async function withFsRetry<T>(fn: () => Promise<T>, options?: { retries?:
 | `fs-lock` 互斥 | 既有「并发 5 个调用者最大同时持有数 = 1」在 `open(wx)` 下仍成立 | `tests/fs-lock.test.ts`（保持） |
 | CRLF 回归 | CRLF 索引的往返写（解析不误报 unrecognized、删除不留死链）；CRLF entry 的 list/search/replace/remove；CRLF 内容注入前 `\r` 已剔除；孤立 CR 同效 | `tests/entry-index.test.ts`、`tests/memory-store-*.test.ts`、`tests/inject.test.ts`（按缺口补） |
 
+落地时新增的测试文件（与上表逐条对应）：`tests/windows-names.test.ts`（保留设备名规则）、`tests/memory-store-retry.test.ts`（mock `node:fs/promises` 注入瞬时 errno，验证写入与删除真的被重试）、`tests/fs-lock-acquire-failure.test.ts`（句柄写入/关闭失败时锁不得残留且原错误上抛）、`tests/fs-retry.win32.test.ts`（win32-gated：真 `FileShare.None` 独占下的短冲突可跨过、长冲突 fail-closed）、`tests/dream.test.ts`（设备名文件不进整目录快照，win32/POSIX 两侧）。
+
 ### 5.2 既有用例的语义变更（明确列出）
 
 | 用例 | 变更 |
@@ -243,7 +246,7 @@ export async function withFsRetry<T>(fn: () => Promise<T>, options?: { retries?:
 
 ### 5.4 真机验收套件
 
-见 `pi-memory/docs/superpowers/verification/2026-10-03-windows-support-acceptance.md`。覆盖：全量套件绿（含跳过清单）、`local/`/`git/` 两类目录名、Git Bash 与 PowerShell 身份一致、`~\` 展开、0 字节锁处置、**非 NTFS 卷上的锁**（`open(wx)` 的核心证明）、CRLF 存盘往返、大小写撞名、**`FileShare.None` 占住 `MEMORY.md` 触发瞬时 `EPERM` 重试**、快照与 `sessions/` 目录、`/memory` 状态行。
+见 `pi-memory/docs/superpowers/verification/2026-10-03-windows-support-acceptance.md`。覆盖（与 §8 记录表一一对应）：全量套件绿（含跳过清单）、`local/`/`git/` 两类目录名、Git Bash 与 PowerShell 身份一致、0 字节锁处置、**非 NTFS 卷上的锁**（`open(wx)` 的核心证明）、CRLF 存盘往返、大小写撞名、**`FileShare.None` 占住 `MEMORY.md` 触发瞬时 `EPERM` 重试**、快照与 `sessions/` 目录。`~\` 展开与 `/memory` 状态行不进清单：前者由注入平台的单测覆盖（`tests/config.test.ts`），而且清单里每一条的 `Dir:` 输出都会实际走一遍用户主目录路径；后者由 `tests/index-wiring.test.ts` 覆盖，并在清单各条里被反复读到。
 
 ### 5.5 验收流程
 
@@ -273,6 +276,8 @@ export async function withFsRetry<T>(fn: () => Promise<T>, options?: { retries?:
 | 真机验收依赖用户机器 | 无法自动回归 | D1 的既定取舍；验收记录留档 |
 
 ## 8. 验收记录表
+
+下表 11 条与真机验收清单的 11 条**一一对应**（清单：`pi-memory/docs/superpowers/verification/2026-10-03-windows-support-acceptance.md`）。状态：**待真机**（Linux CI 已全绿：28 files passed + 1 skipped，620 passed + 2 skipped）。
 
 | # | 条目 | 命令 | 预期 | 实测输出 | 结论 |
 |---|---|---|---|---|---|
