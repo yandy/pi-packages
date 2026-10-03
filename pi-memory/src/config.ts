@@ -162,9 +162,12 @@ export function requiredModel(cfg: MemoryConfig, task: ModelTask): string {
 	return value;
 }
 
-function expandTilde(p: string): string {
+function expandTilde(p: string, platform: NodeJS.Platform = process.platform): string {
 	if (p === "~") return homedir();
 	if (p.startsWith("~/")) return join(homedir(), p.slice(2));
+	// `~\` 只在 Windows 上展开：POSIX 上 `~\foo` 是以 `~` 开头的合法文件名，
+	// 改写它会破坏用户真实的路径（spec Ruling 4）。
+	if (platform === "win32" && p.startsWith("~\\")) return join(homedir(), p.slice(2));
 	return p;
 }
 
@@ -200,6 +203,8 @@ export interface LoadConfigContext {
 	isProjectTrusted(): boolean;
 	_globalDir?: string;
 	_configDirName?: string;
+	/** 测试注入缝：命名/展开规则跟随的平台。默认 `process.platform`。 */
+	_platform?: NodeJS.Platform;
 }
 
 export async function loadConfig(ctx: LoadConfigContext): Promise<MemoryConfig> {
@@ -215,6 +220,6 @@ export async function loadConfig(ctx: LoadConfigContext): Promise<MemoryConfig> 
 		cfg = deepMerge(cfg, readJsonSafe(projectFile));
 	}
 
-	cfg.memoryDir = expandTilde(cfg.memoryDir);
+	cfg.memoryDir = expandTilde(cfg.memoryDir, ctx._platform ?? process.platform);
 	return cfg;
 }

@@ -105,6 +105,32 @@ describe("loadConfig", () => {
 		expect(cfg.memoryDir).toBe(homedir());
 	});
 
+	it("expands ~\\ in memoryDir on win32", async () => {
+		await writeFile(join(globalDir, "memory.json"), JSON.stringify({ memoryDir: "~\\.pi\\memory" }));
+		const cfg = await loadConfig({
+			cwd: projectDir,
+			isProjectTrusted: () => true,
+			_globalDir: globalDir,
+			_configDirName: ".pi",
+			_platform: "win32",
+		});
+		// 注入的 `_platform` 只改展开条件，拼接仍走宿主的 join（POSIX 上反斜杠是普通字符，不是分隔符）。
+		// 真 Windows 上本期望与 `join(homedir(), ".pi", "memory")` 逐字节相同。
+		expect(cfg.memoryDir).toBe(join(homedir(), ".pi\\memory"));
+	});
+
+	it("leaves ~\\ alone on POSIX (it is a legal file name there)", async () => {
+		await writeFile(join(globalDir, "memory.json"), JSON.stringify({ memoryDir: "~\\.pi\\memory" }));
+		const cfg = await loadConfig({
+			cwd: projectDir,
+			isProjectTrusted: () => true,
+			_globalDir: globalDir,
+			_configDirName: ".pi",
+			_platform: "linux",
+		});
+		expect(cfg.memoryDir).toBe("~\\.pi\\memory");
+	});
+
 	it("has autoSurfacing defaults", async () => {
 		const cfg = await loadConfig({ cwd: "/tmp", isProjectTrusted: () => false, _globalDir: globalDir, _configDirName: ".pi" });
 		expect(cfg.autoSurfacing).toEqual({
