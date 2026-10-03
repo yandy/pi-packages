@@ -6,7 +6,7 @@ Aligned with Claude Code's auto memory mechanism: **one memory = one file**, a `
 
 > ## ⚠️ Breaking changes
 >
-> **After 2.2.0 (unreleased):**
+> **In 2.3.0:**
 >
 > - **The injected index window is now the newest 50 lines / 16 KiB.** `memIndexInjectMaxLines` 200 → 50 and `memIndexInjectMaxBytes` 25600 → 16384. The write capacity is unchanged (200 lines / 25600 bytes), so memories older than the newest 50 index lines no longer reach the system prompt — they stay reachable through auto-surfacing and the `memory` tool. Configs that already set `memIndexInjectMax*` are unaffected.
 >

@@ -6,7 +6,7 @@ pi coding agent 的文件系统持久记忆层。把项目知识（事实、偏�
 
 > ## ⚠️ 破坏性变更
 >
-> **2.2.0 之后（未发布）：**
+> **2.3.0：**
 >
 > - **注入的索引窗口改为「最新的 50 行 / 16 KiB」。** `memIndexInjectMaxLines` 200 → 50、`memIndexInjectMaxBytes` 25600 → 16384。写入口径不变（200 行 / 25600 字节），因此比「最新 50 行」更旧的记忆不再进 system prompt —— 它们仍可由 auto-surfacing 与 `memory` 工具检索。已经显式配置 `memIndexInjectMax*` 的用户不受影响。
 >
