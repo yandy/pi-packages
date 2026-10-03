@@ -1,4 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// 隔离 getAgentDir：../index → loadConfig 会读 <agentDir>/coding-tools.json，
+// 不 mock 就会依赖开发机上真实的 ~/.pi/agent/coding-tools.json。
+// 必须保留 actual 的其余导出（尤其 CONFIG_DIR_NAME，path.resolve 不接受 undefined）。
+vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@earendil-works/pi-coding-agent")>();
+	return { ...actual, getAgentDir: () => "/nonexistent-agent-dir/agent" };
+});
 
 const ACTION_ERROR = new Error(
 	"Extension runtime not initialized. Action methods cannot be called during extension loading.",
@@ -24,6 +35,17 @@ function makeLoadingPi() {
 }
 
 describe("extension factory", () => {
+	// 项目级 cwd 也必须是临时目录：loadConfig 会读 <cwd>/.pi/coding-tools.json
+	let projectDir: string;
+
+	beforeEach(() => {
+		projectDir = mkdtempSync(join(tmpdir(), "ext-factory-"));
+	});
+
+	afterEach(() => {
+		rmSync(projectDir, { recursive: true, force: true });
+	});
+
 	it("does not call action methods during factory load", async () => {
 		const pi = makeLoadingPi();
 
@@ -53,7 +75,7 @@ describe("extension factory", () => {
 
 		const sessionStartHandler = pi.handlers.get("session_start")?.[0];
 		if (!sessionStartHandler) throw new Error("expected session_start handler");
-		await sessionStartHandler({} as never, { cwd: "/proj" } as never);
+		await sessionStartHandler({} as never, { cwd: projectDir } as never);
 
 		// refreshTools 只应管理自定义工具，且不得关闭别人激活的 grep
 		expect(pi.setActiveTools).toHaveBeenCalled();
@@ -66,7 +88,7 @@ describe("extension factory", () => {
 		expect(activeTools).not.toContain("find");
 	});
 
-	it("registers all four tools", async () => {
+	it("registers all five tools", async () => {
 		const pi = makeLoadingPi();
 
 		const mod = await import("../index");
@@ -75,9 +97,11 @@ describe("extension factory", () => {
 
 		const names = pi.registerTool.mock.calls.map((c: unknown[]) => (c[0] as { name: string }).name);
 		expect(names).toContain("ast_grep_search");
+		expect(names).toContain("ast_grep_replace");
 		expect(names).toContain("lsp_symbols");
 		expect(names).toContain("lsp_hover");
 		expect(names).toContain("lsp_navigate");
+		expect(names).toHaveLength(5);
 	});
 
 	it("registers session_shutdown handler", async () => {

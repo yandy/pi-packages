@@ -96,4 +96,14 @@ describe("refreshTools", () => {
 		expect(result).not.toContain("ls");
 		expect(result).not.toContain("find");
 	});
+
+	it("does not activate ls/find/grep even when a stale config object carries them", () => {
+		const pi = makeMockPi(["read", "bash", "edit", "write"]);
+		const staleConfig = { ...allTrueConfig, ls: true, find: true, grep: true } as CodingToolsConfig;
+		refreshTools(pi as unknown as ExtensionAPI, staleConfig);
+		const result = pi.setActiveTools.mock.calls[0][0] as string[];
+		expect(result).not.toContain("ls");
+		expect(result).not.toContain("find");
+		expect(result).not.toContain("grep");
+	});
 });
