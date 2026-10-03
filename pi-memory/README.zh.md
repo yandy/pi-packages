@@ -8,7 +8,7 @@ pi coding agent 的文件系统持久记忆层。把项目知识（事实、偏�
 >
 > **2.5.0：**
 >
-> - **Windows 上的目录名形态变了。** `local/<项目>` 的 key 现在按 `\` 与 `/` 一起分段，因此 Windows 项目目录是一个可读的单分量名（`C_3a__Users__you__proj`），而不是嵌套的一棵树（`C_3a/Users/you/proj`）。旧嵌套布局下的记忆会变成孤儿目录 —— 手工搬过去（把叶子目录重命名进 `local/`，或重新写入这些记忆）。`git/<host>__<owner>__<repo>` 形态不变，POSIX 输出与之前逐字节一致。
+> - **Windows 上的目录名形态变了。** `local/<项目>` 的 key 现在按 `\` 与 `/` 一起分段，因此 Windows 项目目录是一个可读的单分量名（`C_3a__Users__you__proj`），而不是嵌套的一棵树（`C_3a/Users/you/proj`）。旧嵌套布局下的记忆会变成孤儿目录：在项目里跑一次 `/memory` 读出新的 `Dir:` 路径，再把旧项目目录里的内容搬过去（PowerShell 里用 `Move-Item "<旧项目目录>\*" "<新目录>"`）；留下的空中间目录可以不管。`git/<host>__<owner>__<repo>` 形态不变，POSIX 输出与之前逐字节一致。
 > - **stem 是 Windows 保留设备名的 entry 文件现在会加 `_` 前缀**（`name: "CON"` → `_CON.md`），**所有平台**都这样，这样名字在共享的 `git/` 目录里两边都安全。只影响**新建**文件 —— 既有 entry 保留原名。
 >
 > **2.4.0：**
@@ -394,7 +394,7 @@ Lock: free
 
 pi-memory 在 Windows 上原生可用（PowerShell、cmd、Git Bash 都可以），不需要 WSL。
 
-- **目录名。** 由项目 key 派生的名字一定是单个、合法的 Windows 分量：`\` 被当作分隔符（`C:\Users\you\proj` → `C_3a__Users__you__proj`），结尾的点或空格被十六进制转义（`proj.` → `proj_2e`），而「第一个 `.` 之前的部分」是保留设备名的名字会加 `_` 前缀（`nul` → `_nul`）。`git/` 类 key 的目录名在所有平台上一致，因此共享 `memoryDir` 时同一仓库从 Linux 与 Windows 打开都会落到同一个目录。
+- **目录名。** 由项目 key 派生的名字一定是单个、合法的 Windows 分量：`\` 被当作分隔符（`C:\Users\you\proj` → `C_3a__Users__you__proj`），结尾的点或空格被十六进制转义（`proj.` → `proj_2e`），而「第一个 `.` 之前的部分」是保留设备名的名字会加 `_` 前缀（`nul` → `_nul`）。普通 remote 的 `git/` 目录名在所有平台上一致（`github.com__owner__repo`），因此共享 `memoryDir` 时同一仓库从 Linux 与 Windows 打开都会落到同一个目录。首段与保留设备名撞名（如 `aux.example.com/...`）、含反斜杠、或以点结尾的 key，其目录名在两端仍可能不同。
 - **仓库根。** 用 `git rev-parse --show-cdup` 配合进程 cwd 求根，因此从 Git Bash 启动（git 在那里打印 MSYS 形态的 `/c/...` 路径）与从 PowerShell 启动会映射到同一个记忆目录。
 - **`memoryDir`。** `~`、`~/` 与（Windows 上）`~\` 都会展开；相对路径会被解析成绝对路径。Windows 路径与 UNC 共享都可用。
 - **锁。** 跨进程锁用 `open(…, "wx")`（`CREATE_NEW`）建立，在 NTFS、ReFS、exFAT/FAT32、网络共享与同步目录上都是原子的 —— `memoryDir` 放在非 NTFS 卷上也能用。杀软、编辑器或索引器造成的瞬时 `EPERM`/`EACCES`/`EBUSY` 会做短退避重试；持续失败仍按原始错误报出。
