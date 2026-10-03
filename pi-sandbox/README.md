@@ -16,6 +16,8 @@ pi install .
 
 bash commands are wrapped in a platform sandbox runner and spawned locally (**path transparent**: host paths work as-is); the write/edit tools run an in-process write fence before execution; read is unrestricted.
 
+**Scope: model-issued work only.** A `!command` / `!!command` you type yourself (also the RPC `bash` command) is executed by pi itself through the `user_bash` event, which this extension does not handle — it runs as your own shell, unconfined by the modes above. The same holds for any other process you start outside pi.
+
 | Platform | Runner | Mechanism |
 |---|---|---|
 | Linux | `bwrap` (preferred) | `--ro-bind / /` whole filesystem read-only + rw binds of the workspace and the host `/tmp` |
