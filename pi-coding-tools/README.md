@@ -1,10 +1,14 @@
 # pi-coding-tools
 
-Pi package enabling `ls`/`find`/`grep` built-in tools.
+Pi package providing AST/LSP code-intelligence tools for pi.
 
-## Features
-
-- **ls/find/grep**: Enables these built-in tools that are off by default.
+> ## ⚠️ Breaking changes
+>
+> **In 0.6.0 (unreleased):**
+>
+> - **Built-in `ls`/`find`/`grep` are no longer activated.** This package now only provides the five AST/LSP tools below. pi's own default tool set is just `read`/`bash`/`edit`/`write`, so upgrading silently drops `ls`/`find`/`grep`.
+> - **Re-enable them yourself** in user (`~/.pi/agent/settings.json`) or project (`.pi/settings.json`) settings: `{ "defaultTools": ["+ls", "+find", "+grep"] }`. The `+name` form adds to the inherited default set instead of replacing it.
+> - **Legacy `ls`/`find`/`grep` keys in `coding-tools.json` are silently ignored** — no error, no effect.
 
 ## AST/LSP 代码理解工具
 
@@ -34,9 +38,17 @@ Pi package enabling `ls`/`find`/`grep` built-in tools.
 
 `ast_grep_search` 需要 `ast-grep`（或 `sg`）二进制。安装：`npm i -g @ast-grep/cli` / `cargo install ast-grep` / `brew install ast-grep`。
 
-### 配置
+## Installation
 
-在 `coding-tools.json` 中可开关每个工具（默认全 true），并可整体关 LSP 或覆盖服务器：
+```bash
+pi install npm:@yandy0725/pi-coding-tools
+```
+
+## Configuration
+
+Configuration files control which of the five tools are enabled. All default to `true`.
+
+Full shape:
 
 ```jsonc
 {
@@ -49,15 +61,7 @@ Pi package enabling `ls`/`find`/`grep` built-in tools.
 }
 ```
 
-## Installation
-
-```bash
-pi install npm:@yandy0725/pi-coding-tools
-```
-
-## Configuration
-
-Configuration files control which tools are enabled. All default to `true`.
+Per-server overrides also accept `command` (string array, e.g. `["clangd", "--background-index"]`) and `env` (string map).
 
 ### Global config
 
@@ -65,9 +69,8 @@ Configuration files control which tools are enabled. All default to `true`.
 
 ```json
 {
-  "ls": true,
-  "find": true,
-  "grep": true
+  "ast_grep_search": true,
+  "lsp_hover": true
 }
 ```
 
@@ -77,7 +80,7 @@ Configuration files control which tools are enabled. All default to `true`.
 
 ```json
 {
-  "grep": false
+  "lsp_hover": false
 }
 ```
 
@@ -85,12 +88,13 @@ Configuration files control which tools are enabled. All default to `true`.
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `ls` | `true` | Enable the `ls` built-in tool |
-| `find` | `true` | Enable the `find` built-in tool |
-| `grep` | `true` | Enable the `grep` built-in tool |
 | `ast_grep_search` | `true` | Enable the AST-based code search tool |
 | `ast_grep_replace` | `true` | Enable the AST-based code rewrite tool (dry-run by default) |
 | `lsp_symbols` | `true` | Enable the LSP document symbols tool |
 | `lsp_hover` | `true` | Enable the LSP hover (type/docs) tool |
 | `lsp_navigate` | `true` | Enable the LSP definition/references tool |
 | `lsp` | — | LSP configuration block (`disabled`, `servers` overrides) |
+
+## License
+
+MIT
