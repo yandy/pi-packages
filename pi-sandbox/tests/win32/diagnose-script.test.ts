@@ -158,18 +158,20 @@ describe.skipIf(process.platform !== "win32")("diagnose-windows-sandbox-acl scri
 	it("removes package allow entries while preserving deny entries and other allow entries", () => {
 		const target = join(scratch, "denied");
 		shell("cmd", ["/c", "mkdir", target]);
-		// deny 用 (D)=delete-only：(W) 展开成 Write+Synchronize，而 Win32 打开句柄隐式请求 SYNCHRONIZE，
-		// 会把脚本的 CreateFileW(FILE_WRITE_DAC) 探测打掉（DACL 本身并未拒绝 WRITE_DAC）。
-		const deny = shell("icacls", [target, "/deny", `${currentUser()}:(OI)(CI)(D)`]);
+		// DENY 的受托人用**同一个包 SID**（不是当前用户）：真机证明“受托人 = 当前用户”的 deny 只要含
+		// SYNCHRONIZE（icacls 的 (W)/(D) 都会展开出 S）就会打掉 CreateFileW(FILE_WRITE_DAC) 的探测；
+		// 而包 SID 的 deny 对用户的访问检查无影响，同时钉住脚本“同 SID 的 deny 不得被当成冲突移除”。
+		const deny = shell("icacls", [target, "/deny", `*${PACKAGE_SID}:(OI)(CI)(RX)`]);
 		expect(deny.status, deny.output).toBe(0);
 		const otherAllow = shell("icacls", [target, "/grant", "*S-1-5-32-545:(OI)(CI)(RX)"]);
 		expect(otherAllow.status, otherAllow.output).toBe(0);
-		addPackageAce(target); // 必须真的有包 ACE：否则移除路径不执行，本用例什么都不验证
+		addPackageAce(target); // 同 SID 的 allow：移除路径必须执行且只移除 allow
 		const run = runScript(["-Path", target, "-AllowRoot", scratch, "-Out", join(scratch, "out")]);
 		expect(run.status, run.output).toBe(0);
 		const after = sddl(target);
-		expect(after).not.toContain("S-1-15-2-1234567890");
-		expect(after).toContain("(D;"); // 拒绝 ACE 原样保留（SDDL 里 deny 以 (D; 开头）
+		// SDDL 里按 ACE 类型区分：同 SID 的 allow 必须消失、同 SID 的 deny 必须原样保留。
+		expect(after).not.toMatch(/\(A;[A-Z]*;[^)]*;;;S-1-15-2-1234567890-1234567890\)/u);
+		expect(after).toMatch(/\(D;[A-Z]*;[^)]*;;;S-1-15-2-1234567890-1234567890\)/u);
 		expect(after).toContain("S-1-5-32-545"); // 其它允许 ACE 原样保留
 	});
 
