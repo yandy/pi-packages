@@ -46,6 +46,8 @@ PowerShell 语言模式取决于启动约束，不是 ACL 边界的一部分：`
 
 **`%TEMP%` 的代价。** `%TEMP%` 是用户共享树：其子目录会继承拒绝项，因此第三方程序用 `GENERIC_ALL`/`FullControl` 打开自己的 temp 子目录会被拒。基于 DELETE 的删除、`MAXIMUM_ALLOWED` 与常规读写打开不受影响。
 
+**拒绝分类只认英文消息文本。** 工具用来注入 `[sandbox: …]` 拒绝标记、提权提示与 denial 记账的方言，都是英文的 Win32 / `cmd` / PowerShell 消息文本，且只匹配子进程的 **stderr**。在本地化（如 zh-CN）的 Windows 上这些消息会被本地化：沙箱**仍然拒绝**访问（强制层与语言无关），但工具可能不会标注该拒绝，denial-first 提权也不会记账。看不到拒绝标记时按“分类缺口”而非“强制失效”处理。
+
 `koffi`（Win32 调用的 FFI 层）是常规依赖，懒加载且仅在 Windows 上加载——Win32 绑定表在其他平台上永不物化。
 
 随包提供的 `diagnose-windows-sandbox-acl` 技能（诊断并修复“Windows 文件权限挡住 pi-sandbox 授权”的场景）**仅在 Windows 上**贡献给 pi。它的修复会修改安全描述符，必须由不受限的调用者执行——请通过一次已批准的 `danger-full-access`（或手工）运行。

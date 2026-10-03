@@ -46,6 +46,8 @@ PowerShell language mode follows startup constraints, not the ACL boundary: unde
 
 **The `%TEMP%` cost.** `%TEMP%` is a shared user tree: its subdirectories inherit the deny ACE, so a third party that opens its own temp subdirectory with `GENERIC_ALL`/`FullControl` is refused. DELETE-based deletes, `MAXIMUM_ALLOWED` and ordinary read/write opens are unaffected.
 
+**Denial classification is English-only.** The denial dialects the tool matches to inject the `[sandbox: …]` denial marker, the escalation hint and the denial ledger are English Win32/`cmd`/PowerShell message text, matched against the child's **stderr**. On a localized Windows those messages are localized: the sandbox still denies the access (enforcement is language-independent), but the tool may not annotate the denial and denial-first escalation will not arm. Treat a missing marker as a classification gap, not as a confinement failure.
+
 `koffi` (the FFI layer for the Win32 calls) is a regular dependency, loaded lazily and only on Windows — the Win32 binding table is never materialized elsewhere.
 
 The bundled `diagnose-windows-sandbox-acl` skill (diagnoses and repairs cases where Windows file permissions block pi-sandbox's grants) is contributed to pi **on Windows only**. Its repair modifies security descriptors, so it needs an unconfined caller — run it from an approved `danger-full-access` (or by hand).

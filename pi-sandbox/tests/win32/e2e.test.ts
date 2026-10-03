@@ -21,11 +21,24 @@
  *    every platform. It intentionally duplicates the focused assertions in
  *    `tests/confine.test.ts`: this file is the one place that maps spec §10.2
  *    to test cases, and a reader must not have to hunt for it.
+ *  - Fixtures live under `os.homedir()`, never under `os.tmpdir()`: two cases
+ *    grant the REAL `%TEMP%` as `--temp`, and that grant is inheritable and
+ *    standing (design §4.7), so a fixture planted under `%TEMP%` would inherit
+ *    the capability ACE on the next run and flip the denial cases green for the
+ *    wrong reason. `assertFixtureRootOutsideTmpdir` turns that into a loud
+ *    failure instead of a silent green.
+ *  - Denial evidence is split: the non-zero exit and the host file's state
+ *    (survival / non-creation) are the locale-independent proof of the
+ *    boundary; the English-only denial dialects are asserted separately
+ *    (`expectDenialDialect`) and only where the text comes from Node's own
+ *    errno layer. On a localized Windows the `cmd`/PowerShell/.NET messages are
+ *    localized — a classification gap, not a boundary gap; the acceptance
+ *    checklist records it.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -104,17 +117,54 @@ function denialText(result: ConfinedResult): string {
 }
 
 /**
- * Assert the confined child was denied: a windows-acl denial dialect in the
- * output (the dialects the TS classifier carries, Ruling 7) and — when the
- * command's failure path sets an exit code at all — a non-zero exit.
+ * Assert the confined child was denied at the boundary: it reported failure
+ * (when the command's failure path sets an exit code at all) and the failure
+ * is NOT the runner itself.
+ *
+ * The runner-failure guard is load-bearing: a broken runner fails with
+ * `windows-acl-run: Win32 <API> failed (5): Access is denied. …`, whose
+ * FormatMessageW text is itself one of the denial dialects on an English host.
+ * Without the guard such a run would satisfy a dialect search while the child
+ * never executed.
+ *
+ * This deliberately carries no dialect assertion: the dialect text is
+ * locale-coupled (see `expectDenialDialect`), while the exit status is the
+ * locale-independent half of the evidence. The host-side file state — survival
+ * on a delete, non-creation on a write — is the other half and stays with each
+ * case.
  */
 function expectDenied(result: ConfinedResult, options: { requireNonZeroExit?: boolean } = {}): void {
 	if (options.requireNonZeroExit ?? true) {
 		expect(result.status, `expected a non-zero exit; output:\n${denialText(result)}`).not.toBe(0);
 	}
-	const lower = denialText(result).toLowerCase();
-	const matched = DENIAL_SIGNATURES["windows-acl"].some((signature) => lower.includes(signature));
-	expect(matched, `no windows-acl denial dialect in the output:\n${denialText(result)}`).toBe(true);
+	const fatal = classifyRunnerFailure(result.status, result.stderr, RUNNER_FAILURE_RULES["windows-acl"]);
+	expect(
+		fatal,
+		`runner failed before the command ran — a runner failure is never a denial; output:\n${denialText(result)}`,
+	).toBeUndefined();
+}
+
+/** First denial dialect present in `stderr` — the stream production classifies. */
+function matchedDenialSignature(result: ConfinedResult): string | undefined {
+	const lower = result.stderr.toLowerCase();
+	return DENIAL_SIGNATURES["windows-acl"].find((signature) => lower.includes(signature));
+}
+
+/**
+ * Assert production's `classifyDenial` would recognize this failure: a
+ * windows-acl dialect (Ruling 7) in STDERR — stderr only, like
+ * `src/confine.ts`. A `cmd` builtin can print its denial on stdout, which
+ * production does not classify (recorded in the acceptance checklist §7).
+ *
+ * Called only where the text comes from Node's own errno layer (`EPERM:
+ * operation not permitted`), which is English on every locale. The
+ * `cmd`/PowerShell/.NET deny paths assert the locale-independent boundary
+ * evidence instead (non-zero exit + host file survival): their message text is
+ * localized on a localized Windows, where the sandbox still denies but the
+ * tool cannot annotate the denial.
+ */
+function expectDenialDialect(result: ConfinedResult): void {
+	expect(matchedDenialSignature(result), `no windows-acl denial dialect in stderr:\n${denialText(result)}`).toBeDefined();
 }
 
 /** Assert a denied write/delete left nothing behind, cleaning up a leak first. */
@@ -124,8 +174,52 @@ function expectHostFileNotCreated(path: string): void {
 	expect(leaked, `${path} must not exist after the confined command`).toBe(false);
 }
 
-function systemTempDir(): string {
-	return join(process.env.SystemRoot ?? "C:\\Windows", "Temp");
+/**
+ * Base directory for every filesystem fixture: a per-run directory under the
+ * user home — deliberately NOT under `os.tmpdir()`.
+ *
+ * Two cases grant the REAL `%TEMP%` as `--temp`; the runner's grant is
+ * inheritable and standing (design §4.7; never revoked). A fixture planted
+ * under `%TEMP%` on a second run would inherit that capability ACE through the
+ * temp root and become writable by the confined child: the "outside" denial
+ * cases would then fail on a machine whose confinement works, and the
+ * workspace-allow cases could pass for the wrong reason.
+ * `assertFixtureRootOutsideTmpdir` makes that invariant a hard failure.
+ */
+function fixtureBaseDir(): string {
+	return homedir();
+}
+
+/** Windows paths fold case; children are matched on a separator boundary. */
+function isPathInside(candidate: string, ancestor: string): boolean {
+	const fold = (path: string): string => (process.platform === "win32" ? path.toLowerCase() : path);
+	const child = fold(canonicalPath(candidate)).replace(/[\\/]+$/u, "");
+	const parent = fold(canonicalPath(ancestor)).replace(/[\\/]+$/u, "");
+	return child === parent || child.startsWith(`${parent}\\`) || child.startsWith(`${parent}/`);
+}
+
+/** Fail loudly when a fixture root would sit inside a granted temp root. */
+function assertFixtureRootOutsideTmpdir(path: string): void {
+	if (isPathInside(path, tmpdir())) {
+		throw new Error(
+			`fixture root ${path} is inside os.tmpdir() (${tmpdir()}): the suite grants the real %TEMP%, ` +
+				"whose inheritable ACE would leak into the fixture on a re-run",
+		);
+	}
+}
+
+/**
+ * The only fixtures that must sit inside the real granted temp root: the
+ * `%TEMP%` grant case and the fence-agreement case. Each is created directly
+ * under `os.tmpdir()` and removed by `afterEach` (the owning user keeps DELETE
+ * on its own objects even after the standing grant).
+ */
+const realTempFixtures: string[] = [];
+
+function makeRealTempFixture(): string {
+	const dir = mkdtempSync(join(canonicalPath(tmpdir()), "pi-sandbox-e2e-temp-"));
+	realTempFixtures.push(dir);
+	return dir;
 }
 
 /** pwsh when installed, Windows PowerShell 5.1 otherwise (spec §10.2 names both deny paths). */
@@ -170,7 +264,17 @@ let grantedTemp = "";
 
 describe.skipIf(process.platform !== "win32")("windows-acl end-to-end (real runner)", () => {
 	beforeEach(() => {
-		root = mkdtempSync(join(tmpdir(), "pi-sandbox-e2e-"));
+		// The fixture root must be outside the real `%TEMP%` (see fixtureBaseDir):
+		// assert it loudly rather than let a re-run inherit the standing temp
+		// grant and misread a working confinement.
+		root = mkdtempSync(join(fixtureBaseDir(), "pi-sandbox-e2e-"));
+		try {
+			assertFixtureRootOutsideTmpdir(root);
+		} catch (error) {
+			// The assertion is a safety net; do not leak the fixture it rejected.
+			rmSync(root, { recursive: true, force: true });
+			throw error;
+		}
 		workspace = mkdtempSync(join(root, "workspace-"));
 		grantedTemp = mkdtempSync(join(root, "granted-temp-"));
 	});
@@ -179,6 +283,10 @@ describe.skipIf(process.platform !== "win32")("windows-acl end-to-end (real runn
 		// Grants may have left Low labels and deny ACEs behind; the owning user
 		// still holds DELETE on every object, so recursive cleanup is safe.
 		rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+		while (realTempFixtures.length > 0) {
+			const fixture = realTempFixtures.pop();
+			if (fixture !== undefined) rmSync(fixture, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+		}
 	});
 
 	it("allows a workspace write under workspace-write", { timeout: E2E_TIMEOUT }, () => {
@@ -201,21 +309,25 @@ describe.skipIf(process.platform !== "win32")("windows-acl end-to-end (real runn
 			nodeScript("require('node:fs').writeFileSync(process.argv[1], 'x')", [target]),
 		);
 		expectDenied(result);
+		expectDenialDialect(result);
 		expectHostFileNotCreated(target);
 	});
 
+	/** `dialect: "localized"` cases carry OS/CLR message text; only `node` text is English on every locale. */
 	const deleteOutsideCases: ReadonlyArray<{
 		label: string;
 		fileName: string;
 		command: (victim: string) => string[];
 		/** `cmd /c del` may leave ERRORLEVEL 0 even when the delete is denied. */
 		failSetsExitCode: boolean;
+		dialect: "node" | "localized";
 	}> = [
 		{
 			label: "cmd /c del",
 			fileName: "cmd-del.txt",
 			command: (victim) => [process.env.ComSpec ?? "cmd.exe", "/c", "del", "/f", "/q", victim],
 			failSetsExitCode: false,
+			dialect: "localized",
 		},
 		{
 			label: "powershell Remove-Item",
@@ -228,6 +340,7 @@ describe.skipIf(process.platform !== "win32")("windows-acl end-to-end (real runn
 				`Remove-Item -LiteralPath ${psLiteral(victim)} -Force`,
 			],
 			failSetsExitCode: true,
+			dialect: "localized",
 		},
 		{
 			label: "PowerShell [System.IO.File]::Delete",
@@ -240,26 +353,35 @@ describe.skipIf(process.platform !== "win32")("windows-acl end-to-end (real runn
 				`[System.IO.File]::Delete(${psLiteral(victim)})`,
 			],
 			failSetsExitCode: true,
+			dialect: "localized",
 		},
 		{
 			label: "Node fs.unlinkSync",
 			fileName: "node-unlink.txt",
 			command: (victim) => nodeScript("require('node:fs').unlinkSync(process.argv[1])", [victim]),
 			failSetsExitCode: true,
+			dialect: "node",
 		},
 	];
 
-	for (const { label, fileName, command, failSetsExitCode } of deleteOutsideCases) {
+	for (const { label, fileName, command, failSetsExitCode, dialect } of deleteOutsideCases) {
 		it(`denies deleting a host file outside the workspace via ${label}`, { timeout: E2E_TIMEOUT }, () => {
 			const outsideDir = join(root, "outside");
 			mkdirSync(outsideDir, { recursive: true });
 			const victim = join(outsideDir, fileName);
 			writeFileSync(victim, "must-survive", "utf8");
 			const result = runConfined("workspace-write", command(victim));
+			// Primary, locale-independent evidence: the child failed where the
+			// command sets an exit code, and the host file survived. The denial is
+			// a real access denial, not a "deleted then restored" path.
 			expectDenied(result, { requireNonZeroExit: failSetsExitCode });
-			// The host file must still be there: the denial is a real access
-			// denial, not a "deleted then restored" path.
 			expect(readFileSync(victim, "utf8")).toBe("must-survive");
+			// The dialect is required only where the text is Node's own (English on
+			// every locale). `cmd`/PowerShell/.NET localize theirs: on a localized
+			// Windows a missing dialect is an expected deviation (checklist §0/§7),
+			// not a confinement failure — the host file above still proves the
+			// boundary.
+			if (dialect === "node") expectDenialDialect(result);
 		});
 	}
 
@@ -295,16 +417,15 @@ describe.skipIf(process.platform !== "win32")("windows-acl end-to-end (real runn
 			nodeScript("require('node:fs').writeFileSync(process.argv[1], 'x')", [target]),
 		);
 		expectDenied(result);
+		expectDenialDialect(result);
 		expectHostFileNotCreated(target);
 	});
 
 	it("allows a write under the granted %TEMP% root", { timeout: E2E_TIMEOUT }, () => {
-		// The production seam grants canonicalPath(os.tmpdir()); the test root
-		// lives under it, so this target is outside the workspace but inside the
-		// granted temp root.
-		const tempTargetDir = join(root, "temp-write-target");
-		mkdirSync(tempTargetDir);
-		const target = join(tempTargetDir, "temp-written.txt");
+		// The production seam grants canonicalPath(os.tmpdir()); this is the one
+		// fixture that must live inside it, so it is created directly under the
+		// real temp root (and cleaned up by afterEach) instead of under `root`.
+		const target = join(makeRealTempFixture(), "temp-written.txt");
 		const result = runConfined(
 			"workspace-write",
 			nodeScript("require('node:fs').writeFileSync(process.argv[1], 'ok')", [target]),
@@ -351,6 +472,28 @@ describe.skipIf(process.platform !== "win32")("windows-acl end-to-end (real runn
 		expect(classifyDenial(result.status, result.stderr, DENIAL_SIGNATURES["windows-acl"])).toBe(false);
 	});
 
+	it("classifies a Win32-backed runner failure as a runner failure, not a denial", { timeout: E2E_TIMEOUT }, () => {
+		// A directory as the wrapped command: both roots pass `requireDirectory`,
+		// then CreateProcessAsUserW fails with ERROR_ACCESS_DENIED (5) — a real
+		// Win32 API failure, not argv validation. The API name and code are not
+		// localized; on an English host the FormatMessageW text is "Access is
+		// denied.", itself a denial dialect — the overlap this case guards.
+		const directoryAsCommand = mkdtempSync(join(root, "not-an-executable-"));
+		const result = runConfined("workspace-write", [directoryAsCommand]);
+		expect(result.status).toBe(127);
+		expect(result.stdout).toBe("");
+		const lines = result.stderr.split(/\r?\n/u).filter((line) => line.length > 0);
+		expect(lines).toHaveLength(1);
+		expect(lines[0].startsWith(RUNNER_SIGNATURE)).toBe(true);
+		expect(lines[0]).toContain("Win32 CreateProcessAsUserW failed (5)");
+		// The command never ran. Production checks runner failures before
+		// denials; `expectDenied` must refuse this even though the text carries a
+		// dialect on an English host. The forged companion case in the
+		// all-platform describe pins that overlap independently of the locale.
+		expect(classifyRunnerFailure(result.status, result.stderr, RUNNER_FAILURE_RULES["windows-acl"])).toBe(lines[0]);
+		expect(() => expectDenied(result)).toThrowError(/runner failure is never a denial/u);
+	});
+
 	it("grants exactly the fence's writableRoots('workspace-write', workspace)", { timeout: E2E_TIMEOUT }, () => {
 		const expected = writableRoots("workspace-write", workspace);
 		// The production seam (runners.ts windowsAclRunnerArgv) is the construction
@@ -367,8 +510,9 @@ describe.skipIf(process.platform !== "win32")("windows-acl end-to-end (real runn
 
 		// Effective proof: every expected root accepts a write from the confined
 		// child (the workspace target is outside the granted temp; the temp target
-		// is outside the workspace)...
-		for (const target of [join(workspace, "agreement-ws-written.txt"), join(root, "agreement-temp-written.txt")]) {
+		// is outside the workspace and inside the real %TEMP%).
+		const tempTarget = join(makeRealTempFixture(), "agreement-temp-written.txt");
+		for (const target of [join(workspace, "agreement-ws-written.txt"), tempTarget]) {
 			const result = runConfined(
 				"workspace-write",
 				nodeScript("require('node:fs').writeFileSync(process.argv[1], 'ok')", [target]),
@@ -377,14 +521,18 @@ describe.skipIf(process.platform !== "win32")("windows-acl end-to-end (real runn
 			expect(result.status, `${target}: ${result.stderr}`).toBe(0);
 			expect(readFileSync(target, "utf8")).toBe("ok");
 		}
-		// ...and a path outside all of them is denied.
-		const outside = join(systemTempDir(), `pi-sandbox-e2e-agreement-${process.pid}-${Date.now()}.txt`);
+		// ...and a path outside all of them is denied. `root` is the closest
+		// possible outside path (the fixture parent of the workspace) and, unlike
+		// C:\Windows\Temp, it is writable by the unconfined host even when the
+		// suite runs elevated: the denial can only come from the sandbox.
+		const outside = join(root, "agreement-outside.txt");
 		const denied = runConfined(
 			"workspace-write",
 			nodeScript("require('node:fs').writeFileSync(process.argv[1], 'x')", [outside]),
 			{ temp: seamTemp },
 		);
 		expectDenied(denied);
+		expectDenialDialect(denied);
 		expectHostFileNotCreated(outside);
 	});
 
@@ -411,6 +559,23 @@ describe.skipIf(process.platform !== "win32")("windows-acl end-to-end (real runn
 		// grandchild must also prove the boundary is the pipe, not a broken spawn.
 		expect(report.ignoredErrorCode, `ignore-stdio grandchild failed: ${line}`).toBeNull();
 		expect(report.ignoredStatus).toBe(0);
+	});
+});
+
+/**
+ * Runs everywhere: guards the assertion helper itself. The Windows-only case
+ * proves the overlap with a real Win32 failure; this forged one pins it on
+ * every platform and on hosts whose messages are localized (where the real
+ * failure's text carries no dialect at all).
+ */
+describe("windows-acl denial assertion guard (all platforms)", () => {
+	it("refuses a runner failure whose Win32 message carries a denial dialect", () => {
+		const forged: ConfinedResult = {
+			status: 127,
+			stdout: "",
+			stderr: `${RUNNER_SIGNATURE}Win32 CreateProcessAsUserW failed (5): Access is denied. [command: C:\\nope, cwd: C:\\nope]\n`,
+		};
+		expect(() => expectDenied(forged)).toThrowError(/runner failure is never a denial/u);
 	});
 });
 

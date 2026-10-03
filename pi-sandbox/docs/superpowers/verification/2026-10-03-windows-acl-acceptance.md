@@ -17,8 +17,8 @@ npm install                                  # 必须装上 koffi（windows-acl 
 pi --version                                 # 需 >= 1.0.0（powershell 工具自该版本提供）
 
 cd C:\pi-packages\pi-sandbox
-npx vitest run tests/win32/e2e.test.ts       # 期望：win32 用例真正执行（不是 skip），全绿
-npx vitest run                               # 期望：全量绿
+npx vitest run tests/win32/e2e.test.ts       # 期望：18 个 win32 用例真正执行（不是 skip）+ 2 个全平台用例，全绿
+npx vitest run                               # 期望：全量绿（integration 的 4 个受限 bash 用例在 win32 上按 Ruling 2 跳过）
 ```
 
 **Windows 机器准备（git-bash）**
@@ -30,7 +30,21 @@ npx vitest run tests/win32/e2e.test.ts
 npx vitest run
 ```
 
-**预期**：e2e 文件在 Windows 上报 17 个用例执行通过（外加 1 个各平台都跑的 bash 拒绝用例）；全量套件全绿（Linux 上被 skip 的 win32 专属用例此时真实执行）。
+**预期**：e2e 文件在 Windows 上报 **18 个 win32 用例**执行通过，外加 **2 个各平台用例**（`bash` 拒绝、拒绝断言守卫），共 20 通过、0 跳过；全量套件全绿——`tests/integration.test.ts` 的 4 个受限 `bash` 用例在 win32 上按 **Ruling 2**（win32 受限模式只支持 pwsh，`createSandboxBashOps` 在任何 spawn 前拒绝 bash）**跳过**，不是失败；win32 专属用例此时真实执行。
+
+**前置：机器状态、`%TEMP%` 授权与复跑**
+
+- 套件里两个用例会把**真实的 `%TEMP%`** 作为 `--temp` 授权（`canonicalPath(os.tmpdir())`）。首次授权在整棵 `%TEMP%` 树上**急切传播可继承的能力 ACE + Low 标签 + world `FILE_DELETE_CHILD` DENY**（设计 §4.7），且这些是 **standing（常驻、永不回收）** 的：套件/pi 退出后仍在。完整核对见第 15 条。
+- 套件的 workspace、工作区外目标与私有授予 temp 都建在 `os.homedir()` 下的**每次运行独立目录**（`$env:USERPROFILE\pi-sandbox-e2e-<随机>`），只有必须落在真实 `%TEMP%` 里的两个目标建在 `tmpdir()` 内并在 `afterEach` 删除；套件另有硬断言保证 fixture 根不在 `os.tmpdir()` 内。因此**同一台机器上重复执行 `npx vitest run tests/win32/e2e.test.ts` 是安全的、结果一致**：`%TEMP%` 的常驻授权**不会**污染新 fixture（它们不在 `%TEMP%` 里），这正是本次修复要解决的 Critical。
+- 如果机器在本清单执行前已被旧版本套件/其他工具授权过 `%TEMP%`：**不需要清理**，也不会让本套件假绿；但要理解「`%TEMP%` 子树里任何新目录都会继承能力 ACE」，即受限子进程能写 `%TEMP%` 全树是**设计行为**。若怀疑结果异常，先确认新 fixture 在 `os.homedir()` 下（`$env:USERPROFILE\pi-sandbox-e2e-*`），再核对第 15 条的 `icacls` 观察。
+- 首次运行 `%TEMP%` 全树传播可能耗时数秒（大树更久），e2e 每个用例给了 180s 超时；不要把首次传播误判为挂起。
+
+**前置：系统语言与拒绝方言（Important）**
+
+- `DENIAL_SIGNATURES["windows-acl"]` 的四个方言（`access is denied` / `access to the path` / `permission denied` / `operation not permitted`）都是**英文**文本，且生产端 `classifyDenial` 只匹配 **stderr**。`cmd`、PowerShell/.NET 的消息来自系统/CLR 资源，在**本地化 Windows（zh-CN 等）上会被本地化**：沙箱**仍然拒绝**访问，但工具层可能不注入 `[sandbox: file access denied …]` 标记，denial-first 提权也不记账。这是**分类缺口，不是强制失效**。
+- e2e 已把「主证据」与「方言」分离：非零退出（命令自身设置退出码时）+ 宿主文件仍在/未创建是 locale-independent 的硬断言；方言断言只在 Node 自有 errno 文本（`EPERM: operation not permitted` 等，恒英文）的用例上要求。`cmd`/PowerShell/.NET 删除用例在本地化系统上即使没有方言也通过。
+- 因此第 6/7/10/13a 条在本地化 Windows 上**可能看不到拒绝标记或 `Access is denied.`**：把原始输出粘进「实测」，结论按**环境差异（方言本地化，已知取舍）**记录，不要记为「实现缺陷」或「强制失效」；边界证据用宿主文件状态 + 退出码。自动化用例一侧的方言原文记录点：若怀疑方言缺失，用 `npx vitest run tests/win32/e2e.test.ts --reporter=verbose` 复跑并回看对应用例输出（失败断言会把 `stderr+stdout` 原样打出）。
+
 **实测（粘贴 `npx vitest run tests/win32/e2e.test.ts` 与全量尾部摘要）**：
 
 ```text
@@ -195,6 +209,8 @@ Set-Content -LiteralPath C:\Windows\Temp\pi-sandbox-accept-denied.txt -Value nop
 Test-Path C:\Windows\Temp\pi-sandbox-accept-denied.txt   # False
 ```
 
+**本地化偏差（已知）**：`[sandbox: …]` 标记由生产端 `classifyDenial` 匹配英文 Win32/CLR 消息文本后注入；本地化 Windows 上消息被本地化，标记可能不出现。此时以「命令非零退出 + 宿主 `Test-Path` 为 False」为边界证据，并把原始输出粘进「实测」，结论记为**环境差异（分类本地化缺口）**，不是实现缺陷。
+
 **实测**：
 
 ```text
@@ -221,6 +237,7 @@ cmd /c del /f /q "%USERPROFILE%\pi-sandbox-accept-victim.txt"
 
 - `Remove-Item`：非零退出，工具结果含 `[sandbox: file access denied under workspace-write mode]`（拒绝标记）。
 - `cmd /c del`：删除被拒、原始输出含 `Access is denied.`。注意：cmd 内建命令**可能**在拒绝时仍返回 ERRORLEVEL 0，而 pi 的拒绝标记只在**非零退出**时注入（`src/shell-ops.ts:142` 门控 + `src/confine.ts` 的 `classifyDenial` 同样要求非零退出）→ 此路径的判定证据是**宿主文件仍在**与 `Access is denied.` 文本；把 cmd 实际返回的退出码一并记录，若确为 0，记为「拒绝方言对 cmd 的覆盖受 exit-code 门控限制（已知取舍）」而非实现崩溃。
+- **本地化偏差（已知）**：`Remove-Item` 的 `[sandbox: …]` 标记与 `cmd` 的 `Access is denied.` 文本都是英文方言；本地化 Windows 上可能看不到两者。判定证据仍是宿主文件仍为 `must-survive`（`Remove-Item` 另加非零退出）；cmd 的**真实退出码**一并记录。另注：`cmd` 内建命令的报错可能走 **stdout**，而生产端 `classifyDenial` 只搜 **stderr**——即使英文系统上 cmd 走了 stdout 也不会有标记，这与语言无关，是已知的覆盖缺口。
 - 宿主侧再读一次仍为 `must-survive`。
 
 **实测**：
@@ -302,6 +319,8 @@ Add-Type -TypeDefinition 'public class X {}' -PassThru | Out-Null
 ```
 
 > 语言模式是 PowerShell 启动行为（有可写 temp 才保持 FullLanguage），不是 ACL 边界的一部分。
+>
+> **本地化偏差（已知）**：read-only 的 `[sandbox: …]` 标记同样依赖英文方言；本地化 Windows 上可能不出现，边界证据是宿主 `Test-Path .\read-only-denied.txt` 为 False + 非零退出。
 
 **实测**：
 
@@ -386,6 +405,7 @@ pi -e C:\pi-packages\pi-sandbox
   ```
 
   预期：三条全部被拒（非零退出 + `[sandbox: file access denied under read-only mode]`）。read-only 的令牌不携带能力 SID，A 留下的常驻授权对 B **自动失效**（spec §5）；宿主侧 `session-a.txt` 内容仍为 `a`，`session-b.txt` 不存在。
+  **本地化偏差（已知）**：三条的拒绝标记依赖英文方言，本地化 Windows 上可能不出现；边界证据是非零退出 + 宿主文件状态（`session-a.txt` 仍为 `a`、`session-b.txt` 不存在）。
 
 ### 13b. 不同 workspace：两个 workspace-write 会话各授各的，不能互写互删
 
