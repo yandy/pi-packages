@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { assertWriteAllowed, canonicalizeTarget, FenceDenialError, isWithinRoots } from "../src/fence";
 import { escalationHintMarker } from "../src/escalation";
@@ -8,6 +8,9 @@ import { escalationHintMarker } from "../src/escalation";
 let dir: string;
 let ws: string;
 let outside: string;
+// 注意：wsWrite 必须在 beforeEach 里构造——模块层构造会固化当时的 ws（undefined），
+// 旧实现用 statSync 的 try/catch 静默吞掉 undefined 根，掩盖了这几条测试从未跑过工作区根。
+let wsWrite: { mode: "workspace-write"; workspaceRoot: string };
 
 beforeEach(() => {
 	dir = mkdtempSync(join(tmpdir(), "fence-"));
@@ -16,10 +19,9 @@ beforeEach(() => {
 	mkdirSync(join(dir, "outside"), { recursive: true });
 	ws = realpathSync.native(join(dir, "ws"));
 	outside = realpathSync.native(join(dir, "outside"));
+	wsWrite = { mode: "workspace-write", workspaceRoot: ws };
 });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
-
-const wsWrite = { mode: "workspace-write" as const, workspaceRoot: ws };
 
 describe("canonicalizeTarget", () => {
 	it("resolves symlinks in the existing prefix, keeps the missing tail", () => {
@@ -93,5 +95,69 @@ describe("assertWriteAllowed", () => {
 	});
 	it("danger-full-access allows anywhere", () => {
 		expect(() => assertWriteAllowed("/etc/hosts", { mode: "danger-full-access", workspaceRoot: ws })).not.toThrow();
+	});
+});
+
+describe("win32 containment", () => {
+	// 宿主形状路径：分隔符与大小写比较都按宿主 path.sep 走。不能在 POSIX 上用 "C:\..."
+	// 字面路径做正例——"\" 在 POSIX 是合法文件名字符，把它当分隔符会让 /tmp/ws\..
+	// 这类真实目录被误判成 /tmp/ws 的子路径（真逃逸）；Windows 形状的等价断言见
+	// 下面 win32-only 用例。根取不存在的大小写翻转拼写，身份回退无命中，结果确定。
+	let caseRoot: string;
+	let caseUnder: string;
+	beforeEach(() => {
+		caseRoot = join(dir, "Case", "Demo");
+		caseUnder = join(dir, "case", "demo", "a.txt");
+	});
+
+	it("matches case-insensitively when the platform is case-insensitive", () => {
+		expect(isWithinRoots(caseUnder, [caseRoot], false)).toBe(true);
+		expect(isWithinRoots(join(dir, "case", "other", "a.txt"), [caseRoot], false)).toBe(false);
+	});
+
+	it("stays case-sensitive when told to", () => {
+		expect(isWithinRoots("C:\\Work\\Demo\\a.txt", ["C:\\work\\demo"], true)).toBe(false);
+		expect(isWithinRoots(caseUnder, [caseRoot], true)).toBe(false);
+	});
+
+	it.skipIf(sep === "\\")("keeps a trailing backslash literal on POSIX (no separator widening)", () => {
+		// "\" 在 POSIX 是文件名字符：根 ".../Demo\" 只包含 ".../Demo\/…"，不能因去尾
+		// 而把 ".../Demo" 整棵子树也纳入（那是 POSIX 行为的扩大）。
+		const weirdRoot = `${caseRoot}\\`;
+		expect(isWithinRoots(join(weirdRoot, "f.txt"), [weirdRoot], false)).toBe(true);
+		expect(isWithinRoots(join(caseRoot, "f.txt"), [weirdRoot], false)).toBe(false);
+	});
+
+	it("uses the platform separator instead of a hardcoded slash", () => {
+		expect(isWithinRoots("C:\\work\\demo", ["C:\\work\\demo"], false)).toBe(true);
+		expect(isWithinRoots("C:\\work\\demo2", ["C:\\work\\demo"], false)).toBe(false); // 前缀但不是子路径
+		expect(isWithinRoots(caseRoot, [caseRoot], false)).toBe(true);
+		expect(isWithinRoots(`${caseRoot}2`, [caseRoot], false)).toBe(false); // 前缀但不是子路径
+		expect(isWithinRoots(join(caseRoot, "sub", "f.txt"), [caseRoot], false)).toBe(true);
+	});
+
+	it.skipIf(process.platform !== "win32")("normalizes / to \\ and bounds on the platform separator (win32)", () => {
+		expect(isWithinRoots("C:\\Work\\Demo\\a.txt", ["C:\\work\\demo"], false)).toBe(true);
+		expect(isWithinRoots("C:/Work/Demo/a.txt", ["C:\\work\\demo"], false)).toBe(true);
+		expect(isWithinRoots("C:\\work\\demo2", ["C:\\work\\demo"], false)).toBe(false);
+		expect(isWithinRoots("C:\\work\\demo", ["C:\\"], false)).toBe(true); // 盘根：去尾后 "C:" 边界补回 \
+		expect(isWithinRoots("C:work", ["C:\\"], false)).toBe(false); // 盘相对路径不是盘根子路径
+	});
+
+	it("honours the injected case sensitivity in the fence policy", () => {
+		// 偏差：计划原稿用字面 "C:\..." 路径，但 Linux 上 canonicalizeTarget 会把它们按
+		// POSIX 相对路径拼到 cwd 下（必然拒绝）；且 dir/outside 落在 tmpdir() 这个可写根下，
+		// deny 用例需 _tmpRoots: [] 才是真·围栏外。改用真实目录 + 仅大小写不同的根拼写，
+		// 覆盖同一条注入链路（canonicalizeTarget → writableRoots → isWithinRoots）。
+		const caseFlippedWs = ws.toUpperCase();
+		expect(caseFlippedWs).not.toBe(ws); // mkdtemp 前缀 "fence-" 保证大小写翻转后拼写必变
+		const policy = {
+			mode: "workspace-write" as const,
+			workspaceRoot: caseFlippedWs,
+			caseSensitive: false,
+			_tmpRoots: [] as readonly string[],
+		};
+		expect(() => assertWriteAllowed(join(ws, "file.txt"), policy)).not.toThrow();
+		expect(() => assertWriteAllowed(join(outside, "file.txt"), policy)).toThrowError(/file access denied/);
 	});
 });

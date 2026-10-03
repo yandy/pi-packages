@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { canonicalPath, isSandboxMode, resolveEffectiveMode, SANDBOX_MODES, writableRoots } from "../src/policy";
+import { canonicalPath, defaultTmpRoots, isSandboxMode, resolveEffectiveMode, SANDBOX_MODES, writableRoots } from "../src/policy";
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "policy-")); });
@@ -45,5 +45,23 @@ describe("resolveEffectiveMode", () => {
 	it("override outranks config default", () => {
 		expect(resolveEffectiveMode("read-only", "workspace-write")).toBe("read-only");
 		expect(resolveEffectiveMode(null, "workspace-write")).toBe("workspace-write");
+	});
+});
+
+describe("win32 writable roots", () => {
+	it("drops the POSIX /tmp root on Windows", () => {
+		expect(defaultTmpRoots("win32")).toEqual([tmpdir()]);
+		expect(defaultTmpRoots("linux")).toEqual(["/tmp", tmpdir()]);
+		expect(defaultTmpRoots("darwin")).toEqual(["/tmp", tmpdir()]);
+	});
+
+	it("derives the win32 workspace-write roots (workspace + %TEMP%)", () => {
+		const roots = writableRoots("workspace-write", "C:\\ws", defaultTmpRoots("win32"));
+		expect(roots).toHaveLength(2);
+		expect(roots.map((r) => r.toLowerCase())).toContain("c:\\ws".toLowerCase());
+	});
+
+	it("keeps read-only empty", () => {
+		expect(writableRoots("read-only", "C:\\ws", defaultTmpRoots("win32"))).toEqual([]);
 	});
 });
