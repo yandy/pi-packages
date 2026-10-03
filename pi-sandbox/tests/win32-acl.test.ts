@@ -49,14 +49,14 @@ function writeAce(acl: Buffer, offset: number, type: number, flags: number, mask
 }
 
 /** 造一个 ACL（按需含精确允许/拒绝/标签 ACE），返回其原生指针。 */
-function buildAcl(options: { grant?: boolean; deny?: boolean; label?: boolean }): bigint {
+function buildAcl(options: { grant?: boolean; deny?: boolean; label?: boolean; denyInheritance?: number }): bigint {
 	const count = (options.grant ? 1 : 0) + (options.deny ? 1 : 0) + (options.label ? 1 : 0);
 	const acl = Buffer.alloc(8 + count * 24);
 	acl.writeUInt16LE(2, 0); // AclRevision
 	acl.writeUInt16LE(acl.length, 2); // AclSize
 	acl.writeUInt16LE(count, 4); // AceCount
 	let offset = 8;
-	if (options.deny) offset = writeAce(acl, offset, abi.ACCESS_DENIED_ACE_TYPE, abi.CONTAINER_INHERIT_ACE, abi.FILE_DELETE_CHILD, WORLD_SID);
+	if (options.deny) offset = writeAce(acl, offset, abi.ACCESS_DENIED_ACE_TYPE, options.denyInheritance ?? abi.CONTAINER_INHERIT_ACE, abi.FILE_DELETE_CHILD, WORLD_SID);
 	if (options.grant) offset = writeAce(acl, offset, abi.ACCESS_ALLOWED_ACE_TYPE, abi.SUB_CONTAINERS_AND_OBJECTS_INHERIT, abi.GRANT_MASK, WORKSPACE_SID);
 	if (options.label) writeAce(acl, offset, abi.SYSTEM_MANDATORY_LABEL_ACE_TYPE, abi.SUB_CONTAINERS_AND_OBJECTS_INHERIT, abi.SYSTEM_MANDATORY_LABEL_NO_WRITE_UP, LOW_SID);
 	return allocBytes(acl);
@@ -148,17 +148,24 @@ describe("win32 acl layer", () => {
 
 	it("skips the security-descriptor write when the exact triple already stands", () => {
 		// 精确 ACE + 精确拒绝 + 精确标签都在 -> 只读描述符并释放，不调 SetNamedSecurityInfoW
+		let descriptor = 0n;
 		const api = makeApi({
 			getNamedSecurityInfoW: (_path: unknown, _type: unknown, _info: unknown, _owner: unknown, _group: unknown, daclSlot: bigint, saclSlot: bigint, descriptorSlot: bigint) => {
 				writeSlot(daclSlot, buildAcl({ grant: true, deny: true }));
 				writeSlot(saclSlot, buildAcl({ label: true }));
-				writeSlot(descriptorSlot, allocBytes(Buffer.alloc(64))); // descriptor 拥有 ACL 块
+				descriptor = allocBytes(Buffer.alloc(64)); // descriptor 拥有 ACL 块
+				writeSlot(descriptorSlot, descriptor);
 				return 0;
 			},
 		});
 		grantWrite(api as never, "C:\\work\\demo", WORKSPACE_SID as never, LOW_SID as never, WORLD_SID as never);
-		expect((api.calls as Array<{ name: string }>).some((c) => c.name === "setNamedSecurityInfoW")).toBe(false);
-		expect((api.calls as Array<{ name: string }>).some((c) => c.name === "localFree")).toBe(true);
+		const calls = api.calls as Array<{ name: string; args: unknown[] }>;
+		expect(calls.some((c) => c.name === "setNamedSecurityInfoW")).toBe(false);
+		// 跳过路径只拥有 descriptor 这一处分配：必须恰好释放它一次。count 抓 double free，
+		// 身份抓「释放了别的指针（例如 ACL 内部指针）」——两者都会踩坏 Win32 堆。
+		const frees = calls.filter((c) => c.name === "localFree");
+		expect(frees).toHaveLength(1);
+		expect(frees[0]?.args[0]).toBe(descriptor);
 	});
 
 	it("applies grant + deny + label in ONE SetNamedSecurityInfoW call", () => {
@@ -178,6 +185,45 @@ describe("win32 acl layer", () => {
 		expect(entries.length).toBe(96); // 两条 EXPLICIT_ACCESS_W：拒绝在前、允许在后
 		expect(entries.readUInt32LE(4)).toBe(abi.DENY_ACCESS);
 		expect(entries.readUInt32LE(48 + 4)).toBe(abi.GRANT_ACCESS);
+		// 每条 EXPLICIT_ACCESS_W 48 字节：perms@0、mode@4、inheritance@8、trustee.ptstrName@40。
+		// entry 0 = deny：掩码、继承位、被拒绝的 SID 都要钉住。
+		expect(entries.readUInt32LE(0)).toBe(abi.FILE_DELETE_CHILD);
+		// deny 必须只继承到容器（CONTAINER_INHERIT_ACE）；若退化成默认的 OI|CI，0x40 会蔓延到文件，
+		// 拒绝根内所有 GENERIC_ALL 打开。
+		expect(entries.readUInt32LE(8)).toBe(abi.CONTAINER_INHERIT_ACE);
+		expect(entries.readBigUInt64LE(40)).toBe(WORLD_SID); // deny 命名 world SID，而不是能力 SID
+		// entry 1 = grant：掩码、继承位、被授予的 SID 都要钉住。
+		expect(entries.readUInt32LE(48)).toBe(abi.GRANT_MASK);
+		expect(entries.readUInt32LE(56)).toBe(abi.SUB_CONTAINERS_AND_OBJECTS_INHERIT);
+		expect(entries.readBigUInt64LE(88)).toBe(WORKSPACE_SID); // grant 命名能力 SID，而不是 world SID
+	});
+
+	it("falls back to the apply path when the current triple is a near miss", () => {
+		// 近失 1：deny ACE 存在且掩码/SID 精确，但继承位是 OI|CI 而不是 CONTAINER_INHERIT_ACE。
+		// 其余（能力 ACE + 标签）都精确，因此走到 apply 只能由这一处近失触发。
+		const wrongDeny = makeApi({
+			getNamedSecurityInfoW: (_path: unknown, _type: unknown, _info: unknown, _owner: unknown, _group: unknown, daclSlot: bigint, saclSlot: bigint, descriptorSlot: bigint) => {
+				writeSlot(daclSlot, buildAcl({ grant: true, deny: true, denyInheritance: abi.SUB_CONTAINERS_AND_OBJECTS_INHERIT }));
+				writeSlot(saclSlot, buildAcl({ label: true }));
+				writeSlot(descriptorSlot, allocBytes(Buffer.alloc(64)));
+				return 0;
+			},
+		});
+		grantWrite(wrongDeny as never, "C:\\work\\demo", WORKSPACE_SID as never, LOW_SID as never, WORLD_SID as never);
+		expect((wrongDeny.calls as Array<{ name: string }>).filter((c) => c.name === "setNamedSecurityInfoW")).toHaveLength(1);
+
+		// 近失 2：DACL 里根本没有 deny ACE（能力 ACE 精确；标签在 SACL 里精确，
+		// DACL 里的那条 label ACE 对 hasExactLabel 不可见、不参与判定）-> 同样落到 apply。
+		const noDeny = makeApi({
+			getNamedSecurityInfoW: (_path: unknown, _type: unknown, _info: unknown, _owner: unknown, _group: unknown, daclSlot: bigint, saclSlot: bigint, descriptorSlot: bigint) => {
+				writeSlot(daclSlot, buildAcl({ grant: true, label: true }));
+				writeSlot(saclSlot, buildAcl({ label: true }));
+				writeSlot(descriptorSlot, allocBytes(Buffer.alloc(64)));
+				return 0;
+			},
+		});
+		grantWrite(noDeny as never, "C:\\work\\demo", WORKSPACE_SID as never, LOW_SID as never, WORLD_SID as never);
+		expect((noDeny.calls as Array<{ name: string }>).filter((c) => c.name === "setNamedSecurityInfoW")).toHaveLength(1);
 	});
 
 	it("fails closed with the API name when the descriptor cannot be read", () => {
