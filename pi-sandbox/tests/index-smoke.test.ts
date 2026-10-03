@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetSandboxConfigCache } from "../src/config";
 import { getEscalationBroker, resetEscalationBrokerForTests } from "../src/escalation-broker";
-import { processPermissionState } from "../src/permission";
+import { processPermissionState, type PermissionState } from "../src/permission";
 
 let dir: string;
 beforeEach(() => {
@@ -14,11 +14,29 @@ beforeEach(() => {
 });
 afterEach(() => {
 	processPermissionState.override = null; // C1：模块单例跨测试复位
+	for (const state of freshPermissionStates.splice(0)) state.override = null; // T15 修订：resetModules 后重取的新实例同样复位
 	resetEscalationBrokerForTests(); // 审批通道注册表同为进程级单例，必须复位
 	resetSandboxConfigCache();
 	vi.unstubAllEnvs();
 	rmSync(dir, { recursive: true, force: true });
 });
+
+/**
+ * T15 修订（测试隔离）：状态行用例在 `vi.resetModules()` 之后 `await import("../index")` 会重求值
+ * 整张模块图，命令处理器读的是**新**模块实例里的 `src/permission` 单例，而文件顶部静态导入的
+ * `processPermissionState` 是初始实例的绑定。本仓当前把单例挂 globalThis（`PERMISSION_STATE_KEY`），
+ * 两个实例恰好是同一个对象，override 事实上生效；但这层共享是隐式的——若单例改回模块级变量，
+ * override 会静默失效，status 退回配置默认模式并触发真实 runner 探测（`selectRunner`）。所以这里显式
+ * “resetModules → 重取新单例 → 设 override → 再 import 扩展”，并登记新实例供 afterEach 复位。
+ */
+const freshPermissionStates: PermissionState[] = [];
+async function importIndexWithDangerFullAccessOverride() {
+	vi.resetModules();
+	const { processPermissionState: fresh } = await import("../src/permission");
+	fresh.override = "danger-full-access";
+	freshPermissionStates.push(fresh);
+	return (await import("../index")).default;
+}
 
 type CommandHandler = (args: string, ctx: { ui: { notify: ReturnType<typeof vi.fn> }; cwd?: string }) => Promise<void>;
 type HookHandler = (event: unknown, ctx: unknown) => void;
@@ -357,41 +375,61 @@ describe("T15: 平台门控与 pwsh 未激活提示（Ruling 8/9）", () => {
 
 	it("/permission 状态行在 win32 且 pwsh 未激活时标注 not activated（Ruling 8）", async () => {
 		const { fakePi, commandHandlers } = makeFakePiWithActiveTools(["bash"]);
-		const activate = (await import("../index")).default;
+		// T15 修订：override 必须设在 resetModules 后重取的单例上（bypassed 分支：不触发 runner 探测）
+		const activate = await importIndexWithDangerFullAccessOverride();
 		activate(fakePi as never);
-		processPermissionState.override = "danger-full-access"; // bypassed 分支：不触发真实 runner 探测
-		const notify = vi.fn();
-		await withPlatform("win32", async () => {
-			await commandHandlers.permission.handler("", { ui: { notify } });
-		});
-		expect(notify).toHaveBeenCalledTimes(1);
-		expect(String(notify.mock.calls[0]?.[0])).toContain("shell: powershell only (not activated)");
-	});
-
-	it("/permission 状态行在 win32 且 pwsh 已激活时只注明 shell 方言", async () => {
-		const { fakePi, commandHandlers } = makeFakePiWithActiveTools(["bash", "powershell"]);
-		const activate = (await import("../index")).default;
-		activate(fakePi as never);
-		processPermissionState.override = "danger-full-access";
 		const notify = vi.fn();
 		await withPlatform("win32", async () => {
 			await commandHandlers.permission.handler("", { ui: { notify } });
 		});
 		expect(notify).toHaveBeenCalledTimes(1);
 		const text = String(notify.mock.calls[0]?.[0]);
+		expect(text).toContain("sandbox mode: danger-full-access (/permission override)"); // 隔离生效：status 确实读到本用例设的 override
+		expect(text).toContain("shell: powershell only (not activated)");
+	});
+
+	it("/permission 状态行在 win32 且 pwsh 已激活时只注明 shell 方言", async () => {
+		const { fakePi, commandHandlers } = makeFakePiWithActiveTools(["bash", "powershell"]);
+		const activate = await importIndexWithDangerFullAccessOverride();
+		activate(fakePi as never);
+		const notify = vi.fn();
+		await withPlatform("win32", async () => {
+			await commandHandlers.permission.handler("", { ui: { notify } });
+		});
+		expect(notify).toHaveBeenCalledTimes(1);
+		const text = String(notify.mock.calls[0]?.[0]);
+		expect(text).toContain("sandbox mode: danger-full-access (/permission override)");
 		expect(text).toContain("shell: powershell only");
 		expect(text).not.toContain("not activated");
 	});
 
 	it("/permission 状态行在非 win32 上不含 PowerShell 行", async () => {
 		const { fakePi, commandHandlers } = makeFakePiWithActiveTools(["bash"]);
-		const activate = (await import("../index")).default;
+		const activate = await importIndexWithDangerFullAccessOverride();
 		activate(fakePi as never);
-		processPermissionState.override = "danger-full-access";
 		const notify = vi.fn();
 		await commandHandlers.permission.handler("", { ui: { notify } });
 		expect(notify).toHaveBeenCalledTimes(1);
-		expect(String(notify.mock.calls[0]?.[0])).not.toContain("shell: powershell");
+		const text = String(notify.mock.calls[0]?.[0]);
+		expect(text).toContain("sandbox mode: danger-full-access (/permission override)");
+		expect(text).not.toContain("shell: powershell");
+	});
+
+	it("/permission 状态行在 win32 且无法判断激活状态时标注 activation unknown（T15 修订）", async () => {
+		// 老宿主（含本仓 devDependency 0.80.2 同一形态）没有 getActiveTools：此类宿主上 pwsh
+		// 工具根本不存在，裸 "shell: powershell only" 会被读成“已启用”，必须显式标注未知态。
+		const { fakePi, commandHandlers } = makeFakePi(); // 无 getActiveTools
+		const activate = await importIndexWithDangerFullAccessOverride();
+		activate(fakePi as never);
+		const notify = vi.fn();
+		await withPlatform("win32", async () => {
+			await commandHandlers.permission.handler("", { ui: { notify } });
+		});
+		expect(notify).toHaveBeenCalledTimes(1);
+		const text = String(notify.mock.calls[0]?.[0]);
+		expect(text).toContain("sandbox mode: danger-full-access (/permission override)");
+		expect(text).toContain("shell: powershell only (activation unknown)");
+		expect(text).not.toContain("(not activated)");
 	});
 
 	it("Ruling 8: win32 + bash 活动而 pwsh 缺失 → 有 UI 提示一次，消息点名修法", async () => {
@@ -410,6 +448,7 @@ describe("T15: 平台门控与 pwsh 未激活提示（Ruling 8/9）", () => {
 			expect(notify.mock.calls[0]?.[1]).toBe("warning");
 			const message = String(notify.mock.calls[0]?.[0]);
 			expect(message).toContain("~/.pi/agent/settings.json");
+			expect(message).toContain("requires pi >= 1.0.0"); // T15 修订：宿主前提与 UnsupportedWindowsShellError 同措辞
 			expect(message).toContain('"defaultTools"');
 			expect(message).toContain("-bash");
 			expect(message).toContain("+powershell");

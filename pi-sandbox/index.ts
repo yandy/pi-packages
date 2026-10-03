@@ -44,9 +44,12 @@ function readActiveTools(pi: ExtensionAPI): string[] | undefined {
 	}
 }
 
-/** Ruling 8 的提示文案：必须点名修法与失败方向（未启用前 bash 命令被拒）。 */
+/** Ruling 8 的提示文案：必须点名修法与失败方向（未启用前 bash 命令被拒）。
+ *  T15 修订：补上宿主前提 `requires pi >= 1.0.0`（措辞与 `src/confine.ts` 的
+ *  `UnsupportedWindowsShellError` 一致）——低于 1.0.0 的宿主没有 `powershell` 工具，
+ *  只让用户去 settings.json 打开一个不存在的工具是不可执行的。 */
 const POWERSHELL_HINT_MESSAGE = [
-	"pi-sandbox: on Windows the confined shell is PowerShell only. Enable it in ~/.pi/agent/settings.json:",
+	"pi-sandbox: on Windows the confined shell is PowerShell only. Enable it in ~/.pi/agent/settings.json (requires pi >= 1.0.0):",
 	'  { "defaultTools": ["-bash", "+powershell"] }',
 	"Until then, bash commands are refused (fail-closed).",
 ].join("\n");
@@ -85,13 +88,14 @@ function maybeWarnMissingPowerShellTool(pi: ExtensionAPI, ctx: ExtensionContext)
 /**
  * Ruling 8 的 `/permission` 状态行：win32 上受限 shell 只有 PowerShell。
  * 能判断出 pwsh 不在活动工具里就注明尚未激活——`/permission` 是用户排查“bash 为何被拒”的第一站。
- * 无法判断（老宿主 / 取值失败）时只说方言，不断言激活状态。
+ * 无法判断（老宿主没有 `getActiveTools`——此类宿主上 pwsh 工具根本不存在——或取值失败）时注明
+ * `activation unknown`：不断言激活状态，避免裸 `shell: powershell only` 被读成“已启用”（T15 修订）。
  */
 function win32ShellStatusLine(pi: ExtensionAPI): string | null {
 	if (process.platform !== "win32") return null;
 	const active = readActiveTools(pi);
-	const notActivated = active !== undefined && !active.includes("powershell");
-	return notActivated ? "shell: powershell only (not activated)" : "shell: powershell only";
+	if (active === undefined) return "shell: powershell only (activation unknown)";
+	return active.includes("powershell") ? "shell: powershell only" : "shell: powershell only (not activated)";
 }
 
 export default function (pi: ExtensionAPI) {
