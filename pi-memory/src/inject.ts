@@ -7,8 +7,10 @@ import type { MemoryStore } from "./memory-store";
 import { sanitizeForInjection } from "./sanitize";
 
 /**
- * 注入用的「按行 + 按字节」截断。原本住在 `index-file.ts`（topic 模型的索引层），
- * 但它的两个消费者都在本文件里（索引快照 + entry 正文），因此随 v2 迁到此处，行为逐字不变。
+ * entry 正文用的「按行 + 按字节」截断：**保留开头**，从尾部削。
+ *
+ * 索引不进这里 —— 它的窗口取**最新**的一段（`truncateIndexForInjection`），方向正好相反：
+ * 一起用会让窗口永远只保留最旧的记忆。
  */
 export function truncateForInjection(
 	content: string,
@@ -32,6 +34,106 @@ export function truncateForInjection(
 	return { ok: !truncated, content: out, truncated };
 }
 
+/**
+ * 注入截断标记。放在窗口**开头**：索引是纯时间序，被丢掉的永远是**最旧**的行 ——
+ * 标记若追加在末尾，读起来像「这条之后的都被切了」，而事实恰好相反。
+ */
+export const INDEX_TRUNCATION_MARKER = "[truncated: memory index exceeds injection limit; older entries omitted]";
+
+/**
+ * 索引文本 → 行数组。文件末尾的换行会 split 出一个空元素，它不是「行」：先摘掉再算窗口，
+ * 否则它会白占窗口的一格（50 行窗口就只剩 49 行可用）。
+ */
+function indexLines(content: string): string[] {
+	if (content.length === 0) return [];
+	const lines = content.split("\n");
+	if (lines[lines.length - 1] === "") lines.pop();
+	return lines;
+}
+
+interface IndexWindow {
+	/** 窗口内的行，保持文件原顺序（旧 → 新）。 */
+	lines: string[];
+	/** 窗口的字节数（行间换行算在内；标记与末尾换行不算）。 */
+	byteLength: number;
+	/** 是否有行被丢弃（含「只保留了最新一行的字节前缀」这种退化）。 */
+	truncated: boolean;
+}
+
+/** 从尾部（最新）向头部累积，直到行数或字节数触顶。`truncateIndexForInjection` 与
+ *  `indexInjectionCapacity` 共用它 —— 两处口径不可能漂移。 */
+function indexWindow(lines: string[], maxLines: number, maxBytes: number): IndexWindow {
+	const kept: string[] = [];
+	let byteLength = 0;
+	let degenerated = false;
+	for (let i = lines.length - 1; i >= 0; i--) {
+		const line = lines[i];
+		const lineBytes = Buffer.byteLength(line, "utf8");
+		const cost = kept.length === 0 ? lineBytes : lineBytes + 1;
+		if (kept.length >= maxLines || byteLength + cost > maxBytes) break;
+		kept.unshift(line);
+		byteLength += cost;
+	}
+	if (kept.length === 0 && lines.length > 0 && maxLines > 0 && maxBytes > 0) {
+		// 退化：最新一行自身就超预算 —— 保留它的字节前缀。空 section 比截断的一行更糟：
+		// 模型连「这里本来有索引」都看不到。`maxLines > 0` 是必要的：maxLines = 0 的
+		// 语义是「不注入索引」，不能偷偷塞一行进去。
+		const prefix = truncateLineToBytes(lines[lines.length - 1], maxBytes);
+		kept.push(prefix);
+		byteLength = Buffer.byteLength(prefix, "utf8");
+		// 行数没变（1 → 1），但内容确实被削过：必须算截断，否则 `truncateIndexForInjection`
+		// 会以为「没丢行」而返回未截断的原文，标记也不出现。
+		degenerated = true;
+	}
+	return { lines: kept, byteLength, truncated: degenerated || kept.length < lines.length };
+}
+
+/** 按字符从尾部削到字节上限（与 `truncateForInjection` 的字节口径一致）。 */
+function truncateLineToBytes(line: string, maxBytes: number): string {
+	let cut = line;
+	while (Buffer.byteLength(cut, "utf8") > maxBytes && cut.length > 0) cut = cut.slice(0, -1);
+	return cut;
+}
+
+/**
+ * 索引的注入窗口：保留**最新**的 maxLines 行 / maxBytes 字节。
+ *
+ * - 窗口内保持文件原顺序（旧 → 新），**不反转**：形如「索引末尾的一段连续片段」；
+ * - 超出字节预算时继续丢窗口内**最旧**的一端；
+ * - 截断时在开头加 `INDEX_TRUNCATION_MARKER`；
+ * - 未超预算时**逐字节返回原文**（空索引也是）—— 小索引的注入值与改动前完全一致，
+ *   会话内冻结的值也不会因为这次改动而漂移。
+ */
+export function truncateIndexForInjection(
+	content: string,
+	maxLines: number,
+	maxBytes: number,
+): { ok: boolean; content: string; truncated: boolean } {
+	const window = indexWindow(indexLines(content), maxLines, maxBytes);
+	if (!window.truncated) return { ok: true, content, truncated: false };
+	const body = window.lines.join("\n");
+	return {
+		ok: false,
+		content: `${INDEX_TRUNCATION_MARKER}\n${body}${body.length > 0 ? "\n" : ""}`,
+		truncated: true,
+	};
+}
+
+/** `/memory` 的注入口径。复用 `indexWindow`，所以报出来的数字与实际注入的值不可能不一致。
+ *  字节口径含末尾换行：同一份文件未超预算时，它与 `Index:`（写入口径）报的字节数相同。 */
+export function indexInjectionCapacity(
+	content: string,
+	maxLines: number,
+	maxBytes: number,
+): { lineCount: number; byteLength: number; truncated: boolean } {
+	const window = indexWindow(indexLines(content), maxLines, maxBytes);
+	return {
+		lineCount: window.lines.length,
+		byteLength: window.lines.length > 0 ? window.byteLength + 1 : 0,
+		truncated: window.truncated,
+	};
+}
+
 export function buildInjection(systemPrompt: string, snapshot: string): string {
 	if (!snapshot) return systemPrompt;
 	return `${systemPrompt}\n\n${snapshot}`;
@@ -53,7 +155,7 @@ export function buildInjection(systemPrompt: string, snapshot: string): string {
  */
 export async function buildIndexSection(store: MemoryStore, maxLines: number, maxBytes: number): Promise<string> {
 	const raw = await store.readIndex();
-	const { content } = truncateForInjection(raw, maxLines, maxBytes);
+	const { content } = truncateIndexForInjection(raw, maxLines, maxBytes);
 	return sanitizeForInjection(content);
 }
 

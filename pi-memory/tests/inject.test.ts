@@ -8,11 +8,14 @@ import {
 	buildInjection,
 	buildSideQueryTask,
 	type EntryManifest,
+	INDEX_TRUNCATION_MARKER,
+	indexInjectionCapacity,
 	injectSurfacedContent,
 	runSideQuery,
 	SIDE_QUERY_MAX_ENTRIES,
 	scanEntries,
 	truncateForInjection,
+	truncateIndexForInjection,
 } from "../src/inject";
 import { MEMORY_INDEX_SECTION } from "../src/index-source";
 import { MemoryStore, type StoreConfig } from "../src/memory-store";
@@ -86,6 +89,85 @@ describe("truncateForInjection", () => {
 	});
 });
 
+describe("truncateIndexForInjection", () => {
+	it("returns the raw index untouched when it fits the window", () => {
+		const raw = `# Memory Index\n\n${SAMPLE_INDEX}\n`;
+
+		const r = truncateIndexForInjection(raw, 50, 16384);
+
+		expect(r.ok).toBe(true);
+		expect(r.truncated).toBe(false);
+		// 小索引逐字节不变（含头行与末尾换行）：注入值因此不会被这次改动扰动
+		expect(r.content).toBe(raw);
+	});
+
+	it("returns an empty string for an empty index", () => {
+		expect(truncateIndexForInjection("", 50, 16384)).toEqual({ ok: true, content: "", truncated: false });
+	});
+
+	// 索引是纯时间序（upsertIndexLine 追加、rebuildIndex 按 modified 升序）：窗口必须保留
+	// **最新**的一端，否则新写成功的记忆永远进不了 system prompt。
+	it("keeps the newest lines and drops the oldest when the line budget is exceeded", () => {
+		const lines = Array.from({ length: 60 }, (_, i) => `- [T${i}](t${i}.md) — d${i}`);
+		const raw = `${lines.join("\n")}\n`;
+
+		const r = truncateIndexForInjection(raw, 50, 16384);
+
+		expect(r.truncated).toBe(true);
+		expect(r.content.split("\n")[0]).toBe(INDEX_TRUNCATION_MARKER);
+		expect(r.content).toContain("- [T59](t59.md) — d59");
+		expect(r.content).toContain("- [T10](t10.md) — d10");
+		expect(r.content).not.toContain("- [T9](t9.md) — d9");
+		// 窗口内仍是文件原顺序（旧 → 新），不是反转
+		expect(r.content.indexOf("T10")).toBeLessThan(r.content.indexOf("T59"));
+	});
+
+	// 退化的字节预算：继续丢窗口内**最旧**的一端，而不是把最新的截掉。
+	it("drops the oldest lines of the window when the byte budget is exceeded", () => {
+		const lines = Array.from({ length: 10 }, (_, i) => `- [T${i}](t${i}.md) — ${"x".repeat(30)}`);
+		const raw = `${lines.join("\n")}\n`;
+
+		const r = truncateIndexForInjection(raw, 50, 120);
+
+		expect(r.truncated).toBe(true);
+		expect(r.content).toContain("T9");
+		expect(r.content).not.toContain("- [T0](t0.md)");
+		const windowLines = r.content.split("\n").slice(1, -1);
+		expect(windowLines.length).toBeLessThan(10);
+		expect(Buffer.byteLength(windowLines.join("\n"), "utf8")).toBeLessThanOrEqual(120);
+	});
+
+	// Review Focus #3：一条自带 500 字节的超长行不能把 section 变成空值 —— 至少给出它的字节前缀。
+	it("keeps a byte prefix of the newest line when that line alone blows the byte budget", () => {
+		const raw = `- [Long](long.md) — ${"y".repeat(500)}\n`;
+
+		const r = truncateIndexForInjection(raw, 50, 100);
+
+		expect(r.truncated).toBe(true);
+		expect(r.content.split("\n")[0]).toBe(INDEX_TRUNCATION_MARKER);
+		expect(r.content.split("\n")[1]).toContain("- [Long](long.md) — ");
+		expect(Buffer.byteLength(r.content.split("\n")[1], "utf8")).toBeLessThanOrEqual(100);
+	});
+
+	// Review Focus #4：`/memory` 报的注入口径与真正注入的值共用同一个窗口核心。
+	it("reports the same window through indexInjectionCapacity", () => {
+		const lines = Array.from({ length: 60 }, (_, i) => `- [T${i}](t${i}.md) — d${i}`);
+		const raw = `${lines.join("\n")}\n`;
+
+		expect(indexInjectionCapacity(raw, 50, 16384)).toEqual({
+			lineCount: 50,
+			// 字节口径含末尾换行：未超预算时它与 `Index:` 对同一份文件报的字节数相同
+			byteLength: Buffer.byteLength(`${lines.slice(-50).join("\n")}\n`, "utf8"),
+			truncated: true,
+		});
+		expect(indexInjectionCapacity("- [A](a.md) — d\n", 50, 16384)).toEqual({
+			lineCount: 1,
+			byteLength: Buffer.byteLength("- [A](a.md) — d\n", "utf8"),
+			truncated: false,
+		});
+	});
+});
+
 // ── Plan C（sections 注入）新增 ──────────────────────────────────────────────
 describe("buildIndexSection", () => {
 	let dir: string;
@@ -121,15 +203,19 @@ describe("buildIndexSection", () => {
 		expect(await buildIndexSection(store, 200, 25600)).toBe("");
 	});
 
-	it("truncates to the injection limits and marks the cut", async () => {
+	it("truncates to the newest lines and marks the cut", async () => {
 		const many = Array.from({ length: 10 }, (_, i) => `- [T${i}](t${i}.md) — d${i}`).join("\n");
 		await writeFile(join(dir, "MEMORY.md"), `${many}\n`, "utf8");
 
 		const section = await buildIndexSection(store, 3, 25600);
 
-		expect(section.split("\n")).toHaveLength(4);
-		expect(section).toContain("[truncated: memory index exceeds injection limit]");
-		expect(section).not.toContain("T3");
+		expect(section.split("\n")).toEqual([
+			INDEX_TRUNCATION_MARKER,
+			"- [T7](t7.md) — d7",
+			"- [T8](t8.md) — d8",
+			"- [T9](t9.md) — d9",
+			"",
+		]);
 	});
 
 	// spec §13：注入时净化（磁盘不动，D11）。
