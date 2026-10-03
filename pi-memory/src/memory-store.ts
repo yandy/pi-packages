@@ -7,6 +7,7 @@ import { entryFileName, resolveUniqueFileName } from "./filename";
 import { withLock } from "./fs-lock";
 import { isProcessLockActive, tryWithProcessLock, withProcessLock } from "./process-lock";
 import { createSnapshot } from "./snapshot";
+import { isReservedWindowsName } from "./windows-names";
 
 export const INDEX_FILE = "MEMORY.md";
 export const LOCK_FILE = ".lock";
@@ -63,6 +64,8 @@ export interface StoreConfig {
 	/** 跨进程 `.lock` 的等待上限。注意这里**没有 ttl** —— 锁只在毫秒级的物理写入期间持有，
 	 *  且永不自动回收（见 fs-lock.ts）；dream 的整轮互斥由 process-lock.ts 的进程内队列承担。 */
 	lock: { timeoutMs: number; snapshotKeep: number };
+	/** 命名/读取规则跟随的平台（默认 `process.platform`）。测试注入缝，生产不传。 */
+	platform?: NodeJS.Platform;
 }
 
 export interface EntrySummary {
@@ -109,11 +112,21 @@ function compareSummaries(a: EntrySummary, b: EntrySummary): number {
 export class MemoryStore {
 	readonly #cache = new Map<string, CacheRow>();
 
+	get #platform(): NodeJS.Platform {
+		return this.cfg.platform ?? process.platform;
+	}
+
 	constructor(readonly cfg: StoreConfig) {}
 
 	async #entryFiles(): Promise<string[]> {
 		const names = await readdir(this.cfg.memoryDir).catch(() => []);
-		return names.filter((n) => n.endsWith(".md") && n !== INDEX_FILE && !n.startsWith(".")).sort();
+		return names
+			.filter((n) => n.endsWith(".md") && n !== INDEX_FILE && !n.startsWith("."))
+			// win32：按名打开保留设备名文件会命中设备（CON 等），`readFile` 会阻塞在控制台而不是
+			// 返回内容。修复前的版本或外部工具可能留下过这种文件，这里把它从清单里剔除 ——
+			// 最坏表现是「该条记忆在本机不可见」，而不是卡住整个扫描（spec Ruling 5）。
+			.filter((n) => !(this.#platform === "win32" && isReservedWindowsName(n)))
+			.sort();
 	}
 
 	/** 已被占用的文件名：磁盘上的条目文件 + 索引文件本身。

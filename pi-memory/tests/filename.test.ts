@@ -37,6 +37,21 @@ describe("entryFileName", () => {
 	it("is deterministic", () => {
 		expect(entryFileName("同一个 标题")).toBe(entryFileName("同一个 标题"));
 	});
+
+	it("prefixes reserved Windows device names", () => {
+		expect(entryFileName("CON")).toBe("_CON.md");
+		expect(entryFileName("con")).toBe("_con.md");
+		expect(entryFileName("nul")).toBe("_nul.md");
+		expect(entryFileName("com1")).toBe("_com1.md");
+		expect(entryFileName("lpt9")).toBe("_lpt9.md");
+		expect(entryFileName("nul.tar.gz")).toBe("_nul.tar.gz.md");
+	});
+
+	it("leaves lookalike names alone", () => {
+		expect(entryFileName("CONSOLE")).toBe("CONSOLE.md");
+		expect(entryFileName("nul2")).toBe("nul2.md");
+		expect(entryFileName("com10")).toBe("com10.md");
+	});
 });
 
 describe("resolveUniqueFileName", () => {
