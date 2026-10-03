@@ -172,7 +172,7 @@ describe.skipIf(process.platform !== "win32")("diagnose-windows-sandbox-acl scri
 		// SDDL 里按 ACE 类型区分：同 SID 的 allow 必须消失、同 SID 的 deny 必须原样保留。
 		expect(after).not.toMatch(/\(A;[A-Z]*;[^)]*;;;S-1-15-2-1234567890-1234567890\)/u);
 		expect(after).toMatch(/\(D;[A-Z]*;[^)]*;;;S-1-15-2-1234567890-1234567890\)/u);
-		expect(after).toContain("S-1-5-32-545"); // 其它允许 ACE 原样保留
+		expect(after).toMatch(/\(A;[A-Z]*;[^)]*;;;(?:BU|S-1-5-32-545)\)/u); // 其它允许 ACE 原样保留（SDDL 会把该 well-known SID 别名成 BU）
 	});
 
 	it("refuses a package source outside -AllowRoot before changing anything and exits 2", () => {
