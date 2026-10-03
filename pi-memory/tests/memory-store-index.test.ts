@@ -83,7 +83,9 @@ describe("removeEntry", () => {
 	// 下次 rebuildIndex（dream 会常规调用）会把它加回来 —— 删除被静默回滚。
 	// 注：目录只读时锁的临时文件也建不了，所以本用例钉的是「只读目录 → 干净失败、无半成品」这个端到端
 	// 性质；unlinkStrict 本身的抛错语义由下面的 internal 用例直接覆盖。
-	it("fails the removal when the entry file cannot be deleted", async () => {
+	// win32：`chmod` 只能切只读位（Node 文档：Windows 上只有写权限可被 chmod 影响），目录 ACL 才决定
+	// 删除权，`0o500` 造不出「无法 unlink」→ 平台门；上面那条 root 守卫管的是另一件事，保留。
+	it.skipIf(process.platform === "win32")("fails the removal when the entry file cannot be deleted", async () => {
 		if (typeof process.getuid === "function" && process.getuid() === 0) return; // root 会绕过权限检查
 		await store.addEntry({ name: "A", body: "正文" });
 		await chmod(dir, 0o500); // 目录只读 → unlink 失败
@@ -103,7 +105,8 @@ describe("unlinkStrict / sameFile", () => {
 	});
 
 	// fail-closed 的本体：ENOENT 之外的错误一律上抛，不得静默变成「删除成功」。
-	it("rethrows any error that is not ENOENT", async () => {
+	// win32：与上一条同一原因（`chmod` 造不出不可删除的目录）→ 平台门；root 守卫保留。
+	it.skipIf(process.platform === "win32")("rethrows any error that is not ENOENT", async () => {
 		if (typeof process.getuid === "function" && process.getuid() === 0) return;
 		await writeFile(join(dir, "a.md"), "x", "utf8");
 		await chmod(dir, 0o500);
@@ -117,7 +120,9 @@ describe("unlinkStrict / sameFile", () => {
 
 	// 大小写不敏感 / Unicode 规范化的文件系统上，两个不同的字符串可能指向同一 inode；
 	// 那时 rename 后的 unlink 会把刚写入的文件删掉。硬链接是 Linux 上能构造出的同 inode 双名字。
-	it("detects two names that point at the same inode", async () => {
+	// win32：`link` 只在支持硬链接的卷（NTFS/ReFS，FAT/exFAT 与部分网络盘不支持）上可用，
+	// 且 `sameFile` 比较的 `dev`/`ino` 是 POSIX inode 语义而非跨平台契约 → 平台门。
+	it.skipIf(process.platform === "win32")("detects two names that point at the same inode", async () => {
 		await writeFile(join(dir, "a.md"), "x", "utf8");
 		await writeFile(join(dir, "c.md"), "y", "utf8");
 		await link(join(dir, "a.md"), join(dir, "b.md"));

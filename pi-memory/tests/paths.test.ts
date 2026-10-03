@@ -16,12 +16,17 @@ import { isReservedWindowsName } from "../src/windows-names";
 const execFileP = promisify(execFile);
 
 let dir: string;
+let emptyGitConfig: string;
 
 beforeEach(async () => {
 	// Keep git hermetic: never read the machine's global or system config.
-	vi.stubEnv("GIT_CONFIG_GLOBAL", "/dev/null");
-	vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
+	// 用临时空文件而不是 `/dev/null`：Windows 上它会变成 `C:\dev\null`（不存在也会被 git 忽略，
+	// 但语义依赖平台；临时文件在两个平台上都一样明确）。
 	dir = await mkdtemp(join(tmpdir(), "pi-memory-paths-"));
+	emptyGitConfig = join(dir, "gitconfig-empty");
+	await writeFile(emptyGitConfig, "", "utf8");
+	vi.stubEnv("GIT_CONFIG_GLOBAL", emptyGitConfig);
+	vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
 });
 
 afterEach(async () => {
@@ -43,13 +48,16 @@ describe("resolveMemoryDir", () => {
 	it("joins memoryDir with the git kind and readable dir name", async () => {
 		await initRepo(dir, "https://github.com/yandy/pi-packages.git");
 		expect(await resolveMemoryDir({ memoryDir: "/mem" }, dir)).toBe(
-			join("/mem", "git", "github.com__yandy__pi-packages"),
+			join(resolve("/mem"), "git", "github.com__yandy__pi-packages"),
 		);
 	});
 
 	it("joins memoryDir with the local kind and readable dir name", async () => {
-		const expected = `/mem/local/${resolve(dir).slice(1).split("/").join("__")}`;
-		expect(await resolveMemoryDir({ memoryDir: "/mem" }, dir)).toBe(expected);
+		// memoryDir 与 key 都要先经 resolve()/projectDirName()：win32 上 `resolve("/mem")` 是
+		// `C:\mem`，手写的 `/mem/local/...` 模板不再等于实现返回的宿主机路径。
+		expect(await resolveMemoryDir({ memoryDir: "/mem" }, dir)).toBe(
+			join(resolve("/mem"), "local", projectDirName(resolve(dir))),
+		);
 	});
 
 	it("maps two clones of the same remote to one memory directory", async () => {
@@ -59,8 +67,9 @@ describe("resolveMemoryDir", () => {
 		await mkdir(cloneB, { recursive: true });
 		await initRepo(cloneA, "https://github.com/yandy/pi-packages.git");
 		await initRepo(cloneB, "git@github.com:yandy/pi-packages.git");
-		expect(await resolveMemoryDir({ memoryDir: "/mem" }, cloneA)).toBe("/mem/git/github.com__yandy__pi-packages");
-		expect(await resolveMemoryDir({ memoryDir: "/mem" }, cloneB)).toBe("/mem/git/github.com__yandy__pi-packages");
+		const expected = join(resolve("/mem"), "git", "github.com__yandy__pi-packages");
+		expect(await resolveMemoryDir({ memoryDir: "/mem" }, cloneA)).toBe(expected);
+		expect(await resolveMemoryDir({ memoryDir: "/mem" }, cloneB)).toBe(expected);
 	});
 
 	it("maps a linked worktree to the same memory directory as the main checkout", async () => {
@@ -70,13 +79,15 @@ describe("resolveMemoryDir", () => {
 		await git(["commit", "--allow-empty", "-q", "-m", "init"], dir);
 		const worktree = join(dir, "wt");
 		await git(["worktree", "add", "-q", "-b", "wt-branch", worktree], dir);
-		expect(await resolveMemoryDir({ memoryDir: "/mem" }, worktree)).toBe("/mem/git/github.com__yandy__pi-packages");
+		expect(await resolveMemoryDir({ memoryDir: "/mem" }, worktree)).toBe(
+			join(resolve("/mem"), "git", "github.com__yandy__pi-packages"),
+		);
 	});
 
 	it("honours a custom memoryDir root", async () => {
 		await initRepo(dir, "git@github.com:yandy/pi-packages.git");
 		expect(await resolveMemoryDir({ memoryDir: "/custom/root" }, dir)).toBe(
-			join("/custom/root", "git", "github.com__yandy__pi-packages"),
+			join(resolve("/custom/root"), "git", "github.com__yandy__pi-packages"),
 		);
 	});
 });
@@ -99,7 +110,9 @@ describe("projectDirName", () => {
 	});
 
 	it("keeps backslashes literal (POSIX naming)", () => {
-		expect(projectDirName("/home/a\\b")).toBe("home__a\\b");
+		// 显式传平台：命名规则跟随平台，POSIX 上反斜杠是普通字符（win32 上它是分隔符，
+		// 由下面的 win32 用例覆盖）。
+		expect(projectDirName("/home/a\\b", { platform: "linux" })).toBe("home__a\\b");
 	});
 
 	it("drops empty, . and .. segments", () => {
