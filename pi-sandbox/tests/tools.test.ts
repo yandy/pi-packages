@@ -5,7 +5,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSandboxTools, ESCALATION_PROPS, resolveCall, resolveCallMode } from "../src/tools";
-import { createPermissionState } from "../src/permission";
+import { createPermissionState, processPermissionState } from "../src/permission";
 import { DEFAULT_SANDBOX_CONFIG } from "../src/config";
 import { PLACEHOLDER_KEYS } from "../src/escalation";
 import { getEscalationBroker, resetEscalationBrokerForTests } from "../src/escalation-broker";
@@ -669,5 +669,104 @@ describe("denial-first 硬门禁（未经真实拒绝不提权）", () => {
 		expect(ctx.ui.select).toHaveBeenCalledTimes(1);
 		const { readFile } = await import("node:fs/promises");
 		expect(await readFile(outside, "utf-8")).toBe("ok");
+	});
+});
+
+describe("windows tool wiring", () => {
+	/** 测试用 pwsh 工具工厂：记录调用（base 元数据一次 + execute 时带 ops 一次），execute 直接回显。 */
+	function fakePowerShellBuilder(calls: { cwd: string; opts?: unknown }[] = []) {
+		return vi.fn((cwd: string, opts?: unknown) => {
+			calls.push({ cwd, opts });
+			return {
+				name: "powershell",
+				label: "PowerShell",
+				description: "Run PowerShell commands",
+				parameters: { type: "object", properties: { command: { type: "string" } } },
+				async execute(_id: string, params: { command?: string }) {
+					return { content: [{ type: "text" as const, text: `ran ${String(params.command ?? "")}` }] };
+				},
+			};
+		});
+	}
+
+	it("builds the tool set on win32 and exposes a powershell tool when the host provides the builder", () => {
+		const tools = createSandboxTools({ cwd: process.cwd(), permission: processPermissionState, platform: "win32" });
+		for (const name of ["bash", "write", "edit"] as const) expect(tools[name]).toBeDefined();
+		if (tools.powershell === undefined) {
+			// 宿主 <1.0.0（本仓 devDependency 0.80.2 即如此）时合法缺省：不报错、不阻断
+			expect(typeof tools.powershell).toBe("undefined");
+			return;
+		}
+		expect((tools.powershell as { name?: string }).name).toBe("powershell");
+	});
+
+	it("does not register a powershell tool on POSIX platforms (builder present or not)", () => {
+		const build = vi.fn();
+		const tools = createSandboxTools({
+			cwd: process.cwd(),
+			permission: processPermissionState,
+			platform: "linux",
+			_hostCreatePowerShellToolDefinition: build,
+		});
+		expect(tools.powershell).toBeUndefined();
+		// 平台门控先于宿主探测/构造：非 win32 上连 builder 都不该被摸（老宿主上该键本来也不存在）。
+		expect(build).not.toHaveBeenCalled();
+	});
+
+	it("passes the win32 platform through to the bash ops builder", async () => {
+		// bash 的拒绝行为本身由 Task 12 的 shell-ops 用例钉住；这里只断言 tools 层不吞掉该注入点。
+		// ops 是逐调用构造的（mode 来自当次 resolveCall），故需真跑一次 execute 才能观察到 platform 透传。
+		const build = vi.fn(() => ({ exec: vi.fn(async () => ({ exitCode: 0 })) }));
+		const { deps } = makeDeps({ platform: "win32", _buildBashOps: build as never });
+		const { bash } = createSandboxTools(deps);
+		await bash.execute("call-win32", { command: "echo hi" }, undefined, undefined, toolCtx());
+		expect(build).toHaveBeenCalledWith(expect.objectContaining({ platform: "win32" }));
+	});
+
+	it("win32 + host builder: powershell carries the same escalation surface and builds ops per call", async () => {
+		// 宿主 0.80.2 没有 createPowerShellToolDefinition → 正例分支靠测试注入到达；
+		// 注入值走与生产命名空间探测同一条 `typeof === "function"` 口径。
+		const calls: { cwd: string; opts?: unknown }[] = [];
+		const builder = fakePowerShellBuilder(calls);
+		const { deps } = makeDeps({ platform: "win32", _hostCreatePowerShellToolDefinition: builder });
+		const { powershell } = createSandboxTools(deps);
+		expect(powershell?.name).toBe("powershell");
+		// 与 bash 同一套提权面（extendParams）与同一套 prepareArguments 串联（占位符剥离）。
+		const props = (powershell?.parameters as { properties: Record<string, unknown> }).properties;
+		expect(props.sandbox_permissions).toBeDefined();
+		expect(props.justification).toBeDefined();
+		expect(powershell?.prepareArguments?.({ command: "Get-ChildItem", sandbox_permissions: "null", justification: "null" }))
+			.toEqual({ command: "Get-ChildItem" });
+		// 创建期取一次 base 元数据；execute 时按当次 mode 再构造一次带受限 ops 的定义（与 bash 同构）。
+		expect(calls.length).toBe(1);
+		const result = await powershell!.execute("pwsh-1", { command: "Get-ChildItem" }, undefined, undefined, toolCtx());
+		expect(calls.length).toBe(2);
+		expect(calls[0].opts).toBeUndefined();
+		expect(calls[1].opts).toEqual(expect.objectContaining({ operations: expect.anything() }));
+		expect((result.content[0] as { text: string }).text).toBe("ran Get-ChildItem");
+	});
+
+	it("powershell shares bash's command-kind denial gate and one-shot marker", async () => {
+		const { deps } = makeDeps({ platform: "win32", _hostCreatePowerShellToolDefinition: fakePowerShellBuilder() });
+		const { powershell } = createSandboxTools(deps);
+		const ctx = toolCtx(true, "Allow once") as { ui: { select: ReturnType<typeof vi.fn> } };
+		// 无前置拒绝：command 类门禁忽略提权（与 bash 同账本），不弹窗、结果带忽略标记。
+		const ignored = await powershell!.execute("pwsh-g1", {
+			command: "Set-Content C:\\outside.txt x",
+			sandbox_permissions: "danger-full-access",
+			justification: "preemptive",
+		}, undefined, undefined, ctx as never) as { content: { text: string }[] };
+		expect(ctx.ui.select).not.toHaveBeenCalled();
+		expect(ignored.content.map((c) => c.text).join("\n")).toContain("escalation fields were ignored");
+		// 播种 command 类前置拒绝后原样重试：进入审批且 subject 是 command（同 bash 文案），批准后带一次性标记。
+		seedDenial("command");
+		const escalated = await powershell!.execute("pwsh-g2", {
+			command: "Set-Content C:\\outside.txt x",
+			sandbox_permissions: "danger-full-access",
+			justification: "retry after denial",
+		}, undefined, undefined, ctx as never) as { content: { text: string }[] };
+		expect(ctx.ui.select).toHaveBeenCalledTimes(1);
+		expect(ctx.ui.select.mock.calls[0][0]).toContain("this command");
+		expect(escalated.content.map((c) => c.text).join("\n")).toContain('one-shot escalation to "danger-full-access"');
 	});
 });
