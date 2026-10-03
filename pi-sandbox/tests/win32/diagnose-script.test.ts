@@ -45,9 +45,10 @@ function recap(output: string) {
 	return line === undefined ? undefined : (JSON.parse(line.slice("RECAP ".length)) as Record<string, unknown>);
 }
 
-/** `nextAction` 在 summary 报告记录的 details 里，不在 RECAP 里（RECAP 只有 verdicts/changes/verifications/refusals/scans/report）。 */
+/** `nextAction` 在 summary 报告记录的 details 里，不在 RECAP 里（RECAP 只有 verdicts/changes/verifications/refusals/scans/report）。
+ * 判别字段是 `kind`：`Write-Report` 的参数序是 (Kind, Operation, Target, ...)，summary 记录的 `operation` 装的是 mode。 */
 function nextAction(output: string): unknown {
-	return reports(output).find((record) => record.operation === "summary")?.details?.nextAction;
+	return reports(output).find((record) => record.kind === "summary")?.details?.nextAction;
 }
 
 /** RECAP.verdicts 是对象数组：`{ path, verdict, writeDac, writeOwner, packageObjects }`。 */
@@ -62,10 +63,13 @@ function addPackageAce(path: string): void {
 	expect(icacls.status, icacls.output).toBe(0);
 }
 
-/** 从 DACL 中移除当前用户的显式 ACE（制造"缺 WRITE_DAC/WRITE_OWNER"的场景）。 */
-function stripCurrentUserAce(path: string): void {
-	const icacls = shell("icacls", [path, "/remove", `${process.env.USERNAME ?? ""}`]);
+/** 制造“需要补授权”的目标：切断继承、只给当前用户 RX——只剩**所有者隐式 WRITE_DAC**，恰好落在脚本的 grant 分支。
+ * 不能用 `icacls /remove`：它只删显式 ACE，继承的 FullControl 仍在，目标看起来完全健康。 */
+function needsGrant(path: string): void {
+	const user = `${process.env.USERDOMAIN ?? ""}\\${process.env.USERNAME ?? ""}`;
+	const icacls = shell("icacls", [path, "/inheritance:r", "/grant", `${user}:(OI)(CI)(RX)`]);
 	expect(icacls.status, icacls.output).toBe(0);
+	expect(sddl(path)).toContain("(RX)"); // 夹具真的生效，避免用例以错误的原因通过/失败
 }
 
 function sddl(path: string): string {
@@ -91,10 +95,10 @@ describe.skipIf(process.platform !== "win32")("diagnose-windows-sandbox-acl scri
 		expect(sddl(target)).toBe(before);
 	});
 
-	it("grants the signed-in user full control when WRITE_DAC is missing and emits a recovery pair", () => {
+	it("grants the signed-in user full control when WRITE_OWNER is missing and emits a recovery pair", () => {
 		const target = join(scratch, "locked");
 		shell("cmd", ["/c", "mkdir", target]);
-		stripCurrentUserAce(target);
+		needsGrant(target);
 		const out = join(scratch, "out");
 		const run = runScript(["-Path", target, "-AllowRoot", scratch, "-Out", out]);
 		expect(run.status).toBe(0);
@@ -158,16 +162,23 @@ describe.skipIf(process.platform !== "win32")("diagnose-windows-sandbox-acl scri
 	it("restores a saved DACL from the recovery record and the printed ROLLBACK command", () => {
 		const target = join(scratch, "restore-me");
 		shell("cmd", ["/c", "mkdir", target]);
-		stripCurrentUserAce(target);
+		needsGrant(target);
+		const before = sddl(target);
 		const out = join(scratch, "out");
 		const repair = runScript(["-Path", target, "-AllowRoot", scratch, "-Out", out]);
+		expect(repair.status).toBe(0);
+		expect(sddl(target)).not.toBe(before); // 修复真的改了 DACL，否则下面的还原断言没有意义
 		const rollbackLine = repair.output.split(/\r?\n/u).find((l) => l.startsWith("ROLLBACK "));
 		expect(rollbackLine).toBeDefined();
+		// 真正执行打印出的 ROLLBACK 命令（用户会粘贴的那一行），而不是重复一遍 repair argv。
+		const viaCommand = shell(PS, ["-NoProfile", "-Command", (rollbackLine as string).slice("ROLLBACK ".length)]);
+		expect(viaCommand.status, viaCommand.output).toBe(0);
+		expect(sddl(target)).toBe(before);
+		// 记录文件本身也能直接 -Restore（RECAP/记录契约）。
 		const record = readdirSync(out).find((f) => /^acl-backup-.*\.json$/u.test(f)) as string;
 		const restored = runScript(["-Path", target, "-AllowRoot", scratch, "-Restore", join(out, record)]);
 		expect(restored.status).toBe(0);
-		const viaCommand = runScript(["-Path", target, "-AllowRoot", scratch, "-Restore", join(out, record)]);
-		expect(viaCommand.status).toBe(0);
+		expect(sddl(target)).toBe(before);
 	});
 
 	it("rejects a missing -AllowRoot, a repair without -Out, and -Restore with two paths", () => {
@@ -180,14 +191,20 @@ describe.skipIf(process.platform !== "win32")("diagnose-windows-sandbox-acl scri
 		);
 	});
 
-	it("refuses a junction pointing outside -AllowRoot", () => {
+	it("refuses a junction that carries a package ACE", () => {
 		const outside = join(scratch, "outside-junction");
 		const link = join(scratch, "link");
 		shell("cmd", ["/c", "mkdir", outside]);
 		shell("cmd", ["/c", "mklink", "/J", link, outside]);
-		const run = runScript(["-Path", join(link, "."), "-AllowRoot", scratch, "-Out", join(scratch, "out")]);
-		expect([0, 2]).toContain(run.status);
-		if (run.status === 2) expect(nextAction(run.output)).toBe("stop");
+		addPackageAce(link); // 包 ACE 落在 reparse point 自身上：Get-RepairRefusal 必须拒绝
+		const beforeLink = sddl(link);
+		const beforeOutside = sddl(outside);
+		const run = runScript(["-Path", link, "-AllowRoot", scratch, "-Out", join(scratch, "out")]);
+		expect(run.status).toBe(2);
+		expect(run.output).toContain("REPAIR_REFUSED");
+		expect(nextAction(run.output)).toBe("stop");
+		expect(sddl(link)).toBe(beforeLink);
+		expect(sddl(outside)).toBe(beforeOutside);
 	});
 
 	it("writes one JSONL report per run under -Out", () => {
