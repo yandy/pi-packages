@@ -35,4 +35,8 @@ describe("diagnosis skill packaging", () => {
 		// pi 侧语义：返回空数组 = 不追加任何技能路径（spec §4.10 已核实的 mergePaths 行为）
 		expect(aclSkillPaths("darwin")).toHaveLength(0);
 	});
+
+	it("ships the repair script next to the skill", () => {
+		expect(existsSync(`${skillDir}/scripts/diagnose-windows-sandbox-acl.ps1`)).toBe(true);
+	});
 });
