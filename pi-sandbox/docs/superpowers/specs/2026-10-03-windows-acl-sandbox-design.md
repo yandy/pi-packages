@@ -174,22 +174,33 @@ parseArgs → requireDirectory(ws, temp) → win32()（koffi 懒加载）
 | `src/shell-ops.ts`（新） | 从 `bash-ops.ts` 抽出受限 ops 工厂（confine/spawn/超时/中止/denial 记账），bash 与 powershell 共用；`bash-ops.ts` 对外导出与行为**零变化**（现有测试即回归网）。平台判定同样经**注入点**，使 bash 的 win32 拒绝分支可在 Linux 单测 |
 | `src/powershell-ops.ts`（新） | PowerShell 专用 ops：`getPowerShellConfig()` 取 argv + pi 的 UTF-8 输出前缀。被拒时经与 bash **同一条** denial 记账路径（`onDenial` → ledger 的 `command` 类），使 pwsh 的拒绝能驱动 denial-first 提权重试 |
 | `src/tools.ts` | 注册 `powershell` 工具覆盖（运行时探测 `createPowerShellToolDefinition`）；win32 受限模式下 bash 拒绝（Ruling 2） |
+
+**宿主版本差异的接入规则（D7 的必然要求）**：pi 是 ESM（`"type": "module"`），因此对**版本门控**的宿主 API（`createPowerShellToolDefinition`、`getPowerShellConfig`、`getActiveTools`）**不得**用静态具名导入——在 0.80.2 上运行时会因缺失导出而链接失败（连扩展都加载不了）。一律用命名空间导入 + 属性访问 + `typeof === "function"` 探测：
+
+```ts
+import * as piHost from "@earendil-works/pi-coding-agent";
+const host = piHost as unknown as Record<string, unknown>;
+const createPowerShellToolDefinition = typeof host.createPowerShellToolDefinition === "function"
+  ? (host.createPowerShellToolDefinition as (cwd: string, opts: unknown) => unknown)
+  : undefined;
+```
 | `index.ts` | 激活期 pwsh 未激活提示（Ruling 8）；`/permission` 状态行的 win32 标注；`resources_discover` 处理器的 platform 门控（Ruling 9） |
 | `src/win32/skill-paths.ts`（新） | 纯函数 `aclSkillPaths(platform)`：win32 返回 `["./skills/diagnose-windows-sandbox-acl"]`，其余平台返回 `[]`（可在 Linux 单测断言） |
 
 ### 4.9 模块划分
 
 ```
-src/win32/abi.js      Win32 常量 + x64 布局（纯数据，按 dsh verify/abi-probe.cpp 的值写断言）
-src/win32/ffi.js      koffi 懒加载 + 绑定表（kernel32/advapi32）+ Win32Error 格式化
+src/win32/abi.js      Win32 常量 + x64 布局（进程/Job/ACL/令牌四组；纯数据，按 dsh verify/abi-probe.cpp 的值写断言）
+src/win32/ffi.js      koffi 懒加载 + 绑定表（kernel32/advapi32）+ 指针/内存 helper + Win32Error 格式化
+src/win32/proc.js     进程原语：quoteArg/buildCommandLine、kill-on-close Job、suspended→assign→resume、CreateProcessAsUserW、waitForProcessExit
 src/win32/token.js    logon SID、well-known SID、restricting 列表、Low IL、默认 DACL 补丁
 src/win32/acl.js      DACL/标签读改写、环境性删除拒绝、per-path LockFileEx 锁
 src/win32/sid.js      能力 SID 派生 + 路径边界校验（纯函数）
 src/win32/cli.js      参数解析/校验（纯函数）
-src/win32/runner.js   独立入口（thin：main + exit code）
+src/win32/runner.js   独立入口（thin：main + exit code；main 可注入 api/spawn 以便单测）
 ```
 
-行数估计（按参考实现折算）：`ffi`+`abi` ≈ 320、`token` ≈ 250、`acl` ≈ 340、`sid`+`cli` ≈ 120、`runner` ≈ 160，合计约 **1200 行 JS**（未含 TS 接线与测试）。
+行数估计（按参考实现折算）：`abi`+`ffi` ≈ 420（沙箱绑定 + 进程/Job 绑定）、`proc` ≈ 320（从 `dsh-win32-process/src/process.ts` 的 `quoteArg`/`buildCommandLine`/`createKillOnCloseJob`/`inheritedStandardHandles`/`spawnJobProcess`/`spawnInheritedJobProcess`/`waitForProcessExit` 子集折算；**不**含 piped stdio、fd-7 控制管道、普通 runner 原语）、`token` ≈ 250、`acl` ≈ 340、`sid`+`cli` ≈ 130、`runner` ≈ 170，合计约 **1600 行 JS**（未含 TS 接线与测试）。测试可注入面：`ffi.js` 暴露测试用的 `types` 注入点，`token`/`acl`/`proc`/`runner` 的每个函数都接受 `api` 作为参数——因此除真实 Win32 语义外的逻辑均可在 Linux 上单测。
 
 ### 4.10 诊断技能的落位与**平台门控**
 
