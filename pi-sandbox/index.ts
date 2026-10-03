@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getSandboxConfig } from "./src/config";
 import { getDenialLedger } from "./src/denial-ledger";
 import { getEscalationBroker } from "./src/escalation-broker";
@@ -6,6 +6,7 @@ import { createPermissionCommand, processPermissionState } from "./src/permissio
 import { canonicalPath } from "./src/policy";
 import { selectRunner } from "./src/runners";
 import { createSandboxTools } from "./src/tools";
+import { aclSkillPaths } from "./src/win32/skill-paths";
 
 /**
  * pi-subagents 的子会话生命周期通道名（约定，非编译期契约；spec §4.1、§8）。
@@ -28,6 +29,71 @@ function readHasUI(ctx: { hasUI: boolean }): boolean {
 	}
 }
 
+/**
+ * 活动工具探测（Ruling 8 的前置）：`getActiveTools` 是 pi 较新的 API，老宿主上可能不存在；
+ * 取值器又可能因 ctx 失效 / reload 抛错。`typeof` 探测 + try/catch 把任何失败都归为
+ * “无法判断”（undefined）——本文件的约定是扩展 factory 永不 throw（I2），提示宁可不出。
+ */
+function readActiveTools(pi: ExtensionAPI): string[] | undefined {
+	try {
+		if (typeof pi.getActiveTools !== "function") return undefined;
+		const active = pi.getActiveTools();
+		return Array.isArray(active) ? active : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/** Ruling 8 的提示文案：必须点名修法与失败方向（未启用前 bash 命令被拒）。 */
+const POWERSHELL_HINT_MESSAGE = [
+	"pi-sandbox: on Windows the confined shell is PowerShell only. Enable it in ~/.pi/agent/settings.json:",
+	'  { "defaultTools": ["-bash", "+powershell"] }',
+	"Until then, bash commands are refused (fail-closed).",
+].join("\n");
+
+/**
+ * 每进程一次的提示标志：pi 对每个会话（含子会话）重调 factory，不加标志会每次 activate /
+ * session_start 重复刷屏。模块级变量在同一 pi 进程的所有会话间共享。
+ */
+let powershellHintShown = false;
+
+/**
+ * Ruling 8：win32 上 pwsh 未激活时提示一次（有 UI 走 `ctx.ui.notify`，无 UI 写 stderr）。
+ * 判决条件必须能明确判断：宿主有 `getActiveTools`，且 `bash` 在活动列表而 `powershell` 不在。
+ * 任何取值失败（陈旧 ctx / 老宿主 / 取值器抛错）都静默——提示是锦上添花，绝不能阻断激活。
+ */
+function maybeWarnMissingPowerShellTool(pi: ExtensionAPI, ctx: ExtensionContext): void {
+	if (process.platform !== "win32" || powershellHintShown) return;
+	const active = readActiveTools(pi);
+	if (active === undefined || active.includes("powershell") || !active.includes("bash")) return;
+	powershellHintShown = true;
+	let notified = false;
+	if (readHasUI(ctx)) {
+		try {
+			const notify = ctx.ui?.notify;
+			if (typeof notify === "function") {
+				notify(POWERSHELL_HINT_MESSAGE, "warning");
+				notified = true;
+			}
+		} catch {
+			notified = false; // ctx 已失效（reload / 会话替换）：继续走 stderr
+		}
+	}
+	if (!notified) console.warn(`sandbox: ${POWERSHELL_HINT_MESSAGE.replaceAll("\n", "\n  ")}`);
+}
+
+/**
+ * Ruling 8 的 `/permission` 状态行：win32 上受限 shell 只有 PowerShell。
+ * 能判断出 pwsh 不在活动工具里就注明尚未激活——`/permission` 是用户排查“bash 为何被拒”的第一站。
+ * 无法判断（老宿主 / 取值失败）时只说方言，不断言激活状态。
+ */
+function win32ShellStatusLine(pi: ExtensionAPI): string | null {
+	if (process.platform !== "win32") return null;
+	const active = readActiveTools(pi);
+	const notActivated = active !== undefined && !active.includes("powershell");
+	return notActivated ? "shell: powershell only (not activated)" : "shell: powershell only";
+}
+
 export default function (pi: ExtensionAPI) {
 	const cwd = process.cwd();
 	// I2 fail-safe：坏配置在此 warn 并回落 DEFAULT（仍是受约束的 workspace-write），
@@ -40,6 +106,12 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool(tools.bash as never);
 	pi.registerTool(tools.write as never);
 	pi.registerTool(tools.edit as never);
+	// Ruling 9：技能按平台**追加**贡献（pi 侧是 mergePaths 合并语义）。只返回本包的技能路径，
+	// 或空数组 = 什么也不加（非 win32 上零目录条目）；绝不返回“完整集合”而抹掉其他来源。
+	pi.on("resources_discover", () => ({ skillPaths: aclSkillPaths() }));
+	// 老宿主（含本仓 devDependency 0.80.2）没有 createPowerShellToolDefinition → tools.powershell
+	// 为 undefined：跳过注册即可，不报错（此时宿主本来也没有 powershell 工具可覆盖）。
+	if (tools.powershell !== undefined) pi.registerTool(tools.powershell as never);
 
 	pi.registerCommand("permission", createPermissionCommand({
 		state: processPermissionState,
@@ -62,11 +134,14 @@ export default function (pi: ExtensionAPI) {
 					? "unavailable (fail-closed: confined commands will be refused)"
 					: `${selected.runner} (${selected.enforcement} enforcement)`;
 			}
-			return [
+			const lines = [
 				`sandbox mode: ${effective} (${source})`,
 				`runner: ${runnerText}`,
 				`workspace: ${canonicalPath(effectiveCwd)}`,
-			].join("\n");
+			];
+			const shellLine = win32ShellStatusLine(pi);
+			if (shellLine !== null) lines.push(shellLine);
+			return lines.join("\n");
 		},
 	}));
 
@@ -90,6 +165,9 @@ export default function (pi: ExtensionAPI) {
 		getDenialLedger().forget(event.sessionId); // 子会话销毁：清掉未消费的拒绝记录（防 Map 泄漏）
 	});
 	pi.on("session_start", (_event, ctx) => {
+		// Ruling 8 的提示不依赖 UI 或会话身份（无 UI 时落 stderr），所以必须在下面的 hasUI
+		// 守卫**之前**——守卫之后的路径是审批通道注册，与提示无关。
+		maybeWarnMissingPowerShellTool(pi, ctx);
 		if (!readHasUI(ctx)) return; // headless / 子会话 / ctx 已失效：都不是审批终点
 		let sessionId: string;
 		try {
