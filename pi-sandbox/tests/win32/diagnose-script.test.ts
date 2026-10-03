@@ -10,7 +10,6 @@ const SCRIPT = fileURLToPath(
 	new URL("../../skills/diagnose-windows-sandbox-acl/scripts/diagnose-windows-sandbox-acl.ps1", import.meta.url),
 );
 const PACKAGE_SID = "S-1-15-2-1234567890-1234567890";
-const CAPABILITY_SID = "S-1-4-105015370-174601073";
 
 /** pwsh when installed, Windows PowerShell 5.1 otherwise（与 e2e 套件同策略：目标机器可能只有 5.1）。 */
 function resolvePowerShell(): string {
@@ -54,22 +53,6 @@ function mergeEnv(overrides: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 
 function runScript(args: readonly string[], env?: NodeJS.ProcessEnv) {
 	return shell(PS, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", SCRIPT, ...args], env);
-}
-
-/** 写一条 `S-1-4-*` 能力 ACE（pi-sandbox 自己的授权形态）。真机实证：`icacls /grant *S-1-4-…` 报
- * `ERROR_NONE_MAPPED(1332)`（S-1-4 是 Non-Unique 权威，icacls 走 LSA 名称映射）；.NET 直接写安全
- * 描述符不经过名称解析，脚本的 Get-Acl 能读到同一条 ACE。回读断言兼作夹具自检。 */
-function addCapabilityAce(path: string): void {
-	const literal = `'${path.replaceAll("'", "''")}'`;
-	const command = [
-		`$sid = [System.Security.Principal.SecurityIdentifier]::new('${CAPABILITY_SID}')`,
-		`$acl = Get-Acl -LiteralPath ${literal}`,
-		"$acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($sid, 'Modify', 'ContainerInherit, ObjectInherit', 'None', 'Allow'))",
-		`Set-Acl -LiteralPath ${literal} -AclObject $acl`,
-	].join("; ");
-	const result = shell(PS, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command]);
-	expect(result.status, result.output).toBe(0);
-	expect(sddl(path)).toContain(CAPABILITY_SID);
 }
 
 /** PowerShell 字面量（单引号内翻倍）——`-Command` 拼接用。 */
@@ -121,12 +104,25 @@ function needsGrant(path: string): void {
 	const icacls = shell("icacls", [path, "/inheritance:r", "/grant", `${currentUser()}:(OI)(CI)(RX)`]);
 	expect(icacls.status, icacls.output).toBe(0);
 	// 夹具真的生效：只剩 RX 且继承的 FullControl 已切断，否则用例会以错误的原因通过/失败。
-	expect(sddl(path)).toContain("(RX)");
-	expect(sddl(path)).not.toContain("(F)");
+	// 这两条自检读 icacls 文本而非 sddl()：`(RX)`/`(F)` 是 icacls 的符号形（不随语言环境变化），
+	// SDDL 里权限位是十六进制掩码（RX = 0x1200a9、F = 0x1f01ff），`(RX)` 永不出现——sddl() 改用
+	// Get-Acl 的 SDDL 后若沿用原断言，真机第二跑已绿的用例 2/7 会因夹具自检而回归。
+	const icaclsText = shell("icacls", [path]).output;
+	expect(icaclsText).toContain("(RX)");
+	expect(icaclsText).not.toContain("(F)");
 }
 
+/** 用 `Get-Acl` 的 SDDL（locale 无关、SID 形式，能直接断言 `(D;` 拒绝 ACE）而不是 icacls 的本地化输出。 */
 function sddl(path: string): string {
-	return shell("icacls", [path]).output;
+	const result = shell(PS, [
+		"-NoProfile",
+		"-ExecutionPolicy",
+		"Bypass",
+		"-Command",
+		`(Get-Acl -LiteralPath ${psLiteral(path)}).Sddl`,
+	]);
+	expect(result.status, result.output).toBe(0);
+	return result.output.trim();
 }
 
 let scratch: string;
@@ -134,7 +130,9 @@ beforeEach(() => {
 	scratch = mkdtempSync(join(tmpdir(), "pi-sbx-acl-"));
 });
 afterEach(() => {
-	// ACE 变更后的瞬态锁/继承传播会让删除短暂 EPERM；Node 仅在 recursive 下对 EPERM 重试。
+	// `/inheritance:r` 造出的受保护 DACL 会让删除直接 EPERM（不是瞬态锁）：先把整棵树的 ACE
+	// 复位为继承（用户是所有者，有隐式 WRITE_DAC），再删。
+	shell("icacls", [scratch, "/reset", "/T", "/C", "/Q"]);
 	rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -172,19 +170,20 @@ describe.skipIf(process.platform !== "win32")("diagnose-windows-sandbox-acl scri
 		expect(sddl(target)).not.toContain("S-1-15-2-1234567890");
 	});
 
-	it("removes package allow entries while preserving deny entries and pi-sandbox capability SIDs", () => {
+	it("removes package allow entries while preserving deny entries and other allow entries", () => {
 		const target = join(scratch, "denied");
 		shell("cmd", ["/c", "mkdir", target]);
 		const deny = shell("icacls", [target, "/deny", `${currentUser()}:(OI)(CI)(W)`]);
 		expect(deny.status, deny.output).toBe(0);
-		addCapabilityAce(target); // icacls 对 S-1-4-* 报 ERROR_NONE_MAPPED：必须用 .NET 写这条能力 ACE
+		const otherAllow = shell("icacls", [target, "/grant", "*S-1-5-32-545:(OI)(CI)(RX)"]);
+		expect(otherAllow.status, otherAllow.output).toBe(0);
 		addPackageAce(target); // 必须真的有包 ACE：否则移除路径不执行，本用例什么都不验证
 		const run = runScript(["-Path", target, "-AllowRoot", scratch, "-Out", join(scratch, "out")]);
-		expect(run.status).toBe(0);
+		expect(run.status, run.output).toBe(0);
 		const after = sddl(target);
 		expect(after).not.toContain("S-1-15-2-1234567890");
-		expect(after).toMatch(/\(DENY\)/i);
-		expect(after).toContain("S-1-4-105015370-174601073");
+		expect(after).toContain("(D;"); // 拒绝 ACE 原样保留（SDDL 里 deny 以 (D; 开头）
+		expect(after).toContain("S-1-5-32-545"); // 其它允许 ACE 原样保留
 	});
 
 	it("refuses a package source outside -AllowRoot before changing anything and exits 2", () => {
@@ -208,10 +207,13 @@ describe.skipIf(process.platform !== "win32")("diagnose-windows-sandbox-acl scri
 		shell("cmd", ["/c", "mkdir", managed]);
 		addPackageAce(managed);
 		const before = sddl(managed);
+		// 先证明覆写真的到达子进程：失败信息会直接给出子进程看到的 ProgramFiles。
+		const probe = shell(PS, ["-NoProfile", "-Command", "$env:ProgramFiles"], { ProgramFiles: scratch });
+		expect(probe.output.trim(), probe.output).toBe(scratch);
 		const run = runScript(["-Path", managed, "-AllowRoot", scratch, "-Out", join(scratch, "out")], {
 			ProgramFiles: scratch,
 		});
-		expect(run.status).toBe(2);
+		expect(run.status, run.output).toBe(2);
 		expect(run.output).toContain("REPAIR_REFUSED");
 		expect(nextAction(run.output), run.output).toBe("stop");
 		expect(sddl(managed)).toBe(before);

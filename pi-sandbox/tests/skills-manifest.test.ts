@@ -43,4 +43,15 @@ describe("diagnosis skill packaging", () => {
 	it("ships the repair script next to the skill", () => {
 		expect(existsSync(`${skillDir}/scripts/diagnose-windows-sandbox-acl.ps1`)).toBe(true);
 	});
+
+	it("keeps pi-sandbox capability SIDs out of the package-SID pattern", () => {
+		const script = readFileSync(`${skillDir}/scripts/diagnose-windows-sandbox-acl.ps1`, "utf8");
+		const pattern = /\$PACKAGE_SID\s*=\s*'([^']+)'/u.exec(script)?.[1];
+		expect(pattern).toBeDefined();
+		const matches = new RegExp(pattern as string, "u");
+		expect(matches.test("S-1-15-2-1234567890-1234567890")).toBe(true); // 第三方包 SID：命中（会被移除）
+		expect(matches.test("S-1-4-105015370-174601073")).toBe(false); // pi-sandbox 自己的能力 SID：不得命中
+		expect(matches.test("S-1-15-2-1")).toBe(false); // ALL APPLICATION PACKAGES：不得命中
+		expect(matches.test("S-1-15-2-2")).toBe(false); // ALL RESTRICTED APPLICATION PACKAGES：不得命中
+	});
 });
