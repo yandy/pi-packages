@@ -10,6 +10,7 @@ const SCRIPT = fileURLToPath(
 	new URL("../../skills/diagnose-windows-sandbox-acl/scripts/diagnose-windows-sandbox-acl.ps1", import.meta.url),
 );
 const PACKAGE_SID = "S-1-15-2-1234567890-1234567890";
+const CAPABILITY_SID = "S-1-4-105015370-174601073";
 
 /** pwsh when installed, Windows PowerShell 5.1 otherwise（与 e2e 套件同策略：目标机器可能只有 5.1）。 */
 function resolvePowerShell(): string {
@@ -33,15 +34,47 @@ function shell(program: string, args: readonly string[], env?: NodeJS.ProcessEnv
 	const result = spawnSync(program, args, {
 		encoding: "utf8",
 		timeout: 120_000,
-		env: env === undefined ? process.env : { ...process.env, ...env },
+		env: env === undefined ? process.env : mergeEnv(env),
 	});
 	// spawn 失败（如 PATH 上没有该 PowerShell）时 result.error 必须进入 output，否则断言只剩 “expected null to be 0”。
 	const spawnError = result.error === undefined ? "" : `[spawn error: ${result.error.message}]`;
 	return { status: result.status, output: `${result.stdout ?? ""}${result.stderr ?? ""}${spawnError}` };
 }
 
+/** Win32 环境块键不区分大小写：若只 spread 再覆写，`ProgramFiles` 会与原键形成两个大小写不同的键，
+ *  libuv 排序后旧值可能在前，Windows 取第一个匹配 → 覆写静默失效（真机实证：用例 6 得 exit 0）。 */
+function mergeEnv(overrides: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+	const lowered = new Set(Object.keys(overrides).map((key) => key.toLowerCase()));
+	const merged: NodeJS.ProcessEnv = {};
+	for (const [key, value] of Object.entries(process.env)) {
+		if (!lowered.has(key.toLowerCase())) merged[key] = value;
+	}
+	return { ...merged, ...overrides };
+}
+
 function runScript(args: readonly string[], env?: NodeJS.ProcessEnv) {
 	return shell(PS, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", SCRIPT, ...args], env);
+}
+
+/** 写一条 `S-1-4-*` 能力 ACE（pi-sandbox 自己的授权形态）。真机实证：`icacls /grant *S-1-4-…` 报
+ * `ERROR_NONE_MAPPED(1332)`（S-1-4 是 Non-Unique 权威，icacls 走 LSA 名称映射）；.NET 直接写安全
+ * 描述符不经过名称解析，脚本的 Get-Acl 能读到同一条 ACE。回读断言兼作夹具自检。 */
+function addCapabilityAce(path: string): void {
+	const literal = `'${path.replaceAll("'", "''")}'`;
+	const command = [
+		`$sid = [System.Security.Principal.SecurityIdentifier]::new('${CAPABILITY_SID}')`,
+		`$acl = Get-Acl -LiteralPath ${literal}`,
+		"$acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($sid, 'Modify', 'ContainerInherit, ObjectInherit', 'None', 'Allow'))",
+		`Set-Acl -LiteralPath ${literal} -AclObject $acl`,
+	].join("; ");
+	const result = shell(PS, ["-NoProfile", "-Command", command]);
+	expect(result.status, result.output).toBe(0);
+	expect(sddl(path)).toContain(CAPABILITY_SID);
+}
+
+/** PowerShell 字面量（单引号内翻倍）——`-Command` 拼接用。 */
+function psLiteral(value: string): string {
+	return `'${value.replaceAll("'", "''")}'`;
 }
 
 function reports(output: string) {
@@ -101,10 +134,11 @@ beforeEach(() => {
 	scratch = mkdtempSync(join(tmpdir(), "pi-sbx-acl-"));
 });
 afterEach(() => {
-	rmSync(scratch, { recursive: true, force: true });
+	// ACE 变更后的瞬态锁/继承传播会让删除短暂 EPERM；Node 仅在 recursive 下对 EPERM 重试。
+	rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 });
 
-describe.skipIf(process.platform !== "win32")("diagnose-windows-sandbox-acl script", () => {
+describe.skipIf(process.platform !== "win32")("diagnose-windows-sandbox-acl script", { timeout: 120_000 }, () => {
 	it("reports NOT_THIS_CLASS and changes nothing on a healthy directory", () => {
 		const target = join(scratch, "healthy");
 		shell("cmd", ["/c", "mkdir", target]);
@@ -143,8 +177,7 @@ describe.skipIf(process.platform !== "win32")("diagnose-windows-sandbox-acl scri
 		shell("cmd", ["/c", "mkdir", target]);
 		const deny = shell("icacls", [target, "/deny", `${currentUser()}:(OI)(CI)(W)`]);
 		expect(deny.status, deny.output).toBe(0);
-		const capability = shell("icacls", [target, "/grant", "*S-1-4-105015370-174601073:(OI)(CI)(M)"]);
-		expect(capability.status, capability.output).toBe(0);
+		addCapabilityAce(target); // icacls 对 S-1-4-* 报 ERROR_NONE_MAPPED：必须用 .NET 写这条能力 ACE
 		addPackageAce(target); // 必须真的有包 ACE：否则移除路径不执行，本用例什么都不验证
 		const run = runScript(["-Path", target, "-AllowRoot", scratch, "-Out", join(scratch, "out")]);
 		expect(run.status).toBe(0);
@@ -216,16 +249,14 @@ describe.skipIf(process.platform !== "win32")("diagnose-windows-sandbox-acl scri
 		const missingOut = runScript(["-Path", target, "-AllowRoot", scratch]);
 		expect(missingOut.status).toBe(2);
 		expect(missingOut.output).toContain("-Out");
-		const restoreTwoPaths = runScript([
-			"-Path",
-			target,
-			join(target, "x"),
-			"-AllowRoot",
-			scratch,
-			"-Restore",
-			"record.json",
+		// `-File` 下 `-Path a b` 不会绑成数组（`b` 会被当位置参数绑给 -AllowRoot，报“参数指定多次”
+		// 并由 PowerShell 退出 1，而非脚本的 ArgumentException）——用 `-Command` + `-Path 'a','b'` 显式数组。
+		const restoreTwoPaths = shell(PS, [
+			"-NoProfile",
+			"-Command",
+			`& ${psLiteral(SCRIPT)} -Path ${psLiteral(target)},${psLiteral(join(target, "x"))} -AllowRoot ${psLiteral(scratch)} -Restore 'record.json'`,
 		]);
-		expect(restoreTwoPaths.status).toBe(2);
+		expect(restoreTwoPaths.status, restoreTwoPaths.output).toBe(2);
 		expect(restoreTwoPaths.output).toContain("exactly one -Path");
 	});
 
