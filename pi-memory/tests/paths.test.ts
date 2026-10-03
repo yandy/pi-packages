@@ -386,6 +386,14 @@ describe("projectIdentity", () => {
 		expect(await projectIdentity(bare)).toEqual({ kind: "local", key: resolve(bare) });
 	});
 
+	it("falls back to local when the cwd is inside .git", async () => {
+		// `.git` 内部同样没有工作树：`--show-cdup` 是 exit 0 + 0 字节（与裸仓库同类），
+		// 但 `git config` 仍能读到仓库的 remote。必须保留既有的 local/<绝对路径> 身份，
+		// 而不是因 remote 变成 git/<remote 身份>（与裸仓库同类的身份回归）。
+		await initRepo(dir, "https://github.com/yandy/pi-packages.git");
+		expect(await projectIdentity(join(dir, ".git"))).toEqual({ kind: "local", key: resolve(join(dir, ".git")) });
+	});
+
 	it("resolves the same identity from a subdirectory", async () => {
 		await initRepo(dir, "https://github.com/yandy/pi-packages.git");
 		const sub = join(dir, "packages", "inner");

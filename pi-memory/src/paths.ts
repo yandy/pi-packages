@@ -21,15 +21,19 @@ async function gitToplevel(cwd: string): Promise<string | null> {
 		const { stdout } = await execFileP("git", ["rev-parse", "--show-cdup"], { cwd, timeout: GIT_TIMEOUT_MS });
 		const cdup = stdout.trim();
 		if (cdup !== "") return resolve(cwd, cdup);
-		// 输出为空有两种情况：位于工作树根，或者裸仓库。裸仓库里 `--show-cdup` 以 exit 0 + 0 字节
-		// 返回（实测 git 2.55，不是非零退出），无法与「工作树根」区分；裸仓库没有工作树，必须显式
-		// 用 `--is-bare-repository` 判定并返回 null，否则裸仓库 + remote 会从既有的
-		// `local/<绝对路径>` 变成 `git/<remote 身份>`（spec §4.2）。非仓库在第一步已被 catch 拦住。
-		const { stdout: bare } = await execFileP("git", ["rev-parse", "--is-bare-repository"], {
+		// 输出为空有两种情况：位于工作树根，或者根本没有工作树。裸仓库、cwd 在 `.git` 内部
+		// （含 `.git/objects`）、以及只设了 GIT_DIR 而 cwd 在工作树外时，`--show-cdup` 都以
+		// exit 0 + 0 字节返回（实测 git 2.55，不是非零退出），无法与「工作树根」区分。用
+		// `--is-inside-work-tree` 作独立判据（实测 git 2.55：工作树根与任意子目录 → `true`；
+		// 裸仓库、`.git` 内部、GIT_DIR 无工作树 → `false`，均 exit 0；非仓库 → 非零退出，被
+		// 外层 catch 拦住）：只有 `true` 才是工作树根 → resolve(cwd)，`false` 则无工作树 →
+		// null，由调用方落回 `local/<绝对路径>`。否则裸仓库或 `.git` 内部 + remote 会把既有的
+		// `local/<绝对路径>` 变成 `git/<remote 身份>`（spec §4.2）。
+		const { stdout: inside } = await execFileP("git", ["rev-parse", "--is-inside-work-tree"], {
 			cwd,
 			timeout: GIT_TIMEOUT_MS,
 		});
-		return bare.trim() === "true" ? null : resolve(cwd);
+		return inside.trim() === "true" ? resolve(cwd) : null;
 	} catch {
 		return null;
 	}
