@@ -18,6 +18,7 @@ pi --version                                 # 需 >= 1.0.0（powershell 工具�
 
 cd C:\pi-packages\pi-sandbox
 npx vitest run tests/win32/e2e.test.ts       # 期望：20 个 win32 用例真正执行（不是 skip）+ 2 个全平台用例，全绿
+npx vitest run tests/win32/diagnose-script.test.ts  # 诊断脚本套件（首次真机运行；10 例；需 pwsh 或 Windows PowerShell 5.1 + icacls）
 npx vitest run                               # 期望：全量绿（integration 的 4 个受限 bash 用例在 win32 上按 Ruling 2 跳过）
 ```
 
@@ -30,7 +31,7 @@ npx vitest run tests/win32/e2e.test.ts
 npx vitest run
 ```
 
-**预期**：e2e 文件在 Windows 上报 **20 个 win32 用例**执行通过，外加 **2 个各平台用例**（`bash` 拒绝、拒绝断言守卫），共 22 通过、0 跳过；全量套件全绿——`tests/integration.test.ts` 的 4 个受限 `bash` 用例在 win32 上按 **Ruling 2**（win32 受限模式只支持 pwsh，`createSandboxBashOps` 在任何 spawn 前拒绝 bash）**跳过**，不是失败；win32 专属用例此时真实执行。
+**预期**：e2e 文件在 Windows 上报 **20 个 win32 用例**执行通过，外加 **2 个各平台用例**（`bash` 拒绝、拒绝断言守卫），共 22 通过、0 跳过；诊断脚本套件 `tests/win32/diagnose-script.test.ts` 首次真机执行 **10 例**（它静态依赖脚本契约，首次失败按该计划 Step 2 的三类分流处理）；全量套件全绿——`tests/integration.test.ts` 的 4 个受限 `bash` 用例在 win32 上按 **Ruling 2**（win32 受限模式只支持 pwsh，`createSandboxBashOps` 在任何 spawn 前拒绝 bash）**跳过**，不是失败；win32 专属用例此时真实执行。
 
 **前置：机器状态、`%TEMP%` 授权与复跑**
 
@@ -432,7 +433,7 @@ pi -e C:\pi-packages\pi-sandbox
 
 ## 14. 诊断技能目录：Windows 出现 / 非 Windows 不出现
 
-**前置（重要）**：本行要求包内存在 `skills/diagnose-windows-sandbox-acl/SKILL.md`——该内容由第二部分计划 `docs/superpowers/plans/2026-10-03-windows-acl-diagnosis-skill.md` 交付（本清单写就时尚未落地）。若尚未执行第二部分，本行预期为 FAIL，记录为**已知缺口（交付顺序）**，不是 runner 缺陷；执行第二部分后复跑本行。
+**前置**：包内已存在 `skills/diagnose-windows-sandbox-acl/`（SKILL.md + `scripts/diagnose-windows-sandbox-acl.ps1`）——本行已由第二部分交付（S1–S3，含 Windows-only 套件 `tests/win32/diagnose-script.test.ts`）；技能的修复流程见第 17 条。
 
 **命令（Windows）**：在中立 cwd 启动，避免项目级配置干扰（PowerShell / git-bash 相同）：
 
@@ -496,3 +497,88 @@ icacls "$TEMP"
 - 清理验收产生的普通文件即可（`pi-sandbox-accept-*`、`session-*`、`hardlink-*`）。
 - **不要试图回滚常驻 ACL/标签**：清除可继承标签不会回退已传播到子对象的标签（spec §7）；如需人工处置，先在记录里说明命令与理由。
 - 把第 1–15 条的原始输出与结论回填 spec §13 的「编号 / 命令 / 预期 / 实测输出 / 结论」表格，偏差按「实现缺陷 / 环境差异 / 文档补充」逐条闭环。
+
+## 17. 诊断技能修复流程（真机，由第二部分交付）
+
+> 对应 spec §4.10 / §10.3 / Ruling 9；技能内容 = `skills/diagnose-windows-sandbox-acl/{SKILL.md, scripts/diagnose-windows-sandbox-acl.ps1}`（S1–S3），自动化面 = 第 0 条的 `tests/win32/diagnose-script.test.ts`。
+> 该流程按 SKILL.md 的契约**只批准一次**：技能请求 `danger-full-access`（denial-first 门禁此时应放行——本会话刚从 17.1 拿到真实拒绝），随后同一次调用完成诊断 + 修复。
+
+### 17.1 造一个"外来包 ACE 挡路"的目录
+
+不受限 PowerShell / git-bash 均可（`icacls` 的包 SID 是 `S-1-15-2-*` 形态）：
+
+```powershell
+mkdir C:\pi-sandbox-accept\skill-demo
+icacls C:\pi-sandbox-accept\skill-demo /grant "*S-1-15-2-1234567890-1234567890:(OI)(CI)(RX)"
+```
+
+在 `C:\pi-sandbox-accept` 的 pi 会话里让模型访问它（`$PSVersionTable` 之类无关命令不算）：
+
+```text
+用 powershell 工具执行：Get-ChildItem C:\pi-sandbox-accept\skill-demo
+```
+
+**预期**：受限子进程访问该目录失败（`Access is denied` 或 permission 类错误）——这正是技能要修的场景（spec §7：被其他 AppContainer 工具以包 SID 打标的对象对 Low 完整性子进程不可读）。
+
+**实测**：
+
+```text
+
+```
+
+### 17.2 调用技能（一次批准）
+
+```text
+/skill:diagnose-windows-sandbox-acl
+```
+
+（或直接说：这个目录的 Windows 文件权限挡住了 pi-sandbox，请用随包技能诊断并修复。）
+
+**预期**：
+- 技能先请求一次 `danger-full-access`（提示用**用户语言**，不含 `ACL`/`ACE`/`WRITE_DAC` 等术语）；
+- 批准后执行 `diagnose-windows-sandbox-acl.ps1`，stdout 尾部有 `RECAP {...}`；其 `verdicts` 为 `[{"path":"…","verdict":"CULPRIT"|"BOTH",…}]` 形态（对象数组），并打印 `BACKUP …` / `FIXED …` / `ROLLBACK …`；
+- `summary` 报告记录的 `details.nextAction` 为 `verify_original_confined_operation`（**不在 `RECAP` 里**）；
+- `-Out` 目录（若模型自选，记下路径）下出现 `acl-report-*.jsonl`、`acl-backup-*.json` 与其同名 `.ps1`。
+
+**手工对照（可选，直接跑同一件事）**：
+
+```powershell
+& 'C:\pi-packages\pi-sandbox\skills\diagnose-windows-sandbox-acl\scripts\diagnose-windows-sandbox-acl.ps1' `
+  -Path 'C:\pi-sandbox-accept\skill-demo' -AllowRoot 'C:\pi-sandbox-accept\skill-demo' -Out 'C:\pi-sandbox-accept\acl-out'
+exit $LASTEXITCODE     # 期望 0；stdout 末段有 RECAP / REPORT_FILE / SUMMARY FIXED=… GRANTED=… REFUSED=… RESTORED=…
+```
+
+**实测（技能原始输出：批准提示、`RECAP`、`SUMMARY`、产物清单）**：
+
+```text
+
+```
+
+### 17.3 复跑原操作（确认修复生效）
+
+切回 `workspace-write`（`/permission workspace-write` 或重启会话），重跑 17.1 的命令。
+
+**预期**：可读/可写成功；`icacls C:\pi-sandbox-accept\skill-demo` 不再含 `S-1-15-2-1234567890`。
+
+**实测**：
+
+```text
+
+```
+
+### 17.4 用打印出的 `ROLLBACK` 命令还原
+
+把 17.2 打印的 `ROLLBACK …` 整行粘进 PowerShell 执行（它调用的就是 `-Out` 下被拷出的同脚本，带 `-Restore`）。
+
+**预期**：退出码 0；`icacls C:\pi-sandbox-accept\skill-demo` 回到 17.1 之后、17.2 之前的状态（外来包 ACE 恢复）。
+
+**实测**：
+
+```text
+
+```
+
+### 17.5 已知覆盖边界（记录，不作为失败）
+
+- 自动回滚**失败**路径（`nextAction=restore_pending_then_stop`）无法在单进程测试内构造，真机流程也不刻意制造；若真遇到（例如 ACL 在备份后被外部改动），按 `RECAP`/`ROLLBACK` 与 `RESTORE_PENDING` 记录证据并归档到 spec §13。
+- 技能的两个替代修复分支（缺 `WRITE_OWNER` 的 grant、`-AllowRoot` 内的子树扫描）由 `tests/win32/diagnose-script.test.ts` 的用例 2/5/6 覆盖，不另做手工步骤。
