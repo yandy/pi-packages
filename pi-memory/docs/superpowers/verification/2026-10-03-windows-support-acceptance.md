@@ -69,7 +69,7 @@ cd /c/pi-packages/pi-memory
 npx vitest run
 ```
 
-**再看跳过的是哪几条（在 `pi-memory` 目录里跑，哪个 shell 都行）**
+**再看跳过的是哪几条（在 `pi-memory` 目录里跑，PowerShell）**
 
 ```powershell
 npx vitest run --reporter=json --outputFile=vitest-win32.json
@@ -77,10 +77,20 @@ node -e "const r=require('./vitest-win32.json');for(const f of r.testResults)for
 Remove-Item vitest-win32.json
 ```
 
+**再看跳过的是哪几条（git-bash）**
+
+```bash
+cd /c/pi-packages/pi-memory
+npx vitest run --reporter=json --outputFile=vitest-win32.json
+node -e "const r=require('./vitest-win32.json');for(const f of r.testResults)for(const a of f.assertionResults)if(a.status==='skipped')console.log(a.fullName)"
+rm vitest-win32.json
+```
+
 **预期**
 
-- 尾部摘要：`Test Files  29 passed (29)`、`Tests  618 passed | 4 skipped (622)`。
-  （Linux 基线是 `28 passed | 1 skipped (29)` / `620 passed | 2 skipped (622)`；Windows 上 `tests/fs-retry.win32.test.ts` 从「整体跳过」变为**真实执行**，所以是 29 个文件全跑、618 通过。`618 + 4 = 622` 与 Linux 总数一致。）
+- 尾部摘要：`Test Files  30 passed (30)`、`Tests  626 passed | 4 skipped (630)`。
+  （Linux 基线是 `29 passed | 1 skipped (30)` / `628 passed | 2 skipped (630)`；Windows 上 `tests/fs-retry.win32.test.ts` 从「整体跳过」变为**真实执行**（+2 例），而 4 条平台门用例转为跳过（−4 例），所以 `626 + 4 = 630`，与 Linux 总数一致。
+  ℹ️ 这两个数字是 2026-10-04 首次真机运行后校正的：初次预期写成了 `618/4/622`（当时按未含最终修复轮新增 8 例的旧基数算），实际总数一直是 **630**。）
 - 跳过用例**恰好**是下面 4 条（`describe` 与 `it` 名逐字一致；JSON 的 `fullName` 用空格连接两段）：
 
   1. `tests/paths.test.ts`
@@ -93,7 +103,8 @@ Remove-Item vitest-win32.json
      `unlinkStrict / sameFile` > `detects two names that point at the same inode`
 
 - 前三条是 POSIX 权限/同 inode 语义（Windows 的 `chmod`/硬链接语义不同），第 1 条是 Git Bash 的 MSYS 仿真回归（只在非 Windows 上有意义）。
-- 若总数不是 622、或跳过清单多/少了条目：原样粘贴并归类（多半是本机工作树还有别的改动，或依赖安装不完整）。
+- 若总数不是 630、或跳过清单多/少了条目：原样粘贴并归类（多半是本机工作树还有别的改动，或依赖安装不完整）。
+- 首次真机运行（2026-10-04）在**本条目**发现 3 条测试自带的平台假设（`readdir` 顺序 / 内部 `join` 出的默认 sessions 目录 / 大小写不敏感 FS 下的同名派生），已在分支上修好——它们都是**测试缺陷**，产品行为正确；修完本条目应当全绿。
 
 **实测（默认 reporter 的尾部摘要 + 跳过清单原文）**：
 

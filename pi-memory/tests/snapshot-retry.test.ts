@@ -61,7 +61,8 @@ describe("createSnapshot 的瞬时错误重试", () => {
 		const dir = await createSnapshot(backupRoot, "write", ["MEMORY.md", "a.md"], memoryDir, { keep: 5, now: NOW });
 
 		expect(dir).toBe(join(backupRoot, "2026-10-01T00-00-01-000Z-write"));
-		expect(await readdir(dir)).toEqual(["MEMORY.md", "a.md"]);
+		// readdir 的顺序由文件系统决定（NTFS 与 ext4 的顺序不同），断言集合而不是顺序
+		expect((await readdir(dir)).sort()).toEqual(["MEMORY.md", "a.md"].sort());
 		expect(await readFile(join(dir, "a.md"), "utf8")).toBe("A\n");
 		expect(hoisted.cp.mock.calls.length).toBeGreaterThanOrEqual(3); // 两个文件 + 至少一次重试
 	});
@@ -134,8 +135,13 @@ describe("快照重试的平台由调用方传入", () => {
 			platform: "win32",
 		});
 
-		await expect(store.addEntry({ name: "A", body: "正文" })).resolves.toMatchObject({ file: "A.md" });
-		expect(await store.readEntry("A")).toMatchObject({ name: "A", body: "正文" });
+		// 名字刻意避开夹具里的 `a.md`：在大小写不敏感的文件系统上，派生名 `A.md` 会撞上已存在的
+		// `a.md` → `#resolveTargetFile` 的磁盘探测（这是**产品正确行为**）会挑 `A-2.md`。
+		// 本用例钉的是「cfg.platform 传到快照重试」，不该依赖宿主文件系统的大小写语义。
+		await expect(store.addEntry({ name: "Alpha entry", body: "正文" })).resolves.toMatchObject({
+			file: "Alpha-entry.md",
+		});
+		expect(await store.readEntry("Alpha entry")).toMatchObject({ name: "Alpha entry", body: "正文" });
 		expect(hoisted.cp.mock.calls.length).toBeGreaterThanOrEqual(2); // 至少一次重试
 	});
 });

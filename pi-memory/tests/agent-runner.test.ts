@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Hoisted mocks — plain vi.fn() so vi.mock factory can reference them.
@@ -336,7 +337,12 @@ describe("runHeadlessAgent", () => {
 			sessionPersistence: { enabled: true },
 		});
 
-		expect(createSessionMock).toHaveBeenCalledWith("/mem", "/mem/sessions");
+		expect(createSessionMock).toHaveBeenCalledWith(
+			"/mem",
+			// 默认的 sessions 目录由实现内部 `join(cwd, "sessions")` 算出（src/agent-runner.ts:83），
+			// 所以期望值必须用 join 构造：Windows 上它是 `\mem\sessions`，写死 `/mem/sessions` 会红。
+			join("/mem", "sessions"),
+		);
 		expect(inMemoryMock).not.toHaveBeenCalled();
 	});
 
