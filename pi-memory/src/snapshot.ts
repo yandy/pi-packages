@@ -63,6 +63,8 @@ export async function pruneSnapshots(backupRoot: string, keep: number): Promise<
 
 	dirs.sort();
 	for (const name of dirs.slice(0, Math.max(0, dirs.length - Math.max(0, keep)))) {
-		await rm(join(backupRoot, name), { recursive: true, force: true });
+		// Windows 上删目录会被杀软/索引器打成瞬时 EPERM/EBUSY：用 Node 自带的退避重试
+		// （非 Windows 平台会忽略这两个参数）。
+		await rm(join(backupRoot, name), { recursive: true, force: true, maxRetries: 6, retryDelay: 50 });
 	}
 }
