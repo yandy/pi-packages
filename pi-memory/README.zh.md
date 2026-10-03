@@ -17,7 +17,7 @@ pi coding agent 的文件系统持久记忆层。把项目知识（事实、偏�
 > **2.1.0：**
 >
 > - **模型必须显式配置。** 没有内置默认值，也没有父会话模型回退：`defaults.model`（或 per-task `model`）必须存在且可解析，否则 `session_start` 会报配置错误并且**什么都不初始化**。详见[模型配置](#模型配置)。
-> - **`/memory on` / `/memory off` 已删除。** `enabled` 只是 `memory.json` 里的开关，启动时读一次，改动需要重启会话。
+> - **`/memory on` / `/memory off` 已删除。** `enabled` 只是 `memory.json` 里的开关，启动时读一次，改动需要重启会话。**该键现已移除** —— 写了也会被忽略，见[禁用本扩展](#禁用本扩展)。
 > - **1.x → 2.0 的自动迁移已删除。** legacy topic 文件原样留在磁盘上，但对记忆系统**不可见**（过不了 `parseEntryFile` 的 v2 五字段校验）。详见 [1.x 数据](#1x-数据)。
 >
 > **2.0.0 已包含：**
@@ -37,7 +37,7 @@ pi coding agent 的文件系统持久记忆层。把项目知识（事实、偏�
 - **自动提取（extract memories）** ⭐ —— 每轮结束后一个异步 headless agent 拿到的是**整轮对话的结构化渲染**（user 消息全文、assistant 文本与 tool_call、tool_result 及其错误标记），而不是两条消息。它经同一套 `memory` 原语写入，并且**从不排队等锁**：dream 正在整轮持锁时，本回合直接跳过。该功能**默认关闭**，需要显式设 `extractMemories.enabled: true`。
 - **`/dream`** —— headless 整理 agent（Orient → Gather Signal → Consolidate → Prune & Index），合并重复、消解矛盾、改名、重建索引。它**没有裸文件权限**：只有七个 `memory` action，整轮持有逻辑锁，进入时先对整个目录拍一次快照。
 - **Dream 提醒** —— 距上次 dream 超过 N 个会话或 N 小时后提示 `/dream`。
-- **`/memory`** —— 完整状态（开关、目录、索引容量、entry 数、上次 dream、锁状态含持有者），以及 `unlock`。
+- **`/memory`** —— 完整状态（目录、索引容量、entry 数、上次 dream、锁状态含持有者），以及 `unlock`。
 - **两级锁** —— 进程内逻辑锁承担**逻辑作用域**（单次原语，或 dream 的整轮）；跨进程 `.lock` **只持毫秒**且**永不自动回收**。没有 TTL、没有心跳、没有接管，所以互斥是硬保证；代价是崩溃遗留的锁必须**人工**清除（`/memory unlock`）。
 - **快照** —— 每次写入都在 `.backups/<ts>-<label>/` 留下回滚点，保留最近 `lock.snapshotKeep` 份（`migrate-` 开头的目录是旧版迁移留下的整目录快照，其 `originals/` 子目录里才是 2.0 之前的 topic 原文，永不裁剪）。`/dream` 是例外：它**进入时只对整个目录拍一次**快照，该轮内部的原语会跳过逐文件快照（一轮只留一个回滚点）。
 - **会话检索** —— `memory search scope=sessions` 查历史会话。
@@ -126,7 +126,6 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
 
 ```json
 {
-  "enabled": true,
   "memoryDir": "~/.pi/memory",
   "memIndexMaxLines": 200,
   "memIndexMaxBytes": 25600,
@@ -157,7 +156,6 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
 
 | 键 | 默认值 | 说明 |
 |-----|---------|------|
-| `enabled` | `true` | 整个记忆系统的开关。**启动时读一次**，改动需重启会话 |
 | `memoryDir` | `~/.pi/memory` | 所有记忆数据的根目录 |
 | `memIndexMaxLines` | `200` | 写入口径：`MEMORY.md` 的最大非空行数（`# Memory Index` 头行与手写标题同样占额度，所以并不等于记忆条数） |
 | `memIndexMaxBytes` | `25600` | 写入口径：`MEMORY.md` 的最大字节数 |
@@ -192,17 +190,29 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
 
 headless 会话默认落在 `<项目记忆目录>/sessions/` —— 在项目记忆目录里，不在你的工作副本里。
 
+### 禁用本扩展
+
+pi-memory 没有自己的包级开关 —— `memory.json` 里原来的顶层 `enabled` 键**已移除**，写了也会被忽略。禁用它与其他 pi package 一样，靠「不加载这个扩展」：
+
+只在本项目禁用（项目根目录的 `.pi/settings.json`，仅在项目被信任后读取）：
+
+```json
+{ "packages": [{ "source": "npm:@yandy0725/pi-memory", "extensions": [] }] }
+```
+
+项目条目会替换个人条目，因此该项目不会加载本扩展。全局禁用：`pi remove npm:@yandy0725/pi-memory`，或用 `pi config` 关闭该包的资源（项目 scope 会写成 `autoload: false` + `extensions: ["-index.ts"]`）。扩展保持加载时，仍可用模块级开关（`autoSurfacing.enabled` / `extractMemories.enabled`）单独关掉某个行为。
+
 ## 模型配置
 
 会执行的任务必须能解析出模型 —— **既没有随包默认值，也没有父会话模型回退**。`defaults.model` 可以满足全部任务；各任务自己的 `model`（`dream.model` / `extractMemories.model` / `autoSurfacing.model`）优先于它。
 
 | 任务 | 何时必需 |
 |------|---------|
-| `dream` | 记忆系统开启（`enabled: true`）时**恒**需要 |
+| `dream` | **恒**需要 —— 每个会话启动时都校验 |
 | `extractMemories` | `extractMemories.enabled` 为真时 |
 | `autoSurfacing` | `autoSurfacing.enabled` 为真时 |
 
-`enabled: false` 时什么都不跑（`/dream` 与提醒也被挡住），因此不需要任何模型。`session_start` 会把每个必需模型拿到注册表里解析；只要有缺失或解析不出的，就**不初始化任何东西**：弹一条 error 通知 `pi-memory config error:` + 每个问题一行 `- <error>`，`/memory` 则报 `Memory: misconfigured` + `Dir: not initialized` + 同样的行。两条错误文案：
+`session_start` 会把每个必需模型拿到注册表里解析；只要有缺失或解析不出的，就**不初始化任何东西**：弹一条 error 通知 `pi-memory config error:` + 每个问题一行 `- <error>`，`/memory` 则报 `Memory: misconfigured` + `Dir: not initialized` + 同样的行。两条错误文案：
 
 - `no model for <task> — set "<task>.model" or "defaults.model" in memory.json`
 - `model "<value>" for <task> is not resolvable (unknown id or missing credentials)`
@@ -312,7 +322,6 @@ memory(action: "add" | "replace" | "remove" | "list" | "search",
 状态输出：
 
 ```
-Memory: enabled
 Dir: /home/you/.pi/memory/git/github.com__owner__repo
 Index: 38/200 lines, 2841/25600 bytes, 1 unrecognized lines
 Inject: 39/50 lines, 2841/16384 bytes
@@ -324,9 +333,8 @@ Lock: free
 
 - `Index` 用**写入**口径（`memIndexMax*`），并报告索引里有多少非空行解析不出（`# Memory Index` 头行与手写标题会计入）。CRLF（以及单独的 CR）行尾在解析前就被归一为 LF，下一次写入也一律输出 LF，因此被 Windows 编辑器改过行尾的 `MEMORY.md` **不会**推高这个计数。注入侧同样做归一：CRLF 文件不会把 `\r` 送进 system prompt。
 - `Inject` 用**注入**口径（`memIndexInjectMax*`），统计窗口内的行数与字节数 —— 即真正会进 `memory_index` section 的索引文本（截断标记本身不计入）。它与真正注入的值由同一份窗口代码算出来，不可能漂移。注意两行的口径不同：`Index` 数的是**非空**行，`Inject` 数的是窗口内的**全部**行，所以规范索引（LF 行尾、以换行结尾、头部后有且仅有一个空行）下 `Inject` 会比 `Index` 多一行而字节数相同。system prompt 里的值是**会话内冻结**的（见[为什么索引是冻结的](#为什么索引是冻结的)）：`session_start` 之后写入的记忆会立刻出现在 `Index`，但要等 compaction 或下一个会话才出现在 `Inject`。
-- `Modules` 报三个模型驱动功能的激活状态：`on(<生效模型>)` / `off`。生效模型 = 该任务自己的 `model`，没有则用 `defaults.model`。`dream` 没有独立开关 —— memory 系统启用它就可用。
+- `Modules` 报三个模型驱动功能的激活状态：`on(<生效模型>)` / `off`。生效模型 = 该任务自己的 `model`，没有则用 `defaults.model`。`dream` 没有独立开关 —— 健康会话里它始终可用。
 - `Lock` 有三种：`free`、`held by <op> (pid N on <hostname>, started <ISO>)`、`unreadable — run /memory unlock`。`/memory unlock` 的确认框会显示同一行持有者信息。
-- 以 `enabled: false` 启动的会话在启动时不初始化任何东西：`/memory` 报两行（`Memory: disabled` + `Dir: not initialized — set "enabled": true in memory.json and restart`）；会话中途无法开启；`/memory unlock` 不需要 store 也能用。
 - 必需模型缺失或解析不出时不初始化任何东西，`/memory` 报 `Memory: misconfigured` + `Dir: not initialized` + 每行一条 `- <error>`；同样的错误在 session_start 时以 error 通知出现。
 
 ### `/dream`
