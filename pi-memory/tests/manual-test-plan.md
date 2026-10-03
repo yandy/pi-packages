@@ -25,10 +25,9 @@ MEM=<上面 /memory 打印的目录>
 /memory
 ```
 
-**预期**（8 行，值随你的目录变化）：
+**预期**（7 行，值随你的目录变化）：
 
 ```
-Memory: enabled
 Dir: /home/you/.pi/memory/local/tmp__mem-v2-test
 Index: 0/200 lines, 0/25600 bytes, 0 unrecognized lines
 Inject: 0/50 lines, 0/16384 bytes
@@ -59,10 +58,10 @@ Lock: free
    **预期**：正常初始化、无错误通知，`memory` 工具可用。
 3. **配一个不存在的 id**：把 `defaults.model` 改成例如 `"nope/nope"` → 重启会话。
    **预期**：error 通知里是 `model "nope/nope" for dream is not resolvable (unknown id or missing credentials)`（extract / 侧查询同一条文案，task 名不同）。
-4. **disabled 时不校验**：设 `enabled: false` 且不配任何模型 → 重启会话。
-   **预期**：无任何错误通知；`/memory` 两行 —— `Memory: disabled` + `Dir: not initialized — set "enabled": true in memory.json and restart`。
+4. **残留键被忽略**：在 `memory.json` 里加 `"enabled": false`（一个已移除的键）→ 重启会话。
+   **预期**：无任何通知，会话照常初始化（`memory` 工具可用），`/memory` 正常输出 7 行健康态；要禁用整个扩展请走 pi 层（见 README「禁用本扩展」）。
 
-测完把 `memory.json` 恢复成测试 1 用的那份（`enabled: true` + 可解析的 `defaults.model`）。
+测完把 `memory.json` 恢复成测试 1 用的那份（可解析的 `defaults.model`，不含 `enabled`）。
 
 ---
 

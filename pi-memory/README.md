@@ -126,7 +126,6 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
 
 ```json
 {
-  "enabled": true,
   "memoryDir": "~/.pi/memory",
   "memIndexMaxLines": 200,
   "memIndexMaxBytes": 25600,
@@ -157,7 +156,6 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `enabled` | `true` | Toggle the entire memory system on/off. Read once at session start — changing it requires restarting the session |
 | `memoryDir` | `~/.pi/memory` | Root directory for all memory data |
 | `memIndexMaxLines` | `200` | Write capacity: max non-empty lines in `MEMORY.md` (the `# Memory Index` header and hand-written headings count too, so this is not exactly the memory count) |
 | `memIndexMaxBytes` | `25600` | Write capacity: max bytes of `MEMORY.md` |
@@ -192,17 +190,29 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
 
 Persisted headless sessions default to `<project memory dir>/sessions/` — inside the project's memory directory, not inside your working copy.
 
+### Disabling the extension
+
+pi-memory has no package-level switch of its own — the former top-level `enabled` key in `memory.json` is **gone** and is now ignored if present. Disable the extension the way you disable any pi package, by not loading it:
+
+Project-only (`.pi/settings.json` in the project root — read only after project trust is granted):
+
+```json
+{ "packages": [{ "source": "npm:@yandy0725/pi-memory", "extensions": [] }] }
+```
+
+A project entry replaces the personal entry, so the extension is not loaded in that project. Globally: `pi remove npm:@yandy0725/pi-memory`, or toggle the package's resources with `pi config` (project scope writes `autoload: false` plus `extensions: ["-index.ts"]`). Module switches (`autoSurfacing.enabled`, `extractMemories.enabled`) still turn off individual behaviors while the extension stays loaded.
+
 ## Model configuration
 
 Every task that will run must resolve a model — **there is no shipped default and no parent-model fallback**. `defaults.model` satisfies all of them; a per-task `model` (`dream.model`, `extractMemories.model`, `autoSurfacing.model`) overrides it.
 
 | Task | Required when |
 |------|---------------|
-| `dream` | the memory system is enabled (`enabled: true`) — always required |
+| `dream` | always required — every session validates it at startup |
 | `extractMemories` | `extractMemories.enabled` is true |
 | `autoSurfacing` | `autoSurfacing.enabled` is true |
 
-With `enabled: false` nothing runs — not even `/dream` or the nudge — so no model is required. At `session_start` pi-memory resolves every required model against the model registry. If one is missing or cannot be resolved, it initialises **nothing**: it shows an error notification `pi-memory config error:` followed by one `- <error>` line per problem, and `/memory` reports `Memory: misconfigured` and `Dir: not initialized`, followed by the same lines. The two possible messages are:
+At `session_start` pi-memory resolves every required model against the model registry. If one is missing or cannot be resolved, it initialises **nothing**: it shows an error notification `pi-memory config error:` followed by one `- <error>` line per problem, and `/memory` reports `Memory: misconfigured` and `Dir: not initialized`, followed by the same lines. The two possible messages are:
 
 - `no model for <task> — set "<task>.model" or "defaults.model" in memory.json`
 - `model "<value>" for <task> is not resolvable (unknown id or missing credentials)`
@@ -312,7 +322,6 @@ One line per memory: `- name (type, modified …) — description [file]`.
 Status output:
 
 ```
-Memory: enabled
 Dir: /home/you/.pi/memory/git/github.com__owner__repo
 Index: 38/200 lines, 2841/25600 bytes, 1 unrecognized lines
 Inject: 39/50 lines, 2841/16384 bytes
@@ -324,9 +333,8 @@ Lock: free
 
 - `Index` uses the **write** capacity (`memIndexMax*`) and reports how many non-empty lines could not be parsed as index lines (the `# Memory Index` header and hand-written headings count). CRLF (or lone CR) line endings are normalised to LF before parsing, and the next write emits LF too, so a `MEMORY.md` re-saved by a Windows editor does **not** raise this count.
 - `Inject` uses the **injection** window (`memIndexInjectMax*`) and counts the window's lines and bytes — the index text that goes into the `memory_index` section, taken from the **newest** end (the truncation marker itself is not counted). It is computed by the same window code that produces the injected value, so the two cannot drift. Note the two lines count different things: `Index` counts **non-empty** lines, `Inject` counts **every** line of the window, so on a canonical index (LF endings, trailing newline, one blank line after the header) `Inject` reports one more line than `Index` and the same byte count. The value in the system prompt is **frozen for the session** (see [Why the index is frozen](#why-the-index-is-frozen)): a memory written after `session_start` appears in `Index` immediately but in `Inject` only after compaction or in the next session.
-- `Modules` reports the activation state of the three model-driven features as `on(<effective model>)` / `off`. The effective model is the task's own `model`, otherwise `defaults.model`. `dream` has no switch of its own — it is on whenever the memory system is enabled.
+- `Modules` reports the activation state of the three model-driven features as `on(<effective model>)` / `off`. The effective model is the task's own `model`, otherwise `defaults.model`. `dream` has no switch of its own — it is always available in a healthy session.
 - `Lock` is `free`, `held by <op> (pid N on <hostname>, started <ISO>)`, or `unreadable — run /memory unlock`. `/memory unlock` shows the same holder line in its confirmation prompt.
-- In a session started with `enabled: false`, nothing is initialized at boot: `/memory` reports `Memory: disabled` plus `Dir: not initialized — set "enabled": true in memory.json and restart`, there is no way to enable it mid-session, and `/memory unlock` still works without a store.
 - If a required model is missing or cannot be resolved, nothing is initialized and `/memory` reports `Memory: misconfigured` and `Dir: not initialized`, followed by one `- <error>` line per problem. The same errors are shown as an error notification at session start.
 
 ### `/dream`
