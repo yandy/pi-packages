@@ -172,7 +172,7 @@ export async function withFsRetry<T>(fn: () => Promise<T>, options?: { retries?:
 ```
 
 - errno 集合取自 Node `fs.rm` 自带重试的集合（`EBUSY`/`EMFILE`/`ENFILE`/`ENOTEMPTY`/`EPERM`），在此基础上按平台收敛：全平台 `EBUSY`/`EMFILE`/`ENFILE`/`ENOTEMPTY`；**仅 win32** 追加 `EPERM`/`EACCES`（POSIX 上 `EACCES`/`EPERM` 是永久性权限错误，重试只会平白拖慢 fail-closed）。
-- 参数：`retries: 6`、`baseDelayMs: 20`、指数退避、单次上限 300ms → 最坏新增等待 ≈ 900ms（远小于 `lock.timeoutMs` 默认 5000）。
+- 参数：`retries: 6`、`baseDelayMs: 20`、指数退避、单次上限 300ms → **每次调用**最坏新增等待 ≈ 900ms。注意这是**逐调用**预算：一次 `replaceEntry` 在 win32 上最坏可有 5 次被重试的调用（获取锁 `open` → entry `writeFile` → `unlinkStrict` → 索引 `writeFile` → 释放 `rm`），合计 ≈ 4.5s，已接近 `lock.timeoutMs` 默认 5000ms —— 因此「`.lock` 只被持有一瞬间」这条说法在**病态重试风暴**下不成立（等待者仍会以可操作的错误 fail-closed，互斥不被破坏）。不引入「一次原语共享 deadline」的总量上限：收益是让超时更有意义，代价是把逐调用的重试语义变成跨调用的状态（YAGNI；真机若观察到接近超时的实际案例再考虑）。
 - 非瞬时错误、重试耗尽后的错误都**原样上抛**（Ruling 8）。
 - 应用点（Ruling 7，只包物理调用）：
   | 位置 | 调用 |
@@ -180,9 +180,10 @@ export async function withFsRetry<T>(fn: () => Promise<T>, options?: { retries?:
   | `memory-store.ts` | 四个写原语的 `writeFile`（entry 与索引）+ `unlinkStrict` 的 `unlink` |
   | `fs-lock.ts` | `open(lockPath,"wx")`、记录写入、`releaseLock` 的 `rm` |
   | `snapshot.ts` | `pruneSnapshots` 的 `rm` 用 `{ recursive: true, force: true, maxRetries: 6, retryDelay: 50 }` |
-  | `snapshot.ts` | `createSnapshot` 的 `cp`/`mkdir` 保持原样（失败即抛，已有语义） |
+  | `snapshot.ts` | `createSnapshot` 的 `mkdir`/`cp` 也套重试（两者元余等：`mkdir` 是 `recursive`、`cp` 覆盖写）。它们在**每次写原语**里运行（`#maybeSnapshot`），正是杀软/同步客户端打断的对象；不重试就会让一次瞬时错误把 `memory add` 整条弄失败 |
+  | `index.ts` | `/memory unlock` 的 `unlink`（用户此时正被一个可能就是瞬时错误造成的锁堵住，这里是恢复路径） |
 - `nudge.ts` 的 `.dream-meta.json` 写入不在范围内（best-effort，失败已有兜底），避免把重试铺进副作用最小的路径。
-- **刻意排除**：读取路径（`readFile`/`stat`/`readdir`）不套重试 —— 它们的失败已在各处降级为「空 / 跳过」，既不留需要人工处置的状态，也不改变语义；`mkdir`（`#savingQueue` 与 `snapshot.createSnapshot`）不套重试 —— 建目录失败是干净失败，没有任何残留，重试只会延长 fail-closed 的报错时间。
+- **刻意排除**：读取路径（`readFile`/`stat`/`readdir`）不套重试 —— 它们的失败已在各处降级为「空 / 跳过」，既不留需要人工处置的状态，也不改变语义；`#savingQueue` 的 `mkdir`（建记忆目录本身，在取锁**之前**）不套重试 —— 失败是干净失败，没有任何残留，重试只会延长 fail-closed 的报错时间。`createSnapshot` 的 `mkdir`/`cp` 不在此列（见上表）。
 
 ### 4.6 换行符（不新增归一逻辑）
 
@@ -202,7 +203,7 @@ export async function withFsRetry<T>(fn: () => Promise<T>, options?: { retries?:
 1. win32 上任意 key 派生出的名字：不含 `/` 或 `\`、不以 `.`/空格结尾、非保留设备名。
 2. `resolveMemoryDir` 的结果恒在 `memoryDir` 之下（穿越兜底）。
 3. POSIX 上 `projectDirName` 的输出与改动前逐字节一致（除 entry 文件名设备名变换）。
-4. 锁路径要么不存在、要么完整 JSON、要么极短暂的 0 字节；不存在第四种状态。
+4. 锁路径要么不存在、要么完整 JSON、要么**尚未写完的记录**（0 字节，或并发读者恰好看到已写入的字节前缀）。第三种是**瞬态**：持有者随后写入完整记录，或在自己的清理路径上删掉它；并发读者在这段窗口里会把它读成 `unreadable` 并立即报「遗弃」（fail-closed：不接管、不删除）。这是 `open(wx)` + 分离写入所固有的代价（另见 §7）。0 字节态由 `tests/fs-lock.test.ts` 钉住；半写前缀态无法稳定构造，不单独设用例。
 5. `open(wx)` 驱动的互斥：并发 `withLock` 的最大同时持有数为 1。
 6. 重试只吞瞬时 errno；`ENOENT`、`EISDIR` 等立即上抛。
 
@@ -271,7 +272,10 @@ export async function withFsRetry<T>(fn: () => Promise<T>, options?: { retries?:
 | 0 字节 `.lock` 窗口（新引入） | 持有者崩溃 → 等待者耗满 5s 才报错 | 错误文案给清除指引；`/memory unlock` 可清；验收清单第 5 条覆盖 |
 | win32 上瞬时的 `EPERM` 真为永久权限错误 | 重试 6 次后才报错（~900ms 延迟） | 只影响失败路径的延迟，不影响正确性；fail-closed 保持 |
 | POSIX 侧创建的保留设备名文件（历史版本或手工） | Windows 上不可见（已 skip）；不会被读取阻塞 | Ruling 5 的跳过是护栏；写进 README 已知限制 |
-| `local/` 命名形态变化 | Windows 用户旧嵌套目录变孤儿 | README 给 `mv` 迁移命令；`git/` 目录完全不受影响 |
+| `local/` 命名形态变化 | Windows 用户旧嵌套目录变孤儿 | README 给 PowerShell 迁移步骤（`/memory` 读新 `Dir:` + `New-Item` + `Move-Item`）；`git/` 目录完全不受影响 |
+| 半写记录被并发读者看到（`open(wx)` 固有） | 该读者立刻报「被遗弃」（fail-closed，不接管不删除）；持有者随后正常写入或释放 | 记录在此；`createExclusive` 的记录写入改为**定长位置写 + 完整性校验**，消除「重试续写导致两个 JSON 拼接」的持久化变体（后者会让持有者自己也认不出锁、从此无法释放） |
+| 同步客户端目录（OneDrive/Dropbox）当作共享 `memoryDir` | 每台机器各有一份本地副本 → 锁只能排除同机进程；跨机并发写会由同步客户端产生冲突副本（静默丢记忆） | README 明确区分：网络共享（服务端单一命名空间，跨机互斥成立）vs 同步目录（仅同机） |
+| 一次写原语内多次重试的累计预算 ≈4.5s | 病态重试风暴下 `.lock` 持有时间接近 `lock.timeoutMs`（5s） | 等待者仍 fail-closed 且报可操作错误；不引入跨调用总量上限（§4.5 已记录理由） |
 | `--show-cdup` 在极老 git（<1.5.4）上不可用 | toplevel 解析失败 → 退回 `local/<cwd>` 身份 | 15 年前的功能，接受；验收清单第 3 条在真机确认输出形态 |
 | 真机验收依赖用户机器 | 无法自动回归 | D1 的既定取舍；验收记录留档 |
 
