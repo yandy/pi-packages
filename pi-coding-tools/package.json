@@ -4,7 +4,7 @@
 		"access": "public"
 	},
 	"version": "0.5.4",
-	"description": "pi package enabling ls/find/grep built-in tools",
+	"description": "pi package providing AST/LSP code-intelligence tools",
 	"license": "MIT",
 	"repository": {
 		"type": "git",

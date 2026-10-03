@@ -1,10 +1,6 @@
 # pi-coding-tools
 
-启用 `ls`/`find`/`grep` 内置工具的 Pi 扩展包。
-
-## 功能
-
-- **ls/find/grep**：启用这些默认关闭的内置工具。
+提供 AST/LSP 代码智能工具的 Pi 扩展包。
 
 ## AST/LSP 代码理解工具
 
@@ -34,21 +30,6 @@
 
 `ast_grep_search` 需要 `ast-grep`（或 `sg`）二进制。安装：`npm i -g @ast-grep/cli` / `cargo install ast-grep` / `brew install ast-grep`。
 
-### 配置
-
-在 `coding-tools.json` 中可开关每个工具（默认全 true），并可整体关 LSP 或覆盖服务器：
-
-```jsonc
-{
-  "ast_grep_search": true,
-  "ast_grep_replace": true,
-  "lsp_symbols": true,
-  "lsp_hover": true,
-  "lsp_navigate": true,
-  "lsp": { "disabled": false, "servers": { "clangd": { "disabled": true } } }
-}
-```
-
 ## 安装
 
 ```bash
@@ -57,7 +38,7 @@ pi install npm:@yandy0725/pi-coding-tools
 
 ## 配置
 
-配置文件控制哪些工具处于启用状态。所有工具默认启用。
+配置文件控制这 5 个自定义工具的启用状态。所有工具默认启用。
 
 ### 全局配置
 
@@ -65,9 +46,8 @@ pi install npm:@yandy0725/pi-coding-tools
 
 ```json
 {
-  "ls": true,
-  "find": true,
-  "grep": true
+  "ast_grep_search": true,
+  "lsp_hover": true
 }
 ```
 
@@ -77,7 +57,7 @@ pi install npm:@yandy0725/pi-coding-tools
 
 ```json
 {
-  "grep": false
+  "lsp_hover": false
 }
 ```
 
@@ -85,12 +65,13 @@ pi install npm:@yandy0725/pi-coding-tools
 
 | 字段 | 默认值 | 说明 |
 |-------|---------|------|
-| `ls` | `true` | 启用 `ls` 内置工具 |
-| `find` | `true` | 启用 `find` 内置工具 |
-| `grep` | `true` | 启用 `grep` 内置工具 |
 | `ast_grep_search` | `true` | 启用基于 AST 的代码搜索工具 |
 | `ast_grep_replace` | `true` | 启用基于 AST 的代码重写工具（默认 dry-run） |
 | `lsp_symbols` | `true` | 启用 LSP 文档符号工具 |
 | `lsp_hover` | `true` | 启用 LSP 悬停（类型/文档）工具 |
 | `lsp_navigate` | `true` | 启用 LSP 定义/引用工具 |
 | `lsp` | — | LSP 配置块（`disabled`、`servers` 覆盖） |
+
+## License
+
+MIT

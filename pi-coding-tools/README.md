@@ -1,10 +1,6 @@
 # pi-coding-tools
 
-Pi package enabling `ls`/`find`/`grep` built-in tools.
-
-## Features
-
-- **ls/find/grep**: Enables these built-in tools that are off by default.
+Pi package providing AST/LSP code-intelligence tools for pi.
 
 ## AST/LSP 代码理解工具
 
@@ -34,21 +30,6 @@ Pi package enabling `ls`/`find`/`grep` built-in tools.
 
 `ast_grep_search` 需要 `ast-grep`（或 `sg`）二进制。安装：`npm i -g @ast-grep/cli` / `cargo install ast-grep` / `brew install ast-grep`。
 
-### 配置
-
-在 `coding-tools.json` 中可开关每个工具（默认全 true），并可整体关 LSP 或覆盖服务器：
-
-```jsonc
-{
-  "ast_grep_search": true,
-  "ast_grep_replace": true,
-  "lsp_symbols": true,
-  "lsp_hover": true,
-  "lsp_navigate": true,
-  "lsp": { "disabled": false, "servers": { "clangd": { "disabled": true } } }
-}
-```
-
 ## Installation
 
 ```bash
@@ -57,7 +38,7 @@ pi install npm:@yandy0725/pi-coding-tools
 
 ## Configuration
 
-Configuration files control which tools are enabled. All default to `true`.
+Configuration files control which of the five tools are enabled. All default to `true`.
 
 ### Global config
 
@@ -65,9 +46,8 @@ Configuration files control which tools are enabled. All default to `true`.
 
 ```json
 {
-  "ls": true,
-  "find": true,
-  "grep": true
+  "ast_grep_search": true,
+  "lsp_hover": true
 }
 ```
 
@@ -77,7 +57,7 @@ Configuration files control which tools are enabled. All default to `true`.
 
 ```json
 {
-  "grep": false
+  "lsp_hover": false
 }
 ```
 
@@ -85,12 +65,13 @@ Configuration files control which tools are enabled. All default to `true`.
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `ls` | `true` | Enable the `ls` built-in tool |
-| `find` | `true` | Enable the `find` built-in tool |
-| `grep` | `true` | Enable the `grep` built-in tool |
 | `ast_grep_search` | `true` | Enable the AST-based code search tool |
 | `ast_grep_replace` | `true` | Enable the AST-based code rewrite tool (dry-run by default) |
 | `lsp_symbols` | `true` | Enable the LSP document symbols tool |
 | `lsp_hover` | `true` | Enable the LSP hover (type/docs) tool |
 | `lsp_navigate` | `true` | Enable the LSP definition/references tool |
 | `lsp` | — | LSP configuration block (`disabled`, `servers` overrides) |
+
+## License
+
+MIT

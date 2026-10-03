@@ -47,20 +47,23 @@ describe("extension factory", () => {
 		const factory = mod.default;
 		factory(pi as never);
 
-		// 模拟 runtime 初始化完成：action methods 不再抛错
-		pi.getActiveTools.mockReturnValue(["read", "bash", "edit", "write"]);
+		// 模拟 runtime 初始化完成：action methods 不再抛错；grep 由 pi 自身/其他扩展激活
+		pi.getActiveTools.mockReturnValue(["read", "bash", "edit", "write", "grep"]);
 		pi.setActiveTools.mockImplementation(() => {});
 
 		const sessionStartHandler = pi.handlers.get("session_start")?.[0];
 		if (!sessionStartHandler) throw new Error("expected session_start handler");
 		await sessionStartHandler({} as never, { cwd: "/proj" } as never);
 
-		// refreshTools 应该已经启用了配置中的工具
+		// refreshTools 只应管理自定义工具，且不得关闭别人激活的 grep
 		expect(pi.setActiveTools).toHaveBeenCalled();
 		const activeTools: string[] = pi.setActiveTools.mock.calls[0][0];
-		for (const name of ["ls", "find", "grep", "ast_grep_search", "lsp_symbols", "lsp_hover", "lsp_navigate"]) {
+		for (const name of ["ast_grep_search", "ast_grep_replace", "lsp_symbols", "lsp_hover", "lsp_navigate"]) {
 			expect(activeTools).toContain(name);
 		}
+		expect(activeTools).toContain("grep");
+		expect(activeTools).not.toContain("ls");
+		expect(activeTools).not.toContain("find");
 	});
 
 	it("registers all four tools", async () => {
