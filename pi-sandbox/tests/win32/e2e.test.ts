@@ -76,6 +76,16 @@ interface RunOverrides {
 	workspace?: string;
 	/** Defaults to `canonicalPath(fixture granted temp)`; the `%TEMP%` case passes the real tmpdir. */
 	temp?: string;
+	/**
+	 * Defaults to the test process's cwd. The runner inherits its own cwd into
+	 * the child (`runner.js` never chdirs: the workspace is an authorization
+	 * root, not a chdir target), so moving the child's cwd means moving the
+	 * runner's — this option does that. Only the bare-relative-`NUL` case needs
+	 * it: a relative path resolves against the child's cwd, so that case must
+	 * move the cwd (not the name) to place the file inside/outside the granted
+	 * workspace.
+	 */
+	cwd?: string;
 }
 
 /** One `node -e <source> [args...]` child argv. */
@@ -104,6 +114,7 @@ function runConfined(mode: "read-only" | "workspace-write", args: readonly strin
 		encoding: "utf8",
 		timeout: SPAWN_TIMEOUT,
 		windowsHide: true,
+		cwd: overrides.cwd ?? process.cwd(),
 	});
 	if (result.error !== undefined) {
 		throw new Error(`failed to spawn the runner: ${result.error.message}\nstderr:\n${result.stderr ?? ""}`);
@@ -255,6 +266,16 @@ process.stdout.write(JSON.stringify({
 }) + "\\n");
 `;
 
+/**
+ * Child source writing to the NUL DEVICE object, not to a file in the cwd.
+ * The child-source literal `'\\\\.\\NUL'` (four backslashes, the dot, two
+ * backslashes) parses to the runtime device path `\\.\NUL`; only that device
+ * spelling reaches the device object whose DACL grants Everyone
+ * read/write/execute. The bare relative name `'NUL'` is an ordinary file —
+ * see the relative-name case in the Windows-only describe.
+ */
+const NUL_DEVICE_WRITE_SOURCE = "require('node:fs').writeFileSync('\\\\.\\NUL', 'x'); console.log('nul-ok');";
+
 // Fixtures are inside the Windows-only describe: the non-Windows bash-refusal
 // case below must not touch the filesystem.
 let root = "";
@@ -398,17 +419,57 @@ describe.skipIf(process.platform !== "win32")("windows-acl end-to-end (real runn
 	});
 
 	for (const mode of ["read-only", "workspace-write"] as const) {
-		it(`allows writing the NUL device in ${mode} mode`, { timeout: E2E_TIMEOUT }, () => {
-			// Environment property (device DACL grants Everyone), not a sandbox grant:
-			// it holds in both modes (design §7).
-			const result = runConfined(
-				mode,
-				nodeScript("require('node:fs').writeFileSync('NUL', 'x'); console.log('nul-ok');"),
-			);
+		it(`allows writing the NUL device via \\\\.\\NUL in ${mode} mode`, { timeout: E2E_TIMEOUT }, () => {
+			// NUL writability is an ENVIRONMENT PROPERTY of the device's DACL
+			// (Everyone read/write/execute), not a capability grant: it holds in both
+			// modes (design §7), regardless of which roots the token was granted. It
+			// is reachable only through the device spellings — `\\.\NUL` here, `> NUL`
+			// in the `cmd` case below. A bare relative `'NUL'` does NOT exercise it;
+			// see the ordinary-file-name case further down.
+			const result = runConfined(mode, nodeScript(NUL_DEVICE_WRITE_SOURCE));
 			expect(result.status, result.stderr).toBe(0);
 			expect(result.stdout).toContain("nul-ok");
 		});
 	}
+
+	it("allows writing the NUL device via cmd's `> NUL` under workspace-write", { timeout: E2E_TIMEOUT }, () => {
+		// The other documented spelling of the same device: cmd's builtin
+		// redirection resolves NUL through the Win32 device-name mapping, so the
+		// write lands on the device object (as in the two cases above), not on a
+		// file in the child's cwd. Empty stdout proves the text went to the device.
+		const result = runConfined("workspace-write", [process.env.ComSpec ?? "cmd.exe", "/c", "echo x > NUL"]);
+		expect(result.status, result.stderr).toBe(0);
+		expect(result.stdout).toBe("");
+	});
+
+	it("treats a bare relative `NUL` as an ordinary file name governed by the workspace boundary", { timeout: E2E_TIMEOUT }, () => {
+		// Pins the distinction the device cases above depend on: a bare relative
+		// `'NUL'` is NOT the device. libuv builds NT paths and does not apply the
+		// Win32 device-name mapping, so `writeFileSync('NUL', …)` resolves to a
+		// real file named `NUL` in the CHILD'S CWD — and the sandbox then governs
+		// it by the workspace boundary, exactly like any other file name. (This is
+		// why a relative `'NUL'` failed on the real machine with EPERM in BOTH
+		// modes: the cwd sat outside the granted roots — a directory-boundary
+		// denial, not a device or mode denial.)
+		const source = "require('node:fs').writeFileSync('NUL', 'x'); console.log('nul-ok');";
+		// Inside the granted workspace: allowed, and the result is a real file.
+		// The workspace ROOT is used directly (the same surface as the
+		// workspace-write case above), so the write does not depend on the grant's
+		// propagation to a pre-existing subdirectory.
+		const allowed = runConfined("workspace-write", nodeScript(source), { cwd: workspace });
+		expect(allowed.status, allowed.stderr).toBe(0);
+		expect(allowed.stdout).toContain("nul-ok");
+		const created = join(workspace, "NUL");
+		expect(existsSync(created), `${created} must be a real file: a bare 'NUL' is not the device`).toBe(true);
+		expect(readFileSync(created, "utf8")).toBe("x");
+		// Outside the granted roots: denied — again the workspace boundary, not the
+		// device's DACL (the device spelling succeeds under this very mode above).
+		const outsideCwd = mkdtempSync(join(root, "relative-nul-outside-"));
+		const denied = runConfined("workspace-write", nodeScript(source), { cwd: outsideCwd });
+		expectDenied(denied);
+		expectDenialDialect(denied);
+		expectHostFileNotCreated(join(outsideCwd, "NUL"));
+	});
 
 	it("denies a workspace write under read-only", { timeout: E2E_TIMEOUT }, () => {
 		const target = join(workspace, "read-only-denied.txt");

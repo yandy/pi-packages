@@ -17,7 +17,7 @@ npm install                                  # 必须装上 koffi（windows-acl 
 pi --version                                 # 需 >= 1.0.0（powershell 工具自该版本提供）
 
 cd C:\pi-packages\pi-sandbox
-npx vitest run tests/win32/e2e.test.ts       # 期望：18 个 win32 用例真正执行（不是 skip）+ 2 个全平台用例，全绿
+npx vitest run tests/win32/e2e.test.ts       # 期望：20 个 win32 用例真正执行（不是 skip）+ 2 个全平台用例，全绿
 npx vitest run                               # 期望：全量绿（integration 的 4 个受限 bash 用例在 win32 上按 Ruling 2 跳过）
 ```
 
@@ -30,7 +30,7 @@ npx vitest run tests/win32/e2e.test.ts
 npx vitest run
 ```
 
-**预期**：e2e 文件在 Windows 上报 **18 个 win32 用例**执行通过，外加 **2 个各平台用例**（`bash` 拒绝、拒绝断言守卫），共 20 通过、0 跳过；全量套件全绿——`tests/integration.test.ts` 的 4 个受限 `bash` 用例在 win32 上按 **Ruling 2**（win32 受限模式只支持 pwsh，`createSandboxBashOps` 在任何 spawn 前拒绝 bash）**跳过**，不是失败；win32 专属用例此时真实执行。
+**预期**：e2e 文件在 Windows 上报 **20 个 win32 用例**执行通过，外加 **2 个各平台用例**（`bash` 拒绝、拒绝断言守卫），共 22 通过、0 跳过；全量套件全绿——`tests/integration.test.ts` 的 4 个受限 `bash` 用例在 win32 上按 **Ruling 2**（win32 受限模式只支持 pwsh，`createSandboxBashOps` 在任何 spawn 前拒绝 bash）**跳过**，不是失败；win32 专属用例此时真实执行。
 
 **前置：机器状态、`%TEMP%` 授权与复跑**
 

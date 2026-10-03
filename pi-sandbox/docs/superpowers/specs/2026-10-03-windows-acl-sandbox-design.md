@@ -266,7 +266,7 @@ pi-sandbox/skills/diagnose-windows-sandbox-acl/
 - `%TEMP%` 是用户共享树：其子目录会继承 `FILE_DELETE_CHILD` 拒绝项，因此第三方程序用 `GENERIC_ALL`/`FullControl` 打开自己 temp 子目录会被拒（基于 DELETE 的删除、`MAXIMUM_ALLOWED`、常规读写打开不受影响）；首次授权会在整棵 `%TEMP%` 树上做急切传播（可能数秒），之后每次命中精确跳过。
 - 授权根内**目录**的 FullControl 打开被拒绝（拒绝项属于完全访问掩码，无法避免的代价）。
 
-**其他继承边界**：控制台隔离不可用（子进程共享宿主控制台，`CREATE_NO_WINDOW`/`CREATE_NEW_CONSOLE` 会以 `STATUS_DLL_INIT_FAILED` 死亡）；`NUL` 在两种模式下可写（设备 DACL 授予 Everyone 读写，属环境性而非授权）；受限令牌下 `whoami` 与令牌检查 cmdlet 可能失败（诊断噪音）。
+**其他继承边界**：控制台隔离不可用（子进程共享宿主控制台，`CREATE_NO_WINDOW`/`CREATE_NEW_CONSOLE` 会以 `STATUS_DLL_INIT_FAILED` 死亡）；`NUL` 在两种模式下可通过**设备拼法**写（`cmd` 的 `> NUL`、Node 的 `\\.\NUL`；设备 DACL 授予 Everyone 读写，属环境性而非授权；**相对 `NUL`** 是 cwd 下的普通文件名，按工作区边界判权）；受限令牌下 `whoami` 与令牌检查 cmdlet 可能失败（诊断噪音）。
 
 ## 8. 与参考实现（dsh）的差异清单
 
@@ -317,7 +317,7 @@ pi-sandbox/skills/diagnose-windows-sandbox-acl/
 
 ### 10.2 Windows 真机套件（`describe.skipIf(process.platform !== "win32")`）
 
-真令牌 + 真 spawn：workspace 内写成功；外部写被拒；外部删除被拒（`cmd del`、`Remove-Item`、.NET `File::Delete`、Node `unlink` 四条路径且**宿主文件仍在**）；外部读成功；`NUL` 两模式可写；`read-only` 拒 workspace 写；`%TEMP%` 可写；同一 workspace 的两个进程互不越界；硬链接已知边界；pwsh 语言模式（workspace-write FullLanguage / read-only ConstrainedLanguage）；退出码镜像（含 `0xC0000005`）；超时与中止连孙进程一起死；runner 失败签名分类；围栏与 runner 语义一致；`bash` 拒绝文案含指定 JSON 片段；覆盖注册一个未激活的 `powershell` 工具被 pi 接受（不报错）。
+真令牌 + 真 spawn：workspace 内写成功；外部写被拒；外部删除被拒（`cmd del`、`Remove-Item`、.NET `File::Delete`、Node `unlink` 四条路径且**宿主文件仍在**）；外部读成功；`NUL` 两模式可写（设备拼法 `\\.\NUL` / `> NUL`；相对 `NUL` 是普通文件名）；`read-only` 拒 workspace 写；`%TEMP%` 可写；同一 workspace 的两个进程互不越界；硬链接已知边界；pwsh 语言模式（workspace-write FullLanguage / read-only ConstrainedLanguage）；退出码镜像（含 `0xC0000005`）；超时与中止连孙进程一起死；runner 失败签名分类；围栏与 runner 语义一致；`bash` 拒绝文案含指定 JSON 片段；覆盖注册一个未激活的 `powershell` 工具被 pi 接受（不报错）。
 
 诊断技能的**平台门控**（真机侧）：启动一次会话，确认 `diagnose-windows-sandbox-acl` **出现在**可用技能目录中（若相对路径未生效则改用 `import.meta.url` 绝对路径，见 §4.10）；同一份构建在 Linux/macOS 上启动时不出现该技能。
 

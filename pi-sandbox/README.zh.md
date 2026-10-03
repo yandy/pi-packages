@@ -42,6 +42,8 @@ bash 命令被包装进平台沙箱 runner 后在本地 spawn（**路径透明**
 
 PowerShell 语言模式取决于启动约束，不是 ACL 边界的一部分：`read-only` 下 `%TEMP%` 不可写，pwsh 可能退化为 ConstrainedLanguage（`Add-Type`/COM/反射失败）；`workspace-write` 保持 FullLanguage。
 
+**`NUL` 在两种模式下都可写**——这是**设备自身的环境属性**（设备 DACL 授予 Everyone 读/写/执行），不是沙箱的能力授予，因此与令牌拿到哪些授权根无关。它只能通过设备拼法到达：`cmd` 的 `> NUL`，以及 Node 的 `\\.\NUL`。**相对路径** `NUL` 不是设备：libuv 构造 NT 路径时不做 Win32 设备名映射，因此 `writeFileSync('NUL', …)` 是子进程 cwd 下一个名为 `NUL` 的**普通文件**——在工作区内允许、在工作区外被拒，与其他文件名完全同等。
+
 **常驻的安全描述符改动。** 授权幂等但**不回收**：pi 退出后，工作区与 `%TEMP%` 上的 ACE、world `FILE_DELETE_CHILD` 拒绝项与 Low 强制标签仍然保留。这会向**任何**以同一用户身份运行在 Low 完整性的进程放宽该目录树；事后再清除可继承标签也不会回退已传播到子对象的标签。切回 `read-only` 会让能力 ACE 失效（该令牌不携带能力 SID），但不会移除它们。首次授权会在整棵 `%TEMP%` 树上做急切传播（大树可能耗时数秒），之后每次调用命中精确匹配的快路径。`%TEMP%` 与 `TMP` 本身**不**被重写——沙箱的可写临时根就是宿主 `%TEMP%`。
 
 **`%TEMP%` 的代价。** `%TEMP%` 是用户共享树：其子目录会继承拒绝项，因此第三方程序用 `GENERIC_ALL`/`FullControl` 打开自己的 temp 子目录会被拒。基于 DELETE 的删除、`MAXIMUM_ALLOWED` 与常规读写打开不受影响。
