@@ -172,7 +172,7 @@ export async function withFsRetry<T>(fn: () => Promise<T>, options?: { retries?:
 ```
 
 - errno 集合取自 Node `fs.rm` 自带重试的集合（`EBUSY`/`EMFILE`/`ENFILE`/`ENOTEMPTY`/`EPERM`），在此基础上按平台收敛：全平台 `EBUSY`/`EMFILE`/`ENFILE`/`ENOTEMPTY`；**仅 win32** 追加 `EPERM`/`EACCES`（POSIX 上 `EACCES`/`EPERM` 是永久性权限错误，重试只会平白拖慢 fail-closed）。
-- 参数：`retries: 6`、`baseDelayMs: 20`、指数退避、单次上限 300ms → **每次调用**最坏新增等待 ≈ 900ms。注意这是**逐调用**预算：一次 `replaceEntry` 在 win32 上最坏可有 5 次被重试的调用（获取锁 `open` → entry `writeFile` → `unlinkStrict` → 索引 `writeFile` → 释放 `rm`），合计 ≈ 4.5s，已接近 `lock.timeoutMs` 默认 5000ms —— 因此「`.lock` 只被持有一瞬间」这条说法在**病态重试风暴**下不成立（等待者仍会以可操作的错误 fail-closed，互斥不被破坏）。不引入「一次原语共享 deadline」的总量上限：收益是让超时更有意义，代价是把逐调用的重试语义变成跨调用的状态（YAGNI；真机若观察到接近超时的实际案例再考虑）。
+- 参数：`retries: 6`、`baseDelayMs: 20`、指数退避、单次上限 300ms → **每次调用**最坏新增等待 ≈ 900ms。注意这是**逐调用**预算：一次 `replaceEntry` 在 win32 上最坏可有约 10 次被重试的调用（获取锁 `open` → 快照 `mkdir`×2 + `cp`×3 → entry `writeFile` → `unlinkStrict` → 索引 `writeFile` → 释放 `rm`），合计 ≈ 9s，**可能超过** `lock.timeoutMs` 默认 5000ms —— 因此「`.lock` 只被持有一瞬间」在**病态重试风暴**下不成立；等待者仍会以可操作的错误 fail-closed，互斥不被破坏（README 的 Locking 表已按「每次重试调用毫秒级」口径表述）。不引入「一次原语共享 deadline」的总量上限：收益是让超时更有意义，代价是把逐调用的重试语义变成跨调用的状态（YAGNI；真机若观察到接近超时的实际案例再考虑）。
 - 非瞬时错误、重试耗尽后的错误都**原样上抛**（Ruling 8）。
 - 应用点（Ruling 7，只包物理调用）：
   | 位置 | 调用 |
@@ -275,7 +275,7 @@ export async function withFsRetry<T>(fn: () => Promise<T>, options?: { retries?:
 | `local/` 命名形态变化 | Windows 用户旧嵌套目录变孤儿 | README 给 PowerShell 迁移步骤（`/memory` 读新 `Dir:` + `New-Item` + `Move-Item`）；`git/` 目录完全不受影响 |
 | 半写记录被并发读者看到（`open(wx)` 固有） | 该读者立刻报「被遗弃」（fail-closed，不接管不删除）；持有者随后正常写入或释放 | 记录在此；`createExclusive` 的记录写入改为**定长位置写 + 完整性校验**，消除「重试续写导致两个 JSON 拼接」的持久化变体（后者会让持有者自己也认不出锁、从此无法释放） |
 | 同步客户端目录（OneDrive/Dropbox）当作共享 `memoryDir` | 每台机器各有一份本地副本 → 锁只能排除同机进程；跨机并发写会由同步客户端产生冲突副本（静默丢记忆） | README 明确区分：网络共享（服务端单一命名空间，跨机互斥成立）vs 同步目录（仅同机） |
-| 一次写原语内多次重试的累计预算 ≈4.5s | 病态重试风暴下 `.lock` 持有时间接近 `lock.timeoutMs`（5s） | 等待者仍 fail-closed 且报可操作错误；不引入跨调用总量上限（§4.5 已记录理由） |
+| 一次写原语内多次重试的累计预算 ≈9s（快照的 `mkdir`/`cp` 纳入重试后） | 病态重试风暴下 `.lock` 持有时间可超过 `lock.timeoutMs`（5s） | 等待者仍 fail-closed 且报可操作错误，互斥不被破坏；不引入跨调用总量上限（§4.5 已记录理由） |
 | `--show-cdup` 在极老 git（<1.5.4）上不可用 | toplevel 解析失败 → 退回 `local/<cwd>` 身份 | 15 年前的功能，接受；验收清单第 3 条在真机确认输出形态 |
 | 真机验收依赖用户机器 | 无法自动回归 | D1 的既定取舍；验收记录留档 |
 
