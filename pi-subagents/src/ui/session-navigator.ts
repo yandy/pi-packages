@@ -230,14 +230,18 @@ export class TranscriptOverlay implements Component {
 
 		if (matchesKey(data, "up") || matchesKey(data, "k")) {
 			this.scrollOffset = Math.max(0, this.scrollOffset - 1);
-			// Streaming may add lines between handleInput and render,
-			// making maxScroll larger; unconditionally disable autoScroll
-			// so render() does not reset scrollOffset back to the bottom.
+			// Upward keys pause following unconditionally: streaming may add lines
+			// between handleInput and render, making maxScroll larger, and a "was I
+			// at the bottom?" test against the stale value would let render() reset
+			// a viewport the operator just left.
 			this.autoScroll = false;
 			scrolled = true;
 		} else if (matchesKey(data, "down") || matchesKey(data, "j")) {
 			this.scrollOffset = Math.min(maxScroll, this.scrollOffset + 1);
-			this.autoScroll = false;
+			// Downward keys re-arm following when they land on the bottom, so the
+			// live tail resumes as soon as the operator scrolls back down (or was
+			// already there).
+			this.autoScroll = this.scrollOffset >= maxScroll;
 			scrolled = true;
 		} else if (matchesKey(data, "pageUp") || matchesKey(data, "shift+up")) {
 			this.scrollOffset = Math.max(0, this.scrollOffset - viewportHeight);
@@ -245,7 +249,7 @@ export class TranscriptOverlay implements Component {
 			scrolled = true;
 		} else if (matchesKey(data, "pageDown") || matchesKey(data, "shift+down")) {
 			this.scrollOffset = Math.min(maxScroll, this.scrollOffset + viewportHeight);
-			this.autoScroll = false;
+			this.autoScroll = this.scrollOffset >= maxScroll;
 			scrolled = true;
 		} else if (matchesKey(data, "home")) {
 			this.scrollOffset = 0;
