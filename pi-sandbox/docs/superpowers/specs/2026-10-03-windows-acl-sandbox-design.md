@@ -350,7 +350,7 @@ Windows：合成 ACL 场景（缺 `WRITE_DAC` 的目录、显式包允许 ACE �
 | 产物 | 改动 |
 |---|---|
 | `README.md` / `README.zh.md` | 平台表新增 Windows 行（runner `windows-acl`、机制、`partial`）；新增 Windows 小节：机制、standalone/boundary 清单、`%TEMP%` 常驻改动与外部性、pwsh 语言模式差异、bash 拒绝与 `defaultTools` 配置、koffi 依赖、诊断技能用法 |
-| `package.json` | `dependencies` += `koffi`；`files` += `skills/`；**不改** `pi` manifest（技能走 `resources_discover` 动态注册）；版本 **1.3.2 → 1.4.0** |
+| `package.json` | `dependencies` += `koffi`；`files` += `resources/`（技能在非约定目录 `resources/skills/`，见 §4.10）；**不改** `pi` manifest（技能走 `resources_discover` 动态注册）；版本 **1.3.2 → 1.4.0** |
 | 发布 | 按 `docs/guides/release.md`（minor）；是否发版由用户另行决定 |
 
 ## 12. 交付范围
