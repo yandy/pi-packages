@@ -35,7 +35,7 @@ pi-memory 之前只在 Linux/macOS 上验证过：`paths.ts` 明确声明命名�
 |---|---|---|
 | P1 | 命名未中和 `\`，git remote / 本地路径里的 `\..\..` 会让目录逃出 `memoryDir` | **安全**：可写出到记忆根之外 |
 | P2 | 段内出现保留设备名或结尾点/空格（如 `C:\con\proj`） | 目录创建失败 → 该项目记忆**完全不可用** |
-| P3 | `git rev-parse --show-toplevel` 的绝对路径输出在 Git Bash 下是 `/c/...`，`resolve()` 后变成 `C:\c\...` | 同一项目从不同 shell 启动 → **两个记忆目录**，且都不指向真实路径 |
+| P3 | `git rev-parse --show-toplevel` 的绝对路径输出在 Git Bash 下是 `/c/...`，`resolve()` 后变成 `C:\c\...` | 同一项目从不同 shell 启动 → **两个记忆目录**，且都不指向真实路径。**本次选择接受此风险**（Ruling 11 + 12：Git Bash 不在支持面内），同类风险的通用形态与处置见 §7 |
 | P4 | 跨进程锁用硬链接（NTFS-only；ReFS / 部分网络共享不支持） | 非 NTFS 卷上取不到锁 → 记忆**完全不可写** |
 | P5 | `unlink`/`writeFile` 在 Windows 上会被杀软、编辑器、索引器打成瞬时 `EPERM`/`EBUSY`；释放锁时的 `rm(.lock)` 命中就会残留锁 | 残留 `.lock` 之后该项目**所有**写入被堵死，只能人工 `/memory unlock` |
 | P6 | entry 文件名可派生为保留设备名（`memory add name="CON"` → `con.md`） | Windows 上写入落到控制台设备：索引多了一行、文件不存在 → **静默丢记忆** |
@@ -50,7 +50,7 @@ pi-memory 之前只在 Linux/macOS 上验证过：`paths.ts` 明确声明命名�
 |---|---|---|
 | D1 | 验证方式 | **以真机为准**：设计给出编号验收清单与预期输出（**只在 PowerShell 上验收**；Git Bash 不在支持面内，见 Ruling 11），用户在 Windows 机器执行并回贴原始输出，据此迭代。**CI 保持 ubuntu**；win32 纯逻辑用平台参数注入在 Linux CI 上直接单测 |
 | D2 | 命名适用范围 | `\` 作为分隔符只在 **win32** 生效 → POSIX 输出逐字节不变（不构成破坏性变更）。`local/` 不要求跨平台稳定，`git/` 必须保持 `host__owner__repo` 形态不变 |
-| D3 | 目录身份 | toplevel 改用 `git rev-parse --show-cdup` + `resolve(cwd, …)`（相对路径，无盘符可被 MSYS 转换）；win32 上 `expandTilde` 也认 `~\` |
+| D3 | 目录身份 | **（2026-10-04 由 Ruling 12 撤销）**原定 toplevel 改用 `git rev-parse --show-cdup` + `resolve(cwd, …)`；现回到 `--show-toplevel`（main 的既有实现）。win32 上 `expandTilde` 也认 `~\`（不变） |
 | D4 | 穿越兜底 | `resolveMemoryDir` 组装完成后断言结果仍在 `memoryDir` 之下，越界抛错（fail-closed） |
 | D5 | entry 文件名 | 保留设备名 stem 加前缀变换（`con` → `_con.md`），**全平台生效**（git 类目录跨机共享，名字必须在两边都安全） |
 | D6 | 跨进程锁 | 主原语改为 `open(lockPath, "wx")` + 立即写入，删掉「临时文件 + `link`」舞蹈；读取新增「空记录 = 建立中」态 |
@@ -65,14 +65,15 @@ pi-memory 之前只在 Linux/macOS 上验证过：`paths.ts` 明确声明命名�
 
 - **Ruling 1**：`projectDirName(key, { platform })` 的 win32 分支必须保证输出满足三条不变量：① 不含 `/` 与 `\`（单分量）；② 不以 `.` 或空格结尾；③ 不是保留设备名（按「第一个 `.` 之前的部分」判定）。`local/` 与 `git/` 共用同一套保证。
 - **Ruling 2**：`escapeSegment` 的既有 `_XX` 十六进制转义词汇表扩展用于新场景，不引入第二套转义风格；`\` 通过「作为分隔符参与分段」中和，而不是转义成字面量。
-- **Ruling 3**：`--show-cdup` 是 toplevel 的**唯一**来源。不做「先试 `--show-toplevel` 再启发式归一 MSYS 路径」的双路径。「有无工作树」的判定用 `--is-inside-work-tree`（裸仓库、`.git` 内部、`GIT_DIR` 无工作树都返回 `false`），它不是根的来源，不受本条约束。
+- **Ruling 3（已由 Ruling 12 撤销）**：原定 `--show-cdup` 是 toplevel 的**唯一**来源。
 - **Ruling 4**：`~\` 展开只在 win32 生效（POSIX 上 `~\foo` 是合法文件名，不得改写）。
 - **Ruling 5**：`entryFileName` 对保留设备名的变换**不带平台条件**（POSIX 也生效）；win32 上 `#entryFiles` 额外跳过保留设备名文件（防历史/外部创建的文件命中 CON 设备导致读取阻塞）。
 - **Ruling 6**：锁的四态读取（`absent` / `empty` / `unreadable` / `held`）中，**只有 acquire 路径**区分 `empty`（等待）与 `unreadable`（立即报遗弃）；`readLockStatus` 对外仍只暴露三态（`empty` 归入 `unreadable`），`/memory` 输出与 `/memory unlock` 契约不变。
 - **Ruling 7**：重试只包住**物理文件系统调用**，不包住逻辑（不做「整个 store 原语重试」）。快照裁剪的 `rm` 用 Node 自带的 `maxRetries`/`retryDelay`，不套 `withFsRetry`。
 - **Ruling 8**：`withFsRetry` 的失败必须保留原始 errno 与路径（不包装成新错误类型），以免改变既有的 fail-closed 语义与错误文案。
 - **Ruling 9**：CRLF 相关的既有行为（读取归一、写回转 LF）**不得**为了「保留原风格」而改动；本设计只加测试与文档。
-- **Ruling 11**（2026-10-04，用户明确）：**验收与文档只面 PowerShell** —— Windows 用户只用 PowerShell，Git Bash 不在支持面内。因此：验收清单只给 PowerShell 命令，原「Git Bash 与 PowerShell 身份一致」条目改为「从仓库子目录启动得到同一记忆目录」（同一条代码路径，PowerShell 即可验证）；README 不再声明 Git Bash 可用。§1.1 的 MSYS 事实与 `tests/paths.test.ts` 的 MSYS 仿真用例**保留**：它们保证的是「根的解析不依赖 git 如何渲染绝对路径」（在 Windows 上本就跳过），而不是对 Git Bash 的支持承诺。
+- **Ruling 11**（2026-10-04，用户明确）：**验收与文档只面 PowerShell** —— Windows 用户只用 PowerShell，Git Bash 不在支持面内。因此：验收清单只给 PowerShell 命令，原「Git Bash 与 PowerShell 身份一致」条目改为「从仓库子目录启动得到同一记忆目录」（同一条代码路径，PowerShell 即可验证）；README 不再声明 Git Bash 可用。
+- **Ruling 12**（2026-10-04，用户明确，**撤销 Ruling 3**）：**仓库根回到 `git rev-parse --show-toplevel`**（main 的既有实现，4 行、一次 spawn、路径由 git 规范化）。为什么：Ruling 11 把 Git Bash 移出支持面后，cdup 的主要动机（MSYS 形态输出）消失；用户偏好回到与 main 一致的简单实现。随之删除：`--is-inside-work-tree` 判据（不再需要 —— `--show-toplevel` 在裸仓库 / cwd 在 `.git` 内部时以 `fatal: this operation must be run in a work tree`（exit 128）退出，天然返回 `null`，由两条 bare 用例与 `.git` 用例钉住）与 MSYS 仿真用例（它钉住的性质已被明确放弃）。**接受的代价**（已写入 §7）：若 PATH 上的 `git` 是 cygwin/MSYS 构建（对任何调用者都打印 `/cygdrive/c/...` 这类 POSIX 形态路径），`resolve()` 会得到错前缀 → 同一项目出现第二个记忆目录；Git for Windows 的 `git.exe` 打印原生路径，不受影响。验收清单第 3 条会打印 `--show-toplevel` 的原始输出，若它不是原生形态则归因环境差异。
 
 ## 3. 方案选择（被否决的路线）
 
@@ -89,7 +90,7 @@ pi-memory 之前只在 Linux/macOS 上验证过：`paths.ts` 明确声明命名�
 `mkdir` 在所有文件系统上原子，是教科书式的可移植锁。否决原因：`.lock` 是**文件**这件事已写进 README 的存储布局、`/memory` 状态行与 `/memory unlock`；改成目录是更大的契约变更，而 `open(wx)` 已能覆盖同一批文件系统。
 
 ### 3.5 身份：`--show-toplevel` + MSYS 路径启发式归一（被否决）
-识别 `/c/...` 形态并映射成 `C:\...`。否决原因：启发式要处理盘符大小写、`/cygdrive/c/...`、`//server/share`、多盘符等分支，且每一分支都只能靠猜；`--show-cdup` 输出的相对路径没有可被转换的绝对路径成分，天然免疫。
+识别 `/c/...` 形态并映射成 `C:\...`。否决原因：启发式要处理盘符大小写、`/cygdrive/c/...`、`//server/share`、多盘符等分支，且每一分支都只能靠猜。（这条否决仍成立：Ruling 12 回退到 `--show-toplevel` 后，我们**不做**任何 MSYS 归一 —— 而是接受「POSIX 形态 git」这个环境限制，见 §7。）
 
 ### 3.6 换行符：保留原风格 / 平台产出（被否决）
 「写入时保持原文件行尾」或「Windows 上产出 CRLF」都能让 Windows 编辑器更「顺眼」。否决原因（用户已确认鲁棒档）：同一 `git/` 记忆目录被 Windows 与 Linux 交替写入时，文件行尾会来回翻转；若目录进了版控或云盘，会产生整份 diff 抖动。写入恒 LF 是既有的明确决定，本次不推翻。
@@ -128,9 +129,9 @@ POSIX 侧示例保持不变：`/home/yandy/proj` → `home__yandy__proj`，`/hom
 
 ### 4.2 目录身份（`src/paths.ts`、`src/config.ts`）
 
-- `gitToplevel(cwd)`：`git rev-parse --show-cdup` → `resolve(cwd, cdup)`（仓库根处输出为空行 → `resolve(cwd)`）。
-  - **「没有工作树」必须显式判掉**：`--show-cdup` 在裸仓库、以及 cwd 位于 `.git` 内部（含 `.git/objects`）时以 **exit 0 + 0 字节输出**返回（实测 git 2.55，不是非零退出），因此「空输出」不等于「在仓库根」。用 `git rev-parse --is-inside-work-tree` 判：`true` → 在仓库根，`resolve(cwd)`；`false`（裸仓库 / `.git` 内部 / `GIT_DIR` 指向工作树之外）→ 返回 `null`，让 `projectIdentity` 退回 `local/<绝对路径>`，与本次改动前（`--show-toplevel` 在这些场景 exit 128）逐字节一致。非仓库时两条命令都以非零退出 → 既有 catch 返回 `null`。
-  - 为什么不带 `--show-toplevel` 兜底：Ruling 3。`--show-cdup` 自 git 1.5.4 起存在，无版本风险；「有无工作树」的判定不是「根的来源」，不受 Ruling 3 约束（`--is-inside-work-tree` 同样自 1.5.x 起存在）。
+- `gitToplevel(cwd)`：`git rev-parse --show-toplevel` → `resolve(toplevel)`（**Ruling 12**；撤销了原 Ruling 3 的 `--show-cdup` 方案）。
+  - 裸仓库、cwd 在 `.git` 内部（含 `.git/objects`）、`GIT_DIR` 无工作树：git 以 `fatal: this operation must be run in a work tree` 退出（实测 exit 128）→ 返回 `null` → `projectIdentity` 退回 `local/<绝对路径>`，与改动前逐字节一致。非仓库同样由 catch 返回 `null`。
+  - 已知限制：git 输出必须是原生 Windows 形态；cygwin/MSYS 构建会打印 `/cygdrive/c/...`，`resolve()` 会把它变成错前缀（见 §7）。
   - `resolve(config.memoryDir)` 顺带把**相对路径**配置固化在解析时刻：相对值不再以「每个调用点的 cwd」为基准，而是以进程 cwd 解析一次后固定（逻辑锁的 key 用的是这个字符串，同一目录不应因写法不同而得到两把锁）。
 - `expandTilde(p, platform = process.platform)`：`~` → `homedir()`；`~/` 前缀（两端都认）；`~\` 前缀**仅 win32**。
 - `resolveMemoryDir` 兜底（D4）：
@@ -276,7 +277,7 @@ export async function withFsRetry<T>(fn: () => Promise<T>, options?: { retries?:
 | 半写记录被并发读者看到（`open(wx)` 固有） | 该读者立刻报「被遗弃」（fail-closed，不接管不删除）；持有者随后正常写入或释放 | 记录在此；`createExclusive` 的记录写入改为**定长位置写 + 完整性校验**，消除「重试续写导致两个 JSON 拼接」的持久化变体（后者会让持有者自己也认不出锁、从此无法释放） |
 | 同步客户端目录（OneDrive/Dropbox）当作共享 `memoryDir` | 每台机器各有一份本地副本 → 锁只能排除同机进程；跨机并发写会由同步客户端产生冲突副本（静默丢记忆） | README 明确区分：网络共享（服务端单一命名空间，跨机互斥成立）vs 同步目录（仅同机） |
 | 一次写原语内多次重试的累计预算 ≈9s（快照的 `mkdir`/`cp` 纳入重试后） | 病态重试风暴下 `.lock` 持有时间可超过 `lock.timeoutMs`（5s） | 等待者仍 fail-closed 且报可操作错误，互斥不被破坏；不引入跨调用总量上限（§4.5 已记录理由） |
-| `--show-cdup` 在极老 git（<1.5.4）上不可用 | toplevel 解析失败 → 退回 `local/<cwd>` 身份 | 15 年前的功能，接受；验收清单第 3 条在真机确认输出形态 |
+| PATH 上的 `git` 是 cygwin/MSYS 构建（打印 `/cygdrive/c/...` 这类 POSIX 形态路径） | `--show-toplevel` 的结果经 `resolve()` 得到错前缀（`C:\cygdrive\...`）→ 同一项目会出现**第二个**记忆目录（Ruling 12 明确接受） | 验收清单第 3 条打印 `--show-toplevel` 原始输出；若为 POSIX 形态则归因**环境差异**并在 README 提示用 Git for Windows 的 `git.exe` |
 | 真机验收依赖用户机器 | 无法自动回归 | D1 的既定取舍；验收记录留档 |
 
 ## 8. 验收记录表

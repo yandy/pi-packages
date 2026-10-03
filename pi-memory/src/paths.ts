@@ -8,32 +8,22 @@ const execFileP = promisify(execFile);
 const GIT_TIMEOUT_MS = 3000;
 
 /**
- * 仓库根：用 `--show-cdup`（相对路径）而不是 `--show-toplevel`（绝对路径）。
+ * 仓库根：`git rev-parse --show-toplevel`（绝对路径）。
  *
- * `--show-toplevel` 的输出形态随启动它的 shell 变化：从 Git Bash 启动时 git 返回 MSYS 形态
- * `/c/Users/...`，`resolve()` 在 Windows 上得到 `C:\c\Users\...` —— 既不指向真实路径，也与从
- * PowerShell 启动得到的 `C:\Users\...` 不是同一个身份，同一个项目会有两个记忆目录（spec §1.2 P3）。
- * `--show-cdup` 输出「从 cwd 到仓库根的相对路径」（仓库根处为空行），没有可被转换的绝对路径
- * 成分，配 `resolve(cwd, …)` 得到的一定是 Node 自己视角的本地绝对路径（spec Ruling 3）。
+ * 2026-10-04 用户决定回到这个实现（spec Ruling 12，**撤销 Ruling 3**）：Windows 上只用
+ * PowerShell、Git Bash 不在支持面内，所以「MSYS 形态输出会让 `resolve()` 得到 `C:\c\…`」这条
+ * 动机消失。随之删除了 `--is-inside-work-tree` 判据与 MSYS 仿真用例：裸仓库、cwd 在 `.git`
+ * 内部（含 `.git/objects`）时 git 以 `fatal: this operation must be run in a work tree` 退出，
+ * 这里天然返回 `null`，调用方落回 `local/<绝对路径>`；非仓库同样由 catch 返回 `null`。
+ *
+ * 已知限制（spec §7）：若 PATH 上的 `git` 是 cygwin/MSYS 构建（对任何调用者都打印
+ * `/cygdrive/c/…` 这类 POSIX 形态路径），`resolve()` 会得到错误前缀 —— 同一项目会出现第二个
+ * 记忆目录。Git for Windows 的 `git.exe` 打印原生路径，不受影响。
  */
 async function gitToplevel(cwd: string): Promise<string | null> {
 	try {
-		const { stdout } = await execFileP("git", ["rev-parse", "--show-cdup"], { cwd, timeout: GIT_TIMEOUT_MS });
-		const cdup = stdout.trim();
-		if (cdup !== "") return resolve(cwd, cdup);
-		// 输出为空有两种情况：位于工作树根，或者根本没有工作树。裸仓库、cwd 在 `.git` 内部
-		// （含 `.git/objects`）、以及只设了 GIT_DIR 而 cwd 在工作树外时，`--show-cdup` 都以
-		// exit 0 + 0 字节返回（实测 git 2.55，不是非零退出），无法与「工作树根」区分。用
-		// `--is-inside-work-tree` 作独立判据（实测 git 2.55：工作树根与任意子目录 → `true`；
-		// 裸仓库、`.git` 内部、GIT_DIR 无工作树 → `false`，均 exit 0；非仓库 → 非零退出，被
-		// 外层 catch 拦住）：只有 `true` 才是工作树根 → resolve(cwd)，`false` 则无工作树 →
-		// null，由调用方落回 `local/<绝对路径>`。否则裸仓库或 `.git` 内部 + remote 会把既有的
-		// `local/<绝对路径>` 变成 `git/<remote 身份>`（spec §4.2）。
-		const { stdout: inside } = await execFileP("git", ["rev-parse", "--is-inside-work-tree"], {
-			cwd,
-			timeout: GIT_TIMEOUT_MS,
-		});
-		return inside.trim() === "true" ? resolve(cwd) : null;
+		const { stdout } = await execFileP("git", ["rev-parse", "--show-toplevel"], { cwd, timeout: GIT_TIMEOUT_MS });
+		return stdout.trim() || null;
 	} catch {
 		return null;
 	}

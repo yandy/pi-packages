@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { chmod, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve, win32 } from "node:path";
 import { promisify } from "node:util";
@@ -385,8 +385,8 @@ describe("projectIdentity", () => {
 	});
 
 	it("falls back to local for a bare repository with a remote", async () => {
-		// 裸仓库里 `git rev-parse --show-cdup` 是 exit 0 + 0 字节（git 2.55 实测），不能据此当成
-		// “位于工作树根”；否则裸仓库 + remote 会把既有的 local/<绝对路径> 变成 git/<remote 身份>。
+		// 裸仓库没有工作树：`git rev-parse --show-toplevel` 以 `fatal: this operation must be run in a work tree`
+		// （exit 128）退出 → `gitToplevel` 返回 null → 落回 local/<绝对路径>，不会因 remote 变成 git/<remote 身份>。
 		const bare = join(dir, "bare-with-remote.git");
 		await git(["init", "-q", "--bare", bare], dir);
 		await git(["remote", "add", "origin", "https://github.com/yandy/pi-packages.git"], bare);
@@ -400,9 +400,8 @@ describe("projectIdentity", () => {
 	});
 
 	it("falls back to local when the cwd is inside .git", async () => {
-		// `.git` 内部同样没有工作树：`--show-cdup` 是 exit 0 + 0 字节（与裸仓库同类），
-		// 但 `git config` 仍能读到仓库的 remote。必须保留既有的 local/<绝对路径> 身份，
-		// 而不是因 remote 变成 git/<remote 身份>（与裸仓库同类的身份回归）。
+		// `.git` 内部同样没有工作树（`--show-toplevel` 同样 exit 128 → null），但 `git config` 仍能读到
+		// 仓库的 remote。必须保留既有的 local/<绝对路径> 身份，而不是因 remote 变成 git/<remote 身份>。
 		await initRepo(dir, "https://github.com/yandy/pi-packages.git");
 		expect(await projectIdentity(join(dir, ".git"))).toEqual({ kind: "local", key: resolve(join(dir, ".git")) });
 	});
@@ -412,39 +411,6 @@ describe("projectIdentity", () => {
 		const sub = join(dir, "packages", "inner");
 		await mkdir(sub, { recursive: true });
 		expect(await projectIdentity(sub)).toEqual({ kind: "git", key: "github.com/yandy/pi-packages" });
-	});
-});
-
-// Git Bash 下 `git rev-parse --show-toplevel` 返回 `/c/Users/...`（本用例的名字不再把 Git Bash 当作支持面，
-// 只把它当作「git 可能输出的 POSIX 形态」的一个实例；spec Ruling 11）。
-describe("projectIdentity when git prints POSIX-style paths", () => {
-	// Git Bash 下 `git rev-parse --show-toplevel` 返回 `/c/Users/...`，而 `resolve()` 在 Windows
-	// 上会把它变成 `C:\c\Users\...`（既不真实也与 PowerShell 启动时不同：同一个项目会分裂成两个
-	// 记忆目录，spec §1.2 P3）。`--show-cdup` 输出相对路径，没有可被转换的绝对成分。
-	// 在 Linux 上用“打印 MSYS 绝对路径”的假 git 就能把这条回归钉住。
-	it.skipIf(process.platform === "win32")("resolves the native root from --show-cdup, not the MSYS absolute path", async () => {
-		const repo = join(dir, "fake-repo");
-		const sub = join(repo, "sub");
-		const bin = join(dir, "fake-bin");
-		await mkdir(sub, { recursive: true });
-		await mkdir(bin, { recursive: true });
-		const fakeGit = join(bin, "git");
-		await writeFile(
-			fakeGit,
-			[
-				"#!/bin/sh",
-				'case "$1 $2" in',
-				'  "rev-parse --show-cdup") echo "../" ;;',
-				'  "rev-parse --show-toplevel") echo "/c/fake/repo" ;;',
-				"  *) exit 1 ;;",
-				"esac",
-			].join("\n"),
-			"utf8",
-		);
-		await chmod(fakeGit, 0o755);
-		vi.stubEnv("PATH", `${bin}:${process.env.PATH ?? ""}`);
-
-		expect(await projectIdentity(sub)).toEqual({ kind: "local", key: resolve(repo) });
 	});
 });
 

@@ -58,22 +58,20 @@ Remove-Item vitest-win32.json
 
 **预期**
 
-- 尾部摘要：`Test Files  30 passed (30)`、`Tests  626 passed | 4 skipped (630)`。
-  （Linux 基线是 `29 passed | 1 skipped (30)` / `628 passed | 2 skipped (630)`；Windows 上 `tests/fs-retry.win32.test.ts` 从「整体跳过」变为**真实执行**（+2 例），而 4 条平台门用例转为跳过（−4 例），所以 `626 + 4 = 630`，与 Linux 总数一致。
-  ℹ️ 这两个数字是 2026-10-04 首次真机运行后校正的：初次预期写成了 `618/4/622`（当时按未含最终修复轮新增 8 例的旧基数算），实际总数一直是 **630**。）
-- 跳过用例**恰好**是下面 4 条（`describe` 与 `it` 名逐字一致；JSON 的 `fullName` 用空格连接两段）：
+- 尾部摘要：`Test Files  29 passed (29)`、`Tests  626 passed | 3 skipped (629)`。
+  （Linux 基线是 `28 passed | 1 skipped (29)` / `627 passed | 2 skipped (629)`；Windows 上 `tests/fs-retry.win32.test.ts` 从「整体跳过」变为**真实执行**（+2 例），而 3 条平台门用例转为跳过（−3 例），所以 `626 + 3 = 629`，与 Linux 总数一致。
+  ℹ️ 这两个数字是 2026-10-04 首次真机运行后校正的：总数从 630 变为 **629**（Ruling 12 回退到 `--show-toplevel` 时删掉了 MSYS 仿真用例），跳过从 4 条变为 **3 条**。）
+- 跳过用例**恰好**是下面 3 条（`describe` 与 `it` 名逐字一致；JSON 的 `fullName` 用空格连接两段）：
 
-  1. `tests/paths.test.ts`
-     `projectIdentity when git prints POSIX-style paths` > `resolves the native root from --show-cdup, not the MSYS absolute path`
-  2. `tests/memory-store-index.test.ts`
+  1. `tests/memory-store-index.test.ts`
      `removeEntry` > `fails the removal when the entry file cannot be deleted`
-  3. `tests/memory-store-index.test.ts`
+  2. `tests/memory-store-index.test.ts`
      `unlinkStrict / sameFile` > `rethrows any error that is not ENOENT`
-  4. `tests/memory-store-index.test.ts`
+  3. `tests/memory-store-index.test.ts`
      `unlinkStrict / sameFile` > `detects two names that point at the same inode`
 
-- 前三条是 POSIX 权限/同 inode 语义（Windows 的 `chmod`/硬链接语义不同）；第 1 条是 MSYS 形态的仿真回归，它保证「仓库根解析不依赖 git 如何渲染绝对路径」，只在非 Windows 上运行，与 Git Bash 支持无关。
-- 若总数不是 630、或跳过清单多/少了条目：原样粘贴并归类（多半是本机工作树还有别的改动，或依赖安装不完整）。
+- 这三条都是 POSIX 权限/同 inode 语义（Windows 的 `chmod`/硬链接语义不同）。
+- 若总数不是 629、或跳过清单多/少了条目：原样粘贴并归类（多半是本机工作树还有别的改动，或依赖安装不完整）。
 - 首次真机运行（2026-10-04）在**本条目**发现 3 条测试自带的平台假设（`readdir` 顺序 / 内部 `join` 出的默认 sessions 目录 / 大小写不敏感 FS 下的同名派生），已在分支上修好——它们都是**测试缺陷**，产品行为正确；修完本条目应当全绿。
 
 **实测（默认 reporter 的尾部摘要 + 跳过清单原文）**：
@@ -108,7 +106,7 @@ Dir: C:\Users\<user>\.pi\memory\local\C_3a__Users__<user>__pi-memory-probe
 
 ```
 
-## 3. 从仓库子目录启动得到同一个记忆目录（`--show-cdup` 求根）
+## 3. 从仓库子目录启动得到同一个记忆目录（`--show-toplevel` 求根）
 
 **在哪做**：`C:\pi-packages`（git 仓库）与其子目录 `C:\pi-packages\pi-memory`。
 
@@ -116,12 +114,11 @@ Dir: C:\Users\<user>\.pi\memory\local\C_3a__Users__<user>__pi-memory-probe
 
 ```powershell
 cd C:\pi-packages
-node -e "console.log('cdup at root =', JSON.stringify(require('child_process').execFileSync('git',['rev-parse','--show-cdup'],{encoding:'utf8'}).trim()))"
+node -e "console.log('toplevel =', JSON.stringify(require('child_process').execFileSync('git',['rev-parse','--show-toplevel'],{encoding:'utf8'}).trim()))"
 pi -ne -e C:\pi-packages\pi-memory
 # 在 pi 里输入：/memory —— 记下 Dir:
 
 cd C:\pi-packages\pi-memory
-node -e "console.log('cdup in subdir =', JSON.stringify(require('child_process').execFileSync('git',['rev-parse','--show-cdup'],{encoding:'utf8'}).trim()))"
 pi -ne -e C:\pi-packages\pi-memory
 # 在 pi 里输入：/memory —— 这一次的 Dir: 必须与上一条逐字相同
 ```
@@ -130,8 +127,7 @@ pi -ne -e C:\pi-packages\pi-memory
 
 | 观察点 | 期望 |
 |---|---|
-| `cdup at root` | 空串 `""` |
-| `cdup in subdir` | 相对路径（如 `"../"`）—— **永远不带盘符**，因此不受 git 如何渲染绝对路径影响 |
+| `toplevel` | 原生 Windows 形态（如 `"C:/pi-packages"`）；**不应**是 `/c/...` 或 `/cygdrive/c/...`（那是 cygwin/MSYS 构建的 git，见下） |
 | 两次 `/memory` 的 `Dir:` | **逐字相同** |
 
 `Dir:` 应形如：
@@ -140,9 +136,10 @@ pi -ne -e C:\pi-packages\pi-memory
 Dir: C:\Users\<user>\.pi\memory\git\github.com__yandy__pi-packages
 ```
 
-若子目录启动时 `Dir:` 与仓库根启动不同（例如退化成 `local\` 分类，或路径里出现 `\c\`），判定失败 —— 这正是用相对路径的 `--show-cdup` 而不是解析 `--show-toplevel` 的绝对路径来求根要保证的事。
+若子目录启动时 `Dir:` 与仓库根启动不同（例如退化成 `local\` 分类），判定失败。
+若 `toplevel` 输出的是 POSIX 形态（`/c/...`、`/cygdrive/c/...`）—— 说明 PATH 上的 `git` 是 cygwin/MSYS 构建，`resolve()` 会得到 `C:\c\...` 这类错前缀，此时记忆目录会多出一份：**归因为环境差异**（spec Ruling 12 / §7 明确接受该限制），处置是把 Git for Windows 的 `git.exe` 放到 PATH 前面，**不要记为实现缺陷**。
 
-**实测（两处 `cdup` 输出 + 两次 `Dir:`）**：
+**实测（`toplevel` 输出 + 两次 `Dir:`）**：
 
 ```text
 
