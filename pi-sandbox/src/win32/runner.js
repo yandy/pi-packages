@@ -33,6 +33,11 @@
  *    restricting list, and no SID string is parsed. The default-DACL patch
  *    still runs (with Everyone) — see §4.6 of the design — otherwise the
  *    confined process could not create anonymous stdio pipes.
+ *  - The child starts in the RUNNER's cwd (`process.cwd()`), never the
+ *    workspace root: the TypeScript seam already spawned the runner in the
+ *    tool's cwd, and the workspace is an authorization root, not a chdir
+ *    target, so overriding it here would silently change directory for every
+ *    call whose cwd differs from the workspace root.
  *
  * Plain ESM JavaScript on purpose: the runner entry executes in a standalone
  * node process and Node refuses TypeScript type-stripping inside node_modules,
@@ -41,7 +46,8 @@
  * @module
  */
 
-import { pathToFileURL } from "node:url";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import * as abi from "./abi.js";
 import { grantWrite } from "./acl.js";
@@ -135,18 +141,32 @@ export async function main(rawArgs, deps = {}) {
 	// temp → workspace → Everyone: new objects created inside the temp tree must
 	// not acquire the shared workspace capability.
 	setTokenDefaultDaclGrant(api, token, writeSids[1] ?? writeSids[0] ?? worldSid);
-	const child = spawn(token, { command: parsed.command, args: parsed.args, cwd: parsed.workspace });
+	// Inherit the runner's own cwd: the TypeScript seam spawned this process in
+	// the caller's cwd, so the child must start there too (never the workspace
+	// root, which is only an authorization root).
+	const child = spawn(token, { command: parsed.command, args: parsed.args, cwd: process.cwd() });
 	return wait(child.process);
 }
 
 /**
  * Whether this module is the process entry point (`node runner.js …`) and not
- * an import from a test or another module.
- * @returns {boolean} true when `process.argv[1]` is this file.
+ * an import from a test or another module. Both sides are realpath-resolved:
+ * under a symlinked install (`npm link`) `process.argv[1]` is the symlink while
+ * `import.meta.url` is the real path, so a bare URL comparison would be false
+ * and `main` would never run — the process would exit 0 with NO signature
+ * line, which the TypeScript classifier reads as success (a silent fail-open).
+ * Any resolution failure returns false: not being an entry point is the safe
+ * reading when the comparison cannot be made.
+ * @returns {boolean} true when `process.argv[1]` resolves to this file.
  */
 function isEntryPoint() {
 	const entry = process.argv[1];
-	return entry !== undefined && import.meta.url === pathToFileURL(entry).href;
+	if (entry === undefined) return false;
+	try {
+		return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(entry);
+	} catch {
+		return false;
+	}
 }
 
 if (isEntryPoint()) {
