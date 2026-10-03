@@ -41,7 +41,7 @@ Lock: free
 逐项核对：
 
 - `Index` 的行数 = `MEMORY.md` 的非空行数（文件还不存在时是 0；`# Memory Index` 这行算 1 个 `unrecognized`）；字节数 = 文件真实字节数。
-- `Inject` = 真正进 system prompt 的窗口（默认最新 50 行 / 16384 字节），取索引**最新**一端；未超预算时它与 `Index` 对同一份文件报的字节数相同。
+- `Inject` = 真正进 system prompt 的窗口（默认最新 50 行 / 16384 字节），取索引**最新**一端；规范索引（以换行结尾、头部后有且仅有一个空行）下，未超预算时它与 `Index` 的字节数相同、行数多 1（`Index` 只数**非空**行，`Inject` 数窗口内**全部**行）。
 - `Modules` = 三个模型驱动功能的激活状态（`dream` / `extractMemories` / `autoSurfacing`）；`dream` 没有独立开关（memory 启用即可用），`off` 的模块不显示模型。
 - `Entries` = 目录里的 entry 文件数（不含 `MEMORY.md`）；空目录为 0。
 - `Last dream`：从未 dream 过时为 `never`。
