@@ -46,7 +46,9 @@ export class MemoryLockedError extends Error {
 		super(
 			abandoned
 				? `Memory lock at ${lockPath} is abandoned by ${described} — delete the file to clear it`
-				: `Memory is locked by ${described}`,
+				: holder
+					? `Memory is locked by ${described}`
+					: `Memory lock at ${lockPath} is still being written (0 bytes) — if no other process is writing, delete the file or run /memory unlock`,
 		);
 		this.name = "MemoryLockedError";
 	}
@@ -171,14 +173,19 @@ async function createExclusive(lockPath: string, info: LockInfo): Promise<boolea
 	}
 	try {
 		await withFsRetry(() => handle.writeFile(JSON.stringify(info), "utf8"));
+		// `close` 也可能失败（SMB/网络盘的延迟刷写错误、EIO），而它在记录**已落盘**之后发生：
+		// 若直接上抛，`withLock` 的 finally 不会执行（acquire 从未返回 true），锁会留在原地并指向
+		// 本进程 → 本进程此后每次获取都读到「活持有者」并自锁到 timeout。故与写入失败同一处置。
+		await handle.close();
 	} catch (e) {
-		// 记录写不进去，这把锁就没有任何持有者：先关句柄再删文件（Windows 上删除打开中的文件
-		// 需要 share-delete，且删除会延迟到关闭之后），否则会留下 0 字节锁挡住后来的写入者。
+		// 走到这里说明这把锁没有可用的持有者（记录没写进去，或 close 失败）：先关句柄再删文件
+		// （Windows 上删除打开中的文件需要 share-delete，且删除会延迟到关闭之后），否则会留下
+		// 0 字节/自指的锁挡住后来的写入者。`rm` 走重试：win32 上杀软/索引器造成的瞬时 EPERM
+		// 正是本任务要消掉的那类残留（spec §1.2 P5）。
 		await handle.close().catch(() => {});
-		await rm(lockPath, { force: true }).catch(() => {});
+		await withFsRetry(() => rm(lockPath, { force: true })).catch(() => {});
 		throw e;
 	}
-	await handle.close();
 	return true;
 }
 

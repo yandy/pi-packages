@@ -78,6 +78,9 @@ describe("withLock", () => {
 		const err = await withLock(lockPath, "add", { timeoutMs: 150, pollMs: 20 }, async () => "never").catch((e: unknown) => e);
 		expect(err).toBeInstanceOf(MemoryLockedError);
 		expect((err as MemoryLockedError).abandoned).toBe(false);
+		// spec §7 风险表：这类错误必须给出清除指引（`/memory` 也提示 `run /memory unlock`）
+		expect((err as MemoryLockedError).message).toContain(lockPath);
+		expect((err as MemoryLockedError).message).toContain("delete the file");
 		expect(Date.now() - started).toBeGreaterThanOrEqual(140);
 	});
 
