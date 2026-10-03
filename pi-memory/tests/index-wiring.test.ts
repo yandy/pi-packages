@@ -1483,17 +1483,16 @@ describe("index wiring (integration)", () => {
 		expect(notify).toHaveBeenCalledTimes(1);
 		expect(notify.mock.calls[0][1]).toBe("info");
 		const lines = notify.mock.calls[0][0].split("\n");
-		expect(lines).toHaveLength(8);
-		expect(lines[0]).toBe("Memory: enabled");
-		expect(lines[1]).toBe(`Dir: ${dir}`);
-		expect(lines[2]).toMatch(/^Index: 4\/200 lines, \d+\/25600 bytes, 2 unrecognized lines$/);
+		expect(lines).toHaveLength(7);
+		expect(lines[0]).toBe(`Dir: ${dir}`);
+		expect(lines[1]).toMatch(/^Index: 4\/200 lines, \d+\/25600 bytes, 2 unrecognized lines$/);
 		// 注入口径：`Inject:` 与真正注入共用同一个窗口核心（`indexInjectionCapacity`），
 		// 这里给精确值而不是 `\d+` —— 口径漂移（例如误用写入口径）必须在这里红。
-		expect(lines[3]).toBe(`Inject: 5/50 lines, ${Buffer.byteLength(statusIndex, "utf8")}/16384 bytes`);
-		expect(lines[4]).toBe("Entries: 1");
-		expect(lines[5]).toBe("Modules: dream=on(test/model) extractMemories=off autoSurfacing=on(test/model)");
-		expect(lines[6]).toBe("Last dream: 2026-10-01T00:00:00.000Z");
-		expect(lines[7]).toBe(`Lock: held by dream (pid ${process.pid} on h, started 2026-10-02T01:02:03.000Z)`);
+		expect(lines[2]).toBe(`Inject: 5/50 lines, ${Buffer.byteLength(statusIndex, "utf8")}/16384 bytes`);
+		expect(lines[3]).toBe("Entries: 1");
+		expect(lines[4]).toBe("Modules: dream=on(test/model) extractMemories=off autoSurfacing=on(test/model)");
+		expect(lines[5]).toBe("Last dream: 2026-10-01T00:00:00.000Z");
+		expect(lines[6]).toBe(`Lock: held by dream (pid ${process.pid} on h, started 2026-10-02T01:02:03.000Z)`);
 	});
 
 	it("/memory reports a fresh directory as free / never / not needed", async () => {
@@ -1505,15 +1504,15 @@ describe("index wiring (integration)", () => {
 		await commands["memory"].handler("", uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } }));
 
 		const lines = notify.mock.calls[0][0].split("\n");
-		expect(lines[2]).toBe(
+		expect(lines[1]).toBe(
 			`Index: 1/200 lines, ${Buffer.byteLength(DISK_INDEX, "utf8")}/25600 bytes, 0 unrecognized lines`,
 		);
 		// 未超预算时 Inject 的字节数与 Index 对同一份文件报的值相同（口径一致）。
-		expect(lines[3]).toBe(`Inject: 1/50 lines, ${Buffer.byteLength(DISK_INDEX, "utf8")}/16384 bytes`);
-		expect(lines[4]).toBe("Entries: 0");
-		expect(lines[5]).toBe("Modules: dream=on(test/model) extractMemories=off autoSurfacing=on(test/model)");
-		expect(lines[6]).toBe("Last dream: never");
-		expect(lines[7]).toBe("Lock: free");
+		expect(lines[2]).toBe(`Inject: 1/50 lines, ${Buffer.byteLength(DISK_INDEX, "utf8")}/16384 bytes`);
+		expect(lines[3]).toBe("Entries: 0");
+		expect(lines[4]).toBe("Modules: dream=on(test/model) extractMemories=off autoSurfacing=on(test/model)");
+		expect(lines[5]).toBe("Last dream: never");
+		expect(lines[6]).toBe("Lock: free");
 	});
 
 	it("/memory reports the enabled modules with their effective models", async () => {
@@ -1536,7 +1535,7 @@ describe("index wiring (integration)", () => {
 
 			const lines = notify.mock.calls[0][0].split("\n");
 			// per-task model 优先，其余回落到 defaults.model；关闭的模块不显示模型。
-			expect(lines[5]).toBe("Modules: dream=on(test/model) extractMemories=on(extract/model) autoSurfacing=off");
+			expect(lines[4]).toBe("Modules: dream=on(test/model) extractMemories=on(extract/model) autoSurfacing=off");
 		} finally {
 			mockConfigValue.extractMemories.enabled = false;
 			delete mockConfigValue.extractMemories.model;
@@ -1557,7 +1556,7 @@ describe("index wiring (integration)", () => {
 		expect(await readdir(dir)).not.toContain(".migrated");
 
 		await commands["memory"].handler("", uiCtx(uiWith(notify)));
-		expect(notify.mock.calls[0][0].split("\n")).toHaveLength(8);
+		expect(notify.mock.calls[0][0].split("\n")).toHaveLength(7);
 
 		// legacy 文件对记忆视图不可见：list 返回空清单文案（src/memory-tool.ts:262）
 		const listed = await tools[0].execute("c1", { action: "list" }, undefined, undefined, undefined);
@@ -1603,7 +1602,7 @@ describe("index wiring (integration)", () => {
 
 		await commands["memory"].handler("", uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } }));
 
-		expect(notify.mock.calls[0][0].split("\n")[7]).toBe("Lock: unreadable — run /memory unlock");
+		expect(notify.mock.calls[0][0].split("\n")[6]).toBe("Lock: unreadable — run /memory unlock");
 	});
 
 	it("/memory on and /memory off are no longer subcommands", async () => {
@@ -1621,7 +1620,7 @@ describe("index wiring (integration)", () => {
 		expect(notify).toHaveBeenCalledTimes(2);
 		for (const call of notify.mock.calls) {
 			expect(call[1]).toBe("info");
-			expect(call[0].split("\n")[0]).toBe("Memory: enabled");
+			expect(call[0].split("\n")[0]).toBe(`Dir: ${dir}`);
 		}
 		expect(tools).toHaveLength(registered);
 	});
@@ -2200,13 +2199,13 @@ describe("index wiring (integration)", () => {
 		const { pi, tools, commands, handlers } = createFakePi();
 		memoryFactory(pi as any);
 
-		// ① 健康会话：状态块首行是 enabled
+		// ① 健康会话：状态块直接以目录起头
 		await handlers["session_start"][0]({}, ctxUI());
 		expect(tools).toHaveLength(1);
 		await commands["memory"].handler("", ctxUI());
 		expect(notify).toHaveBeenCalledTimes(1);
 		expect(notify.mock.calls[0][1]).toBe("info");
-		expect(notify.mock.calls[0][0].split("\n")[0]).toBe("Memory: enabled");
+		expect(notify.mock.calls[0][0].split("\n")[0]).toBe(`Dir: ${dir}`);
 		expect(notify.mock.calls[0][0]).toContain(`Dir: ${dir}`);
 		notify.mockClear();
 
@@ -2233,13 +2232,13 @@ describe("index wiring (integration)", () => {
 		expect(tools).toHaveLength(1);
 		notify.mockClear();
 
-		// ③ 改好配置再重启：错误态被清掉，状态块回到 enabled
+		// ③ 改好配置再重启：错误态被清掉，状态块回到健康态
 		mockConfigValue.defaults = { model: "test/model", sessionPersistence: { enabled: false } };
 		await handlers["session_start"][0]({}, ctxUI());
 		expect(notify).not.toHaveBeenCalled();
 		await commands["memory"].handler("", ctxUI());
 		expect(notify).toHaveBeenCalledTimes(1);
-		expect(notify.mock.calls[0][0].split("\n")[0]).toBe("Memory: enabled");
+		expect(notify.mock.calls[0][0].split("\n")[0]).toBe(`Dir: ${dir}`);
 		expect(notify.mock.calls[0][0]).not.toContain("misconfigured");
 		expect(tools).toHaveLength(1);
 	});

@@ -581,7 +581,6 @@ export default function (pi: ExtensionAPI) {
 			const cap = indexCapacity(indexRaw, config.memIndexMaxLines, config.memIndexMaxBytes);
 			const inject = indexInjectionCapacity(indexRaw, config.memIndexInjectMaxLines, config.memIndexInjectMaxBytes);
 			const summary = [
-				`Memory: ${config.enabled ? "enabled" : "disabled"}`,
 				`Dir: ${dir}`,
 				`Index: ${cap.lineCount}/${config.memIndexMaxLines} lines, ${cap.byteLength}/${config.memIndexMaxBytes} bytes, ${parseEntryIndex(indexRaw).unrecognized} unrecognized lines`,
 				`Inject: ${inject.lineCount}/${config.memIndexInjectMaxLines} lines, ${inject.byteLength}/${config.memIndexInjectMaxBytes} bytes`,
