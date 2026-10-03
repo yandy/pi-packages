@@ -133,11 +133,12 @@ export const EXPLICIT_ACCESS_W_SIZE = 48;
 /** x64 offset of TRUSTEE_W inside EXPLICIT_ACCESS_W. */
 export const TRUSTEE_W_OFFSET = 16;
 /**
- * x64 offset of Trustee.ptstrName inside EXPLICIT_ACCESS_W (the address the
- * ACL layer writes the trustee SID to): TRUSTEE_W_OFFSET 16 + the probe-
- * verified 24-byte offset of ptstrName inside TRUSTEE_W.
+ * x64 offset of Trustee.ptstrName relative to the start of TRUSTEE_W (the
+ * reference's convention, kept as-is to match win32-abi.ts). The absolute
+ * position inside EXPLICIT_ACCESS_W -- the address the ACL layer writes the
+ * trustee SID to -- is TRUSTEE_W_OFFSET + TRUSTEE_W_PTSTRNAME_OFFSET = 40.
  */
-export const TRUSTEE_W_PTSTRNAME_OFFSET = 40;
+export const TRUSTEE_W_PTSTRNAME_OFFSET = 24;
 
 // --- Token, SID_AND_ATTRIBUTES, and TOKEN_GROUPS layout (x64) ---
 

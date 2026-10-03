@@ -16,7 +16,8 @@ describe("win32 abi constants", () => {
 	it("keeps the x64 record layouts the probes verified", () => {
 		expect(abi.EXPLICIT_ACCESS_W_SIZE).toBe(48);
 		expect(abi.TRUSTEE_W_OFFSET).toBe(16);
-		expect(abi.TRUSTEE_W_PTSTRNAME_OFFSET).toBe(40);
+		// relative to TRUSTEE_W; absolute inside EXPLICIT_ACCESS_W = 16 + 24 = 40
+		expect(abi.TRUSTEE_W_PTSTRNAME_OFFSET).toBe(24);
 		expect(abi.SID_AND_ATTRIBUTES_SIZE).toBe(16);
 		expect(abi.TOKEN_GROUPS_OFFSET).toBe(8);
 		expect(abi.ACL_HEADER_SIZE).toBe(8);
