@@ -415,7 +415,9 @@ describe("projectIdentity", () => {
 	});
 });
 
-describe("projectIdentity with an MSYS-style git (Git Bash emulation)", () => {
+// Git Bash 下 `git rev-parse --show-toplevel` 返回 `/c/Users/...`（本用例的名字不再把 Git Bash 当作支持面，
+// 只把它当作「git 可能输出的 POSIX 形态」的一个实例；spec Ruling 11）。
+describe("projectIdentity when git prints POSIX-style paths", () => {
 	// Git Bash 下 `git rev-parse --show-toplevel` 返回 `/c/Users/...`，而 `resolve()` 在 Windows
 	// 上会把它变成 `C:\c\Users\...`（既不真实也与 PowerShell 启动时不同：同一个项目会分裂成两个
 	// 记忆目录，spec §1.2 P3）。`--show-cdup` 输出相对路径，没有可被转换的绝对成分。

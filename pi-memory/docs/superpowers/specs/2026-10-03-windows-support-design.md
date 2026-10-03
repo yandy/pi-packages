@@ -48,7 +48,7 @@ pi-memory 之前只在 Linux/macOS 上验证过：`paths.ts` 明确声明命名�
 
 | # | 决策 | 内容 |
 |---|---|---|
-| D1 | 验证方式 | **以真机为准**：设计给出编号验收清单与预期输出（PowerShell + git-bash 两套命令），用户在 Windows 机器执行并回贴原始输出，据此迭代。**CI 保持 ubuntu**；win32 纯逻辑用平台参数注入在 Linux CI 上直接单测 |
+| D1 | 验证方式 | **以真机为准**：设计给出编号验收清单与预期输出（**只在 PowerShell 上验收**；Git Bash 不在支持面内，见 Ruling 11），用户在 Windows 机器执行并回贴原始输出，据此迭代。**CI 保持 ubuntu**；win32 纯逻辑用平台参数注入在 Linux CI 上直接单测 |
 | D2 | 命名适用范围 | `\` 作为分隔符只在 **win32** 生效 → POSIX 输出逐字节不变（不构成破坏性变更）。`local/` 不要求跨平台稳定，`git/` 必须保持 `host__owner__repo` 形态不变 |
 | D3 | 目录身份 | toplevel 改用 `git rev-parse --show-cdup` + `resolve(cwd, …)`（相对路径，无盘符可被 MSYS 转换）；win32 上 `expandTilde` 也认 `~\` |
 | D4 | 穿越兜底 | `resolveMemoryDir` 组装完成后断言结果仍在 `memoryDir` 之下，越界抛错（fail-closed） |
@@ -72,7 +72,7 @@ pi-memory 之前只在 Linux/macOS 上验证过：`paths.ts` 明确声明命名�
 - **Ruling 7**：重试只包住**物理文件系统调用**，不包住逻辑（不做「整个 store 原语重试」）。快照裁剪的 `rm` 用 Node 自带的 `maxRetries`/`retryDelay`，不套 `withFsRetry`。
 - **Ruling 8**：`withFsRetry` 的失败必须保留原始 errno 与路径（不包装成新错误类型），以免改变既有的 fail-closed 语义与错误文案。
 - **Ruling 9**：CRLF 相关的既有行为（读取归一、写回转 LF）**不得**为了「保留原风格」而改动；本设计只加测试与文档。
-- **Ruling 10**：真机验收清单里的每一条都必须给出**可粘贴的命令 + 预期输出**；代码无法自动判定的条目才进清单（能单测的不进）。
+- **Ruling 11**（2026-10-04，用户明确）：**验收与文档只面 PowerShell** —— Windows 用户只用 PowerShell，Git Bash 不在支持面内。因此：验收清单只给 PowerShell 命令，原「Git Bash 与 PowerShell 身份一致」条目改为「从仓库子目录启动得到同一记忆目录」（同一条代码路径，PowerShell 即可验证）；README 不再声明 Git Bash 可用。§1.1 的 MSYS 事实与 `tests/paths.test.ts` 的 MSYS 仿真用例**保留**：它们保证的是「根的解析不依赖 git 如何渲染绝对路径」（在 Windows 上本就跳过），而不是对 Git Bash 的支持承诺。
 
 ## 3. 方案选择（被否决的路线）
 
@@ -98,7 +98,7 @@ pi-memory 之前只在 Linux/macOS 上验证过：`paths.ts` 明确声明命名�
 估算：默认 `memoryDir`（`%USERPROFILE%\.pi\memory`，约 30–40 字符）+ `git/` 或 `local/` + 目录名上限 120 字节 + 文件名上限 100 字节 + `.md`，单文件全路径约 200 字符；`MEMORY.md`、`.backups/<ts>-write/`、`sessions/` 都更短。本设计不引入 `\\?\` 前缀或长路径专门处理。
 
 ### 3.8 加 Windows CI job（本次被否决）
-见 D1：pi-sandbox 的既有决策是「真机为准、CI 保持 ubuntu」。本任务的 win32 差异大部分是纯字符串/路径语义，可在 Linux CI 上用 `path.win32` + 平台注入直接单测；真正只有真机能验的部分（fs 原语、Git Bash 下的 git 输出、全链路）由验收清单承担。仓库里还有 pi-container-sandbox 等对 Windows runner 不友好的包，加矩阵的成本大于收益。
+见 D1：pi-sandbox 的既有决策是「真机为准、CI 保持 ubuntu」。本任务的 win32 差异大部分是纯字符串/路径语义，可在 Linux CI 上用 `path.win32` + 平台注入直接单测；真正只有真机能验的部分（fs 原语、真机上的 git 行为、全链路）由验收清单承担。仓库里还有 pi-container-sandbox 等对 Windows runner 不友好的包，加矩阵的成本大于收益。
 
 ## 4. 详细设计
 
@@ -247,11 +247,11 @@ export async function withFsRetry<T>(fn: () => Promise<T>, options?: { retries?:
 
 ### 5.4 真机验收套件
 
-见 `pi-memory/docs/superpowers/verification/2026-10-03-windows-support-acceptance.md`。覆盖（与 §8 记录表一一对应）：全量套件绿（含跳过清单）、`local/`/`git/` 两类目录名、Git Bash 与 PowerShell 身份一致、0 字节锁处置、**非 NTFS 卷上的锁**（`open(wx)` 的核心证明）、CRLF 存盘往返、大小写撞名、**`FileShare.None` 占住 `MEMORY.md` 触发瞬时 `EPERM` 重试**、快照与 `sessions/` 目录。`~\` 展开与 `/memory` 状态行不进清单：前者由注入平台的单测覆盖（`tests/config.test.ts`），而且清单里每一条的 `Dir:` 输出都会实际走一遍用户主目录路径；后者由 `tests/index-wiring.test.ts` 覆盖，并在清单各条里被反复读到。
+见 `pi-memory/docs/superpowers/verification/2026-10-03-windows-support-acceptance.md`。覆盖（与 §8 记录表一一对应）：全量套件绿（含跳过清单）、`local/`/`git/` 两类目录名、**从仓库子目录启动得到同一记忆目录**、0 字节锁处置、**非 NTFS 卷上的锁**（`open(wx)` 的核心证明）、CRLF 存盘往返、大小写撞名、**`FileShare.None` 占住 `MEMORY.md` 触发瞬时 `EPERM` 重试**、快照与 `sessions/` 目录。`~\` 展开与 `/memory` 状态行不进清单：前者由注入平台的单测覆盖（`tests/config.test.ts`），而且清单里每一条的 `Dir:` 输出都会实际走一遍用户主目录路径；后者由 `tests/index-wiring.test.ts` 覆盖，并在清单各条里被反复读到。
 
 ### 5.5 验收流程
 
-1. 本设计给出编号清单与预期输出（PowerShell + git-bash 两套命令）。
+1. 本设计给出编号清单与预期输出（PowerShell 命令；Git Bash 不在支持面内，见 Ruling 11）。
 2. 用户在 Windows 机器执行并回贴原始输出。
 3. 差异逐条归因（**实现缺陷** / **环境差异** / **文档需要补充**），修完复跑。
 4. 把结论回填验收清单的「实测」栏与本文档 §8 的记录表。偏差未闭环前不得宣称完成。
@@ -287,7 +287,7 @@ export async function withFsRetry<T>(fn: () => Promise<T>, options?: { retries?:
 |---|---|---|---|---|---|
 | 1 | 全量套件 | `npx vitest run`（pi-memory 目录） | 全绿 + 跳过清单与 `skipIf(win32)` 条目一致 | （待填） | （待填） |
 | 2 | `local/` 目录名 | 见验收清单 | 单层 `C_3a__...` | （待填） | （待填） |
-| 3 | Git Bash vs PowerShell 身份一致 | 见验收清单 | 同一个 `Dir:` | （待填） | （待填） |
+| 3 | 从仓库子目录启动身份一致 | 见验收清单 | `Dir:` 与从仓库根启动逐字相同 | （待填） | （待填） |
 | 4 | `git/` 目录名与 Linux 一致 | 见验收清单 | `github.com__owner__repo` | （待填） | （待填） |
 | 5 | 0 字节锁处置 | 见验收清单 | 可操作错误 → `/memory unlock` 恢复 | （待填） | （待填） |
 | 6 | 非 NTFS 卷上的锁 | 见验收清单 | 写入成功 | （待填） | （待填） |

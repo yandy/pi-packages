@@ -10,6 +10,7 @@
 **共同约定**
 
 - 仓库路径按 `C:\pi-packages` 写；你若 clone 在别处，替换文中所有该前缀。
+- **验收只在 PowerShell 上进行**：Git Bash 不在支持面内，本清单不提供 bash 命令（第 3 条不再做「两个 shell 对比」，改为验证「从子目录启动得到同一记忆目录」）。
 - 本清单一律用 `pi -ne -e <pi-memory 目录>` 启动：`-ne` 关掉机器上已配置的其它扩展（避免与已安装的 `@yandy0725/pi-memory` 重复注册 `memory` 工具与 `/memory` 命令），`-e` 显式加载**本次待验收的本地构建**（pi 按包的 `pi.extensions` 加载其 `index.ts`）。
 - 模型：dream 是每个会话的必跑任务，`defaults.model` / `dream.model` 必须能解析；否则 `/memory` 显示 `Memory: misconfigured`。那是配置问题，先修好再验收。
 - 默认 `memoryDir` 是 `$env:USERPROFILE\.pi\memory`；若你改过它，把各条 `Dir:` 的根换成你的配置值。
@@ -36,21 +37,6 @@ New-Item -ItemType Directory -Force "$env:USERPROFILE\pi-memory-probe" | Out-Nul
 New-Item -ItemType Directory -Force "C:\pi-accept\proj" | Out-Null
 ```
 
-**git-bash**
-
-```bash
-git clone https://github.com/yandy/pi-packages.git /c/pi-packages   # 已 clone 过则跳过
-cd /c/pi-packages
-git checkout pi-memory-windows-support
-npm install
-git log -1 --oneline
-node -v
-
-# 全量套件（= 第 1 条；把尾部摘要与跳过清单留给第 1 条的「实测」）
-cd /c/pi-packages/pi-memory
-npx vitest run
-```
-
 第 1 条给出全量套件的预期结果与跳过清单。第 3、4 条在 `C:\pi-packages` 里做，第 6 条在 `C:\pi-accept\vol` 里做。
 
 ## 1. 全量套件（Windows 上可跑、跳过清单可预测）
@@ -62,28 +48,12 @@ cd C:\pi-packages\pi-memory
 npx vitest run
 ```
 
-**命令（git-bash）**
-
-```bash
-cd /c/pi-packages/pi-memory
-npx vitest run
-```
-
-**再看跳过的是哪几条（在 `pi-memory` 目录里跑，PowerShell）**
+**再看跳过的是哪几条（在 `pi-memory` 目录里跑）**
 
 ```powershell
 npx vitest run --reporter=json --outputFile=vitest-win32.json
 node -e "const r=require('./vitest-win32.json');for(const f of r.testResults)for(const a of f.assertionResults)if(a.status==='skipped')console.log(a.fullName)"
 Remove-Item vitest-win32.json
-```
-
-**再看跳过的是哪几条（git-bash）**
-
-```bash
-cd /c/pi-packages/pi-memory
-npx vitest run --reporter=json --outputFile=vitest-win32.json
-node -e "const r=require('./vitest-win32.json');for(const f of r.testResults)for(const a of f.assertionResults)if(a.status==='skipped')console.log(a.fullName)"
-rm vitest-win32.json
 ```
 
 **预期**
@@ -94,7 +64,7 @@ rm vitest-win32.json
 - 跳过用例**恰好**是下面 4 条（`describe` 与 `it` 名逐字一致；JSON 的 `fullName` 用空格连接两段）：
 
   1. `tests/paths.test.ts`
-     `projectIdentity with an MSYS-style git (Git Bash emulation)` > `resolves the native root from --show-cdup, not the MSYS absolute path`
+     `projectIdentity when git prints POSIX-style paths` > `resolves the native root from --show-cdup, not the MSYS absolute path`
   2. `tests/memory-store-index.test.ts`
      `removeEntry` > `fails the removal when the entry file cannot be deleted`
   3. `tests/memory-store-index.test.ts`
@@ -102,7 +72,7 @@ rm vitest-win32.json
   4. `tests/memory-store-index.test.ts`
      `unlinkStrict / sameFile` > `detects two names that point at the same inode`
 
-- 前三条是 POSIX 权限/同 inode 语义（Windows 的 `chmod`/硬链接语义不同），第 1 条是 Git Bash 的 MSYS 仿真回归（只在非 Windows 上有意义）。
+- 前三条是 POSIX 权限/同 inode 语义（Windows 的 `chmod`/硬链接语义不同）；第 1 条是 MSYS 形态的仿真回归，它保证「仓库根解析不依赖 git 如何渲染绝对路径」，只在非 Windows 上运行，与 Git Bash 支持无关。
 - 若总数不是 630、或跳过清单多/少了条目：原样粘贴并归类（多半是本机工作树还有别的改动，或依赖安装不完整）。
 - 首次真机运行（2026-10-04）在**本条目**发现 3 条测试自带的平台假设（`readdir` 顺序 / 内部 `join` 出的默认 sessions 目录 / 大小写不敏感 FS 下的同名派生），已在分支上修好——它们都是**测试缺陷**，产品行为正确；修完本条目应当全绿。
 
@@ -124,15 +94,7 @@ pi -ne -e C:\pi-packages\pi-memory
 # 在 pi 里输入：/memory
 ```
 
-**命令（git-bash 里启动 pi，同一目录）**
-
-```bash
-cd ~/pi-memory-probe
-pi -ne -e /c/pi-packages/pi-memory
-# 在 pi 里输入：/memory
-```
-
-**预期**：两边的 `Dir:` 相同，且以 `\local\C_3a__Users__<你的用户名>__pi-memory-probe` 结尾；`local\` 之后只有**一个**路径分量：
+**预期**：`Dir:` 以 `\local\C_3a__Users__<你的用户名>__pi-memory-probe` 结尾；`local\` 之后只有**一个**路径分量：
 
 ```text
 Dir: C:\Users\<user>\.pi\memory\local\C_3a__Users__<user>__pi-memory-probe
@@ -146,38 +108,31 @@ Dir: C:\Users\<user>\.pi\memory\local\C_3a__Users__<user>__pi-memory-probe
 
 ```
 
-## 3. Git Bash 与 PowerShell 得到同一个记忆目录（`--show-cdup` 免疫 MSYS 路径）
+## 3. 从仓库子目录启动得到同一个记忆目录（`--show-cdup` 求根）
 
-**在哪做**：`C:\pi-packages`（git 仓库；任意子目录同理）。
+**在哪做**：`C:\pi-packages`（git 仓库）与其子目录 `C:\pi-packages\pi-memory`。
 
-**命令（PowerShell）**
+**命令（PowerShell：先仓库根，再子目录）**
 
 ```powershell
 cd C:\pi-packages
-git rev-parse --show-toplevel
-node -e "console.log(require('child_process').execFileSync('git',['rev-parse','--show-cdup'],{encoding:'utf8'}).trim())"
+node -e "console.log('cdup at root =', JSON.stringify(require('child_process').execFileSync('git',['rev-parse','--show-cdup'],{encoding:'utf8'}).trim()))"
 pi -ne -e C:\pi-packages\pi-memory
-# 在 pi 里输入：/memory
-```
+# 在 pi 里输入：/memory —— 记下 Dir:
 
-**命令（git-bash）**
-
-```bash
-cd /c/pi-packages
-git rev-parse --show-toplevel
-node -e "console.log(require('child_process').execFileSync('git',['rev-parse','--show-cdup'],{encoding:'utf8'}).trim())"
-pi -ne -e /c/pi-packages/pi-memory
-# 在 pi 里输入：/memory
+cd C:\pi-packages\pi-memory
+node -e "console.log('cdup in subdir =', JSON.stringify(require('child_process').execFileSync('git',['rev-parse','--show-cdup'],{encoding:'utf8'}).trim()))"
+pi -ne -e C:\pi-packages\pi-memory
+# 在 pi 里输入：/memory —— 这一次的 Dir: 必须与上一条逐字相同
 ```
 
 **预期**
 
-| 命令 | PowerShell | git-bash |
-|---|---|---|
-| `git rev-parse --show-toplevel`（仓库根） | `C:/pi-packages` | `/c/pi-packages`（MSYS 形态）——**形态不同是正常的**，它不参与记忆目录身份 |
-| `node -e … --show-cdup`（仓库根） | 空行 | 空行 |
-| 同上，在子目录（可选：`cd pi-memory` 后再跑） | `../` | `../`（两壳相同，永远是不带盘符的相对路径） |
-| `/memory` 的 `Dir:` | 两壳**必须逐字相同** | 同左 |
+| 观察点 | 期望 |
+|---|---|
+| `cdup at root` | 空串 `""` |
+| `cdup in subdir` | 相对路径（如 `"../"`）—— **永远不带盘符**，因此不受 git 如何渲染绝对路径影响 |
+| 两次 `/memory` 的 `Dir:` | **逐字相同** |
 
 `Dir:` 应形如：
 
@@ -185,9 +140,9 @@ pi -ne -e /c/pi-packages/pi-memory
 Dir: C:\Users\<user>\.pi\memory\git\github.com__yandy__pi-packages
 ```
 
-若两壳 `Dir:` 不同（例如 Git Bash 一侧出现 `C:\c\pi-packages`，或退化成 `local\` 分类），判定失败 —— 这正是本任务用 `--show-cdup` 替代 `--show-toplevel` 要消除的问题。
+若子目录启动时 `Dir:` 与仓库根启动不同（例如退化成 `local\` 分类，或路径里出现 `\c\`），判定失败 —— 这正是用相对路径的 `--show-cdup` 而不是解析 `--show-toplevel` 的绝对路径来求根要保证的事。
 
-**实测（两壳各贴 `--show-toplevel`、`--show-cdup`、`Dir:`）**：
+**实测（两处 `cdup` 输出 + 两次 `Dir:`）**：
 
 ```text
 
@@ -197,7 +152,7 @@ Dir: C:\Users\<user>\.pi\memory\git\github.com__yandy__pi-packages
 
 **在哪做**：第 1–3 条使用的 `C:\pi-packages` 就是 `https://github.com/yandy/pi-packages.git` 的克隆，无需再 clone 一份。
 
-**命令（Windows，PowerShell 或 git-bash 都行）**
+**命令（PowerShell）**
 
 ```powershell
 cd C:\pi-packages
@@ -384,14 +339,7 @@ cd C:\pi-packages\pi-memory
 npx vitest run tests/fs-retry.win32.test.ts --reporter=verbose
 ```
 
-**命令（git-bash）**
-
-```bash
-cd /c/pi-packages/pi-memory
-npx vitest run tests/fs-retry.win32.test.ts --reporter=verbose
-```
-
-**预期**：`Test Files 1 passed (1)`、`Tests 2 passed (2)`，两条**都真实执行**（不是 skip），verbose 输出里能看到：
+**预期**：`Test Files 1 passed (1)`、`Tests 2 passed (2)`，两条**都真实执行**（不是 skip）—— 无需额外命令，`--reporter=verbose` 下也应看到：
 
 ```text
 withFsRetry against a real Windows sharing violation > crosses a short exclusive hold
@@ -606,7 +554,7 @@ Get-ChildItem -Force $dir | Select-Object -ExpandProperty Name
 | 归类 | 判据 | 处置 |
 |---|---|---|
 | **实现缺陷** | 你的输入与清单一致、命令路径都走到了，结果仍与预期不符 | 回到对应 Task 修代码/测试；修完复跑该条与第 1 条 |
-| **环境差异** | 机器状态导致（未装 Git Bash / 没有非 NTFS 卷 / 本地化或版本差异 / 你改过 `memoryDir`、`lock.snapshotKeep`、模型配置） | 记录实际值与原因；必要时同步修正 README 或本清单的说明，不改代码 |
+| **环境差异** | 机器状态导致（未装 powershell（第 7 条需要它）/ 没有非 NTFS 卷 / 本地化或版本差异 / 你改过 `memoryDir`、`lock.snapshotKeep`、模型配置） | 记录实际值与原因；必要时同步修正 README 或本清单的说明，不改代码 |
 | **文档需要补充** | 本清单步骤缺前置条件、命令不能直接粘贴、措辞有歧义 | 直接改本文件并注明改动 |
 
 **收尾清理（可选）**：验收产生的普通文件可删（`C:\pi-accept`、`$env:USERPROFILE\pi-memory-probe`、记忆目录里的验收条目与 `.backups`、第 6 条卷上的目录与 `hl-src.txt`）。`.backups` 是回滚点，删前确认不需要恢复。第 6 条若临时改过全局 `memory.json`，记得改回并重启 pi。
