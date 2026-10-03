@@ -74,11 +74,16 @@ function countInjectedBlocks(content: string): number {
  * `dream` 没有独立开关 —— memory 系统启用（能走到状态分支）它就可用；另外两个直接反映各自的
  * `enabled`。模型是**生效值**（per-task 优先，其次 `defaults.model`），关闭的模块不显示模型：
  * 用户问「为什么没生效」时答案在开关上，而不在模型上。
+ *
+ * 导出供测试直接覆盖：正常会话里「模型解析不出」那条路径走不到（`session_start` 会先拦成
+ * misconfigured），只能直接调纯函数。
  */
-function moduleStatusLine(cfg: MemoryConfig): string {
+export function moduleStatusLine(cfg: MemoryConfig): string {
 	return (["dream", "extractMemories", "autoSurfacing"] as const)
 		.map((task) => {
-			const enabled = task === "dream" ? true : cfg[task].enabled;
+			// `?.` 是防御：`deepMerge` 会把用户写的 `"extractMemories": null` 原样带进来，
+			// 那时 `cfg[task].enabled` 会抛错，把整个 `/memory` 命令带崩。
+			const enabled = task === "dream" ? true : cfg[task]?.enabled;
 			if (!enabled) return `${task}=off`;
 			return `${task}=on(${taskModel(cfg, task) ?? "no model"})`;
 		})

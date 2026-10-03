@@ -123,7 +123,9 @@ export type ModelTask = "dream" | "extractMemories" | "autoSurfacing";
 
 /** 某任务的模型值：per-task 优先，其次共享的 defaults.model。`/memory` 的模块状态行也用它。 */
 export function taskModel(cfg: MemoryConfig, task: ModelTask): string | undefined {
-	return cfg[task].model ?? cfg.defaults?.model;
+	// `?.`：`deepMerge` 把用户写的 `"dream": null` 原样带进来 —— 那时应该报「没有模型」，
+	// 而不是抛 TypeError，把启动校验变成一句看不懂的初始化失败。
+	return cfg[task]?.model ?? cfg.defaults?.model;
 }
 
 /**

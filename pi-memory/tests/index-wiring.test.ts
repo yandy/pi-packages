@@ -107,8 +107,9 @@ vi.mock("../src/index-source", async (importOriginal) => {
 	return { ...actual, readRecordedMemoryIndex: readRecordedMemoryIndexMock };
 });
 
-import memoryFactory from "../index";
-import { loadConfig } from "../src/config";
+import memoryFactory, { moduleStatusLine } from "../index";
+import { DEFAULT_CONFIG, loadConfig, type MemoryConfig } from "../src/config";
+import { INDEX_TRUNCATION_MARKER } from "../src/inject";
 
 const LEGACY_TOPIC = [
 	"---",
@@ -314,6 +315,43 @@ describe("index wiring (integration)", () => {
 		expect(second.systemPromptOptions.sections["memory_index"]).not.toContain("changed");
 		// 走 sections 路径时不再返回 systemPrompt（避免全量替换从 position 0 打断缓存）
 		expect(result?.systemPrompt).toBeUndefined();
+	});
+
+	// 端到端钉住「session_start 用的是**注入**口径」：一行 swap 就会落在写入口径（200/25600）上，
+	// 那时 60 条索引会整份注入，下面的 50 条断言就会红。
+	it("injects only the newest 50 lines of a long index at session_start", async () => {
+		const entries = Array.from({ length: 60 }, (_, i) => `- [M${i}](m${i}.md) — d${i}`);
+		await writeFile(join(dir, "MEMORY.md"), `# Memory Index\n\n${entries.join("\n")}\n`, "utf8");
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		const event = sectionsEvent();
+		await handlers["before_agent_start"][0](event, uiCtx());
+		const section = event.systemPromptOptions.sections["memory_index"] as string;
+
+		expect(section.split("\n")[0]).toBe(INDEX_TRUNCATION_MARKER);
+		expect((section.match(/^- \[/gm) ?? []).length).toBe(50);
+		expect(section).toContain("- [M10](m10.md)");
+		expect(section).not.toContain("- [M9](m9.md)");
+	});
+
+	// compaction 是会话内唯一的刷新点：那里也必须用注入口径（同一个窗口核心）。
+	it("re-reads the same inject window at session_compact", async () => {
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		const entries = Array.from({ length: 60 }, (_, i) => `- [M${i}](m${i}.md) — d${i}`);
+		await writeFile(join(dir, "MEMORY.md"), `# Memory Index\n\n${entries.join("\n")}\n`, "utf8");
+		await handlers["session_compact"][0]({ type: "session_compact", reason: "manual" }, uiCtx());
+
+		const event = sectionsEvent();
+		await handlers["before_agent_start"][0](event, uiCtx());
+		const section = event.systemPromptOptions.sections["memory_index"] as string;
+
+		expect(section.split("\n")[0]).toBe(INDEX_TRUNCATION_MARKER);
+		expect((section.match(/^- \[/gm) ?? []).length).toBe(50);
 	});
 
 	// Review Focus #1：省略该键 = pi 生成 { memory_index: null } = 索引被静默删除。
@@ -1432,7 +1470,8 @@ describe("index wiring (integration)", () => {
 			undefined,
 		);
 		const index = await readFile(join(dir, "MEMORY.md"), "utf8");
-		await writeFile(join(dir, "MEMORY.md"), `# Memory Index\n\n${index}手写的一行\n`, "utf8");
+		const statusIndex = `# Memory Index\n\n${index}手写的一行\n`;
+		await writeFile(join(dir, "MEMORY.md"), statusIndex, "utf8");
 		await writeFile(
 			join(dir, ".lock"),
 			JSON.stringify({ pid: process.pid, hostname: "h", startedAt: "2026-10-02T01:02:03.000Z", op: "dream" }),
@@ -1448,8 +1487,9 @@ describe("index wiring (integration)", () => {
 		expect(lines[0]).toBe("Memory: enabled");
 		expect(lines[1]).toBe(`Dir: ${dir}`);
 		expect(lines[2]).toMatch(/^Index: 4\/200 lines, \d+\/25600 bytes, 2 unrecognized lines$/);
-		// 注入口径：`Inject:` 与真正注入共用同一个窗口核心（`indexInjectionCapacity`）。
-		expect(lines[3]).toMatch(/^Inject: \d+\/50 lines, \d+\/16384 bytes$/);
+		// 注入口径：`Inject:` 与真正注入共用同一个窗口核心（`indexInjectionCapacity`），
+		// 这里给精确值而不是 `\d+` —— 口径漂移（例如误用写入口径）必须在这里红。
+		expect(lines[3]).toBe(`Inject: 5/50 lines, ${Buffer.byteLength(statusIndex, "utf8")}/16384 bytes`);
 		expect(lines[4]).toBe("Entries: 1");
 		expect(lines[5]).toBe("Modules: dream=on(test/model) extractMemories=off autoSurfacing=on(test/model)");
 		expect(lines[6]).toBe("Last dream: 2026-10-01T00:00:00.000Z");
@@ -2265,5 +2305,53 @@ describe("index wiring (integration)", () => {
 		expect(await readdir(dir)).toContain("keep.md");
 		expect(notify).toHaveBeenCalledWith("Memory lock removed.", "info");
 		expect(tools).toHaveLength(0);
+	});
+});
+
+// `/memory` 的模块状态行是纯函数，直接单测：走 wiring 只能盖到「正常配置」那一种。
+describe("moduleStatusLine", () => {
+	const cfg = (over: Partial<MemoryConfig> = {}): MemoryConfig => ({ ...DEFAULT_CONFIG, ...over });
+
+	it("reports each module with its effective model", () => {
+		const config = cfg({
+			defaults: { model: "shared/model" },
+			extractMemories: { ...DEFAULT_CONFIG.extractMemories, enabled: true, model: "extract/model" },
+			autoSurfacing: { ...DEFAULT_CONFIG.autoSurfacing, enabled: false },
+		});
+
+		expect(moduleStatusLine(config)).toBe(
+			"dream=on(shared/model) extractMemories=on(extract/model) autoSurfacing=off",
+		);
+	});
+
+	// 正常会话跑不到这里（模型缺失会在 session_start 被拦成 misconfigured），
+	// 但状态行绝不能印出 `on(undefined)` —— 防御性回落要有测试钉住。
+	it("prints no model instead of on(undefined) when nothing resolves", () => {
+		expect(moduleStatusLine(cfg({ defaults: undefined }))).toBe(
+			"dream=on(no model) extractMemories=off autoSurfacing=on(no model)",
+		);
+	});
+
+	// `deepMerge` 对 `"extractMemories": null` 会真的写入 null：状态行不能因此抛错。
+	it("treats a null module config as off instead of throwing", () => {
+		const config = cfg({
+			defaults: { model: "shared/model" },
+			extractMemories: null as unknown as MemoryConfig["extractMemories"],
+		});
+
+		expect(moduleStatusLine(config)).toBe(
+			"dream=on(shared/model) extractMemories=off autoSurfacing=on(shared/model)",
+		);
+	});
+
+	it("treats a missing enabled flag as off", () => {
+		const config = cfg({
+			defaults: { model: "shared/model" },
+			extractMemories: { ...DEFAULT_CONFIG.extractMemories, enabled: undefined as unknown as boolean },
+		});
+
+		expect(moduleStatusLine(config)).toBe(
+			"dream=on(shared/model) extractMemories=off autoSurfacing=on(shared/model)",
+		);
 	});
 });

@@ -374,6 +374,27 @@ describe("model config", () => {
 			'no model for dream — set "dream.model" or "defaults.model" in memory.json',
 		);
 	});
+
+	// `deepMerge` 会把用户写的 `"dream": null` 原样带进来：不能抛 TypeError，而是退到 defaults.model。
+	it("degrades a module config set to null to defaults.model instead of throwing", () => {
+		const withDefaults = allOn({
+			defaults: { model: "test/shared", sessionPersistence: { enabled: false } },
+			dream: null as unknown as MemoryConfig["dream"],
+		});
+
+		expect(modelConfigErrors(withDefaults, () => true)).toEqual([]);
+		expect(requiredModel(withDefaults, "dream")).toBe("test/shared");
+
+		// 没有 defaults.model 时给出一条可读错误（而不是让 TypeError 变成「初始化失败」）。
+		const withoutDefaults = cfg({
+			dream: null as unknown as MemoryConfig["dream"],
+			autoSurfacing: { ...DEFAULT_CONFIG.autoSurfacing, enabled: false },
+		});
+
+		expect(modelConfigErrors(withoutDefaults, () => true)).toEqual([
+			'no model for dream — set "dream.model" or "defaults.model" in memory.json',
+		]);
+	});
 });
 
 describe("taskModel", () => {
