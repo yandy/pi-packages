@@ -3,10 +3,12 @@
 	"publishConfig": {
 		"access": "public"
 	},
-	"version": "1.1.2",
+	"version": "1.2.0",
 	"description": "pi coding-agent extension that runs every read/write/edit/bash op inside a per-session Docker container",
 	"license": "MIT",
-	"os": ["linux"],
+	"os": [
+		"linux"
+	],
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/yandy/pi-packages",
