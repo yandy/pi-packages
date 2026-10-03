@@ -4,6 +4,12 @@ A [pi](https://pi.dev/docs/latest/extensions) extension that runs the agent's
 `bash`, `read`, `write`, `edit` tools and the user's `!` bash inside a
 per-session Docker container, so coding side effects are sandboxed.
 
+> ## ⚠️ Breaking changes
+>
+> **In 1.2.0:**
+>
+> - **Linux only.** The published package now declares `"os": ["linux"]`, so `npm install` / `pi install` fail with `EBADPLATFORM` on macOS and Windows. See [Platform support](#platform-support).
+
 ## Platform support
 
 **Linux only.** The sandbox relies on Linux container semantics — container paths

@@ -2,6 +2,12 @@
 
 一个 [pi](https://pi.dev/docs/latest/extensions) 扩展，将 agent 的 `bash`、`read`、`write`、`edit` 工具以及用户的 `!` bash 运行在每会话独立的 Docker 容器中，从而隔离编程操作的副作用。
 
+> ## ⚠️ 破坏性变更
+>
+> **1.2.0：**
+>
+> - **仅支持 Linux。** 发布包现在声明 `"os": ["linux"]`，在 macOS 和 Windows 上 `npm install` / `pi install` 会以 `EBADPLATFORM` 拒绝安装。见[平台支持](#平台支持)。
+
 ## 平台支持
 
 **仅支持 Linux。** 沙箱依赖 Linux 容器语义 —— 容器内路径与宿主机路径一致、非 root 的 uid 1000、cgroup 资源限制 —— 因此只在 Linux 上受支持。
