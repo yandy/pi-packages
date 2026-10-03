@@ -1,10 +1,11 @@
-import { canonicalPath, type ConfinedSandboxMode } from "./policy";
+import { canonicalPath, type ConfinedSandboxMode, type SandboxMode } from "./policy";
 import {
 	bwrapProfileArgs,
 	LAUNCHER_BIN,
 	LAUNCHER_FAILURE_EXIT,
 	runnerInvocation,
 	selectRunner,
+	windowsAclAvailability,
 	type RunnerHooks,
 	type RunnerPolicy,
 	type SandboxEnforcement,
@@ -46,6 +47,9 @@ export const DENIAL_SIGNATURES = {
 	landlock: ["permission denied"],
 	seatbelt: ["operation not permitted"],
 	runnerCommand: ["read-only file system", "permission denied"],
+	// 移植契约（Ruling 6）：覆盖 cmd（Access is denied）、pwsh/.NET（Access to the path…）、
+	// Node EACCES/EPERM 与 git-bash（permission denied / operation not permitted）四种方言。
+	"windows-acl": ["access is denied", "access to the path", "permission denied", "operation not permitted"],
 } as const;
 
 export const RUNNER_FAILURE_RULES = {
@@ -56,7 +60,36 @@ export const RUNNER_FAILURE_RULES = {
 		informationalLines: [`${LAUNCHER_BIN}: partial enforcement (older Landlock ABI)`],
 	}],
 	seatbelt: [{ fatalSignatures: ["sandbox-exec: "] }],
-} as const satisfies Record<"bwrap" | "landlock" | "seatbelt", readonly RunnerFailureRule[]>;
+	// 移植契约（Ruling 7）：exit 127 门控 + runner 前缀签名，避免把受限命令自己打印的
+	// 同名字样误判为 runner 失败（命令确实跑过时绝不判 runner 失败）。
+	"windows-acl": [{ allowedExitCodes: [127], fatalSignatures: ["windows-acl-run: "] }],
+} as const satisfies Record<"bwrap" | "landlock" | "seatbelt" | "windows-acl", readonly RunnerFailureRule[]>;
+
+/** Windows 受限模式只支持 pwsh（Ruling 2）：bash 在任何受限模式下拒绝执行，绝不 spawn。 */
+export class UnsupportedWindowsShellError extends Error {
+	constructor(shell: string) {
+		super(
+			`[sandbox: ${shell} is not supported on Windows]\n` +
+			`pi-sandbox confines Windows commands through the powershell tool only; the command was NOT executed.\n` +
+			`Enable it in ~/.pi/agent/settings.json (requires pi >= 1.0.0):\n` +
+			`  { "defaultTools": ["-bash", "+powershell"] }\n` +
+			`Then retry with the powershell tool, or set mode "danger-full-access" explicitly to run unsandboxed.`,
+		);
+		this.name = "UnsupportedWindowsShellError";
+	}
+}
+
+/**
+ * Windows 受限模式只支持 pwsh（Ruling 2）：bash 在任何受限模式下拒绝执行，绝不 spawn。
+ * @param shell - 待执行的 shell 名（`"bash"` / `"powershell"`）。
+ * @param platform - 宿平台（注入点）。
+ * @param mode - 本次调用解析出的生效模式。
+ */
+export function assertShellAllowed(shell: string, platform: string, mode: SandboxMode): void {
+	if (platform === "win32" && shell === "bash" && mode !== "danger-full-access") {
+		throw new UnsupportedWindowsShellError(shell);
+	}
+}
 
 export interface ConfineOptions {
 	/** 预解析的 runner（测试注入 / 调用方缓存）；缺省时走 selectRunner。 */
@@ -90,8 +123,24 @@ export function confine(
 
 	const selected = opts.selected ?? selectRunner(opts.probeTimeoutMs ?? 5000, opts.hooks);
 	if (selected.runner === "unavailable") throw new SandboxUnavailableError(mode);
+
+	// win32 的可用性只解析一次并透传给 runnerInvocation（Task 9 约定）；
+	// 注入即权威：hook 存在时其返回值就是结论（含显式 undefined），绝不回退真实探测。
+	// 不可解析即 fail-closed 抛 SandboxUnavailableError，绝不构造跑不起来的 argv。
+	let availability: { node: string; runner: string } | undefined;
+	if (selected.runner === "windows-acl") {
+		const hooks = opts.hooks ?? {};
+		const injectedRung = hooks.windowsAclRung;
+		availability = injectedRung !== undefined ? injectedRung() : windowsAclAvailability(hooks);
+		if (availability === undefined) {
+			throw new SandboxUnavailableError(
+				mode,
+				"win32 runner is not resolvable (missing runner file, koffi, or a node executable)",
+			);
+		}
+	}
 	return {
-		argv: [...runnerInvocation(selected, policy, opts.hooks), "--", ...argv],
+		argv: [...runnerInvocation(selected, policy, opts.hooks, availability), "--", ...argv],
 		enforcement: selected.enforcement,
 		denialSignatures: DENIAL_SIGNATURES[selected.runner],
 		runnerFailureRules: RUNNER_FAILURE_RULES[selected.runner],
