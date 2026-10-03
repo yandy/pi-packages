@@ -67,7 +67,7 @@ function addCapabilityAce(path: string): void {
 		"$acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($sid, 'Modify', 'ContainerInherit, ObjectInherit', 'None', 'Allow'))",
 		`Set-Acl -LiteralPath ${literal} -AclObject $acl`,
 	].join("; ");
-	const result = shell(PS, ["-NoProfile", "-Command", command]);
+	const result = shell(PS, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command]);
 	expect(result.status, result.output).toBe(0);
 	expect(sddl(path)).toContain(CAPABILITY_SID);
 }
@@ -135,7 +135,7 @@ beforeEach(() => {
 });
 afterEach(() => {
 	// ACE 变更后的瞬态锁/继承传播会让删除短暂 EPERM；Node 仅在 recursive 下对 EPERM 重试。
-	rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+	rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 describe.skipIf(process.platform !== "win32")("diagnose-windows-sandbox-acl script", { timeout: 120_000 }, () => {
@@ -253,8 +253,10 @@ describe.skipIf(process.platform !== "win32")("diagnose-windows-sandbox-acl scri
 		// 并由 PowerShell 退出 1，而非脚本的 ArgumentException）——用 `-Command` + `-Path 'a','b'` 显式数组。
 		const restoreTwoPaths = shell(PS, [
 			"-NoProfile",
+			"-ExecutionPolicy",
+			"Bypass",
 			"-Command",
-			`& ${psLiteral(SCRIPT)} -Path ${psLiteral(target)},${psLiteral(join(target, "x"))} -AllowRoot ${psLiteral(scratch)} -Restore 'record.json'`,
+			`& ${psLiteral(SCRIPT)} -Path ${psLiteral(target)},${psLiteral(join(target, "x"))} -AllowRoot ${psLiteral(scratch)} -Restore 'record.json'; exit $LASTEXITCODE`,
 		]);
 		expect(restoreTwoPaths.status, restoreTwoPaths.output).toBe(2);
 		expect(restoreTwoPaths.output).toContain("exactly one -Path");
