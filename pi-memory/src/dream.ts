@@ -5,6 +5,7 @@ import { runHeadlessAgent } from "./agent-runner";
 import type { SessionPersistenceConfig, ThinkLevel } from "./config";
 import { BACKUP_DIR, type MemoryStore } from "./memory-store";
 import { createSnapshot } from "./snapshot";
+import { isReservedWindowsName } from "./windows-names";
 
 /** Build the dream consolidation task. dream 只有 `memory` 工具的 7 个 action，没有任何文件工具。 */
 export function buildDreamTask(maxLines: number): string {
@@ -72,14 +73,20 @@ export interface RunDreamOpts {
  * - `sessions/`（目录，`sessionPersistence.enabled` 时存在）跳过 —— 同理，而且它可能很大。
  *   `createSnapshot` 的 `cp` 遇到目录会抛 `ERR_FS_EISDIR`（非 ENOENT → fail-closed 上抛 → dream 直接失败）。
  * - `.lock` / `.dream-meta.json` 跳过（都是 dotfile）：锁记录与元数据不属于记忆内容。
+ * - win32：保留设备名文件（`con.md`…）跳过 —— 按名 `cp` 会命中设备（见下）。
  * - 其余全部 `*.md`（entry 文件 + `MEMORY.md`）都会被快照。
  */
-async function snapshotFiles(memoryDir: string): Promise<string[]> {
+async function snapshotFiles(memoryDir: string, platform: NodeJS.Platform = process.platform): Promise<string[]> {
 	const entries = await readdir(memoryDir, { withFileTypes: true }).catch(() => []);
-	return entries
-		.filter((entry) => entry.isFile() && !entry.name.startsWith("."))
-		.map((entry) => entry.name)
-		.sort();
+	return (
+		entries
+			.filter((entry) => entry.isFile() && !entry.name.startsWith("."))
+			// win32：保留设备名文件按名打开会命中设备（CON 等），`createSnapshot` 的 cp 会失败；
+			// dream 是 fail-closed 的，一次 cp 失败就打断整轮（与 `#entryFiles` 同一契约，spec §4.3）。
+			.filter((entry) => !(platform === "win32" && isReservedWindowsName(entry.name)))
+			.map((entry) => entry.name)
+			.sort()
+	);
 }
 
 /**
@@ -101,9 +108,10 @@ export async function runDream(opts: RunDreamOpts): Promise<string> {
 		}
 
 		// 进入时对整目录拍一次快照；这一轮里各原语的逐文件快照被 skipSnapshot 跳过（spec §6）。
-		const files = await snapshotFiles(opts.memoryDir);
+		const files = await snapshotFiles(opts.memoryDir, opts.store.cfg.platform);
 		await createSnapshot(join(opts.memoryDir, BACKUP_DIR), "dream", files, opts.memoryDir, {
 			keep: opts.store.cfg.lock.snapshotKeep,
+			platform: opts.store.cfg.platform,
 		});
 
 		return runHeadlessAgent({

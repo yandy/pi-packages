@@ -6,6 +6,11 @@ Aligned with Claude Code's auto memory mechanism: **one memory = one file**, a `
 
 > ## ⚠️ Breaking changes
 >
+> **In 2.5.0:**
+>
+> - **Windows directory names changed shape.** `local/<project>` keys now split on `\` as well as `/`, so a Windows project directory is one readable component (`C_3a__Users__you__proj`) instead of a nested tree (`C_3a/Users/you/proj`). Memories stored under the old nested layout are orphaned: run `/memory` inside the project to read the new `Dir:` path, then create that directory if it does not exist and move the old project directory's contents into it (in PowerShell: `New-Item -ItemType Directory -Force "<new dir>"` then `Move-Item "<old project dir>\*" "<new dir>"`); the empty intermediate directories left behind can be ignored. `git/<host>__<owner>__<repo>` names are unchanged on POSIX; on Windows they are unchanged too unless the key's first `.`-delimited label is a reserved device name, or the key contains a backslash, or it ends in a dot or a space — those few names are sanitised now (see [Windows](#windows)). POSIX output is byte-identical to before.
+> - **Entry files whose stem is a Windows reserved device name now get a `_` prefix** (`name: "CON"` → `_CON.md`) on every platform, so the name is safe in a shared `git/` directory. Only newly created files are affected — existing entries keep their file names.
+>
 > **In 2.4.0:**
 >
 > - **The package-level `enabled` switch is gone.** `memory.json` has no top-level `enabled` any more: a leftover key is ignored, and `{"enabled": false}` no longer disables anything — it used to skip model validation too, so a disabled config often had no model configured. Disable the extension the way you disable any pi package — by not loading it — see [Disabling the extension](#disabling-the-extension). `dream` is now a required task in every session.
@@ -161,7 +166,7 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `memoryDir` | `~/.pi/memory` | Root directory for all memory data |
+| `memoryDir` | `~/.pi/memory` | Root directory for all memory data. `~`, `~/` and (on Windows) `~\` are expanded; relative values are resolved against the working directory |
 | `memIndexMaxLines` | `200` | Write capacity: max non-empty lines in `MEMORY.md` (the `# Memory Index` header and hand-written headings count too, so this is not exactly the memory count) |
 | `memIndexMaxBytes` | `25600` | Write capacity: max bytes of `MEMORY.md` |
 | `memIndexInjectMaxLines` | `50` | Injection window: max lines of the index put into the `memory_index` section. The window keeps the **newest** lines and drops the **oldest** ones — the index is pure chronological order, so a smaller window never hides the memory you just wrote. **`0` (either key) injects no index at all** — the `memory_index` section stays empty |
@@ -272,7 +277,7 @@ It runs with the five main-agent actions (never `rename` / `rebuild_index`), no 
 | Level | Scope | Behaviour |
 |---|---|---|
 | In-process logical lock (per memory dir) | one primitive call; or a whole dream round | Waits up to `lock.timeoutMs`, then throws a readable error naming the directory. `extract` uses the non-waiting form and skips the turn |
-| Cross-process `.lock` | milliseconds, around the physical write | Acquired with `link` (atomic), **never reclaimed automatically**: no TTL, no heartbeat, no takeover |
+| Cross-process `.lock` | milliseconds per retried call around the physical write (a retry storm can hold it for a few seconds) | Acquired with `open(…, "wx")` (`O_CREAT|O_EXCL`) — the **create** is atomic on NTFS, ReFS, exFAT/FAT32 and in a network share's namespace, so the lock excludes processes on every machine using that share; in a sync-client folder it only excludes same-machine processes (see [Windows](#windows)). The holder record is written immediately after the file is created. **Never reclaimed automatically**: no TTL, no heartbeat, no takeover |
 
 A crash inside a write can therefore leave a `.lock` behind, and nothing will ever delete it for you — that is the deliberate price of a hard mutual-exclusion guarantee. The error names the pid, op and start time; `/memory unlock` is the one sanctioned way to clear it.
 
@@ -376,14 +381,25 @@ Directory names are derived as follows:
 - git repos whose remote is http(s), ssh (including scp-style `[user@]host:owner/repo`, where the user is optional) or `git://`, plus the `git+ssh://` / `git+https://` aliases → `git/<host>__<owner>__<repo>`; port, credentials, trailing `/` and `.git` are stripped and the host is lowercased
 - remote URLs are read from the raw git config (`remote.<name>.url`; `origin` first, then alphabetical, first usable URL wins), so `url.*.insteadOf` rewrites do not change the mapping
 - scheme forms apply WHATWG URL normalization (IDN hosts become punycode, percent-encoding and `.`/`..` folding apply, credentials/queries/fragments are dropped), while scp forms keep the path as written — equivalent remotes written differently can map to different directories
-- everything else — non-git directories, git repos without a remote, `file://` or local-path remotes → `local/<absolute-path>` (git repos use the repository root; a Windows-style drive-letter remote such as `C:/repos/foo.git` is treated as scp-style on POSIX, matching git)
+- everything else — non-git directories, git repos without a remote, `file://`, UNC (`\\server\share\repo.git`), relative and local-path remotes → `local/<absolute-path>` (git repos use the repository root). A Windows drive-letter remote (`Z:\repos\foo.git`) counts as a **local path on Windows**, matching how git treats it there; the same string on POSIX is scp syntax (the drive letter is a host) and still maps to a `git/` name, also matching git
 - `/` becomes `__`; characters that are not portable in file names (`<>:"|?*`, control characters) become `_XX` hex escapes
 - names longer than 120 UTF-8 bytes are truncated to 100 bytes on a code-point boundary plus a `__<hash8>` suffix
-- names target POSIX filesystems: a backslash is an ordinary character, and no Windows device-name or trailing-dot handling is applied
+- names are platform-aware: on Windows a backslash is a separator, and names avoid reserved device names and trailing dots/spaces; on POSIX a backslash stays an ordinary character and these Windows-only rules do not apply. The one rule applied everywhere is the `_` prefix for entry file stems that look like a device name (see [Windows](#windows))
 
 The mapping is not injective: underscores are kept as-is, so `/home/a__b` and `/home/a/b` both map to `home__a__b` (and share one memory directory). Changing or renaming a remote, adding a remote that sorts before the one currently in use, or moving a local directory changes the memory directory, orphaning the old one.
 
 **Older legacy layout:** versions before 1.x stored memory under `~/.pi/memory/<12-char-sha256>/`; those directories are no longer read or written. To migrate a project manually, compute the old hash with `printf '%s' "$(git rev-parse --show-toplevel)" | sha256sum | cut -c1-12` (use `$PWD` outside a git repo), then `mv` that directory to the new location (run `/memory` inside the project to see the new path) and split its topic files by hand (see [1.x data](#1x-data)).
+
+## Windows
+
+pi-memory runs natively on Windows — no WSL required.
+
+- **Directory names.** The name derived from a project key is always a single, legal Windows component: `\` counts as a separator (so `C:\Users\you\proj` → `C_3a__Users__you__proj`), a trailing dot or space is hex-escaped (`proj.` → `proj_2e`), and a name whose first `.`-delimited label is a reserved device name gets a `_` prefix (`nul` → `_nul`). Directory names are identical across platforms for an ordinary remote's `git/` key (`github.com__owner__repo`), so a shared `memoryDir` keeps working when the same repository is opened from Linux and Windows. Keys whose first label collides with a reserved device name (`aux.example.com/...`), that contain a backslash, or that end in a dot or a space can still differ between platforms.
+- **Repository root.** The root comes from `git rev-parse --show-toplevel`, so a repository subdirectory maps to the same memory directory as the repository root. Note the root is taken from git's output as-is: it must be a native Windows path, which Git for Windows prints (`C:/...`). A cygwin/MSYS build of `git` prints POSIX-style paths (`/cygdrive/c/...`), which would place the memory directory under a wrong prefix — put Git for Windows' `git.exe` first on `PATH` if you have several git builds installed.
+- **`memoryDir`.** `~`, `~/` and (on Windows) `~\` are expanded; relative values are resolved to absolute paths. Windows paths and UNC shares both work.
+- **Locking.** The cross-process lock is created with `open(…, "wx")` (`CREATE_NEW`). On a network share that primitive is atomic in the share's single namespace, so the lock excludes processes on every machine using that share — a `memoryDir` on a non-NTFS volume is supported. In a **sync-client folder** (OneDrive, Dropbox, …) there is no single namespace: each machine keeps its own copy, so the lock only excludes processes on the same machine — do not share one `memoryDir` between machines that way; use a network share when you need cross-machine exclusion. A transient `EPERM`/`EACCES`/`EBUSY` from an antivirus scanner, an editor or a file indexer is retried with a short backoff; a persistent failure still reports the original error.
+- **Line endings.** Every memory file pi-memory reads tolerates CRLF and lone CR (they are normalised to LF before parsing), and every write emits LF. A `MEMORY.md` or entry file re-saved by Notepad or another Windows editor therefore neither disappears from the index nor inflates the unrecognised-line count.
+- **Known limitation.** A file whose name is a reserved device name (for example `con.md`, created by hand or by an older version on another platform) is skipped on Windows instead of being read, because opening that name reaches the console device rather than the file. Rename it (using a `\\?\` path) or re-create the memory under a new name. While such a file exists, adding a memory whose name derives to it (`CON` now derives `_CON.md`) creates a second file and a second same-named index line; the next `rebuild_index` — which dream runs regularly — drops the stale line.
 
 ## Notifications
 

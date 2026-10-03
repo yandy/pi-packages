@@ -5,8 +5,10 @@ import { deriveDescription, type EntryType, parseEntryFile, serializeEntryFile }
 import { formatIndexLine, indexCapacity, parseEntryIndex, removeIndexLine, upsertIndexLine } from "./entry-index";
 import { entryFileName, resolveUniqueFileName } from "./filename";
 import { withLock } from "./fs-lock";
+import { withFsRetry } from "./fs-retry";
 import { isProcessLockActive, tryWithProcessLock, withProcessLock } from "./process-lock";
 import { createSnapshot } from "./snapshot";
+import { isReservedWindowsName } from "./windows-names";
 
 export const INDEX_FILE = "MEMORY.md";
 export const LOCK_FILE = ".lock";
@@ -63,6 +65,8 @@ export interface StoreConfig {
 	/** 跨进程 `.lock` 的等待上限。注意这里**没有 ttl** —— 锁只在毫秒级的物理写入期间持有，
 	 *  且永不自动回收（见 fs-lock.ts）；dream 的整轮互斥由 process-lock.ts 的进程内队列承担。 */
 	lock: { timeoutMs: number; snapshotKeep: number };
+	/** 命名/读取规则跟随的平台（默认 `process.platform`）。测试注入缝，生产不传。 */
+	platform?: NodeJS.Platform;
 }
 
 export interface EntrySummary {
@@ -109,11 +113,30 @@ function compareSummaries(a: EntrySummary, b: EntrySummary): number {
 export class MemoryStore {
 	readonly #cache = new Map<string, CacheRow>();
 
+	get #platform(): NodeJS.Platform {
+		return this.cfg.platform ?? process.platform;
+	}
+
+	/** 物理写入路径的统一重试入口（spec §4.5）：只包物理调用，不包逻辑。 */
+	#retry<T>(fn: () => Promise<T>): Promise<T> {
+		return withFsRetry(fn, { platform: this.#platform });
+	}
+
 	constructor(readonly cfg: StoreConfig) {}
 
+	/** 读取路径与 `#savingQueue` 的 `mkdir` **刻意不重试**（spec §4.5）：读失败不改变磁盘状态，
+	 *  目录创建失败会在获取锁阶段就干净地报错（无残留）；重试只会拖慢 fail-closed。 */
 	async #entryFiles(): Promise<string[]> {
 		const names = await readdir(this.cfg.memoryDir).catch(() => []);
-		return names.filter((n) => n.endsWith(".md") && n !== INDEX_FILE && !n.startsWith(".")).sort();
+		return (
+			names
+				.filter((n) => n.endsWith(".md") && n !== INDEX_FILE && !n.startsWith("."))
+				// win32：按名打开保留设备名文件会命中设备（CON 等），`readFile` 会阻塞在控制台而不是
+				// 返回内容。修复前的版本或外部工具可能留下过这种文件，这里把它从清单里剔除 ——
+				// 最坏表现是「该条记忆在本机不可见」，而不是卡住整个扫描（spec Ruling 5）。
+				.filter((n) => !(this.#platform === "win32" && isReservedWindowsName(n)))
+				.sort()
+		);
 	}
 
 	/** 已被占用的文件名：磁盘上的条目文件 + 索引文件本身。
@@ -214,6 +237,7 @@ export class MemoryStore {
 	async #snapshot(label: string, files: string[]): Promise<void> {
 		await createSnapshot(join(this.cfg.memoryDir, BACKUP_DIR), label, files, this.cfg.memoryDir, {
 			keep: this.cfg.lock.snapshotKeep,
+			platform: this.#platform,
 		});
 	}
 
@@ -353,23 +377,25 @@ export class MemoryStore {
 				const now = new Date();
 
 				await this.#maybeSnapshot(options, "write", [INDEX_FILE, file]);
-				await writeFile(
-					join(this.cfg.memoryDir, file),
-					serializeEntryFile(
-						{
-							name,
-							description,
-							type: input.type ?? existing?.type ?? "feedback",
-							created,
-							modified: now.toISOString(),
-						},
-						body,
+				await this.#retry(() =>
+					writeFile(
+						join(this.cfg.memoryDir, file),
+						serializeEntryFile(
+							{
+								name,
+								description,
+								type: input.type ?? existing?.type ?? "feedback",
+								created,
+								modified: now.toISOString(),
+							},
+							body,
+						),
+						"utf8",
 					),
-					"utf8",
 				);
 
 				const next = upsertIndexLine(await this.readIndex(), { name, file, description });
-				await writeFile(this.#indexPath(), next, "utf8");
+				await this.#retry(() => writeFile(this.#indexPath(), next, "utf8"));
 				this.#cache.delete(file);
 
 				return { file, capacityWarning: this.#capacityWarning(next) };
@@ -407,26 +433,28 @@ export class MemoryStore {
 				const file = name === current.name ? current.file : await this.#resolveTargetFile(name, current.file);
 
 				await this.#maybeSnapshot(options, "write", [INDEX_FILE, current.file, file]);
-				await writeFile(
-					join(this.cfg.memoryDir, file),
-					serializeEntryFile(
-						{
-							name,
-							description,
-							type: patch.type ?? current.type,
-							created: current.created,
-							modified: new Date().toISOString(),
-						},
-						body,
+				await this.#retry(() =>
+					writeFile(
+						join(this.cfg.memoryDir, file),
+						serializeEntryFile(
+							{
+								name,
+								description,
+								type: patch.type ?? current.type,
+								created: current.created,
+								modified: new Date().toISOString(),
+							},
+							body,
+						),
+						"utf8",
 					),
-					"utf8",
 				);
 				if (file !== current.file) {
 					// 大小写不敏感 / 做 Unicode 规范化的文件系统上，两个不同的字符串可能指向同一 inode；
 					// 那种情况下上面的 writeFile 已经写穿了原文件，再 unlink 会把刚写入的文件删掉。
 					const target = join(this.cfg.memoryDir, file);
 					const source = join(this.cfg.memoryDir, current.file);
-					if (!(await sameFile(target, source))) await unlinkStrict(source);
+					if (!(await sameFile(target, source))) await this.#retry(() => unlinkStrict(source));
 				}
 
 				const raw = await this.readIndex();
@@ -442,7 +470,7 @@ export class MemoryStore {
 					{ name, file, description },
 					line ? { atLineNo: line.lineNo } : undefined,
 				);
-				await writeFile(this.#indexPath(), next, "utf8");
+				await this.#retry(() => writeFile(this.#indexPath(), next, "utf8"));
 				this.#cache.delete(current.file);
 				this.#cache.delete(file);
 
@@ -456,8 +484,9 @@ export class MemoryStore {
 				if (!current) throw new Error(`Entry "${ref}" not found`);
 
 				await this.#maybeSnapshot(options, "write", [INDEX_FILE, current.file]);
-				await unlinkStrict(join(this.cfg.memoryDir, current.file));
-				await writeFile(this.#indexPath(), removeIndexLine(await this.readIndex(), current.file), "utf8");
+				await this.#retry(() => unlinkStrict(join(this.cfg.memoryDir, current.file)));
+				const next = removeIndexLine(await this.readIndex(), current.file);
+				await this.#retry(() => writeFile(this.#indexPath(), next, "utf8"));
 				this.#cache.delete(current.file);
 		});
 	}
@@ -483,7 +512,9 @@ export class MemoryStore {
 					...effectiveHeader,
 					...summaries.map((s) => formatIndexLine(s.name, s.file, s.description)),
 				];
-				await writeFile(this.#indexPath(), rebuilt.length === 0 ? "" : `${rebuilt.join("\n")}\n`, "utf8");
+				await this.#retry(() =>
+					writeFile(this.#indexPath(), rebuilt.length === 0 ? "" : `${rebuilt.join("\n")}\n`, "utf8"),
+				);
 				this.#cache.clear();
 
 				return { entries: summaries.length, headerLines: effectiveHeader.length };

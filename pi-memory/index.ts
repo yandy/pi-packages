@@ -7,6 +7,7 @@ import { runDream } from "./src/dream";
 import { indexCapacity, parseEntryIndex } from "./src/entry-index";
 import { runExtract } from "./src/extract";
 import { readLockStatus, type LockInfo } from "./src/fs-lock";
+import { withFsRetry } from "./src/fs-retry";
 import { readRecordedMemoryIndex } from "./src/index-source";
 import { applyIndexSection, buildIndexSection, buildInjection, indexInjectionCapacity, injectSurfacedContent, runSideQuery, scanEntries } from "./src/inject";
 import {
@@ -127,7 +128,10 @@ async function unlockMemory(memoryDir: string, ui: ExtensionUIContext): Promise<
 	const ok = await ui.confirm("Memory lock", question);
 	if (!ok) return;
 	try {
-		await unlink(lockPath);
+		// 恢复路径也要重试：用户正是因为一把可能被瞬时错误困住的锁才走到这里，而删除本身
+		// 同样会被杀软/索引器/同步客户端打断 —— 这里再报一次 EPERM 就是把用户困在原地。
+		// 幂等（删一个已不存在的文件走下面的 ENOENT 分支），重试无副作用。
+		await withFsRetry(() => unlink(lockPath));
 		ui.notify("Memory lock removed.", "info");
 	} catch (e) {
 		// confirm 到 unlink 之间锁自己消失了：那正是想要的结果
