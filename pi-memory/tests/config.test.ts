@@ -2,16 +2,16 @@ import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { DEFAULT_CONFIG, loadConfig, modelConfigErrors, requiredModel, requiredModels, type MemoryConfig } from "../src/config";
+import { DEFAULT_CONFIG, loadConfig, modelConfigErrors, requiredModel, requiredModels, taskModel, type MemoryConfig } from "../src/config";
 
 describe("DEFAULT_CONFIG", () => {
 	it("has expected defaults", () => {
 		expect(DEFAULT_CONFIG.enabled).toBe(true);
 		expect(DEFAULT_CONFIG.memIndexMaxLines).toBe(200);
 		expect(DEFAULT_CONFIG.memIndexMaxBytes).toBe(25600);
-		// D3：读写同口径
-		expect(DEFAULT_CONFIG.memIndexInjectMaxLines).toBe(200);
-		expect(DEFAULT_CONFIG.memIndexInjectMaxBytes).toBe(25600);
+		// 注入口径**独立于**写入口径（v2.3.0 起）：窗口只取索引最新的 50 行。
+		expect(DEFAULT_CONFIG.memIndexInjectMaxLines).toBe(50);
+		expect(DEFAULT_CONFIG.memIndexInjectMaxBytes).toBe(16384);
 		expect(DEFAULT_CONFIG.lock).toEqual({ timeoutMs: 5000, snapshotKeep: 5 });
 		// 模型没有默认值：必须由用户显式配置，否则启动即报错（设计 §2.1）
 		expect(DEFAULT_CONFIG.defaults).toEqual({ sessionPersistence: { enabled: false } });
@@ -25,11 +25,12 @@ describe("DEFAULT_CONFIG", () => {
 		expect(DEFAULT_CONFIG.extractMemories.maxAssistantChars).toBe(2000);
 	});
 
-	// D3 的实质：一个 entry 一行索引，注入预算必须与写入上限同量级，
-	// 否则写满 200 条时模型只看得到最旧的一批。
-	it("keeps the injection budget at the same scale as the write capacity (D3)", () => {
-		expect(DEFAULT_CONFIG.memIndexInjectMaxLines).toBe(DEFAULT_CONFIG.memIndexMaxLines);
-		expect(DEFAULT_CONFIG.memIndexInjectMaxBytes).toBe(DEFAULT_CONFIG.memIndexMaxBytes);
+	// v2.3.0 起读写**不再**同口径：注入窗口只取索引最新的 50 行（写入口径保持 200 行 / 25600 B，
+	// 窗口外的旧记忆仍可由 auto-surfacing / memory 工具检索）。这两条断言钉的是「窗口确实比写入
+	// 容量小」这件事本身 —— 任何一边被改回同值都会红。
+	it("keeps the injection window smaller than the write capacity", () => {
+		expect(DEFAULT_CONFIG.memIndexInjectMaxLines).toBeLessThan(DEFAULT_CONFIG.memIndexMaxLines);
+		expect(DEFAULT_CONFIG.memIndexInjectMaxBytes).toBeLessThan(DEFAULT_CONFIG.memIndexMaxBytes);
 	});
 });
 
@@ -372,5 +373,15 @@ describe("model config", () => {
 		expect(() => requiredModel(allOn(), "dream")).toThrow(
 			'no model for dream — set "dream.model" or "defaults.model" in memory.json',
 		);
+	});
+});
+
+describe("taskModel", () => {
+	it("prefers the per-task model and falls back to defaults.model", () => {
+		const shared = { ...DEFAULT_CONFIG, defaults: { model: "shared/model" } };
+
+		expect(taskModel(shared, "dream")).toBe("shared/model");
+		expect(taskModel({ ...shared, dream: { ...shared.dream, model: "own/model" } }, "dream")).toBe("own/model");
+		expect(taskModel({ ...shared, defaults: undefined }, "autoSurfacing")).toBeUndefined();
 	});
 });

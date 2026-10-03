@@ -9,9 +9,9 @@ const { mockConfigValue, dirRef, dirOverrideRef } = vi.hoisted(() => ({
 		memoryDir: "",
 		memIndexMaxLines: 200,
 		memIndexMaxBytes: 25600,
-		// 显式注入的 fixture 不该对 DEFAULT_CONFIG 撒谎（D3：注入预算与写入口径同值）。
-		memIndexInjectMaxLines: 200,
-		memIndexInjectMaxBytes: 25600,
+		// 显式注入的 fixture 不该对 DEFAULT_CONFIG 撒谎：注入口径默认是「最新的 50 行 / 16 KiB」。
+		memIndexInjectMaxLines: 50,
+		memIndexInjectMaxBytes: 16384,
 		lock: { timeoutMs: 5000, snapshotKeep: 5 },
 		defaults: { model: "test/model", sessionPersistence: { enabled: false } },
 		dream: { nudgeAfterSessions: 5, nudgeAfterHours: 24, thinkLevel: "high" as const },
