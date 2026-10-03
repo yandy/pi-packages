@@ -65,7 +65,7 @@ pi-memory 之前只在 Linux/macOS 上验证过：`paths.ts` 明确声明命名�
 
 - **Ruling 1**：`projectDirName(key, { platform })` 的 win32 分支必须保证输出满足三条不变量：① 不含 `/` 与 `\`（单分量）；② 不以 `.` 或空格结尾；③ 不是保留设备名（按「第一个 `.` 之前的部分」判定）。`local/` 与 `git/` 共用同一套保证。
 - **Ruling 2**：`escapeSegment` 的既有 `_XX` 十六进制转义词汇表扩展用于新场景，不引入第二套转义风格；`\` 通过「作为分隔符参与分段」中和，而不是转义成字面量。
-- **Ruling 3**：`--show-cdup` 是 toplevel 的**唯一**来源。不做「先试 `--show-toplevel` 再启发式归一 MSYS 路径」的双路径。裸仓库的「有无工作树」判定用 `--is-bare-repository`，它不是根的来源，不受本条约束。
+- **Ruling 3**：`--show-cdup` 是 toplevel 的**唯一**来源。不做「先试 `--show-toplevel` 再启发式归一 MSYS 路径」的双路径。「有无工作树」的判定用 `--is-inside-work-tree`（裸仓库、`.git` 内部、`GIT_DIR` 无工作树都返回 `false`），它不是根的来源，不受本条约束。
 - **Ruling 4**：`~\` 展开只在 win32 生效（POSIX 上 `~\foo` 是合法文件名，不得改写）。
 - **Ruling 5**：`entryFileName` 对保留设备名的变换**不带平台条件**（POSIX 也生效）；win32 上 `#entryFiles` 额外跳过保留设备名文件（防历史/外部创建的文件命中 CON 设备导致读取阻塞）。
 - **Ruling 6**：锁的四态读取（`absent` / `empty` / `unreadable` / `held`）中，**只有 acquire 路径**区分 `empty`（等待）与 `unreadable`（立即报遗弃）；`readLockStatus` 对外仍只暴露三态（`empty` 归入 `unreadable`），`/memory` 输出与 `/memory unlock` 契约不变。
@@ -129,8 +129,8 @@ POSIX 侧示例保持不变：`/home/yandy/proj` → `home__yandy__proj`，`/hom
 ### 4.2 目录身份（`src/paths.ts`、`src/config.ts`）
 
 - `gitToplevel(cwd)`：`git rev-parse --show-cdup` → `resolve(cwd, cdup)`（仓库根处输出为空行 → `resolve(cwd)`）。
-  - **裸仓库**：`--show-cdup` 在裸仓库里以 **exit 0 + 0 字节输出**返回（实测 git 2.55，不是非零退出），因此必须**显式**用 `git rev-parse --is-bare-repository` 判裸并返回 `null`：否则裸仓库 + remote 会从既有的 `local/<绝对路径>` 变成 `git/<remote 身份>`，构成一处未文档化的、跨平台的记忆目录变更。非仓库时 git 以非零退出 → 既有 catch 返回 `null`。
-  - 为什么不带 `--show-toplevel` 兜底：Ruling 3。`--show-cdup` 自 git 1.5.4 起存在，无版本风险；裸仓库的存在性判定不是「根的来源」，不受 Ruling 3 约束。
+  - **「没有工作树」必须显式判掉**：`--show-cdup` 在裸仓库、以及 cwd 位于 `.git` 内部（含 `.git/objects`）时以 **exit 0 + 0 字节输出**返回（实测 git 2.55，不是非零退出），因此「空输出」不等于「在仓库根」。用 `git rev-parse --is-inside-work-tree` 判：`true` → 在仓库根，`resolve(cwd)`；`false`（裸仓库 / `.git` 内部 / `GIT_DIR` 指向工作树之外）→ 返回 `null`，让 `projectIdentity` 退回 `local/<绝对路径>`，与本次改动前（`--show-toplevel` 在这些场景 exit 128）逐字节一致。非仓库时两条命令都以非零退出 → 既有 catch 返回 `null`。
+  - 为什么不带 `--show-toplevel` 兜底：Ruling 3。`--show-cdup` 自 git 1.5.4 起存在，无版本风险；「有无工作树」的判定不是「根的来源」，不受 Ruling 3 约束（`--is-inside-work-tree` 同样自 1.5.x 起存在）。
 - `expandTilde(p, platform = process.platform)`：`~` → `homedir()`；`~/` 前缀（两端都认）；`~\` 前缀**仅 win32**。
 - `resolveMemoryDir` 兜底（D4）：
   ```ts
