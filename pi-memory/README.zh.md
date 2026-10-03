@@ -6,6 +6,11 @@ pi coding agent 的文件系统持久记忆层。把项目知识（事实、偏�
 
 > ## ⚠️ 破坏性变更
 >
+> **2.4.0：**
+>
+> - **包级开关 `enabled` 已删除。** `memory.json` 不再有顶层 `enabled`：残留的键会被忽略，`{"enabled": false}` 不再能禁用任何东西 —— 它以前还会跳过模型校验，所以被禁用的配置往往也没配模型。要禁用整个扩展，请像禁用其他 pi package 一样「不加载它」，见[禁用本扩展](#禁用本扩展)。`dream` 现在是每个会话的必需任务。
+> - **`/memory` 不再输出 `Memory: enabled|disabled` 行。** 健康态状态块为 7 行、以 `Dir:` 起头；旧的「禁用」态已不存在，只剩**健康**与**配置错误**两态。模块级开关（`autoSurfacing.enabled` / `extractMemories.enabled`）不变。
+>
 > **2.3.0：**
 >
 > - **注入的索引窗口改为「最新的 50 行 / 16 KiB」。** `memIndexInjectMaxLines` 200 → 50、`memIndexInjectMaxBytes` 25600 → 16384。写入口径不变（200 行 / 25600 字节），因此比「最新 50 行」更旧的记忆不再进 system prompt —— 它们仍可由 auto-surfacing 与 `memory` 工具检索。已经显式配置 `memIndexInjectMax*` 的用户不受影响。

@@ -6,6 +6,11 @@ Aligned with Claude Code's auto memory mechanism: **one memory = one file**, a `
 
 > ## ⚠️ Breaking changes
 >
+> **In 2.4.0:**
+>
+> - **The package-level `enabled` switch is gone.** `memory.json` has no top-level `enabled` any more: a leftover key is ignored, and `{"enabled": false}` no longer disables anything — it used to skip model validation too, so a disabled config often had no model configured. Disable the extension the way you disable any pi package — by not loading it — see [Disabling the extension](#disabling-the-extension). `dream` is now a required task in every session.
+> - **`/memory` no longer prints a `Memory: enabled|disabled` line.** The healthy status block is 7 lines starting with `Dir:`, and the old disabled state no longer exists — only *healthy* and *misconfigured* remain. Module switches (`autoSurfacing.enabled`, `extractMemories.enabled`) are unchanged.
+>
 > **In 2.3.0:**
 >
 > - **The injected index window is now the newest 50 lines / 16 KiB.** `memIndexInjectMaxLines` 200 → 50 and `memIndexInjectMaxBytes` 25600 → 16384. The write capacity is unchanged (200 lines / 25600 bytes), so memories older than the newest 50 index lines no longer reach the system prompt — they stay reachable through auto-surfacing and the `memory` tool. Configs that already set `memIndexInjectMax*` are unaffected.
