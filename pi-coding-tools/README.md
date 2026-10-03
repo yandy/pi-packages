@@ -2,6 +2,14 @@
 
 Pi package providing AST/LSP code-intelligence tools for pi.
 
+> ## ⚠️ Breaking changes
+>
+> **In 0.6.0 (unreleased):**
+>
+> - **Built-in `ls`/`find`/`grep` are no longer activated.** This package now only provides the five AST/LSP tools below. pi's own default tool set is just `read`/`bash`/`edit`/`write`, so upgrading silently drops `ls`/`find`/`grep`.
+> - **Re-enable them yourself** in user (`~/.pi/agent/settings.json`) or project (`.pi/settings.json`) settings: `{ "defaultTools": ["+ls", "+find", "+grep"] }`. The `+name` form adds to the inherited default set instead of replacing it.
+> - **Legacy `ls`/`find`/`grep` keys in `coding-tools.json` are silently ignored** — no error, no effect.
+
 ## AST/LSP 代码理解工具
 
 新增 5 个 token-efficient 工具，让 LLM 用最少 token 理解代码库：
@@ -39,6 +47,21 @@ pi install npm:@yandy0725/pi-coding-tools
 ## Configuration
 
 Configuration files control which of the five tools are enabled. All default to `true`.
+
+Full shape:
+
+```jsonc
+{
+  "ast_grep_search": true,
+  "ast_grep_replace": true,
+  "lsp_symbols": true,
+  "lsp_hover": true,
+  "lsp_navigate": true,
+  "lsp": { "disabled": false, "servers": { "clangd": { "disabled": true } } }
+}
+```
+
+Per-server overrides also accept `command` (string array, e.g. `["clangd", "--background-index"]`) and `env` (string map).
 
 ### Global config
 
