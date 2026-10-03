@@ -1,5 +1,5 @@
 // pi-sandbox/tests/win32-ffi.test.ts
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import * as ffi from "../src/win32/ffi.js";
 
 // 内存与指针操作走真实 koffi（跨平台可用）；只有 Win32 绑定表是 win32 专属。
@@ -17,7 +17,7 @@ describe("win32 ffi helpers", () => {
 		expect(ffi.decodePtr(slot)).toBeNull();
 	});
 
-	it("round-trips a uint32 slot through the injected types", () => {
+	it("round-trips a uint32 slot", () => {
 		const slot = ffi.allocUint32();
 		ffi.encodeUint32(slot, 127);
 		expect(ffi.decodeUint32At(slot, 0)).toBe(127);
@@ -65,6 +65,17 @@ describe("win32 ffi helpers", () => {
 			},
 		};
 		expect(ffi.getTempPath(api as never)).toBe("C:\\Users\\alice\\AppData\\Local\\Temp\\");
+	});
+
+	it("reports the system text when the temp path buffer is too small", () => {
+		const api = {
+			getLastError: () => 0,
+			formatMessage: () => "The data area passed to a system call is too small.",
+			getTempPathW: (_length: number, _buffer: Buffer) => 4000,
+		};
+		expect(() => ffi.getTempPath(api as never)).toThrowError(
+			/Win32 GetTempPathW failed \(122\): The data area passed to a system call is too small\. \[required 4000 chars exceed the 261-char buffer; nothing was written\]/,
+		);
 	});
 
 	it("refuses to load the Win32 binding table outside Windows", () => {

@@ -488,7 +488,8 @@ export function getTempPath(api) {
 	const length = api.getTempPathW(buffer.length / 2, buffer);
 	if (length === 0) throwLastError(api, "GetTempPathW");
 	if (length > buffer.length / 2) {
-		throw new Win32Error(
+		throwWin32(
+			api,
 			"GetTempPathW",
 			abi.ERROR_INSUFFICIENT_BUFFER,
 			`required ${length} chars exceed the ${buffer.length / 2}-char buffer; nothing was written`,
