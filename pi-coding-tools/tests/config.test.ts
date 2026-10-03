@@ -1,9 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const baseTrue = {
-	ls: true,
-	find: true,
-	grep: true,
 	ast_grep_search: true,
 	ast_grep_replace: true,
 	lsp_symbols: true,
@@ -26,6 +23,22 @@ describe("loadConfig", () => {
 		expect(cfg).toEqual(baseTrue);
 	});
 
+	it("ignores legacy ls/find/grep keys", async () => {
+		vi.doMock("@earendil-works/pi-coding-agent", () => ({
+			getAgentDir: () => "/nonexistent-agent-dir/agent",
+			CONFIG_DIR_NAME: ".pi",
+		}));
+		vi.doMock("node:fs", () => ({
+			readFileSync: (p: string) => {
+				if (p.endsWith(".pi/coding-tools.json")) return JSON.stringify({ ls: false, find: false, grep: false });
+				throw new Error("not found");
+			},
+		}));
+		const { loadConfig } = await import("../src/config");
+		const cfg = loadConfig("/proj");
+		expect(cfg).toEqual(baseTrue);
+	});
+
 	it("merges global then project (project wins)", async () => {
 		vi.doMock("@earendil-works/pi-coding-agent", () => ({
 			getAgentDir: () => "/nonexistent-agent-dir/agent",
@@ -33,7 +46,7 @@ describe("loadConfig", () => {
 		}));
 		vi.doMock("node:fs", () => ({
 			readFileSync: (p: string) => {
-				if (p.endsWith("agent/coding-tools.json")) return JSON.stringify({ lsp_hover: false, grep: false });
+				if (p.endsWith("agent/coding-tools.json")) return JSON.stringify({ lsp_hover: false, lsp_symbols: false });
 				if (p.endsWith(".pi/coding-tools.json")) return JSON.stringify({ lsp_hover: true });
 				throw new Error("not found");
 			},
@@ -41,7 +54,7 @@ describe("loadConfig", () => {
 		const { loadConfig } = await import("../src/config");
 		const cfg = loadConfig("/proj");
 		expect(cfg.lsp_hover).toBe(true); // project overrides global
-		expect(cfg.grep).toBe(false); // global only, not overridden by project
+		expect(cfg.lsp_symbols).toBe(false); // global only, not overridden by project
 	});
 
 	it("parses lsp block with disabled + servers", async () => {

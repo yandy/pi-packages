@@ -14,9 +14,6 @@ export interface LspConfig {
 }
 
 export interface CodingToolsConfig {
-	ls: boolean;
-	find: boolean;
-	grep: boolean;
 	ast_grep_search: boolean;
 	ast_grep_replace: boolean;
 	lsp_symbols: boolean;
@@ -26,9 +23,6 @@ export interface CodingToolsConfig {
 }
 
 const DEFAULT_CONFIG: CodingToolsConfig = {
-	ls: true,
-	find: true,
-	grep: true,
 	ast_grep_search: true,
 	ast_grep_replace: true,
 	lsp_symbols: true,
@@ -56,9 +50,6 @@ export function loadConfig(cwd: string): CodingToolsConfig {
 	const projectConfig = readJsonFile(resolve(cwd, CONFIG_DIR_NAME, "coding-tools.json")) || {};
 
 	cachedConfig = {
-		ls: projectConfig.ls ?? globalConfig.ls ?? DEFAULT_CONFIG.ls,
-		find: projectConfig.find ?? globalConfig.find ?? DEFAULT_CONFIG.find,
-		grep: projectConfig.grep ?? globalConfig.grep ?? DEFAULT_CONFIG.grep,
 		ast_grep_search: projectConfig.ast_grep_search ?? globalConfig.ast_grep_search ?? DEFAULT_CONFIG.ast_grep_search,
 		ast_grep_replace: projectConfig.ast_grep_replace ?? globalConfig.ast_grep_replace ?? DEFAULT_CONFIG.ast_grep_replace,
 		lsp_symbols: projectConfig.lsp_symbols ?? globalConfig.lsp_symbols ?? DEFAULT_CONFIG.lsp_symbols,
