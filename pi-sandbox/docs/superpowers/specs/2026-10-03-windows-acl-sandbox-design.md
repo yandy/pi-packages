@@ -58,7 +58,7 @@ D3 的拒绝指引文案必须含这段（用户指定）：
 - **Ruling 6**：win32 enforcement 恒为 `partial`；runner 失败规则 = `{allowedExitCodes:[127], fatalSignatures:["windows-acl-run: "]}`。
 - **Ruling 7**：拒绝方言 = `access is denied` / `access to the path` / `permission denied` / `operation not permitted`（大小写不敏感子串）。
 - **Ruling 8**：win32 且 `pi.getActiveTools()` 不含 `powershell` 时，激活期提示一次（有 UI 走 `ctx.ui.notify`，无 UI 写 stderr），`/permission` 状态行显示 `shell: powershell only (not activated)`。
-- **Ruling 9**：诊断技能**只在 Windows 上加载**——由扩展在 `resources_discover` 事件里按平台返回 `skillPaths`（非 win32 返回空，即零目录条目），**不用**静态 `pi.skills` 清单声明。pi 从磁盘加载包，因此**不做** dsh 的 ASAR/SEA 临时提取，脚本按 skill 目录相对路径引用。技能场景本身需**不受限调用者**（修改安全描述符），靠已批准的 `danger-full-access` 承担。
+- **Ruling 9**：诊断技能**只在 Windows 上加载**——由扩展在 `resources_discover` 事件里按平台返回 `skillPaths`（非 win32 返回空，即零目录条目），**不用**静态 `pi.skills` 清单声明。handler **只允许追加**（返回本技能路径，或空数组表示“什么也不加”），**绝不返回"完整集合"**：pi 侧是合并语义（`mergePaths(lastSkillPaths, …)`，已核实）。pi 从磁盘加载包，因此**不做** dsh 的 ASAR/SEA 临时提取，脚本按 skill 目录相对路径引用。技能场景本身需**不受限调用者**（修改安全描述符），靠已批准的 `danger-full-access` 承担。
 - **Ruling 10**：任何 Win32 失败都不得 spawn 未受限子进程；错误必须携带 API 名 + 精确 win32 码 + 系统文本 + 上下文。
 
 ## 3. 方案选择（被否决的路线）
@@ -203,6 +203,18 @@ pi-sandbox/skills/diagnose-windows-sandbox-acl/
 - 路径以**扩展文件所在目录**（包根）为基准解析（pi 的 `buildExtensionResourcePaths` 用 `dirname(extensionPath)` 作 baseDir，与 `pi.skills: ["./resources/skills"]` 的书写形式一致）。该解析行为列进真机验收清单；若相对路径在真机上未生效，回退为 `fileURLToPath(new URL("./skills/diagnose-windows-sandbox-acl", import.meta.url))` 的绝对路径。
 - handler 抛错会被 pi 捕获为扩展错误（fail-safe），不会阻断启动；但技能缺失会直接体现在真机验收的目录断言里。
 - `files` 补 `skills/`（不改 `pi` manifest）。
+
+#### 选用 `resources_discover` 的依据与风险（已核实，不得擅自改为静态声明）
+
+| 问题 | 结论 | 证据 |
+|---|---|---|
+| 会不会覆盖掉其他技能？ | **纯追加，不覆盖**：`extendResources` 做 `lastSkillPaths = mergePaths(lastSkillPaths, 新路径)`（与已发现集合取并集），外层还有 `if (skillPaths.length > 0)` 短路——返回 `[]` 时连碰都不碰既有集合；多个扩展返回的路径全部收集后追加 | `pi-coding-agent/dist/core/resource-loader.js:331`、`dist/core/extensions/runner.js` `emitResourcesDiscover` |
+| 未来 pi 不再发该事件会怎样？ | **安全降级**：handler 按事件名存入 `extension.handlers` Map，宿主不发就是永不触发——不报错、不警告、不影响扩展加载 | `dist/core/extensions/loader.js:216-220`、`runner.js:87-89` `snapshotEventHandlers` |
+| 它是公开 API 还是内部实现？ | **公开类型面、但文档零覆盖**：`on(event: "resources_discover", handler)` 是 `ExtensionAPI` 上的类型化重载，`ResourcesDiscoverEvent/Result` 由包根导出且属于公开的 `ExtensionEvent` 联合；但 `pi` 的 `docs/` 全库零命中 | `dist/core/extensions/types.d.ts:1145`、`dist/index.d.ts` 导出面 |
+| 文档推荐的做法是什么？ | **manifest `pi.skills`**（或“无 manifest 时按约定目录自动发现 `skills/`”）。本仓现成先例 **pi-ask-user**（扩展包 + 技能）用的就是静态声明——但它在**所有平台**都加载 | `pi` `docs/packages.md`、`docs/skills.md`；`pi-ask-user/package.json` → `{"extensions":["./index.ts"],"skills":["./skills"]}` |
+
+- 非目标说明：`compatibility` frontmatter 字段（Agent Skills 的“环境要求”）**pi 不消费**（`skills.js`/`resource-loader.js` 零命中），所以“用 frontmatter 声明平台”这条不存在；pi 也没有任何 per-platform 技能门控机制。
+- **回退方案（仅当未来 pi 移除该事件时启用）**：改为静态 manifest 声明，并接受“非 Windows 平台多一条用不上的目录条目”；该条目成本在 README 的 Windows 小节说明。真机验收清单里的“技能出现在目录中”断言是发现失效的手段。
 
 ## 5. 语义矩阵
 
