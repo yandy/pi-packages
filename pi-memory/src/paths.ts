@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { join, resolve } from "node:path";
+import { join, posix, resolve, win32 } from "node:path";
 import { promisify } from "node:util";
+import { windowsSafeName } from "./windows-names";
 
 const execFileP = promisify(execFile);
 const GIT_TIMEOUT_MS = 3000;
@@ -38,24 +39,41 @@ function truncateToBytes(input: string, maxBytes: number): string {
 	return kept;
 }
 
+export interface NamingOptions {
+	/** 命名规则跟随的平台（默认 `process.platform`）。win32 上 `\` 作为分隔符参与分段。 */
+	platform?: NodeJS.Platform;
+}
+
+// win32 上 `\` 也是分隔符 —— 它必须参与分段，而不是被转义成字面量：转义会让整个名字在
+// `join(memoryDir, …)` 时仍被拆成多级目录（`local/C_3a/Users/...`），而畸形 key
+// （`host/a\..\..\..\etc`）里的 `..` 段还能让目录逃出 memoryDir（spec §1.2 P1/P7）。
+const PATH_SEPARATORS = /[/\\]/;
+const POSIX_SEPARATORS = /\//;
+
 /**
  * Encode a project key into a single, human-readable directory name.
- * `host/repo/path` → `host__repo__path`; `/abs/path` → `abs__path`.
- * Naming targets POSIX filesystems: `\` is an ordinary character, without
- * Windows device-name or trailing-dot handling.
+ * `host/repo/path` → `host__repo__path`; `/abs/path` → `abs__path`。
+ *
+ * 平台差异（spec Ruling 1/D2）：win32 上按 `/` 与 `\` 双分隔符分段，并保证输出满足三条
+ * 不变量 —— 不含分隔符、不以 `.`/空格结尾、不是保留设备名；POSIX 上 `\` 仍是普通字符，
+ * 输出与 win32 支持引入前逐字节一致。
  */
-export function projectDirName(key: string): string {
+export function projectDirName(key: string, options?: NamingOptions): string {
+	const platform = options?.platform ?? process.platform;
+	const separator = platform === "win32" ? PATH_SEPARATORS : POSIX_SEPARATORS;
 	const segments = key
-		.split("/")
+		.split(separator)
 		.filter((segment) => segment !== "" && segment !== "." && segment !== "..")
 		.map(escapeSegment);
 	if (segments.length === 0) return "root";
 	const joined = segments.join("__");
 	// Filesystems cap one name at 255 bytes: count bytes so multi-byte names
 	// (CJK, emoji) cannot exceed the limit, and cut on code point boundaries.
-	if (Buffer.byteLength(joined, "utf8") <= DIR_NAME_MAX_BYTES) return joined;
-	const suffix = createHash("sha256").update(key).digest("hex").slice(0, HASH_LENGTH);
-	return `${truncateToBytes(joined, DIR_NAME_KEEP_BYTES)}__${suffix}`;
+	const name =
+		Buffer.byteLength(joined, "utf8") <= DIR_NAME_MAX_BYTES
+			? joined
+			: `${truncateToBytes(joined, DIR_NAME_KEEP_BYTES)}__${createHash("sha256").update(key).digest("hex").slice(0, HASH_LENGTH)}`;
+	return platform === "win32" ? windowsSafeName(name) : name;
 }
 
 export type ProjectKind = "git" | "local";
@@ -171,7 +189,32 @@ export async function projectIdentity(cwd: string): Promise<ProjectIdentity> {
 	return { kind: "local", key: resolve(toplevel) };
 }
 
+type PathApi = typeof import("node:path");
+
+/**
+ * 断言 `dir` 确实是 `base` 之内的一层（spec §4.2 / D4）。
+ *
+ * 派生名一旦含有分隔符，`join` 就会把它拆成多级路径 —— 畸形 remote（key 里带 `\..\..`）
+ * 能让目录逃出 `memoryDir`。fail-closed：越界即抛错，由 session_start 转成配置错误态，
+ * 而不是悄悄写到别的地方。
+ *
+ * 导出仅为直接单测：POSIX 命名下 `projectDirName` 不可能产出分隔符，公开 API 走不到这条分支。
+ * `platform` 决定用哪套 `path` 语义（win32 的 `relative` 大小写不敏感、认 `\` 与盘符）。
+ */
+export function assertInsideRoot(base: string, dir: string, platform: NodeJS.Platform = process.platform): void {
+	const api: PathApi = platform === "win32" ? win32 : posix;
+	const rel = api.relative(base, dir);
+	if (rel === "" || rel.startsWith("..") || api.isAbsolute(rel)) {
+		throw new Error(`Refusing to use memory directory ${dir}: it escapes ${base}`);
+	}
+}
+
 export async function resolveMemoryDir(config: { memoryDir: string }, cwd: string): Promise<string> {
 	const { kind, key } = await projectIdentity(cwd);
-	return join(config.memoryDir, kind, projectDirName(key));
+	// 相对路径配置（如 `"./memory"`）固化成绝对路径：逻辑锁的 key 用这个字符串，
+	// 同一目录的不同写法不该得到两把锁（见 `memory-store.ts` 的 `#logicalKey`）。
+	const base = resolve(config.memoryDir);
+	const dir = join(base, kind, projectDirName(key));
+	assertInsideRoot(base, dir);
+	return dir;
 }

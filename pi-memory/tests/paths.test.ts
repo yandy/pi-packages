@@ -1,15 +1,17 @@
 import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve, win32 } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	assertInsideRoot,
 	normalizeRemoteUrl,
 	projectDirName,
 	projectIdentity,
 	resolveMemoryDir,
 } from "../src/paths";
+import { isReservedWindowsName } from "../src/windows-names";
 
 const execFileP = promisify(execFile);
 
@@ -145,6 +147,72 @@ describe("projectDirName", () => {
 		const flags = projectDirName(`/home/yandy/${"🇯🇵".repeat(60)}`);
 		const regionalIndicators = flags.match(/[\u{1F1E6}-\u{1F1FF}]/gu) ?? [];
 		expect(regionalIndicators.length % 2).toBe(0);
+	});
+
+	it("splits on backslashes on win32 so a drive path stays one component", () => {
+		expect(projectDirName("C:\\Users\\yandy\\workspace\\proj", { platform: "win32" })).toBe(
+			"C_3a__Users__yandy__workspace__proj",
+		);
+	});
+
+	it("keeps the POSIX result byte-identical when the platform is posix", () => {
+		// D2：win32 专属分支不得影响 POSIX 输出
+		expect(projectDirName("/home/a\\b", { platform: "linux" })).toBe("home__a\\b");
+		expect(projectDirName("C:\\Users\\yandy", { platform: "linux" })).toBe("C_3a\\Users\\yandy");
+	});
+
+	it("neutralises UNC prefixes and mixed separators on win32", () => {
+		expect(projectDirName("\\\\server\\share\\proj", { platform: "win32" })).toBe("server__share__proj");
+		expect(projectDirName("C:/Users\\yandy/proj", { platform: "win32" })).toBe("C_3a__Users__yandy__proj");
+	});
+
+	it("drops dot segments on win32 so a crafted remote cannot climb out", () => {
+		expect(projectDirName("host/a\\..\\..\\..\\etc", { platform: "win32" })).toBe("host__a__etc");
+	});
+
+	it("escapes a trailing dot or space on win32 only", () => {
+		expect(projectDirName("C:\\Users\\yandy\\proj.", { platform: "win32" })).toBe("C_3a__Users__yandy__proj_2e");
+		expect(projectDirName("C:\\Users\\yandy\\proj ", { platform: "win32" })).toBe("C_3a__Users__yandy__proj_20");
+		expect(projectDirName("/home/yandy/proj.", { platform: "linux" })).toBe("home__yandy__proj.");
+	});
+
+	it("prefixes a reserved device name even when it is the first label of the joined name", () => {
+		// Windows 只把「第一个 . 之前的部分」当设备：con.md__repo 仍然命中 CON
+		expect(projectDirName("con.md/repo", { platform: "win32" })).toBe("_con.md__repo");
+		expect(projectDirName("nul", { platform: "win32" })).toBe("_nul");
+	});
+
+	it("keeps a device-looking inner segment untouched when the final name is safe", () => {
+		expect(projectDirName("C:\\con\\proj", { platform: "win32" })).toBe("C_3a__con__proj");
+	});
+
+	it("always yields a single, Windows-legal component for hostile keys", () => {
+		const keys = [
+			"C:\\Users\\yandy\\proj",
+			"\\\\server\\share",
+			"host/a\\..\\..\\..\\etc",
+			"con.md/repo",
+			"nul",
+			"aux.",
+			"C:\\",
+			"..\\..\\..\\",
+			`C:\\${"x".repeat(200)}`,
+			"C:\\Users\\yandy\\proj ",
+			"host\\\\double\\sep",
+			"C:/mixed\\separators/final",
+		];
+		for (const key of keys) {
+			const name = projectDirName(key, { platform: "win32" });
+			expect(name.includes("/"), `${key} -> ${name}`).toBe(false);
+			expect(name.includes("\\"), `${key} -> ${name}`).toBe(false);
+			expect(/[. ]$/.test(name), `${key} -> ${name}`).toBe(false);
+			expect(isReservedWindowsName(name), `${key} -> ${name}`).toBe(false);
+			// 在 win32 语义下 join 进 memoryDir 后仍在 memoryDir 之内
+			const base = "C:\\mem";
+			const dir = win32.resolve(win32.join(base, "local", name));
+			const rel = win32.relative(base, dir);
+			expect(rel.startsWith("..") || isAbsolute(rel), `${key} -> ${dir}`).toBe(false);
+		}
 	});
 });
 
@@ -308,5 +376,34 @@ describe("projectIdentity", () => {
 		const sub = join(dir, "packages", "inner");
 		await mkdir(sub, { recursive: true });
 		expect(await projectIdentity(sub)).toEqual({ kind: "git", key: "github.com/yandy/pi-packages" });
+	});
+});
+
+describe("assertInsideRoot", () => {
+	it("accepts a directory below the root", () => {
+		expect(() => assertInsideRoot("/mem", join("/mem", "git", "github.com__o__r"))).not.toThrow();
+	});
+
+	it("rejects a directory outside the root or the root itself", () => {
+		expect(() => assertInsideRoot("/mem", "/etc")).toThrow(/escapes/);
+		expect(() => assertInsideRoot("/mem", join("/mem", "..", "etc"))).toThrow(/escapes/);
+		expect(() => assertInsideRoot("/mem", "/mem")).toThrow(/escapes/);
+	});
+
+	it("rejects the exact name that the pre-fix Windows derivation produced", () => {
+		// 旧实现在 win32 上把 `C:\Users\yandy` 派生成 `C_3a\Users\yandy`，join 之后变成多级路径
+		const base = "C:\\mem";
+		const escaped = win32.resolve(win32.join(base, "local", "C_3a\\Users\\yandy"));
+		expect(escaped.startsWith(win32.join(base, "local"))).toBe(true); // 只是多级，没逃出
+		expect(() => assertInsideRoot(base, escaped, "win32")).not.toThrow();
+
+		// 带 `..` 的畸形 key 才会真的逃出：这就是断言要拦住的形态
+		const climbing = win32.resolve(win32.join(base, "local", "host__a\\..\\..\\..\\etc"));
+		expect(() => assertInsideRoot(base, climbing, "win32")).toThrow(/escapes/);
+	});
+
+	it("compares case-insensitively on win32", () => {
+		expect(() => assertInsideRoot("C:\\mem", "C:\\MEM\\local\\x", "win32")).not.toThrow();
+		expect(() => assertInsideRoot("/mem", "/MEM/local/x", "linux")).toThrow(/escapes/);
 	});
 });
