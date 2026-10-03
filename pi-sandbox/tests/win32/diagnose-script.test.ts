@@ -7,7 +7,10 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const SCRIPT = fileURLToPath(
-	new URL("../../skills/diagnose-windows-sandbox-acl/scripts/diagnose-windows-sandbox-acl.ps1", import.meta.url),
+	new URL(
+		"../../resources/skills/diagnose-windows-sandbox-acl/scripts/diagnose-windows-sandbox-acl.ps1",
+		import.meta.url,
+	),
 );
 const PACKAGE_SID = "S-1-15-2-1234567890-1234567890";
 

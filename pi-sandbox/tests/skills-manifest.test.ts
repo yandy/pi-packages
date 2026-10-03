@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { aclSkillPaths } from "../src/win32/skill-paths";
 
-const skillDir = fileURLToPath(new URL("../skills/diagnose-windows-sandbox-acl", import.meta.url));
+const skillDir = fileURLToPath(new URL("../resources/skills/diagnose-windows-sandbox-acl", import.meta.url));
 
 describe("diagnosis skill packaging", () => {
 	it("ships the skill directory with SKILL.md", () => {
@@ -38,6 +38,12 @@ describe("diagnosis skill packaging", () => {
 	it("keeps the skill out of the model catalog on non-Windows by returning an empty list", () => {
 		// pi 侧语义：返回空数组 = 不追加任何技能路径（spec §4.10 已核实的 mergePaths 行为）
 		expect(aclSkillPaths("darwin")).toHaveLength(0);
+	});
+
+	it("keeps the skill out of the conventional auto-discovered skills/ directory", () => {
+		// pi 的包资源发现（settings 对象形式 / default 模式）会把 <pkg>/skills 无条件加载到所有平台
+		// （package-manager.js collectDefaultResources），绕过 resources_discover 的平台门控。
+		expect(existsSync(fileURLToPath(new URL("../skills", import.meta.url)))).toBe(false);
 	});
 
 	it("ships the repair script next to the skill", () => {
