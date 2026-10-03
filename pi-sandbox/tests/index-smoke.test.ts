@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetSandboxConfigCache } from "../src/config";
 import { getEscalationBroker, resetEscalationBrokerForTests } from "../src/escalation-broker";
 import { processPermissionState, type PermissionState } from "../src/permission";
+import { aclSkillPaths } from "../src/win32/skill-paths";
 
 let dir: string;
 beforeEach(() => {
@@ -341,7 +342,7 @@ describe("T15: 平台门控与 pwsh 未激活提示（Ruling 8/9）", () => {
 		expect(discovery).toBeDefined();
 		await withPlatform("win32", async () => {
 			await expect(Promise.resolve(discovery?.({ type: "resources_discover", cwd: process.cwd(), reason: "startup" }, {}))).resolves.toEqual({
-				skillPaths: ["./skills/diagnose-windows-sandbox-acl"],
+				skillPaths: aclSkillPaths("win32"),
 			});
 		});
 		await withPlatform("linux", async () => {

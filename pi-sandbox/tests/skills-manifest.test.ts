@@ -1,4 +1,5 @@
 import { readFileSync, existsSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { aclSkillPaths } from "../src/win32/skill-paths";
@@ -21,14 +22,17 @@ describe("diagnosis skill packaging", () => {
 	});
 
 	it("is reachable only through the win32 gating", () => {
-		expect(aclSkillPaths("win32")).toEqual(["./skills/diagnose-windows-sandbox-acl"]);
+		expect(aclSkillPaths("win32")).toEqual([skillDir]);
 		expect(aclSkillPaths("linux")).toEqual([]);
 	});
 
-	it("uses a relative skill path that resolves under the package root", () => {
-		const [relative] = aclSkillPaths("win32");
-		expect(relative?.startsWith("./skills/")).toBe(true);
-		expect(existsSync(fileURLToPath(new URL(`../${relative?.slice(2)}`, import.meta.url)))).toBe(true);
+	// pi 把 resources_discover 返回的路径按会话 cwd 解析（resolveResourcePath = resolvePath(p, cwd)），
+	// 所以这里必须是绝对路径——相对路径在真机上被证伪（spec §4.10）。
+	it("returns an absolute skill path pointing at the packaged skill directory", () => {
+		const [skillPath] = aclSkillPaths("win32");
+		expect(isAbsolute(skillPath)).toBe(true);
+		expect(skillPath).toBe(skillDir);
+		expect(existsSync(join(skillPath, "SKILL.md"))).toBe(true);
 	});
 
 	it("keeps the skill out of the model catalog on non-Windows by returning an empty list", () => {
