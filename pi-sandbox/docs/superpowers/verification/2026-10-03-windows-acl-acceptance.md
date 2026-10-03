@@ -119,7 +119,7 @@ shell: powershell only (not activated)
 
 ```text
 [sandbox: bash is not supported on Windows]
-{ "defaultTools": ["-bash", "+powershell"] }
+{ "defaultTools": ["+powershell"] }
 requires pi >= 1.0.0
 ```
 
@@ -150,7 +150,7 @@ requires pi >= 1.0.0
 **命令（PowerShell / git-bash 相同）**：编辑 `~/.pi/agent/settings.json`：
 
 ```json
-{ "defaultTools": ["-bash", "+powershell"] }
+{ "defaultTools": ["+powershell"] }
 ```
 
 重启 pi，再输入 `/permission`；然后对模型说：

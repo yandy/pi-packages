@@ -42,22 +42,21 @@
 | D7 | 依赖下限 | peer 保持 `>=0.80.2`，powershell 覆盖靠**运行时探测** `createPowerShellToolDefinition` → 版本走 **1.4.0** |
 | D8 | 诊断技能 | **本次包含**：`skills/diagnose-windows-sandbox-acl/`（SKILL.md + 保真移植的 PowerShell 修复脚本）；**仅 Windows 加载**，经 `resources_discover` 事件按平台注册（见 Ruling 9） |
 
-D3 的拒绝指引文案必须含这段（用户指定）：
+**D3 修订（2026-10-03 真机实测后，用户确认）**：原指定文案 `{ "defaultTools": ["-bash", "+powershell"] }` **无效且无必要** —— pi 1.0.0 在 Windows 默认只激活 `powershell`；用户看到的 `bash` 是 pi-sandbox 自己覆盖注册的（扩展注册的工具会被自动激活，而 `defaultTools` 的 `-name` 无法取消扩展工具）。因此改为：
 
-```json
-{ "defaultTools": ["-bash", "+powershell"] }
-```
+1. win32 下我们的 `bash` 工具以 **`defaultActive: false`** 注册（模型默认看不到它，与 pi 的本意一致）；**但仍保留注册** —— 不注册就会露出 pi 内建的无沙箱 bash，显式 `defaultTools: ["bash"]` / `--tools bash` 会得到 fail-open；保留后显式激活仍是**拒绝**（fail-closed）。
+2. 面向模型/用户的指引只保留**有效**方向：`{ "defaultTools": ["+powershell"] }`（`+name` 激活是 pi 支持的语义），不再出现 `-bash`。
 
 ### 2.1 Rulings（实现与测试按编号引用）
 
 - **Ruling 1**：win32 是唯一候选链，**不做功能探测**，但做**可解析性前置检查**（不 spawn 任何进程）：① `src/win32/runner.js` 存在；② `koffi` 可由 `createRequire` 解析；③ node 可执行文件可解析——运行时是 Node（`process.versions.node && !process.versions.bun`）时用 `process.execPath`，否则在 PATH 上找 `node.exe`。任一项不可达即 `unavailable` → `SandboxUnavailableError` + 对应 Windows 指引（重装包 / 安装 Node）。
-- **Ruling 2**：Windows 受限模式下 `bash` 拒绝执行（绝不 spawn）；`danger-full-access` 下 `bash` 走既有裸 spawn。拒绝错误是**独立类型**（不复用 `SandboxUnavailableError` 的措辞），文案含 D3 指定的 JSON 片段、pi ≥1.0.0 前提、`danger-full-access` 逃生门三项。
+- **Ruling 2**：Windows 受限模式下 `bash` 拒绝执行（绝不 spawn）；`danger-full-access` 下 `bash` 走既有裸 spawn。拒绝错误是**独立类型**（不复用 `SandboxUnavailableError` 的措辞），文案含「Windows 上只约束 powershell 工具、请改用该工具、bash 保持 fail-closed」三项；pi ≥1.0.0 前提与 `danger-full-access` 逃生门保留；**不得**再出现 `-bash`（见 D3 修订）。
 - **Ruling 3**：runner 自派生 SID、自授权；argv **不含** `--write-sid/--temp-write-sid`（dsh 的 seam-managed 契约在本包无消费方）。
 - **Ruling 4**：workspace 与 `%TEMP%` 的 ACE/拒绝项/Low 标签都不回收；`dispose` 只关令牌与句柄。
 - **Ruling 5**：不重写 TMP/TEMP。
 - **Ruling 6**：win32 enforcement 恒为 `partial`；runner 失败规则 = `{allowedExitCodes:[127], fatalSignatures:["windows-acl-run: "]}`。
 - **Ruling 7**：拒绝方言 = `access is denied` / `access to the path` / `permission denied` / `operation not permitted`（大小写不敏感子串）。
-- **Ruling 8**：win32 且 `pi.getActiveTools()` 不含 `powershell` 时，激活期提示一次（有 UI 走 `ctx.ui.notify`，无 UI 写 stderr），`/permission` 状态行显示 `shell: powershell only (not activated)`。
+- **Ruling 8**（2026-10-03 修订）：win32 且 `pi.getActiveTools()` 不含 `powershell` 时，激活期提示一次（有 UI 走 `ctx.ui.notify`，无 UI 写 stderr），提示只给**有效**方向 `{ "defaultTools": ["+powershell"] }`；`/permission` 状态行显示 `shell: powershell only (not activated)`。默认态下 Windows 只激活 powershell，故该提示通常不会触发（保留作显式改配置后的兜底）。
 - **Ruling 9**：诊断技能**只在 Windows 上加载**——由扩展在 `resources_discover` 事件里按平台返回 `skillPaths`（非 win32 返回空，即零目录条目），**不用**静态 `pi.skills` 清单声明。handler **只允许追加**（返回本技能路径，或空数组表示“什么也不加”），**绝不返回"完整集合"**：pi 侧是合并语义（`mergePaths(lastSkillPaths, …)`，已核实）。pi 从磁盘加载包，因此**不做** dsh 的 ASAR/SEA 临时提取，脚本按 skill 目录相对路径引用。技能场景本身需**不受限调用者**（修改安全描述符），靠已批准的 `danger-full-access` 承担。
 - **Ruling 10**：任何 Win32 失败都不得 spawn 未受限子进程；错误必须携带 API 名 + 精确 win32 码 + 系统文本 + 上下文。
 
