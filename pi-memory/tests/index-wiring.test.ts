@@ -1444,13 +1444,16 @@ describe("index wiring (integration)", () => {
 		expect(notify).toHaveBeenCalledTimes(1);
 		expect(notify.mock.calls[0][1]).toBe("info");
 		const lines = notify.mock.calls[0][0].split("\n");
-		expect(lines).toHaveLength(6);
+		expect(lines).toHaveLength(8);
 		expect(lines[0]).toBe("Memory: enabled");
 		expect(lines[1]).toBe(`Dir: ${dir}`);
 		expect(lines[2]).toMatch(/^Index: 4\/200 lines, \d+\/25600 bytes, 2 unrecognized lines$/);
-		expect(lines[3]).toBe("Entries: 1");
-		expect(lines[4]).toBe("Last dream: 2026-10-01T00:00:00.000Z");
-		expect(lines[5]).toBe(`Lock: held by dream (pid ${process.pid} on h, started 2026-10-02T01:02:03.000Z)`);
+		// 注入口径：`Inject:` 与真正注入共用同一个窗口核心（`indexInjectionCapacity`）。
+		expect(lines[3]).toMatch(/^Inject: \d+\/50 lines, \d+\/16384 bytes$/);
+		expect(lines[4]).toBe("Entries: 1");
+		expect(lines[5]).toBe("Modules: dream=on(test/model) extractMemories=off autoSurfacing=on(test/model)");
+		expect(lines[6]).toBe("Last dream: 2026-10-01T00:00:00.000Z");
+		expect(lines[7]).toBe(`Lock: held by dream (pid ${process.pid} on h, started 2026-10-02T01:02:03.000Z)`);
 	});
 
 	it("/memory reports a fresh directory as free / never / not needed", async () => {
@@ -1465,9 +1468,40 @@ describe("index wiring (integration)", () => {
 		expect(lines[2]).toBe(
 			`Index: 1/200 lines, ${Buffer.byteLength(DISK_INDEX, "utf8")}/25600 bytes, 0 unrecognized lines`,
 		);
-		expect(lines[3]).toBe("Entries: 0");
-		expect(lines[4]).toBe("Last dream: never");
-		expect(lines[5]).toBe("Lock: free");
+		// 未超预算时 Inject 的字节数与 Index 对同一份文件报的值相同（口径一致）。
+		expect(lines[3]).toBe(`Inject: 1/50 lines, ${Buffer.byteLength(DISK_INDEX, "utf8")}/16384 bytes`);
+		expect(lines[4]).toBe("Entries: 0");
+		expect(lines[5]).toBe("Modules: dream=on(test/model) extractMemories=off autoSurfacing=on(test/model)");
+		expect(lines[6]).toBe("Last dream: never");
+		expect(lines[7]).toBe("Lock: free");
+	});
+
+	it("/memory reports the enabled modules with their effective models", async () => {
+		mockConfigValue.extractMemories.enabled = true;
+		mockConfigValue.extractMemories.model = "extract/model";
+		mockConfigValue.autoSurfacing.enabled = false;
+		// per-task 模型必须在 registry 里可解析，否则 session_start 直接进 misconfigured 态，
+		// `/memory` 报的是错误块而不是状态块。
+		const registry = fakeRegistry(["test/model", "extract/model"]);
+		try {
+			const notify = vi.fn();
+			const { pi, commands, handlers } = createFakePi();
+			memoryFactory(pi as any);
+			await handlers["session_start"][0]({}, uiCtx({ modelRegistry: registry }));
+
+			await commands["memory"].handler(
+				"",
+				uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() }, modelRegistry: registry }),
+			);
+
+			const lines = notify.mock.calls[0][0].split("\n");
+			// per-task model 优先，其余回落到 defaults.model；关闭的模块不显示模型。
+			expect(lines[5]).toBe("Modules: dream=on(test/model) extractMemories=on(extract/model) autoSurfacing=off");
+		} finally {
+			mockConfigValue.extractMemories.enabled = false;
+			delete mockConfigValue.extractMemories.model;
+			mockConfigValue.autoSurfacing.enabled = true;
+		}
 	});
 
 	it("leaves legacy 1.x topic files untouched and reports no migration", async () => {
@@ -1483,7 +1517,7 @@ describe("index wiring (integration)", () => {
 		expect(await readdir(dir)).not.toContain(".migrated");
 
 		await commands["memory"].handler("", uiCtx(uiWith(notify)));
-		expect(notify.mock.calls[0][0].split("\n")).toHaveLength(6);
+		expect(notify.mock.calls[0][0].split("\n")).toHaveLength(8);
 
 		// legacy 文件对记忆视图不可见：list 返回空清单文案（src/memory-tool.ts:262）
 		const listed = await tools[0].execute("c1", { action: "list" }, undefined, undefined, undefined);
@@ -1529,7 +1563,7 @@ describe("index wiring (integration)", () => {
 
 		await commands["memory"].handler("", uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } }));
 
-		expect(notify.mock.calls[0][0].split("\n")[5]).toBe("Lock: unreadable — run /memory unlock");
+		expect(notify.mock.calls[0][0].split("\n")[7]).toBe("Lock: unreadable — run /memory unlock");
 	});
 
 	it("/memory on and /memory off are no longer subcommands", async () => {
