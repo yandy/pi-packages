@@ -17,7 +17,7 @@ pi coding agent 的文件系统持久记忆层。把项目知识（事实、偏�
 > **2.1.0：**
 >
 > - **模型必须显式配置。** 没有内置默认值，也没有父会话模型回退：`defaults.model`（或 per-task `model`）必须存在且可解析，否则 `session_start` 会报配置错误并且**什么都不初始化**。详见[模型配置](#模型配置)。
-> - **`/memory on` / `/memory off` 已删除。** `enabled` 只是 `memory.json` 里的开关，启动时读一次，改动需要重启会话。
+> - **`/memory on` / `/memory off` 已删除。** `enabled` 只是 `memory.json` 里的开关，启动时读一次，改动需要重启会话。**该键现已移除** —— 写了也会被忽略，见[禁用本扩展](#禁用本扩展)。
 > - **1.x → 2.0 的自动迁移已删除。** legacy topic 文件原样留在磁盘上，但对记忆系统**不可见**（过不了 `parseEntryFile` 的 v2 五字段校验）。详见 [1.x 数据](#1x-数据)。
 >
 > **2.0.0 已包含：**
@@ -37,7 +37,7 @@ pi coding agent 的文件系统持久记忆层。把项目知识（事实、偏�
 - **自动提取（extract memories）** ⭐ —— 每轮结束后一个异步 headless agent 拿到的是**整轮对话的结构化渲染**（user 消息全文、assistant 文本与 tool_call、tool_result 及其错误标记），而不是两条消息。它经同一套 `memory` 原语写入，并且**从不排队等锁**：dream 正在整轮持锁时，本回合直接跳过。该功能**默认关闭**，需要显式设 `extractMemories.enabled: true`。
 - **`/dream`** —— headless 整理 agent（Orient → Gather Signal → Consolidate → Prune & Index），合并重复、消解矛盾、改名、重建索引。它**没有裸文件权限**：只有七个 `memory` action，整轮持有逻辑锁，进入时先对整个目录拍一次快照。
 - **Dream 提醒** —— 距上次 dream 超过 N 个会话或 N 小时后提示 `/dream`。
-- **`/memory`** —— 完整状态（开关、目录、索引容量、entry 数、上次 dream、锁状态含持有者），以及 `unlock`。
+- **`/memory`** —— 完整状态（目录、索引容量、entry 数、上次 dream、锁状态含持有者），以及 `unlock`。
 - **两级锁** —— 进程内逻辑锁承担**逻辑作用域**（单次原语，或 dream 的整轮）；跨进程 `.lock` **只持毫秒**且**永不自动回收**。没有 TTL、没有心跳、没有接管，所以互斥是硬保证；代价是崩溃遗留的锁必须**人工**清除（`/memory unlock`）。
 - **快照** —— 每次写入都在 `.backups/<ts>-<label>/` 留下回滚点，保留最近 `lock.snapshotKeep` 份（`migrate-` 开头的目录是旧版迁移留下的整目录快照，其 `originals/` 子目录里才是 2.0 之前的 topic 原文，永不裁剪）。`/dream` 是例外：它**进入时只对整个目录拍一次**快照，该轮内部的原语会跳过逐文件快照（一轮只留一个回滚点）。
 - **会话检索** —— `memory search scope=sessions` 查历史会话。

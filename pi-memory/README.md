@@ -17,7 +17,7 @@ Aligned with Claude Code's auto memory mechanism: **one memory = one file**, a `
 > **In 2.1.0:**
 >
 > - **Models must be configured explicitly.** There is no shipped default and no parent-model fallback: `defaults.model` (or a per-task `model`) must exist and be resolvable, or `session_start` reports a config error and initialises **nothing**. See [Model configuration](#model-configuration).
-> - **`/memory on` and `/memory off` are gone.** `enabled` is a `memory.json` switch read once at session start — changing it needs a session restart.
+> - **`/memory on` and `/memory off` are gone.** `enabled` is a `memory.json` switch read once at session start — changing it needs a session restart. **That key has since been removed** — it is ignored if present; see [Disabling the extension](#disabling-the-extension).
 > - **Automatic 1.x → 2.0 migration has been removed.** Legacy topic files stay on disk untouched but are **invisible** to the memory system (they fail `parseEntryFile`'s five-field v2 frontmatter check). See [1.x data](#1x-data).
 >
 > **In 2.0.0:**
@@ -37,7 +37,7 @@ Aligned with Claude Code's auto memory mechanism: **one memory = one file**, a `
 - **Extract memories** ⭐ — after each run an async headless agent receives a **structured rendering of the whole conversation** (every user message in full, assistant text and tool calls, tool results with error flags), not just two messages. It writes through the same `memory` primitives, under a whole-round logical lock it never waits for: if a dream is running, that turn is simply skipped. This feature is **off by default** — set `extractMemories.enabled: true` to turn it on.
 - **`/dream`** — a headless consolidation agent (Orient → Gather Signal → Consolidate → Prune & Index) that merges duplicates, resolves contradictions, renames entries and rebuilds the index. It has **no raw file access**: it only gets the seven `memory` actions, holds the logical lock for the whole round, and snapshots the entire directory on entry.
 - **Dream nudge** — after N sessions or N hours a notification suggests `/dream`.
-- **`/memory`** — full status (switch, directory, index capacity, entry count, last dream, lock state including the holder), plus `unlock`.
+- **`/memory`** — full status (directory, index capacity, entry count, last dream, lock state including the holder), plus `unlock`.
 - **Two-level locking** — an in-process logical lock carries the *logical* scope (one primitive call, or a whole dream round); the cross-process `.lock` file is held for **milliseconds only** and is **never reclaimed automatically**. There is no TTL, no heartbeat and no takeover, so mutual exclusion is a hard guarantee; the price is that a lock left behind by a crashed process must be removed by a human (`/memory unlock`).
 - **Snapshots** — every write leaves a rollback point under `.backups/<ts>-<label>/`, keeping the last `lock.snapshotKeep` (directories named `migrate-*` — whole-directory snapshots from an earlier 1.x migration, whose `originals/` subdirectory holds the pre-2.0 topic files — are never pruned). `/dream` is the exception: it snapshots the whole directory **once on entry**, and the primitives inside that round skip their per-file snapshots (one round, one rollback point).
 - **Session search** — `memory search scope=sessions` queries past conversation history.
