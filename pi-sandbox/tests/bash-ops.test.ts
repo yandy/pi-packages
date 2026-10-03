@@ -213,4 +213,26 @@ describe("createSandboxBashOps", () => {
 		await expect(ops.exec("true", "/nonexistent-sbx-dir-xyz", { onData: () => {} })).rejects.toThrow(/Working directory does not exist/);
 		expect(spawnFn).not.toHaveBeenCalled();
 	});
+	it("refuses bash on win32 confined modes before spawning, but danger-full-access still spawns", async () => {
+		const confinedSpawn = vi.fn(() => fakeChild()) as never;
+		const confined = createSandboxBashOps({
+			mode: "workspace-write", workspaceRoot: process.cwd(), platform: "win32", spawnFn: confinedSpawn,
+		});
+		await expect(confined.exec("echo hi", cwd, { onData: () => {} })).rejects.toThrowError(/bash is not supported on Windows/);
+		expect(confinedSpawn).not.toHaveBeenCalled(); // guard 在 confine/spawn 之前 fail-closed
+
+		const child = fakeChild();
+		const dfaSpawn = vi.fn(() => child) as never;
+		const dfa = createSandboxBashOps({
+			mode: "danger-full-access", workspaceRoot: process.cwd(), platform: "win32", spawnFn: dfaSpawn,
+		});
+		const p = dfa.exec("echo hi", cwd, { onData: () => {} });
+		await settle(child, 0);
+		await p;
+		expect(dfaSpawn).toHaveBeenCalledTimes(1); // guard 不得在 danger-full-access 早退后触发
+		const [, args, options] = dfaSpawn.mock.calls[0] as unknown as [string, string[], { detached: boolean; windowsHide: boolean }];
+		expect(args).toEqual(["-c", "echo hi"]);
+		expect(options.detached).toBe(false); // win32 无进程组
+		expect(options.windowsHide).toBe(true);
+	});
 });
