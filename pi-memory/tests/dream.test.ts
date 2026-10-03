@@ -192,6 +192,34 @@ describe("runDream", () => {
 		expect(contents).toEqual(["A.md", "MEMORY.md"]);
 	});
 
+	it("skips Windows device-named files in the dream snapshot on win32", async () => {
+		const win = new MemoryStore(CFG(dir, { platform: "win32" }));
+		await writeFile(join(dir, "con.md"), "正文", "utf8");
+		await writeFile(join(dir, "ok.md"), "正文", "utf8");
+		await rm(join(dir, ".backups"), { recursive: true, force: true });
+		runHeadlessAgentMock.mockResolvedValueOnce("ok");
+
+		await runDream(opts({ store: win }));
+
+		const [snapshot] = await backupDirs();
+		const contents = (await readdir(join(dir, ".backups", snapshot))).sort();
+		expect(contents).toEqual(["ok.md"]);
+	});
+
+	it("keeps Windows device-named files in the dream snapshot on linux", async () => {
+		const posix = new MemoryStore(CFG(dir, { platform: "linux" }));
+		await writeFile(join(dir, "con.md"), "正文", "utf8");
+		await writeFile(join(dir, "ok.md"), "正文", "utf8");
+		await rm(join(dir, ".backups"), { recursive: true, force: true });
+		runHeadlessAgentMock.mockResolvedValueOnce("ok");
+
+		await runDream(opts({ store: posix }));
+
+		const [snapshot] = await backupDirs();
+		const contents = (await readdir(join(dir, ".backups", snapshot))).sort();
+		expect(contents).toEqual(["con.md", "ok.md"]);
+	});
+
 	it("prunes old dream snapshots down to lock.snapshotKeep", async () => {
 		const tiny = new MemoryStore(CFG(dir, { lock: { timeoutMs: 5000, snapshotKeep: 1 } }));
 		runHeadlessAgentMock.mockResolvedValue("ok");
