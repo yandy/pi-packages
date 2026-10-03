@@ -19,9 +19,17 @@ const GIT_TIMEOUT_MS = 3000;
 async function gitToplevel(cwd: string): Promise<string | null> {
 	try {
 		const { stdout } = await execFileP("git", ["rev-parse", "--show-cdup"], { cwd, timeout: GIT_TIMEOUT_MS });
-		// 仓库根处输出空行；非仓库 / 裸仓库时 git 以非零退出，由 catch 处理。
 		const cdup = stdout.trim();
-		return cdup === "" ? resolve(cwd) : resolve(cwd, cdup);
+		if (cdup !== "") return resolve(cwd, cdup);
+		// 输出为空有两种情况：位于工作树根，或者裸仓库。裸仓库里 `--show-cdup` 以 exit 0 + 0 字节
+		// 返回（实测 git 2.55，不是非零退出），无法与「工作树根」区分；裸仓库没有工作树，必须显式
+		// 用 `--is-bare-repository` 判定并返回 null，否则裸仓库 + remote 会从既有的
+		// `local/<绝对路径>` 变成 `git/<remote 身份>`（spec §4.2）。非仓库在第一步已被 catch 拦住。
+		const { stdout: bare } = await execFileP("git", ["rev-parse", "--is-bare-repository"], {
+			cwd,
+			timeout: GIT_TIMEOUT_MS,
+		});
+		return bare.trim() === "true" ? null : resolve(cwd);
 	} catch {
 		return null;
 	}

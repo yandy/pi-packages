@@ -371,6 +371,21 @@ describe("projectIdentity", () => {
 		expect(await projectIdentity(dir)).toEqual({ kind: "local", key: resolve(toplevel) });
 	});
 
+	it("falls back to local for a bare repository with a remote", async () => {
+		// 裸仓库里 `git rev-parse --show-cdup` 是 exit 0 + 0 字节（git 2.55 实测），不能据此当成
+		// “位于工作树根”；否则裸仓库 + remote 会把既有的 local/<绝对路径> 变成 git/<remote 身份>。
+		const bare = join(dir, "bare-with-remote.git");
+		await git(["init", "-q", "--bare", bare], dir);
+		await git(["remote", "add", "origin", "https://github.com/yandy/pi-packages.git"], bare);
+		expect(await projectIdentity(bare)).toEqual({ kind: "local", key: resolve(bare) });
+	});
+
+	it("falls back to local for a bare repository without a remote", async () => {
+		const bare = join(dir, "bare.git");
+		await git(["init", "-q", "--bare", bare], dir);
+		expect(await projectIdentity(bare)).toEqual({ kind: "local", key: resolve(bare) });
+	});
+
 	it("resolves the same identity from a subdirectory", async () => {
 		await initRepo(dir, "https://github.com/yandy/pi-packages.git");
 		const sub = join(dir, "packages", "inner");
