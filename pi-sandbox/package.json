@@ -17,7 +17,8 @@
 	],
 	"files": [
 		"index.ts",
-		"src/"
+		"src/",
+		"skills/"
 	],
 	"scripts": {
 		"test": "vitest run",

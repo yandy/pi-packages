@@ -1,6 +1,6 @@
 # pi-sandbox
 
-pi coding-agent 扩展：**进程级沙箱**（bwrap / landlock / seatbelt）——默认**工作目录可写、其余宿主文件可读**，fail-closed。
+pi coding-agent 扩展：**进程级沙箱**（bwrap / landlock / seatbelt / windows-acl）——默认**工作目录可写、其余宿主文件可读**，fail-closed。
 
 ## 安装
 
@@ -21,7 +21,34 @@ bash 命令被包装进平台沙箱 runner 后在本地 spawn（**路径透明**
 | Linux | `bwrap`（首选） | `--ro-bind / /` 全盘只读 + 工作区与宿主 `/tmp` 的 rw bind |
 | Linux | `landlock-run`（回退，随包分发预编译二进制） | Landlock LSM 允许清单：`/` 只读，工作区 + `/tmp` 可写 |
 | macOS | `sandbox-exec`（系统内置） | Seatbelt SBPL：`deny file-write*` + 工作区/临时区例外 |
+| Windows | `windows-acl`（内置，`partial` 强制） | 受限令牌沙箱：`WRITE_RESTRICTED` 令牌 + 对工作区与 `%TEMP%` 的能力 SID ACL 授权 + Low 强制完整性标签；**仅 powershell 工具**（受限模式下 `bash` 被拒绝） |
 | 其他 | 无 | **fail-closed**：受约束命令一律拒绝执行，绝不静默裸跑 |
+
+### Windows
+
+`windows-acl` runner 以 `WRITE_RESTRICTED` 受限令牌启动每条受限命令，并把令牌完整性级别降到 Low。`workspace-write` 下令牌还携带能力 SID，获得工作区与宿主 `%TEMP%` 的写授权，并在两个授权根上打可继承的 `NO_WRITE_UP` 标签；`read-only` 不授予任何写能力。强制是 **`partial`** 的——与参考实现相同，存在三处结构性缺口：
+
+- **NTFS 硬链接是文件对象别名**：工作区内被授权文件的硬链接在外部同样可写
+- **读不受限**：与其他 runner 一致，受约束进程能读调用者可读的一切
+- **被其他 AppContainer 工具以包 SID 打标过的文件对 Low 完整性子进程不可读**（移除外来 ACE 或重装目录树可恢复）
+
+受限 shell 只有 **`powershell` 工具**。受限模式下 `bash` 一律被拒绝（绝不 spawn）并给出可执行的错误指引；在 `~/.pi/agent/settings.json` 中启用该工具（需要 pi >= 1.0.0，`powershell` 工具自该版本起提供）：
+
+```json
+{ "defaultTools": ["-bash", "+powershell"] }
+```
+
+未启用前 pi-sandbox 会在激活时提示一次，`/permission` 状态行显示 `shell: powershell only (not activated)`。`danger-full-access` 是唯一逃生门（与其他平台一样，`bash` 照常裸跑）。
+
+PowerShell 语言模式取决于启动约束，不是 ACL 边界的一部分：`read-only` 下 `%TEMP%` 不可写，pwsh 可能退化为 ConstrainedLanguage（`Add-Type`/COM/反射失败）；`workspace-write` 保持 FullLanguage。
+
+**常驻的安全描述符改动。** 授权幂等但**不回收**：pi 退出后，工作区与 `%TEMP%` 上的 ACE、world `FILE_DELETE_CHILD` 拒绝项与 Low 强制标签仍然保留。这会向**任何**以同一用户身份运行在 Low 完整性的进程放宽该目录树；事后再清除可继承标签也不会回退已传播到子对象的标签。切回 `read-only` 会让能力 ACE 失效（该令牌不携带能力 SID），但不会移除它们。首次授权会在整棵 `%TEMP%` 树上做急切传播（大树可能耗时数秒），之后每次调用命中精确匹配的快路径。`%TEMP%` 与 `TMP` 本身**不**被重写——沙箱的可写临时根就是宿主 `%TEMP%`。
+
+**`%TEMP%` 的代价。** `%TEMP%` 是用户共享树：其子目录会继承拒绝项，因此第三方程序用 `GENERIC_ALL`/`FullControl` 打开自己的 temp 子目录会被拒。基于 DELETE 的删除、`MAXIMUM_ALLOWED` 与常规读写打开不受影响。
+
+`koffi`（Win32 调用的 FFI 层）是常规依赖，懒加载且仅在 Windows 上加载——Win32 绑定表在其他平台上永不物化。
+
+随包提供的 `diagnose-windows-sandbox-acl` 技能（诊断并修复“Windows 文件权限挡住 pi-sandbox 授权”的场景）**仅在 Windows 上**贡献给 pi。它的修复会修改安全描述符，必须由不受限的调用者执行——请通过一次已批准的 `danger-full-access`（或手工）运行。
 
 ## 三档权限模式
 
@@ -72,6 +99,7 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 
 - 受约束进程可**读取**宿主上你有权读的一切（包括 `~/.ssh` 等）——这是本沙箱的设计语义（与 deepseek harness 一致）；root 专属文件受文件权限保护
 - bwrap 下 bash 的 `/tmp` **就是宿主 /tmp**（rw bind，与 write/edit 围栏及 landlock/macOS 一致）：沙箱内命令可以直接修改/删除宿主的临时文件（含会话 socket 与 pi 自己的临时文件），宿主 `/tmp` 的权限原样生效；宿主 `/tmp` 不可写时沙箱内也随之不可写
+- Windows 下沙箱的临时根就是宿主 `%TEMP%`（`windows-acl` runner 授权真实路径、不重写 `TMP`/`TEMP`）：受限命令可以修改/删除宿主临时文件，与上面 bwrap 的 `/tmp` 同属“宿主 tmp 就是宿主 tmp”的语义
 - 受限子进程强制 `LC_MESSAGES=C`（保证拒绝诊断可分类），不改动你的 `LANG`/`LC_CTYPE`
 - 受限 bash 在独立进程组中运行（detached）：timeout/abort 会杀掉整个进程组；但若 pi 自身被硬杀（如 SIGKILL），命令派生的后台孙进程可能存活（pi 内部的子进程追踪 API 不对扩展开放）
 - landlock 回退在旧内核 ABI 上为 partial enforcement（状态里会标注）

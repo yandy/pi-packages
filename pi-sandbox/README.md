@@ -1,6 +1,6 @@
 # pi-sandbox
 
-pi coding-agent extension: process-level sandbox (bwrap / landlock / seatbelt) — workspace writable, everything else readable, fail-closed.
+pi coding-agent extension: process-level sandbox (bwrap / landlock / seatbelt / windows-acl) — workspace writable, everything else readable, fail-closed.
 
 ## Install
 
@@ -21,7 +21,34 @@ bash commands are wrapped in a platform sandbox runner and spawned locally (**pa
 | Linux | `bwrap` (preferred) | `--ro-bind / /` whole filesystem read-only + rw binds of the workspace and the host `/tmp` |
 | Linux | `landlock-run` (fallback, precompiled binary shipped with the package) | Landlock LSM allow list: `/` read-only, workspace + `/tmp` writable |
 | macOS | `sandbox-exec` (built in) | Seatbelt SBPL: `deny file-write*` + workspace/temp exceptions |
+| Windows | `windows-acl` (built in, `partial` enforcement) | Restricted-token sandbox: `WRITE_RESTRICTED` token + capability-SID ACL grants on the workspace and `%TEMP%` + Low mandatory integrity label; **powershell tool only** (`bash` is refused in confined modes) |
 | Other | none | **fail-closed**: confined commands are always refused, never silently run bare |
+
+### Windows
+
+The `windows-acl` runner starts each confined command from a `WRITE_RESTRICTED` token whose integrity level is lowered to Low. In `workspace-write` the token also carries capability SIDs granted write access to the workspace and the host `%TEMP%`, with an inheritable `NO_WRITE_UP` label on both roots; `read-only` grants no write capability. Enforcement is **`partial`**, with three structural gaps inherited from the reference implementation:
+
+- **an NTFS hard link aliases the file object**: a hard link to an authorized file inside the workspace is equally writable from outside it
+- **reads are unconfined**: like every other runner here, a confined process can read everything you can read
+- **files tagged by another AppContainer tool's package SID are unreadable** to the Low-integrity child (remove the foreign ACE or reinstall the tree to recover)
+
+The confined shell is the **`powershell` tool only**. `bash` is refused in every confined mode (never spawned) with an actionable error; enable the tool in `~/.pi/agent/settings.json` (requires pi >= 1.0.0, the version that ships the `powershell` tool):
+
+```json
+{ "defaultTools": ["-bash", "+powershell"] }
+```
+
+Until it is enabled pi-sandbox hints once at activation, and `/permission` shows `shell: powershell only (not activated)`. `danger-full-access` is the only bypass (it runs `bash` bare, as everywhere else).
+
+PowerShell language mode follows startup constraints, not the ACL boundary: under `read-only` PowerShell may degrade to ConstrainedLanguage (`Add-Type`/COM/reflection fail) because `%TEMP%` is not writable; `workspace-write` keeps FullLanguage.
+
+**Standing security-descriptor changes.** Granting is idempotent but never revoked: after pi exits, the ACEs, the world `FILE_DELETE_CHILD` deny and the Low mandatory label on the workspace and `%TEMP%` remain. This relaxes those trees for **any** Low-integrity process running as the same user, and clearing an inheritable label later does not walk back what already propagated to child objects. Switching back to `read-only` makes the capability ACEs inert (that token carries no capability SID) but does not remove them. The first grant eagerly propagates across the whole `%TEMP%` tree (seconds on a large tree); later calls hit the exact-match fast path. `%TEMP%` and `TMP` themselves are **not** rewritten — the sandbox's writable temp root is the host `%TEMP%`.
+
+**The `%TEMP%` cost.** `%TEMP%` is a shared user tree: its subdirectories inherit the deny ACE, so a third party that opens its own temp subdirectory with `GENERIC_ALL`/`FullControl` is refused. DELETE-based deletes, `MAXIMUM_ALLOWED` and ordinary read/write opens are unaffected.
+
+`koffi` (the FFI layer for the Win32 calls) is a regular dependency, loaded lazily and only on Windows — the Win32 binding table is never materialized elsewhere.
+
+The bundled `diagnose-windows-sandbox-acl` skill (diagnoses and repairs cases where Windows file permissions block pi-sandbox's grants) is contributed to pi **on Windows only**. Its repair modifies security descriptors, so it needs an unconfined caller — run it from an approved `danger-full-access` (or by hand).
 
 ## Three permission modes
 
@@ -72,6 +99,7 @@ The prompt offers **Allow once / Deny**; after choosing Deny you may type an **o
 
 - Confined processes can **read** everything you can read on the host (including `~/.ssh` and the like) — that is this sandbox's design semantics (same as the deepseek harness); root-only files stay protected by file permissions
 - Under bwrap, bash's `/tmp` **is the host `/tmp`** (rw bind, matching the write/edit fence and the landlock/macOS runners): confined commands can modify or delete the host's temporary files — including live session sockets and pi's own temp files — and the host's `/tmp` permissions apply as-is. If the host `/tmp` is not writable, neither is the sandbox's
+- On Windows the sandbox's temp root is the host `%TEMP%` (the `windows-acl` runner grants the real path and does not rewrite `TMP`/`TEMP`): confined commands can modify or delete the host's temporary files there — the same "the host tmp is the host tmp" semantics as the bwrap bind above
 - Confined child processes force `LC_MESSAGES=C` (so denial diagnostics stay classifiable) and do not touch your `LANG`/`LC_CTYPE`
 - Confined bash runs in its own process group (detached): timeout/abort kills the whole group, but if pi itself is hard-killed (e.g. SIGKILL), background grandchildren spawned by the command may survive (pi's internal child-tracking API is not available to extensions)
 - The landlock fallback is partial enforcement on older kernel ABIs (the status output says so)
