@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve, win32 } from "node:path";
 import { promisify } from "node:util";
@@ -376,6 +376,37 @@ describe("projectIdentity", () => {
 		const sub = join(dir, "packages", "inner");
 		await mkdir(sub, { recursive: true });
 		expect(await projectIdentity(sub)).toEqual({ kind: "git", key: "github.com/yandy/pi-packages" });
+	});
+});
+
+describe("projectIdentity with an MSYS-style git (Git Bash emulation)", () => {
+	// Git Bash 下 `git rev-parse --show-toplevel` 返回 `/c/Users/...`，而 `resolve()` 在 Windows
+	// 上会把它变成 `C:\c\Users\...`（既不真实也与 PowerShell 启动时不同：同一个项目会分裂成两个
+	// 记忆目录，spec §1.2 P3）。`--show-cdup` 输出相对路径，没有可被转换的绝对成分。
+	// 在 Linux 上用“打印 MSYS 绝对路径”的假 git 就能把这条回归钉住。
+	it.skipIf(process.platform === "win32")("resolves the native root from --show-cdup, not the MSYS absolute path", async () => {
+		const repo = join(dir, "fake-repo");
+		const sub = join(repo, "sub");
+		const bin = join(dir, "fake-bin");
+		await mkdir(sub, { recursive: true });
+		await mkdir(bin, { recursive: true });
+		const fakeGit = join(bin, "git");
+		await writeFile(
+			fakeGit,
+			[
+				"#!/bin/sh",
+				'case "$1 $2" in',
+				'  "rev-parse --show-cdup") echo "../" ;;',
+				'  "rev-parse --show-toplevel") echo "/c/fake/repo" ;;',
+				"  *) exit 1 ;;",
+				"esac",
+			].join("\n"),
+			"utf8",
+		);
+		await chmod(fakeGit, 0o755);
+		vi.stubEnv("PATH", `${bin}:${process.env.PATH ?? ""}`);
+
+		expect(await projectIdentity(sub)).toEqual({ kind: "local", key: resolve(repo) });
 	});
 });
 

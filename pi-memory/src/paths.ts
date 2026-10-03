@@ -7,10 +7,21 @@ import { windowsSafeName } from "./windows-names";
 const execFileP = promisify(execFile);
 const GIT_TIMEOUT_MS = 3000;
 
+/**
+ * 仓库根：用 `--show-cdup`（相对路径）而不是 `--show-toplevel`（绝对路径）。
+ *
+ * `--show-toplevel` 的输出形态随启动它的 shell 变化：从 Git Bash 启动时 git 返回 MSYS 形态
+ * `/c/Users/...`，`resolve()` 在 Windows 上得到 `C:\c\Users\...` —— 既不指向真实路径，也与从
+ * PowerShell 启动得到的 `C:\Users\...` 不是同一个身份，同一个项目会有两个记忆目录（spec §1.2 P3）。
+ * `--show-cdup` 输出「从 cwd 到仓库根的相对路径」（仓库根处为空行），没有可被转换的绝对路径
+ * 成分，配 `resolve(cwd, …)` 得到的一定是 Node 自己视角的本地绝对路径（spec Ruling 3）。
+ */
 async function gitToplevel(cwd: string): Promise<string | null> {
 	try {
-		const { stdout } = await execFileP("git", ["rev-parse", "--show-toplevel"], { cwd, timeout: GIT_TIMEOUT_MS });
-		return stdout.trim() || null;
+		const { stdout } = await execFileP("git", ["rev-parse", "--show-cdup"], { cwd, timeout: GIT_TIMEOUT_MS });
+		// 仓库根处输出空行；非仓库 / 裸仓库时 git 以非零退出，由 catch 处理。
+		const cdup = stdout.trim();
+		return cdup === "" ? resolve(cwd) : resolve(cwd, cdup);
 	} catch {
 		return null;
 	}
