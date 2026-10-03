@@ -40,7 +40,7 @@
 | D5 | 机制 | 移植 dsh windows-acl：`WRITE_RESTRICTED` 受限令牌 + Low 强制完整性 + 环境性删除拒绝；runner **自派生 SID、自幂等授权**（无 seam-managed SID 入参） |
 | D6 | 生命周期 | workspace 与 `%TEMP%` 的授权**都 standing（不回收）**；残留与外部性写进 README |
 | D7 | 依赖下限 | peer 保持 `>=0.80.2`，powershell 覆盖靠**运行时探测** `createPowerShellToolDefinition` → 版本走 **1.4.0** |
-| D8 | 诊断技能 | **本次包含**：`skills/diagnose-windows-sandbox-acl/`（SKILL.md + 保真移植的 PowerShell 修复脚本）；**仅 Windows 加载**，经 `resources_discover` 事件按平台注册（见 Ruling 9） |
+| D8 | 诊断技能 | **本次包含**：`resources/skills/diagnose-windows-sandbox-acl/`（SKILL.md + 保真移植的 PowerShell 修复脚本）；**仅 Windows 加载**，经 `resources_discover` 事件按平台注册（见 Ruling 9） |
 
 **D3 修订 1（第二版，2026-10-03 首轮真机实测后，用户确认；已被 D3 修订 2 取代）**：原指定文案 `{ "defaultTools": ["-bash", "+powershell"] }` **无效且无必要** —— pi 1.0.0 在 Windows 默认只激活 `powershell`；用户看到的 `bash` 是 pi-sandbox 自己覆盖注册的（扩展注册的工具会被自动激活，而 `defaultTools` 的 `-name` 无法取消扩展工具）。因此改为：
 
@@ -195,7 +195,7 @@ const createPowerShellToolDefinition = typeof host.createPowerShellToolDefinitio
   : undefined;
 ```
 | `index.ts` | 激活期 pwsh 未激活提示（Ruling 8）；`/permission` 状态行的 win32 标注；`resources_discover` 处理器的 platform 门控（Ruling 9） |
-| `src/win32/skill-paths.ts`（新） | 纯函数 `aclSkillPaths(platform)`：win32 返回 `["./skills/diagnose-windows-sandbox-acl"]`，其余平台返回 `[]`（可在 Linux 单测断言） |
+| `src/win32/skill-paths.ts`（新） | 纯函数 `aclSkillPaths(platform)`：win32 返回**技能目录的绝对路径**（`fileURLToPath(new URL("../../resources/skills/diagnose-windows-sandbox-acl", import.meta.url))`），其余平台返回 `[]`（可在 Linux 单测断言） |
 
 ### 4.9 模块划分
 
@@ -215,15 +215,16 @@ src/win32/runner.js   独立入口（thin：main + exit code；main 可注入 ap
 ### 4.10 诊断技能的落位与**平台门控**
 
 ```
-pi-sandbox/skills/diagnose-windows-sandbox-acl/
+pi-sandbox/resources/skills/diagnose-windows-sandbox-acl/
   SKILL.md
   scripts/diagnose-windows-sandbox-acl.ps1
 ```
 
-- **不用**静态 `pi.skills` manifest 声明（那会在 Linux/macOS 上也进模型目录，白占 KV cache 并误导模型）。改为在 `index.ts` 里注册 `pi.on("resources_discover", …)`：handler 返回 `{ skillPaths: aclSkillPaths(process.platform) }`，win32 给 `["./skills/diagnose-windows-sandbox-acl"]`、其余平台给 `[]`（返回空 → pi 不会添加任何技能路径）。
-- **路径必须返回绝对路径**（真机修订，2026-10-03）：pi 对 `resources_discover` 返回的路径走 `normalizeExtensionPaths` → `resolveResourcePath(p) = resolvePath(p, this.cwd)`，即**相对路径按会话 cwd 解析**；`buildExtensionResourcePaths` 设的 `baseDir = dirname(extensionPath)` 只进来源标注（`metadata.baseDir`），**不参与解析**（`dist/core/resource-loader.js:608-614`、`:794-796`）。真机证据：从 `C:\pi-sandbox-accept` 启动 `pi -e C:\pi-packages\pi-sandbox` 时相对路径解析到 `C:\pi-sandbox-accept\skills\...`，技能不出现（§14 首跑 FAIL）。因此 `aclSkillPaths("win32")` 返回 `fileURLToPath(new URL("../../skills/diagnose-windows-sandbox-acl", import.meta.url))` 的**绝对路径**（`resolvePath` 对绝对路径原样返回）。
+- **技能目录不能用约定名 `skills/`**（Linux 自检修订，2026-10-03）：pi 的包资源发现在 settings 的**对象形式/filter 模式**下走 `collectDefaultResources()`——`manifest.skills` 未声明时回退到约定目录 `<pkg>/skills` 并无条件加载到**所有平台**（`package-manager.js` `collectPackageResources`/`collectDefaultResources`；本地探针实测：`packages: [{source: …}]` 时 Linux 上技能出现）。因此技能放在非约定目录 `resources/skills/`，`pi` manifest **不声明** `skills`——manifest 模式与 filter/默认模式因而都不会自动贡献它，平台门控全靠下面的 `resources_discover`。
+- **不用**静态 `pi.skills` manifest 声明（那会在 Linux/macOS 上也进模型目录，白占 KV cache 并误导模型）。改为在 `index.ts` 里注册 `pi.on("resources_discover", …)`：handler 返回 `{ skillPaths: aclSkillPaths(process.platform) }`，win32 给技能目录的**绝对路径**、其余平台给 `[]`（返回空 → pi 不会添加任何技能路径）。
+- **路径必须返回绝对路径**（真机修订，2026-10-03）：pi 对 `resources_discover` 返回的路径走 `normalizeExtensionPaths` → `resolveResourcePath(p) = resolvePath(p, this.cwd)`，即**相对路径按会话 cwd 解析**；`buildExtensionResourcePaths` 设的 `baseDir = dirname(extensionPath)` 只进来源标注（`metadata.baseDir`），**不参与解析**（`dist/core/resource-loader.js:608-614`、`:794-796`）。真机证据：从 `C:\pi-sandbox-accept` 启动 `pi -e C:\pi-packages\pi-sandbox` 时相对路径解析到 `C:\pi-sandbox-accept\skills\...`，技能不出现（§14 首跑 FAIL）。因此 `aclSkillPaths("win32")` 返回 `fileURLToPath(new URL("../../resources/skills/diagnose-windows-sandbox-acl", import.meta.url))` 的**绝对路径**（`resolvePath` 对绝对路径原样返回）。
 - handler 抛错会被 pi 捕获为扩展错误（fail-safe），不会阻断启动；但技能缺失会直接体现在真机验收的目录断言里。
-- `files` 补 `skills/`（不改 `pi` manifest）。
+- `files` 包含 `resources/`（不声明 `pi.skills`、不改 `pi.extensions`）。
 
 #### 选用 `resources_discover` 的依据与风险（已核实，不得擅自改为静态声明）
 
@@ -233,6 +234,7 @@ pi-sandbox/skills/diagnose-windows-sandbox-acl/
 | 未来 pi 不再发该事件会怎样？ | **安全降级**：handler 按事件名存入 `extension.handlers` Map，宿主不发就是永不触发——不报错、不警告、不影响扩展加载 | `dist/core/extensions/loader.js:216-220`、`runner.js:87-89` `snapshotEventHandlers` |
 | 它是公开 API 还是内部实现？ | **公开类型面、但文档零覆盖**：`on(event: "resources_discover", handler)` 是 `ExtensionAPI` 上的类型化重载，`ResourcesDiscoverEvent/Result` 由包根导出且属于公开的 `ExtensionEvent` 联合；但 `pi` 的 `docs/` 全库零命中 | `dist/core/extensions/types.d.ts:1145`、`dist/index.d.ts` 导出面 |
 | 文档推荐的做法是什么？ | **manifest `pi.skills`**（或“无 manifest 时按约定目录自动发现 `skills/`”）。本仓现成先例 **pi-ask-user**（扩展包 + 技能）用的就是静态声明——但它在**所有平台**都加载 | `pi` `docs/packages.md`、`docs/skills.md`；`pi-ask-user/package.json` → `{"extensions":["./index.ts"],"skills":["./skills"]}` |
+| 为什么不用 manifest 也不能用约定目录？ | 两条路都会**绕过平台门控**：manifest 模式只按 `pi.skills` 加载（声明即在所有平台加载）；settings 对象形式（filter/`autoload` 缺省）走 `collectDefaultResources()`，在 `manifest.skills` 未声明时回退到约定目录 `<pkg>/skills` 并无条件加载（本地探针：`packages:[{source:…}]` 时 Linux 上出现技能）。故技能放非约定目录 `resources/skills/` + manifest 不声明 `skills` + 绝对路径 `resources_discover` 三件套 | `package-manager.js` `collectPackageResources`（manifest 分支）/`collectDefaultResources`（约定目录分支）、`applyPackageFilter`；本地 SDK 探针（见 ledger） |
 
 - 非目标说明：`compatibility` frontmatter 字段（Agent Skills 的“环境要求”）**pi 不消费**（`skills.js`/`resource-loader.js` 零命中），所以“用 frontmatter 声明平台”这条不存在；pi 也没有任何 per-platform 技能门控机制。
 - **回退方案（仅当未来 pi 移除该事件时启用）**：改为静态 manifest 声明，并接受“非 Windows 平台多一条用不上的目录条目”；该条目成本在 README 的 Windows 小节说明。真机验收清单里的“技能出现在目录中”断言是发现失效的手段。
@@ -354,7 +356,7 @@ Windows：合成 ACL 场景（缺 `WRITE_DAC` 的目录、显式包允许 ACE �
 ## 12. 交付范围
 
 - worktree：`.worktrees/pi-sandbox-windows-support`，分支 `pi-sandbox-windows-support`（基线 228 例全绿）；
-- 交付物：`src/win32/*.js`（新增，约 1200 行）、`src/win32/skill-paths.ts` + `src/shell-ops.ts` + `src/powershell-ops.ts`（新增）、`src/{runners,confine,policy,fence,tools,bash-ops}.ts` 与 `index.ts`（改动）、`skills/diagnose-windows-sandbox-acl/`（新增，仅 Windows 加载）、测试（§10）、文档（§11）；
+- 交付物：`src/win32/*.js`（新增，约 1200 行）、`src/win32/skill-paths.ts` + `src/shell-ops.ts` + `src/powershell-ops.ts`（新增）、`src/{runners,confine,policy,fence,tools,bash-ops}.ts` 与 `index.ts`（改动）、`resources/skills/diagnose-windows-sandbox-acl/`（新增，非约定目录，仅 Windows 加载）、测试（§10）、文档（§11）；
 - **不含**：读/网络隔离、控制台隔离、Windows 上的 bash 受限执行（D3 的有意排除）、`@deepseek-ai/node-addon-system` 式的原生二进制包（§3.3）、npm 发版本身。
 
 ## 13. 验收记录（真机执行后回填）

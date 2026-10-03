@@ -439,7 +439,7 @@ pi -e C:\pi-packages\pi-sandbox
 
 ## 14. 诊断技能目录：Windows 出现 / 非 Windows 不出现
 
-**前置**：包内已存在 `skills/diagnose-windows-sandbox-acl/`（SKILL.md + `scripts/diagnose-windows-sandbox-acl.ps1`）——本行已由第二部分交付（S1–S3，含 Windows-only 套件 `tests/win32/diagnose-script.test.ts`）；技能的修复流程见第 17 条。
+**前置**：包内已存在 `resources/skills/diagnose-windows-sandbox-acl/`（SKILL.md + `scripts/diagnose-windows-sandbox-acl.ps1`）——本行已由第二部分交付（S1–S3，含 Windows-only 套件 `tests/win32/diagnose-script.test.ts`）；技能的修复流程见第 17 条。**注意技能必须放在非约定目录**：`<pkg>/skills/` 会被 pi 的包资源自动发现无条件加载到所有平台（spec §4.10，本地探针已证），因此本行还要看下一条的对照。
 
 **命令（Windows）**：在中立 cwd 启动，避免项目级配置干扰（PowerShell / git-bash 相同）：
 
@@ -454,7 +454,12 @@ pi -e /c/pi-packages/pi-sandbox -p "List the exact names of all skills available
 ```
 
 **预期**：Windows 上输出包含 `diagnose-windows-sandbox-acl`。
-**非 Windows 对照**（同一份构建，在 Linux/macOS 上执行同一命令）：输出**不含** `diagnose-windows-sandbox-acl`（`aclSkillPaths(platform)` 仅在 win32 返回路径，其余平台返回 `[]`，pi 侧是 mergePaths 追加语义）。
+**非 Windows 对照**（同一份构建，在 Linux/macOS 上执行同一命令）：输出**不含** `diagnose-windows-sandbox-acl`（`aclSkillPaths(platform)` 仅在 win32 返回路径，其余平台返回 `[]`，pi 侧是 mergePaths 追加语义）。**两种包配置形式都要看**（二者在 pi 里走不同代码路径，spec §4.10）：
+
+1. 字符串形式（`"packages": ["<本地路径>"]` 或 `/...`）——manifest 模式；
+2. 对象形式（`"packages": [{"source": "<本地路径>"}]`）——filter/默认模式，会回退到约定目录 `<pkg>/skills/`；
+
+对象形式下若技能也在非 Windows 出现，说明技能又回到了约定目录（或有其他自动发现路径）——归类为**实现缺陷**（Linux 侧可用同一份构建直接复现）。
 若 Windows 上未出现：先确认「非 Windows 对照」也正确，再检查 `aclSkillPaths` 是否返回**绝对路径**（spec §4.10 真机修订：pi 把 `resources_discover` 返回的路径按**会话 cwd** 解析，`baseDir` 只用于来源标注——相对路径已在真机证伪），归类为**实现缺陷**。
 
 **实测（Windows + 非 Windows 两段输出）**：
@@ -506,7 +511,7 @@ icacls "$TEMP"
 
 ## 17. 诊断技能修复流程（真机，由第二部分交付）
 
-> 对应 spec §4.10 / §10.3 / Ruling 9；技能内容 = `skills/diagnose-windows-sandbox-acl/{SKILL.md, scripts/diagnose-windows-sandbox-acl.ps1}`（S1–S3），自动化面 = 第 0 条的 `tests/win32/diagnose-script.test.ts`。
+> 对应 spec §4.10 / §10.3 / Ruling 9；技能内容 = `resources/skills/diagnose-windows-sandbox-acl/{SKILL.md, scripts/diagnose-windows-sandbox-acl.ps1}`（S1–S3），自动化面 = 第 0 条的 `tests/win32/diagnose-script.test.ts`。
 > 该流程按 SKILL.md 的契约**只批准一次**：技能请求 `danger-full-access`（denial-first 门禁此时应放行——本会话刚从 17.1 拿到真实拒绝），随后同一次调用完成诊断 + 修复。
 
 ### 17.1 造一个"外来包 ACE 挡路"的目录
