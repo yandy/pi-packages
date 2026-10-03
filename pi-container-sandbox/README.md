@@ -4,10 +4,20 @@ A [pi](https://pi.dev/docs/latest/extensions) extension that runs the agent's
 `bash`, `read`, `write`, `edit` tools and the user's `!` bash inside a
 per-session Docker container, so coding side effects are sandboxed.
 
+## Platform support
+
+**Linux only.** The sandbox relies on Linux container semantics — container paths
+mirroring host paths, non-root uid 1000, cgroup resource limits — so it is
+supported only on Linux.
+
+The published package declares `"os": ["linux"]`, and `npm install` / `pi install`
+refuse to install it on macOS and Windows with `EBADPLATFORM`. Running it from a
+local checkout on another platform is unsupported.
+
 ## Quick start
 
 Requires Docker or Podman (any recent version) running and accessible to your user
-(you need read/write on `/var/run/docker.sock`, Docker Desktop, or a working Podman installation).
+(you need read/write on `/var/run/docker.sock`, or a working Podman installation).
 
 ```bash
 # Install from npm
