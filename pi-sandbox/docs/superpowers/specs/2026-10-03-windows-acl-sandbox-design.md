@@ -1,0 +1,329 @@
+# pi-sandbox：Windows（windows-acl）支持设计
+
+日期：2026-10-03
+状态：已与用户逐节确认（Q1–Q5 五轮拍板），待 spec 评审
+前置研究：`.superpowers/refs/deepseek-harness/`（deepseek harness 源码，MIT）——具体为 `packages/sandbox/sandbox-windows-acl`（0.2.0-rc.2 源码形态）、`packages/sandbox/sandbox-local`、`packages/subprocess/win32-process`，以及两份 Agent Note：`2026-08-08-windows-acl-restricted-token-sandbox.zh.md`（受限令牌档）与 `2026-09-19-windows-acl-mandatory-integrity-confinement.zh.md`（删除约束）
+前置设计：`2026-09-29-process-sandbox-design.md`（平台链、confine seam、围栏、fail-closed）。其 §1「非目标：Windows 支持」由本设计**取代**；其余原则（fail-closed、四后端语义对齐、拒绝/失败两套分类）继续有效且不得重排
+
+## 1. 背景与问题
+
+现状：`PLATFORM_CHAINS`（`src/runners.ts`）只有 `linux` 与 `darwin` 两条链，Windows 命中空链 → `SandboxUnavailableError` → **所有受限模式下的 bash 命令被拒绝**。这是 fail-closed 的正确实现，但对 Windows 用户等于"沙箱不可用"。
+
+用户诉求：参考 dsh 的 windows-acl 实现，让 pi-sandbox 在 Windows 上真正可用。
+
+为什么不复用现有三件套：`bwrap` / `sandbox-exec` 在 Windows 无对应物；`landlock-run` 是 Linux LSM。Windows 的写入限制原语只有 Win32 API（`CreateRestrictedToken`、`SetEntriesInAclW`/`SetNamedSecurityInfoW`、`CreateProcessAsUserW`、Job Object），**没有任何可当 argv 前缀使用的系统程序**。
+
+### 1.1 事实基础（均已核实，标注出处）
+
+| 事实 | 出处 |
+|---|---|
+| pi 默认工具集是 `["read","bash","edit","write"]`，`powershell` 不在其中（opt-in） | `pi-coding-agent/dist/core/settings-manager.js:35` `DEFAULT_TOOL_NAMES` |
+| 原生 Windows 上 pi 把 `bash` 解析到 Git Bash（`shellPath` → `Program Files\Git\bin\bash.exe` → PATH `bash.exe`） | `pi-coding-agent/dist/utils/shell.js:58` `getShellConfig` |
+| `getShellConfig` / `getPowerShellConfig` 从包根导出，扩展可直接用 | `pi-coding-agent/dist/index.d.ts:43` |
+| `createPowerShellToolDefinition` 是 pi **1.0.0** 才有的 API（0.80.2 无 `dist/core/tools/powershell.js`） | 本仓锁定的 0.80.2 与全局安装的 1.0.0 对比 |
+| `PowerShellOperations = BashOperations`（同型接口） | `pi-coding-agent/dist/core/tools/powershell.d.ts` |
+| `ExtensionAPI.getActiveTools(): string[]` 可判定工具是否激活 | `pi-coding-agent/dist/core/extensions/types.d.ts:1237` |
+| npm 上 `@deepseek-ai/dsh-sandbox-windows-acl` 只有 **0.0.1-rc.1**（与研究的 0.2.0-rc.2 源码不是一回事） | `npm view` |
+| `koffi@3.3.2` 对 `win32-x64/ia32/arm64` 有官方预编译包，无需本地工具链 | `npm view koffi` |
+| Node 的类型剥离对 **node_modules 内**的 `.ts` 明确拒绝 → 独立进程那一侧只能是 `.js` | Node 文档 + 依赖包安装位置（`~/.pi/agent/npm/node_modules/...`） |
+| pi 要求 `node >=22.19.0` | `pi-coding-agent/package.json` engines |
+| dsh 的 Windows 侧模型 shell 只有 pwsh（其 `bash-sandbox` 从不跑 Windows） | `.superpowers/refs/.../packages/shell/{bash,pwsh}-sandbox` |
+
+## 2. 已确认决策（用户逐条拍板，不得擅自变更）
+
+| # | 决策 | 内容 |
+|---|---|---|
+| D1 | 验证方式 | 以**真机为准**：设计给出编号验收清单与预期输出（PowerShell + git-bash 两套命令），用户在 Windows 机器执行并回贴输出，据此迭代。CI 保持 ubuntu；win32 专属测试干净 skip |
+| D2 | tmp 语义 | **授予宿主 `%TEMP%`**（对齐 pi-sandbox 现有"宿主 tmp 就是宿主 tmp"语义），**不**重写 TMP/TEMP → git-bash 的 `/tmp` 仍指向宿主 `%TEMP%`，路径透明保住 |
+| D3 | shell 覆盖 | Windows **只支持 pwsh**：受限模式下 `bash` **拒绝执行**并给出可执行指引（含 `settings.json` 片段）；`danger-full-access` 下 `bash` 照常裸跑；pwsh 未激活时**激活期提示一次** + `/permission` 状态行标注 |
+| D4 | 打包形态 | 单包：koffi 进 `pi-sandbox` 的 `dependencies`（仅 win32 懒加载），实现放 `pi-sandbox/src/win32/` |
+| D5 | 机制 | 移植 dsh windows-acl：`WRITE_RESTRICTED` 受限令牌 + Low 强制完整性 + 环境性删除拒绝；runner **自派生 SID、自幂等授权**（无 seam-managed SID 入参） |
+| D6 | 生命周期 | workspace 与 `%TEMP%` 的授权**都 standing（不回收）**；残留与外部性写进 README |
+| D7 | 依赖下限 | peer 保持 `>=0.80.2`，powershell 覆盖靠**运行时探测** `createPowerShellToolDefinition` → 版本走 **1.4.0** |
+| D8 | 诊断技能 | **本次包含**：`skills/diagnose-windows-sandbox-acl/`（SKILL.md + 保真移植的 PowerShell 修复脚本）；**仅 Windows 加载**，经 `resources_discover` 事件按平台注册（见 Ruling 9） |
+
+D3 的拒绝指引文案必须含这段（用户指定）：
+
+```json
+{ "defaultTools": ["-bash", "+powershell"] }
+```
+
+### 2.1 Rulings（实现与测试按编号引用）
+
+- **Ruling 1**：win32 是唯一候选链，**不做功能探测**，但做**可解析性前置检查**（不 spawn 任何进程）：① `src/win32/runner.js` 存在；② `koffi` 可由 `createRequire` 解析；③ node 可执行文件可解析——运行时是 Node（`process.versions.node && !process.versions.bun`）时用 `process.execPath`，否则在 PATH 上找 `node.exe`。任一项不可达即 `unavailable` → `SandboxUnavailableError` + 对应 Windows 指引（重装包 / 安装 Node）。
+- **Ruling 2**：Windows 受限模式下 `bash` 拒绝执行（绝不 spawn）；`danger-full-access` 下 `bash` 走既有裸 spawn。拒绝错误是**独立类型**（不复用 `SandboxUnavailableError` 的措辞），文案含 D3 指定的 JSON 片段、pi ≥1.0.0 前提、`danger-full-access` 逃生门三项。
+- **Ruling 3**：runner 自派生 SID、自授权；argv **不含** `--write-sid/--temp-write-sid`（dsh 的 seam-managed 契约在本包无消费方）。
+- **Ruling 4**：workspace 与 `%TEMP%` 的 ACE/拒绝项/Low 标签都不回收；`dispose` 只关令牌与句柄。
+- **Ruling 5**：不重写 TMP/TEMP。
+- **Ruling 6**：win32 enforcement 恒为 `partial`；runner 失败规则 = `{allowedExitCodes:[127], fatalSignatures:["windows-acl-run: "]}`。
+- **Ruling 7**：拒绝方言 = `access is denied` / `access to the path` / `permission denied` / `operation not permitted`（大小写不敏感子串）。
+- **Ruling 8**：win32 且 `pi.getActiveTools()` 不含 `powershell` 时，激活期提示一次（有 UI 走 `ctx.ui.notify`，无 UI 写 stderr），`/permission` 状态行显示 `shell: powershell only (not activated)`。
+- **Ruling 9**：诊断技能**只在 Windows 上加载**——由扩展在 `resources_discover` 事件里按平台返回 `skillPaths`（非 win32 返回空，即零目录条目），**不用**静态 `pi.skills` 清单声明。pi 从磁盘加载包，因此**不做** dsh 的 ASAR/SEA 临时提取，脚本按 skill 目录相对路径引用。技能场景本身需**不受限调用者**（修改安全描述符），靠已批准的 `danger-full-access` 承担。
+- **Ruling 10**：任何 Win32 失败都不得 spawn 未受限子进程；错误必须携带 API 名 + 精确 win32 码 + 系统文本 + 上下文。
+
+## 3. 方案选择（被否决的路线）
+
+### 3.1 为什么不选 mxc / AppContainer
+
+同 dsh 的结论：mxc 的 OS 下限（Win11 24H2，BaseContainer 档需 25H2+）过新，且低档回退到 AppContainer + 宿主 DACL 改造；AppContainer 令牌**没有环境读访问**，任意路径读需要为每条路径预授读 ACE（全盘 DACL 改写）。受限令牌只对**写**做交集，零读授权，且不受影响的读/网络/进程可见性与本包的既有词汇表一致。
+
+### 3.2 为什么不选 PowerShell runner（零原生依赖）
+
+用 `Add-Type` 现场编译 C# P/Invoke 完成令牌 + ACL + `CreateProcessAsUserW` + 句柄继承，确实能去掉 koffi。代价：每次命令额外 0.5–2s（PowerShell 启动 + 程序集编译/加载），且要从零设计并调试大量句柄继承/stdio 直通互操作代码——没有可对照的已验证实现。移植 dsh 的代码路径风险显著更低。
+
+### 3.3 为什么不选自建原生 runner 包（仿 landlock-run）
+
+形态与本仓已有的 `@deepseek-ai/node-addon-system` 一致（C 代码 + 每架构预编译 + optionalDependencies），但需要 Windows 构建链路、新的多架构原生包与发布流程，而本仓 CI 只有 ubuntu。成本最高，收益只是省掉 koffi 这 2MB。
+
+### 3.4 为什么不直接依赖 npm 上的 dsh 包
+
+发布的 `@deepseek-ai/dsh-sandbox-windows-acl@0.0.1-rc.1` 与研究中的 0.2.0-rc.2 源码不是同一实现（peer 依赖、导出面、能力均不同），且其 peer 依赖拖入 cordis 生态。研究用途只读源码移植。
+
+### 3.5 为什么不选 WSL 转发
+
+要求用户装 WSL + bwrap，`C:\` 与 `/mnt/c` 路径互映破坏路径透明，且**原生 Windows 进程完全不受约束**——不满足诉求。
+
+## 4. 架构
+
+### 4.1 分层与进程边界
+
+```
+pi 进程（不受限）
+ ├─ bash-ops.ts / shell-ops.ts（TS）      ← confine() 产出 argv 前缀；win32 上 bash 直接拒绝
+ │    └─ node.exe src/win32/runner.js …   ← 独立进程，不受限，只负责"造令牌 + 派生受限子进程"
+ │         └─ 受限子进程（WRITE_RESTRICTED + Low IL）   ← 真正的受限执行
+ └─ fence.ts（write/edit 进程内围栏）     ← 与 runner 共用 writableRoots 推导
+```
+
+`.js` 是硬约束：扩展安装后位于 `~/.pi/agent/npm/node_modules/...`，Node 拒绝为 node_modules 内的 `.ts` 做类型剥离。TS 侧通过 `allowJs` 引用，JSDoc 提供类型。
+
+### 4.2 三层隔离（每层关闭一个具体漏洞，缺一不可）
+
+| 层 | 实现 | 关闭什么 |
+|---|---|---|
+| ① 受限令牌 | `CreateRestrictedToken(WRITE_RESTRICTED \| DISABLE_MAX_PRIVILEGE \| LUA_TOKEN)`；restricting 列表：`read-only = [logonSID, Everyone]`，`workspace-write = [logonSID, Everyone, workspaceSID, tempSID]` | 写类访问的 pass-2 交集检查：只有携带能力 SID 的令牌能写授权根；读只走正常检查（**读不受限**） |
+| ② Low 强制完整性 | 令牌 `SetTokenInformation(TokenIntegrityLevel)` 降到 S-1-16-4096；每个授权根在同一份 descriptor 里打 `SYSTEM_MANDATORY_LABEL_NO_WRITE_UP` 可继承标签（`OI\|CI`） | ①只覆盖对象**自身**的访问检查；Windows 还允许凭**父目录**的 `FILE_DELETE_CHILD` 删除，那条路不需要 restricting SID 副署。标签在访问检查内部强制执行 → 授权根之外的 Medium 对象**既防写也防删** |
+| ③ 环境性删除拒绝 | 每个授权根对 world SID 加 `FILE_DELETE_CHILD` 拒绝 ACE，**只带 `CONTAINER_INHERIT_ACE`** | 两个授权根都带 Low 标签时，仅靠②仍可互删。拒绝项使能力 ACE 的 DELETE 位成为根内唯一删除授权来源。只继承到容器是因为 `0x40` 属于 `FILE_ALL_ACCESS`，落到文件上会让根内每次 `GENERIC_ALL` 打开被拒 |
+
+令牌授权掩码 `GRANT_MASK = (FILE_GENERIC_WRITE | DELETE | FILE_DELETE_CHILD) & ~STANDARD_RIGHTS_WRITE`——`WRITE_DAC`/`WRITE_OWNER` 被排除，受限子进程无法改 DACL 或夺取所有权逃逸。
+
+保活组 `logonSID + Everyone` 两种模式都必须保留：没有它们早期 DLL 初始化以 `0xC0000142` 死亡、CNG 让 pwsh 以 `0xE0434352` 崩溃。`Everyone` 仍在列表里，但其环境性写权限已被②的标签层否定。`Authenticated Users` 两种列表都不存在（CIM/WMI 不可用 `0x80041003`，同时关闭 `C:\` 根建树逃逸）；`INTERACTIVE`/`LOCAL` 也不存在（宿主 Public 树对 INTERACTIVE 授予写权限）。
+
+### 4.3 能力身份与确定性派生（纯函数，Linux 上可单测）
+
+```
+workspaceWriteSid(ws) = sha256(ws) → 两个 uint32 % (2^30-1) + 1 → "S-1-4-x-y"
+tempWriteSid(tmp)     = sha256("temp\0" + tmp) → 同上 → "S-1-4-x-y-1"   // 第三级子授权域分离
+```
+
+两者都**确定性**（temp 是宿主 `%TEMP%`，不是随机私有目录），因此**不需要**任何会话态授权表：runner 每次调用都幂等重放授权，跨进程/跨会话/跨重启都命中精确跳过。SID 字符串本身不是秘密，它的能力完全由命名它的 ACE 定义。
+
+### 4.4 授权应用：一次 `SetNamedSecurityInfoW`，三项编辑
+
+`GetNamedSecurityInfoW` 读回 `DACL_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION` → **精确三元组比对**（允许 ACE 的 type/inheritance/mask/SID + 拒绝 ACE 的 type/inheritance/mask/SID + 标签 ACE 的 type/inheritance/policy/SID）→ 三者完全一致则只 `LocalFree` 返回（**这是跨进程复用的关键**，避免急切全树传播）→ 否则 `SetEntriesInAclW` 合并（拒绝项在前）后在**同一次** `SetNamedSecurityInfoW` 里应用 DACL + 标签。
+
+并发：整段 get-merge-set 在每路径 `LockFileEx` 独占锁内，锁文件 `<GetTempPathW()>\dsh-acl-locks\<sha256(小写路径)[0:16]>.lock`（句柄 share read/write 但**不** share delete——可删除的锁文件会在持有者脚下被替换，让两个进程同时"持有"同一把锁）。
+
+分配契约：`GetNamedSecurityInfoW` 返回的 ACL 指针位于 descriptor 分配内部，**只**能 `LocalFree` descriptor；在 `SetEntriesInAclW` 消费完 ACL 之前不得释放。
+
+### 4.5 runner 契约
+
+```
+<node.exe> <pkg>/src/win32/runner.js \
+    --workspace <ws> --temp <tmpRoot> --mode <read-only|workspace-write> \
+    -- <argv...>
+```
+
+调用序列：
+
+```
+parseArgs → requireDirectory(ws, temp) → win32()（koffi 懒加载）
+→ SetConsoleCtrlHandler(null, 1)          // 自身忽略 Ctrl+C，活到能镜像退出码
+→ openProcessToken(TOKEN_QUERY|TOKEN_DUPLICATE|TOKEN_ADJUST_DEFAULT|TOKEN_ASSIGN_PRIMARY)
+→ findLogonSid()                          // TokenGroups 中 SE_GROUP_LOGON_ID 的拷贝
+→ 本进程派生 workspaceSID / tempSID（Ruling 3）
+→ workspace-write：grantWrite(ws)、grantWrite(tmp)（幂等）
+→ createRestrictedToken(restricting = 按模式的列表)
+→ restrictTokenIntegrity(Low)
+→ setTokenDefaultDaclGrant(见 4.6)
+→ CreateProcessAsUserW（kill-on-close Job、stdio 直通、STARTF_USESHOWWINDOW+SW_HIDE）
+→ wait → 镜像子进程退出码（全 32 位）
+```
+
+失败契约：任何 runner 侧失败（参数非法、目录不存在、令牌/授权/spawn 错误）→ stderr `windows-acl-run: <detail>` + **exit 127**（Ruling 6）。
+
+### 4.6 令牌默认 DACL 补丁（不移植就会坏的地方）
+
+受限令牌继承的默认 DACL 只命名用户的环境 SID，**不含任何 restricting SID**，于是受限子进程新建**匿名管道**（孙进程 stdio）会在创建时被 pass-2 检查拒绝（`ERROR_ACCESS_DENIED`，Node 表现为 spawn EPERM）。因此 `SetTokenInformation(TokenDefaultDacl)` 合并一条 `FILE_ALL_ACCESS` 允许 ACE，SID 选择顺序与 dsh 一致：`tempSID → workspaceSID → Everyone`（本包授权了 `%TEMP%`，所以 tempSID 就在 restricting 列表里）。新建对象自身 DACL 因此能过 pass-2，而**创建本身仍被父对象的 DACL 门控**。
+
+### 4.7 进程生命周期与清理
+
+- 子进程在 kill-on-close Job 内创建（先 suspended，分配到 Job 后再恢复初始线程，目标代码不会在分配前执行）。
+- win32 上 pi 侧 **不**使用 `detached`（pi 自己也是 `detached: process.platform !== "win32"`），并加 `windowsHide`；kill 只杀 runner → Job 句柄关闭 → **整棵进程树消亡**。
+- timeout/abort 的既有文案契约（`timeout:<n>` / `aborted`）不变。
+- 不使用 `CREATE_NO_WINDOW` / `CREATE_NEW_CONSOLE`（受限令牌下子进程会以 `STATUS_DLL_INIT_FAILED` 死亡）。
+
+### 4.8 TS 侧接线
+
+| 文件 | 改动 |
+|---|---|
+| `src/runners.ts` | 新增 `RunnerKind` `windows-acl`、win32 链、runner argv 构造、`partial`、可解析性前置检查（Ruling 1） |
+| `src/confine.ts` | win32 的 `denialSignatures`（Ruling 7）与 `runnerFailureRules`（Ruling 6） |
+| `src/policy.ts` | win32 的 tmp 根默认值 = `[os.tmpdir()]`（去掉 POSIX 的 `"/tmp"`；经既有 `_tmpRoots` 注入点可在 Linux 覆盖测） |
+| `src/fence.ts` | win32 containment：大小写不敏感 + 用 `path.sep` 而非硬编码 `/`；保留 dev/ino 身份回退（覆盖 8.3 短名与 junction）。大小写判定经**参数注入**（由 `process.platform` 派生、单测可覆盖），使 win32 语义在 Linux 上可测（testing.md「参数注入」） |
+| `src/shell-ops.ts`（新） | 从 `bash-ops.ts` 抽出受限 ops 工厂（confine/spawn/超时/中止/denial 记账），bash 与 powershell 共用；`bash-ops.ts` 对外导出与行为**零变化**（现有测试即回归网）。平台判定同样经**注入点**，使 bash 的 win32 拒绝分支可在 Linux 单测 |
+| `src/powershell-ops.ts`（新） | PowerShell 专用 ops：`getPowerShellConfig()` 取 argv + pi 的 UTF-8 输出前缀。被拒时经与 bash **同一条** denial 记账路径（`onDenial` → ledger 的 `command` 类），使 pwsh 的拒绝能驱动 denial-first 提权重试 |
+| `src/tools.ts` | 注册 `powershell` 工具覆盖（运行时探测 `createPowerShellToolDefinition`）；win32 受限模式下 bash 拒绝（Ruling 2） |
+| `index.ts` | 激活期 pwsh 未激活提示（Ruling 8）；`/permission` 状态行的 win32 标注；`resources_discover` 处理器的 platform 门控（Ruling 9） |
+| `src/win32/skill-paths.ts`（新） | 纯函数 `aclSkillPaths(platform)`：win32 返回 `["./skills/diagnose-windows-sandbox-acl"]`，其余平台返回 `[]`（可在 Linux 单测断言） |
+
+### 4.9 模块划分
+
+```
+src/win32/abi.js      Win32 常量 + x64 布局（纯数据，按 dsh verify/abi-probe.cpp 的值写断言）
+src/win32/ffi.js      koffi 懒加载 + 绑定表（kernel32/advapi32）+ Win32Error 格式化
+src/win32/token.js    logon SID、well-known SID、restricting 列表、Low IL、默认 DACL 补丁
+src/win32/acl.js      DACL/标签读改写、环境性删除拒绝、per-path LockFileEx 锁
+src/win32/sid.js      能力 SID 派生 + 路径边界校验（纯函数）
+src/win32/cli.js      参数解析/校验（纯函数）
+src/win32/runner.js   独立入口（thin：main + exit code）
+```
+
+行数估计（按参考实现折算）：`ffi`+`abi` ≈ 320、`token` ≈ 250、`acl` ≈ 340、`sid`+`cli` ≈ 120、`runner` ≈ 160，合计约 **1200 行 JS**（未含 TS 接线与测试）。
+
+### 4.10 诊断技能的落位与**平台门控**
+
+```
+pi-sandbox/skills/diagnose-windows-sandbox-acl/
+  SKILL.md
+  scripts/diagnose-windows-sandbox-acl.ps1
+```
+
+- **不用**静态 `pi.skills` manifest 声明（那会在 Linux/macOS 上也进模型目录，白占 KV cache 并误导模型）。改为在 `index.ts` 里注册 `pi.on("resources_discover", …)`：handler 返回 `{ skillPaths: aclSkillPaths(process.platform) }`，win32 给 `["./skills/diagnose-windows-sandbox-acl"]`、其余平台给 `[]`（返回空 → pi 不会添加任何技能路径）。
+- 路径以**扩展文件所在目录**（包根）为基准解析（pi 的 `buildExtensionResourcePaths` 用 `dirname(extensionPath)` 作 baseDir，与 `pi.skills: ["./resources/skills"]` 的书写形式一致）。该解析行为列进真机验收清单；若相对路径在真机上未生效，回退为 `fileURLToPath(new URL("./skills/diagnose-windows-sandbox-acl", import.meta.url))` 的绝对路径。
+- handler 抛错会被 pi 捕获为扩展错误（fail-safe），不会阻断启动；但技能缺失会直接体现在真机验收的目录断言里。
+- `files` 补 `skills/`（不改 `pi` manifest）。
+
+## 5. 语义矩阵
+
+| 模式 | restricting 列表 | 授权 | 子进程 TMP/TEMP | bash | pwsh |
+|---|---|---|---|---|---|
+| `read-only` | `[logonSID, Everyone]` | 无 | 不重写（写会被拒） | 拒绝 + 指引 | 受限执行；pwsh 可能退化 ConstrainedLanguage |
+| `workspace-write` | `[logonSID, Everyone, wsSID, tempSID]` | workspace + `%TEMP%` | 不重写（`%TEMP%` 已授权） | 拒绝 + 指引 | 受限执行；有可写 temp → 保持 FullLanguage |
+| `danger-full-access` | — | — | — | 既有裸 spawn（Ruling 2） | 既有裸 spawn |
+
+- **`read-only` 不含能力 SID**，所以历史 `workspace-write` 留下的常驻 ACE 在降级后**自动失效**（pass-2 只授予 restricting 列表携带的内容），无需清理。
+- **`writableRoots`（win32）= `[canonical(workspace), canonical(os.tmpdir())]`**，`read-only` 为空；fence 与 runner 共用同一推导，防止"write 工具能写而 bash 不能"的漂移。`%TEMP%` 的两侧（授权路径与围栏根）一律取 `canonicalPath(os.tmpdir())`（`realpathSync.native`，解析 junction 与短名拼写），避免拼写差异导致两侧不相交。
+- 拒绝与失败两套分类保持 pi-sandbox 既有语义：命中拒绝方言 → `[sandbox: file access denied …]` + 提权提示标记 + 记账一次（驱动 denial-first 提权）；命中失败规则 → `SandboxUnavailableError`。
+
+## 6. 失败模式矩阵
+
+| 失败点 | 处理 | 模型/用户看到 |
+|---|---|---|
+| koffi / runner.js / node 不可达 | 选择期前置检查 → `unavailable`（Ruling 1） | `SANDBOX_UNAVAILABLE (mode)` + Windows 指引 |
+| runner 侧任一失败（参数、目录、令牌、授权、spawn） | 不 spawn 受限子进程；`windows-acl-run: <detail>` + exit 127 | 既有 `classifyRunnerFailure` → `SandboxUnavailableError(detail)` |
+| 受限子进程被拒 | 方言命中（Ruling 7） | 拒绝标记 + 提权提示 + denial ledger |
+| 授权应用中途失败 | 已应用路径尽力撤销 + `AggregateError`；standing 授权**不算**错误产物 | 原始 `Win32Error`（API 名 + win32 码 + 系统文本 + 路径） |
+| 被授权目录不是调用者所有 / 缺 `WRITE_OWNER` | 大声失败（SACL 写入需要；不静默降级隔离） | 同 dsh：仅授予 Modify 的目录会失败，文档记录 |
+| 受限模式下调用 `bash` | 拒绝，绝不 spawn（Ruling 2） | 独立错误类型 + `settings.json` 片段 + pi 版本前提 + `danger-full-access` 逃生门 |
+| pwsh 未激活 | 激活期提示一次 + 状态行标注（Ruling 8） | UI 通知 / stderr 警告 |
+| FAT/无 ACL 卷作授权根 | 大声失败（文档记录为未验证区域） | `Win32Error` |
+
+## 7. 安全与信任边界
+
+**`partial` 强制（三处结构性缺口，全部继承自 dsh 并保留文档）**
+
+1. **NTFS 硬链接是文件对象别名**：工作区内被授权文件的硬链接在外部同样可写。拒绝所有多链接文件不可行（pnpm 安装大量使用硬链接）。
+2. **读不受限**：`WRITE_RESTRICTED` 只交叉检查写访问，受限子进程能读调用者可读的一切（含其他工作区）。
+3. **被其他 AppContainer 工具以包 SID 打标过的文件对 Low 完整性令牌不可读**（内核规则未确证），需移除外来 ACE 或重装目录树。
+
+**standing 授权的残留与外部性（D6 的代价，必须写进 README）**
+
+- workspace 与 `%TEMP%` 树上的 Low 可继承标签**生命期长于 pi**，会向**任何**以同一用户身份运行在 Low 完整性的进程放宽该目录树（Medium 下本会被拒）；清除可继承标签**不会回退**已传播到子对象的标签，所以撤销只能做一半。
+- `%TEMP%` 是用户共享树：其子目录会继承 `FILE_DELETE_CHILD` 拒绝项，因此第三方程序用 `GENERIC_ALL`/`FullControl` 打开自己 temp 子目录会被拒（基于 DELETE 的删除、`MAXIMUM_ALLOWED`、常规读写打开不受影响）；首次授权会在整棵 `%TEMP%` 树上做急切传播（可能数秒），之后每次命中精确跳过。
+- 授权根内**目录**的 FullControl 打开被拒绝（拒绝项属于完全访问掩码，无法避免的代价）。
+
+**其他继承边界**：控制台隔离不可用（子进程共享宿主控制台，`CREATE_NO_WINDOW`/`CREATE_NEW_CONSOLE` 会以 `STATUS_DLL_INIT_FAILED` 死亡）；`NUL` 在两种模式下可写（设备 DACL 授予 Everyone 读写，属环境性而非授权）；受限令牌下 `whoami` 与令牌检查 cmdlet 可能失败（诊断噪音）。
+
+## 8. 与参考实现（dsh）的差异清单
+
+| # | 维度 | dsh | 本设计 | 原因 |
+|---|---|---|---|---|
+| 1 | 授权管理位置 | seam 持有 `AclWriteGrant`，按会话 materialize/revoke，向 runner 传成对 `--write-sid/--temp-write-sid`（`manageDacls:false`） | runner **自派生 SID、自幂等授权**；argv 无 SID 参数（Ruling 3） | pi-sandbox 无常驻 server 的会话授权生命周期；temp 是确定性宿主路径 → SID 可确定性派生 |
+| 2 | temp 语义 | **拒绝**授予宿主临时根；每会话随机私有目录 + 重写 TMP/TEMP + 退出清理 | 授予宿主 **`%TEMP%`**；不重写（D2/Ruling 5） | 保住"宿主 tmp 就是宿主 tmp"的路径透明，与四后端语义对齐 |
+| 3 | 生命周期 | workspace standing + **temp revocable** | 两者**都 standing**（Ruling 4） | 撤销无法回退已传播的标签；且撤销后每次都要重传播 |
+| 4 | 需要移植的边界检查 | `assertTempRootOutsideWorkspace` / `assertPrivateTempDisjoint` | 不需要（两处固定根，重叠后果只是冗余授权） | D2 的直接后果 |
+| 5 | shell 工具面 | Windows 上模型侧只有 pwsh（`pwsh-sandbox`）；POSIX 才是 bash | Windows 上 pwsh 受限、bash **拒绝**（Ruling 2） | D3；dsh 在 Windows 上根本不注册 bash 工具，我们用拒绝保证 fail-closed |
+| 6 | 下层原语 | 共享库 `dsh-win32-process`：另有普通 runner 原语、fd-7 CRT 控制管道、`pollProcessExit`/`isJobEmpty`、环境块排序 | 只移植沙箱需要的那部分；不要 fd-7、不要普通 runner 原语；环境走 Node 继承 | YAGNI；pi 的 shell ops 不使用子进程控制管道 |
+| 7 | 选择/探测 | 唯一候选不探测 | 唯一候选不功能探测，但加**可解析性前置检查**（Ruling 1） | dsh 的 runner 是包内文件必然存在；我们要把"koffi/runner/node 缺失"从 spawn ENOENT 变成清晰的 `SANDBOX_UNAVAILABLE` |
+| 8 | 拒绝/失败接入点 | seam 返回 `denialSignatures`/`runnerFailureRules`，由 bash/pwsh 执行器包渲染 | 值相同，接入本包自己的 `classifyDenial`/`classifyRunnerFailure`，命中后注入拒绝标记 + 提权提示 | pi-sandbox 的拒绝必须能驱动 denial-first 提权记账 |
+| 9 | 写侧围栏 | 独立 cordis 服务 `dsh-fs-sandbox` | 内建 `fence.ts`，本次补 win32 语义 | 架构对应物，Windows 语义是本包新增工作 |
+| 10 | 进程清理 | Job object 在 runner 内；seam 无 detached 逻辑 | 同样 Job object；额外在 win32 关闭 `detached` | dsh 的 Windows 侧没有"shell ops + 进程组"这一层 |
+| 11 | 诊断技能分发与加载 | 随包发布，经 cordis skills 服务注册，启动时从 ASAR/SEA 提取到临时目录 | 技能目录随包发布，经 pi 的 `resources_discover` 事件**按平台**注册（win32 才返回路径），**不提取**（Ruling 9） | pi 从磁盘加载包，无需归档内路径处理；静态 manifest 声明会在非 Windows 上也进模型目录 |
+| 12 | 打包形态 | 独立包 `dsh-sandbox-windows-acl` | 合进单包 `src/win32/` + koffi 依赖 | D4 |
+
+## 9. 已知取舍与非目标
+
+**非目标**：读隔离；网络隔离（始终允许，与既有设计一致）；进程可见性；控制台隔离；`!`/`!!` 用户手输命令（不受扩展接管，既有行为）；Windows 上的 CIM/WMI 可用性。
+
+**已知取舍**：
+
+1. `%TEMP%` 与 workspace 的常驻 ACL/标签改动（见 §7 外部性），且不回收。
+2. 首次授权在大型 `%TEMP%`/工作区上做急切全树传播（秒级），之后 O(1)。
+3. **默认配置的 Windows 用户第一次让模型跑命令会撞上 bash 拒绝**，必须显式改 `defaultTools`（这是 D3 的必然结果，也是它想要的 fail-closed）。
+4. `read-only` 下 pwsh 会退化到 ConstrainedLanguage（`Add-Type`/COM/反射失败），`workspace-write` 保持 FullLanguage——属 PowerShell 启动行为，不是 ACL 边界的一部分。
+5. FAT 类无 ACL 目标未验证；NULL-DACL 目录在 grant/revoke 往返下不保持身份（后者本包不触发，因为不 revoke）。
+6. 受限孙进程的 named-pipe stdio（libuv `stdio:'pipe'`）仍会被拒；继承/忽略 stdio 与匿名管道可用。pi 的 shell ops 用管道连接的是 **runner**（不受限），所以本包的模型可见路径不受影响。
+
+## 10. 测试计划
+
+### 10.1 Linux / CI 可跑（本机可跑，随 `npm test`）
+
+| 对象 | 断言 | 测试文件 |
+|---|---|---|
+| `sid.js` 派生 | 与已知向量一致、域分离（同路径 temp ≠ workspace）、子授权数量 | `tests/win32-sid.test.ts` |
+| `cli.js` 参数 | 缺参/未知参/缺命令/模式校验/目录校验的逐例 | `tests/win32-cli.test.ts` |
+| `abi.js` 布局 | x64 结构体尺寸与偏移（`STARTUPINFO`/`EXPLICIT_ACCESS_W`/`TOKEN_MANDATORY_LABEL`/ACL 头） | `tests/win32-abi.test.ts` |
+| token/acl（**注入 mock 绑定表**） | 每处分配与提前退出的失败路径、精确 ACE 跳过、拒绝项 `CI`-only、标签载荷、锁的 get-merge-set 顺序 | `tests/win32-token.test.ts`、`tests/win32-acl.test.ts` |
+| runner 选择 | win32 链、`partial`、前置检查失败 → `unavailable`、hooks 注入 | `tests/runners.test.ts`（扩充） |
+| confine | win32 argv 形态、方言、失败规则、分类（exit 127 + 签名） | `tests/confine.test.ts`（扩充） |
+| policy/fence | win32 tmp 根、大小写不敏感、`\`/`/` 混用、8.3 身份回退 | `tests/policy.test.ts`、`tests/fence.test.ts`（扩充） |
+| shell ops | bash 在 win32 受限模式拒绝（Ruling 2）、danger-full-access 裸跑；pwsh argv/UTF-8 前缀/超时/中止/denial 记账 | `tests/bash-ops.test.ts`（扩充）、`tests/powershell-ops.test.ts` |
+| skills 清单 | `aclSkillPaths(platform)` 的平台门控（win32 给路径、其余给空）、SKILL.md frontmatter 可解析、脚本文件随 `files` 发布 | `tests/win32-skill-paths.test.ts`、`tests/skills-manifest.test.ts` |
+| 回归 | 现有 228 例全绿（`bash-ops.ts` 抽取为行为保持型重构） | 既有全部 |
+
+### 10.2 Windows 真机套件（`describe.skipIf(process.platform !== "win32")`）
+
+真令牌 + 真 spawn：workspace 内写成功；外部写被拒；外部删除被拒（`cmd del`、`Remove-Item`、.NET `File::Delete`、Node `unlink` 四条路径且**宿主文件仍在**）；外部读成功；`NUL` 两模式可写；`read-only` 拒 workspace 写；`%TEMP%` 可写；同一 workspace 的两个进程互不越界；硬链接已知边界；pwsh 语言模式（workspace-write FullLanguage / read-only ConstrainedLanguage）；退出码镜像（含 `0xC0000005`）；超时与中止连孙进程一起死；runner 失败签名分类；围栏与 runner 语义一致；`bash` 拒绝文案含指定 JSON 片段；覆盖注册一个未激活的 `powershell` 工具被 pi 接受（不报错）。
+
+诊断技能的**平台门控**（真机侧）：启动一次会话，确认 `diagnose-windows-sandbox-acl` **出现在**可用技能目录中（若相对路径未生效则改用 `import.meta.url` 绝对路径，见 §4.10）；同一份构建在 Linux/macOS 上启动时不出现该技能。
+
+### 10.3 诊断技能测试
+
+Linux：`aclSkillPaths` 平台门控的逐值断言、SKILL.md frontmatter 解析、脚本存在性与 `files` 发布面。
+Windows：合成 ACL 场景（缺 `WRITE_DAC` 的目录、显式包允许 ACE 的文件）→ 断言 `REPORT`/`RECAP` 输出、备份与恢复脚本产物、失败时逆序回滚、`-AllowRoot` 边界（只改请求对象或严格内部）。
+
+### 10.4 真机验收流程
+
+1. 我给出编号清单与预期输出（PowerShell + git-bash 两套命令）。
+2. 你在 Windows 机器执行并回贴原始输出。
+3. 差异逐条归因（实现缺陷 / 环境差异 / 文档需要补充），修完复跑。
+4. 把结论写回本 spec 的验收记录节（新增 §13）。
+
+## 11. 文档与发布清单
+
+| 产物 | 改动 |
+|---|---|
+| `README.md` / `README.zh.md` | 平台表新增 Windows 行（runner `windows-acl`、机制、`partial`）；新增 Windows 小节：机制、standalone/boundary 清单、`%TEMP%` 常驻改动与外部性、pwsh 语言模式差异、bash 拒绝与 `defaultTools` 配置、koffi 依赖、诊断技能用法 |
+| `package.json` | `dependencies` += `koffi`；`files` += `skills/`；**不改** `pi` manifest（技能走 `resources_discover` 动态注册）；版本 **1.3.2 → 1.4.0** |
+| 发布 | 按 `docs/guides/release.md`（minor）；是否发版由用户另行决定 |
+
+## 12. 交付范围
+
+- worktree：`.worktrees/pi-sandbox-windows-support`，分支 `pi-sandbox-windows-support`（基线 228 例全绿）；
+- 交付物：`src/win32/*.js`（新增，约 1200 行）、`src/win32/skill-paths.ts` + `src/shell-ops.ts` + `src/powershell-ops.ts`（新增）、`src/{runners,confine,policy,fence,tools,bash-ops}.ts` 与 `index.ts`（改动）、`skills/diagnose-windows-sandbox-acl/`（新增，仅 Windows 加载）、测试（§10）、文档（§11）；
+- **不含**：读/网络隔离、控制台隔离、Windows 上的 bash 受限执行（D3 的有意排除）、`@deepseek-ai/node-addon-system` 式的原生二进制包（§3.3）、npm 发版本身。
+
+## 13. 验收记录（真机执行后回填）
+
+待填写：编号 / 命令 / 预期 / 实测输出 / 结论。
