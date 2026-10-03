@@ -121,10 +121,10 @@ pi -ne -e /c/pi-packages/pi-memory
 # 在 pi 里输入：/memory
 ```
 
-**预期**：两边的 `Dir:` 相同，且以 `\local\C_3a__Users_<你的用户名>__pi-memory-probe` 结尾；`local\` 之后只有**一个**路径分量：
+**预期**：两边的 `Dir:` 相同，且以 `\local\C_3a__Users__<你的用户名>__pi-memory-probe` 结尾；`local\` 之后只有**一个**路径分量：
 
 ```text
-Dir: C:\Users\<user>\.pi\memory\local\C_3a__Users_<user>__pi-memory-probe
+Dir: C:\Users\<user>\.pi\memory\local\C_3a__Users__<user>__pi-memory-probe
 ```
 
 失败形态（改动前的行为）：`...\local\C_3a\Users\<user>\pi-memory-probe` —— `C:` 的冒号被转义后 `\` 仍被当成分隔符，目录被拆成多级嵌套。
@@ -300,10 +300,11 @@ Get-PSDrive -PSProvider FileSystem | Select-Object Name, Root, Description
 ```powershell
 $vol = "D:"
 [IO.File]::WriteAllText("$vol\hl-src.txt", "x")
+Remove-Item "$vol\hl-dst.txt" -ErrorAction SilentlyContinue
 node -e "require('fs').linkSync(process.argv[1], process.argv[2])" "$vol\hl-src.txt" "$vol\hl-dst.txt"
 ```
 
-**预期**：抛错（`EPERM` / `ENOTSUP` / `ENOSYS` 一类，原文贴进实测）。**若这条命令没有报错**（说明该卷支持硬链接，负对照不成立），换一个卷重做本项（exFAT/FAT32 U 盘最稳妥），不要用这个卷的结论。
+**预期**：抛错（`EPERM` / `ENOTSUP` / `ENOSYS` 一类，原文贴进实测）。**若这条命令没有报错**（说明该卷支持硬链接，负对照不成立），换一个卷重做本项（exFAT/FAT32 U 盘最稳妥），不要用这个卷的结论。命令块里先用 `Remove-Item` 删掉目标文件，是为防止上一次运行残留的 `hl-dst.txt` 让 `linkSync` 以 `EEXIST` 失败而被误读成「该卷不支持硬链接」（负对照假通过）。**若机器上没有任何非 NTFS 卷**（没有 ReFS/Dev Drive、没有 exFAT/FAT32 格式的 U 盘、也没有网络共享盘）：本项记「**不适用（无非 NTFS 卷）**」，并在实测里贴 ① 的输出作为证明，**不要记为失败或实现缺陷**。
 测完清理：`Remove-Item "$vol\hl-src.txt","$vol\hl-dst.txt" -ErrorAction SilentlyContinue`。
 
 **含义**：硬链接是改动前那把锁的原语，它在这样的卷上取不到锁 → 记忆完全不可写。负对照失败即证明旧实现与这个卷无缘，下面要证明新实现可以。
