@@ -349,4 +349,21 @@ Windows：合成 ACL 场景（缺 `WRITE_DAC` 的目录、显式包允许 ACE �
 
 ## 13. 验收记录（真机执行后回填）
 
-待填写：编号 / 命令 / 预期 / 实测输出 / 结论。
+### 13.1 自动化端到端套件（Windows 11，用户机器）
+
+命令：`npx vitest run tests/win32/e2e.test.ts`（提交 `efde10cb`）
+
+**结果：22 passed / 0 skipped。** 覆盖并已证实的真机行为：受限令牌创建、能力 SID 的 DACL 授权（工作区 + `%TEMP%`）、`read-only` 拒绝工作区写、四种删除路径（`cmd del` / `Remove-Item` / `.NET File::Delete` / Node `unlink`）在授权根之外全部被拒且宿主文件存活、授权根之外可读、NUL 设备在两种模式下可写、退出码镜像（含 `0xC0000005` 全 32 位）、缺失根时的 `windows-acl-run: ` + exit 127 契约、Win32 失败与"被拒绝"的分类区分、授予根与围栏 `writableRoots` 一致、管道 stdio 孙进程被拒、以及三处跨平台断言（bash 拒绝文案、拒绝断言守卫）。
+
+### 13.2 真机回归中发现并修复的两处测试缺陷（后端无缺陷）
+
+| # | 现象 | 根因 | 修复 |
+|---|---|---|---|
+| 1 | NUL 用例在两种模式下 EPERM，路径 `…\pi-sandbox\NUL` | 用例用了**裸相对名** `'NUL'`：libuv 走 NT 路径不做 Win32 设备名映射，它于是成为 cwd 下的普通文件（cwd 不在授权根内） | 改用设备拼法；并新增两条用例分别钉住 `cmd` 的 `> NUL` 与"相对名是普通文件" |
+| 2 | 改用 `\\.\NUL` 后仍 EPERM，路径 `C:\.NUL` | **双重转义**：路径嵌在"生成的代码文本"里被解析两次，掉了一层反斜杠；Windows 把单个前导 `\` 读作"当前盘当前目录" | 路径改经 **argv** 传递（`spawnSync` 逐字、不经 shell、只解析一层），用 `String.raw` 书写 |
+
+结论：NUL 可写是设备 DACL 的**环境性**属性（两种模式都成立），只能通过设备拼法到达；裸相对名 `NUL` 是普通文件，受工作区边界约束。
+
+### 13.3 待回填
+
+人工清单：`docs/superpowers/verification/2026-10-03-windows-acl-acceptance.md`（§1-§13、§15 现在可跑；§14 依赖诊断技能内容落地后）。
