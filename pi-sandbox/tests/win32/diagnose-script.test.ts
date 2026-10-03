@@ -29,30 +29,15 @@ function currentUser(): string {
 	return `${process.env.USERDOMAIN ?? ""}\\${process.env.USERNAME ?? ""}`;
 }
 
-function shell(program: string, args: readonly string[], env?: NodeJS.ProcessEnv) {
-	const result = spawnSync(program, args, {
-		encoding: "utf8",
-		timeout: 120_000,
-		env: env === undefined ? process.env : mergeEnv(env),
-	});
+function shell(program: string, args: readonly string[]) {
+	const result = spawnSync(program, args, { encoding: "utf8", timeout: 120_000 });
 	// spawn 失败（如 PATH 上没有该 PowerShell）时 result.error 必须进入 output，否则断言只剩 “expected null to be 0”。
 	const spawnError = result.error === undefined ? "" : `[spawn error: ${result.error.message}]`;
 	return { status: result.status, output: `${result.stdout ?? ""}${result.stderr ?? ""}${spawnError}` };
 }
 
-/** Win32 环境块键不区分大小写：若只 spread 再覆写，`ProgramFiles` 会与原键形成两个大小写不同的键，
- *  libuv 排序后旧值可能在前，Windows 取第一个匹配 → 覆写静默失效（真机实证：用例 6 得 exit 0）。 */
-function mergeEnv(overrides: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-	const lowered = new Set(Object.keys(overrides).map((key) => key.toLowerCase()));
-	const merged: NodeJS.ProcessEnv = {};
-	for (const [key, value] of Object.entries(process.env)) {
-		if (!lowered.has(key.toLowerCase())) merged[key] = value;
-	}
-	return { ...merged, ...overrides };
-}
-
-function runScript(args: readonly string[], env?: NodeJS.ProcessEnv) {
-	return shell(PS, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", SCRIPT, ...args], env);
+function runScript(args: readonly string[]) {
+	return shell(PS, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", SCRIPT, ...args]);
 }
 
 /** PowerShell 字面量（单引号内翻倍）——`-Command` 拼接用。 */
@@ -173,7 +158,9 @@ describe.skipIf(process.platform !== "win32")("diagnose-windows-sandbox-acl scri
 	it("removes package allow entries while preserving deny entries and other allow entries", () => {
 		const target = join(scratch, "denied");
 		shell("cmd", ["/c", "mkdir", target]);
-		const deny = shell("icacls", [target, "/deny", `${currentUser()}:(OI)(CI)(W)`]);
+		// deny 用 (D)=delete-only：(W) 展开成 Write+Synchronize，而 Win32 打开句柄隐式请求 SYNCHRONIZE，
+		// 会把脚本的 CreateFileW(FILE_WRITE_DAC) 探测打掉（DACL 本身并未拒绝 WRITE_DAC）。
+		const deny = shell("icacls", [target, "/deny", `${currentUser()}:(OI)(CI)(D)`]);
 		expect(deny.status, deny.output).toBe(0);
 		const otherAllow = shell("icacls", [target, "/grant", "*S-1-5-32-545:(OI)(CI)(RX)"]);
 		expect(otherAllow.status, otherAllow.output).toBe(0);
@@ -207,12 +194,16 @@ describe.skipIf(process.platform !== "win32")("diagnose-windows-sandbox-acl scri
 		shell("cmd", ["/c", "mkdir", managed]);
 		addPackageAce(managed);
 		const before = sddl(managed);
-		// 先证明覆写真的到达子进程：失败信息会直接给出子进程看到的 ProgramFiles。
-		const probe = shell(PS, ["-NoProfile", "-Command", "$env:ProgramFiles"], { ProgramFiles: scratch });
-		expect(probe.output.trim(), probe.output).toBe(scratch);
-		const run = runScript(["-Path", managed, "-AllowRoot", scratch, "-Out", join(scratch, "out")], {
-			ProgramFiles: scratch,
-		});
+		const out = join(scratch, "out");
+		// Node 传 env 覆写在真机上实测不生效（子进程仍读到 C:\Program Files）：改为在同一个
+		// PowerShell 进程内先设 `$env:ProgramFiles` 再调用脚本；`exit $LASTEXITCODE` 透传退出码。
+		const run = shell(PS, [
+			"-NoProfile",
+			"-ExecutionPolicy",
+			"Bypass",
+			"-Command",
+			`$env:ProgramFiles = ${psLiteral(scratch)}; & ${psLiteral(SCRIPT)} -Path ${psLiteral(managed)} -AllowRoot ${psLiteral(scratch)} -Out ${psLiteral(out)}; exit $LASTEXITCODE`,
+		]);
 		expect(run.status, run.output).toBe(2);
 		expect(run.output).toContain("REPAIR_REFUSED");
 		expect(nextAction(run.output), run.output).toBe("stop");
