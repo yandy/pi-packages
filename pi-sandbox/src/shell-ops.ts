@@ -42,6 +42,11 @@ export interface ShellOpsOptions extends ConfineOptions {
 	 * 在 danger-full-access 早退之后、confine 之前调用；该模式不经过 guard。
 	 */
 	guard?: (mode: SandboxMode) => void;
+	/**
+	 * cwd 不存在时报错的第二行；缺省保持 bash 文案逐字不变（bash-ops 的既有断言依赖它），
+	 * pwsh 经 powershell-ops 传入 PowerShell 文案。
+	 */
+	cwdErrorMessage?: string;
 }
 
 /** stderr 分类窗口：只保留尾部 8KB（拒绝/失败信息总在末尾附近）。 */
@@ -60,7 +65,9 @@ export function createSandboxShellOps(opts: ShellOpsOptions): BashOperations {
 			try {
 				await fsAccess(cwd, constants.F_OK);
 			} catch {
-				throw new Error(`Working directory does not exist: ${cwd}\nCannot execute bash commands.`);
+				throw new Error(
+					`Working directory does not exist: ${cwd}\n${opts.cwdErrorMessage ?? "Cannot execute bash commands."}`,
+				);
 			}
 			return new Promise<{ exitCode: number | null }>((resolve, reject) => {
 				if (execOpts.signal?.aborted) {
