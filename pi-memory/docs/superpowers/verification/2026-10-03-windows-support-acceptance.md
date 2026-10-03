@@ -170,7 +170,7 @@ Linux:   /home/<user>/.pi/memory/git/github.com__yandy__pi-packages
 
 Linux 对照值由控制器在 Linux 上对同一仓库（同一 `origin`）跑出并提供；两边末两段（`git` + `github.com__yandy__pi-packages`）必须逐字相同。这条性质意味着：把同一个 `memoryDir`（同步盘/网络盘）在两端共享时，同一仓库会落到**同一个**项目记忆目录。若你的克隆 `origin` 不是这个 URL（例如用了 fork），按实际 remote 推导并注明实际值。
 
-- **本地 remote 的归类（2026-10-04 首次真机发现的缺陷，已修）**：把 `origin` 换成盘符本地路径再跑一次，确认它落在 `local/` 而不是 `git/`：
+- **本地 remote 的归类（2026-10-04 首次真机发现的缺陷；已修，且同日在真机复验通过）**：把 `origin` 换成盘符本地路径再跑一次，确认它落在 `local/` 而不是 `git/`：
 
 ```powershell
 cd C:\pi-packages
