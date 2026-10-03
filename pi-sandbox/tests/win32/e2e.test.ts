@@ -266,16 +266,6 @@ process.stdout.write(JSON.stringify({
 }) + "\\n");
 `;
 
-/**
- * Child source writing to the NUL DEVICE object, not to a file in the cwd.
- * The child-source literal `'\\\\.\\NUL'` (four backslashes, the dot, two
- * backslashes) parses to the runtime device path `\\.\NUL`; only that device
- * spelling reaches the device object whose DACL grants Everyone
- * read/write/execute. The bare relative name `'NUL'` is an ordinary file —
- * see the relative-name case in the Windows-only describe.
- */
-const NUL_DEVICE_WRITE_SOURCE = "require('node:fs').writeFileSync('\\\\.\\NUL', 'x'); console.log('nul-ok');";
-
 // Fixtures are inside the Windows-only describe: the non-Windows bash-refusal
 // case below must not touch the filesystem.
 let root = "";
@@ -426,7 +416,20 @@ describe.skipIf(process.platform !== "win32")("windows-acl end-to-end (real runn
 			// is reachable only through the device spellings — `\\.\NUL` here, `> NUL`
 			// in the `cmd` case below. A bare relative `'NUL'` does NOT exercise it;
 			// see the ordinary-file-name case further down.
-			const result = runConfined(mode, nodeScript(NUL_DEVICE_WRITE_SOURCE));
+			//
+			// The device path is an ARGUMENT, not text embedded in the generated
+			// source: embedding it adds an escaping level, and the previous
+			// four-backslash literal silently lost one — the child parsed `\.NUL`,
+			// which Windows reads as `C:\.NUL` (the current directory on C:) and
+			// rejected with EPERM. `String.raw` keeps the spelling at one level and
+			// `spawnSync` passes argv verbatim (no shell), so the child receives
+			// exactly `\\.\NUL`.
+			const result = runConfined(
+				mode,
+				nodeScript("require('node:fs').writeFileSync(process.argv[1], 'x'); console.log('nul-ok');", [
+					String.raw`\\.\NUL`,
+				]),
+			);
 			expect(result.status, result.stderr).toBe(0);
 			expect(result.stdout).toContain("nul-ok");
 		});
