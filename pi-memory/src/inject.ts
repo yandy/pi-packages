@@ -2,9 +2,16 @@ import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { runHeadlessAgent } from "./agent-runner";
 import type { SessionPersistenceConfig, ThinkLevel } from "./config";
 import type { EntryType } from "./entry-file";
+import { splitLines } from "./entry-index";
 import { MEMORY_INDEX_SECTION } from "./index-source";
 import type { MemoryStore } from "./memory-store";
 import { sanitizeForInjection } from "./sanitize";
+
+/**
+ * entry 正文的截断标记。与 `INDEX_TRUNCATION_MARKER` **刻意分开**：这里截的是
+ * `<relevant_memories>` 里的一条正文，说「memory index」会指错对象。
+ */
+export const ENTRY_TRUNCATION_MARKER = "[truncated: memory entry exceeds injection limit]";
 
 /**
  * entry 正文用的「按行 + 按字节」截断：**保留开头**，从尾部削。
@@ -25,13 +32,24 @@ export function truncateForInjection(
 		truncated = true;
 	}
 	if (Buffer.byteLength(out, "utf8") > maxBytes) {
-		let cut = out;
-		while (Buffer.byteLength(cut, "utf8") > maxBytes && cut.length > 0) cut = cut.slice(0, -1);
-		out = cut;
+		out = cutToBytes(out, maxBytes);
 		truncated = true;
 	}
-	if (truncated) out += `\n[truncated: memory index exceeds injection limit]`;
+	if (truncated) out += `\n${ENTRY_TRUNCATION_MARKER}`;
 	return { ok: !truncated, content: out, truncated };
+}
+
+/**
+ * 按字符从尾部削到字节上限。
+ *
+ * 顺手丢掉被切一半的代理对：孤立高代理是**无效 UTF-16**，任何编码器都会把它变成 U+FFFD ——
+ * 宁可少一个字符，也不要给模型塞一个替换字符。
+ */
+function cutToBytes(text: string, maxBytes: number): string {
+	let cut = text;
+	while (Buffer.byteLength(cut, "utf8") > maxBytes && cut.length > 0) cut = cut.slice(0, -1);
+	const last = cut.charCodeAt(cut.length - 1);
+	return cut.length > 0 && last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
 }
 
 /**
@@ -41,13 +59,15 @@ export function truncateForInjection(
 export const INDEX_TRUNCATION_MARKER = "[truncated: memory index exceeds injection limit; older entries omitted]";
 
 /**
- * 索引文本 → 行数组。文件末尾的换行会 split 出一个空元素，它不是「行」：先摘掉再算窗口，
- * 否则它会白占窗口的一格（50 行窗口就只剩 49 行可用）。
+ * 索引文本 → 窗口用的行数组。
+ *
+ * 行拆分**共用 `entry-index` 的 `splitLines`**（先做行尾归一）：`/memory` 的 `Index:` 与
+ * `Inject:` 必须活在同一个「行」的定义上，否则 CRLF / 单独 CR 的文件上两行行数会互相矛盾。
+ * 额外摘掉**尾部全部空行**：`rebuildIndex` 把它们当噪音，但它们照样白吃窗口行数。
  */
-function indexLines(content: string): string[] {
-	if (content.length === 0) return [];
-	const lines = content.split("\n");
-	if (lines[lines.length - 1] === "") lines.pop();
+function indexWindowLines(content: string): string[] {
+	const lines = splitLines(content);
+	while (lines.length > 0 && lines[lines.length - 1].trim() === "") lines.pop();
 	return lines;
 }
 
@@ -76,9 +96,8 @@ function indexWindow(lines: string[], maxLines: number, maxBytes: number): Index
 	}
 	if (kept.length === 0 && lines.length > 0 && maxLines > 0 && maxBytes > 0) {
 		// 退化：最新一行自身就超预算 —— 保留它的字节前缀。空 section 比截断的一行更糟：
-		// 模型连「这里本来有索引」都看不到。`maxLines > 0` 是必要的：maxLines = 0 的
-		// 语义是「不注入索引」，不能偷偷塞一行进去。
-		const prefix = truncateLineToBytes(lines[lines.length - 1], maxBytes);
+		// 模型连「这里本来有索引」都看不到。两个非正守卫是内部防御（调用方已先挡掉非正预算）。
+		const prefix = cutToBytes(lines[lines.length - 1], maxBytes);
 		kept.push(prefix);
 		byteLength = Buffer.byteLength(prefix, "utf8");
 		// 行数没变（1 → 1），但内容确实被削过：必须算截断，否则 `truncateIndexForInjection`
@@ -88,11 +107,9 @@ function indexWindow(lines: string[], maxLines: number, maxBytes: number): Index
 	return { lines: kept, byteLength, truncated: degenerated || kept.length < lines.length };
 }
 
-/** 按字符从尾部削到字节上限（与 `truncateForInjection` 的字节口径一致）。 */
-function truncateLineToBytes(line: string, maxBytes: number): string {
-	let cut = line;
-	while (Buffer.byteLength(cut, "utf8") > maxBytes && cut.length > 0) cut = cut.slice(0, -1);
-	return cut;
+/** 行数组 → 注入文本（行间与末尾都是 LF）；空窗口不补换行，只留标记。 */
+function joinWindowLines(lines: string[]): string {
+	return lines.length === 0 ? "" : `${lines.join("\n")}\n`;
 }
 
 /**
@@ -102,31 +119,41 @@ function truncateLineToBytes(line: string, maxBytes: number): string {
  * - 超出字节预算时继续丢窗口内**最旧**的一端；
  * - 截断时在开头加 `INDEX_TRUNCATION_MARKER`；
  * - 未超预算时**逐字节返回原文**（空索引也是）—— 小索引的注入值与改动前完全一致，
- *   会话内冻结的值也不会因为这次改动而漂移。
+ *   会话内冻结的值也不会因为这次改动而漂移；唯一的例外是 CRLF / 单独 CR 的文件：行拆分
+ *   先做归一，这时返回的是 LF 文本（`\r` 不进 system prompt）。
+ * - 预算非正（`memIndexInjectMaxLines/Bytes` 写 0）= **不注入**：返回空值而不是裸标记 ——
+ *   标记的含义是「索引被截断了」，与「按配置不注入」对模型的含义完全不同。
  */
 export function truncateIndexForInjection(
 	content: string,
 	maxLines: number,
 	maxBytes: number,
 ): { ok: boolean; content: string; truncated: boolean } {
-	const window = indexWindow(indexLines(content), maxLines, maxBytes);
-	if (!window.truncated) return { ok: true, content, truncated: false };
-	const body = window.lines.join("\n");
-	return {
-		ok: false,
-		content: `${INDEX_TRUNCATION_MARKER}\n${body}${body.length > 0 ? "\n" : ""}`,
-		truncated: true,
-	};
+	if (maxLines <= 0 || maxBytes <= 0) return { ok: true, content: "", truncated: false };
+
+	const window = indexWindow(indexWindowLines(content), maxLines, maxBytes);
+	if (!window.truncated) {
+		return { ok: true, content: content.includes("\r") ? joinWindowLines(window.lines) : content, truncated: false };
+	}
+	return { ok: false, content: `${INDEX_TRUNCATION_MARKER}\n${joinWindowLines(window.lines)}`, truncated: true };
 }
 
-/** `/memory` 的注入口径。复用 `indexWindow`，所以报出来的数字与实际注入的值不可能不一致。
- *  字节口径含末尾换行：同一份文件未超预算时，它与 `Index:`（写入口径）报的字节数相同。 */
+/**
+ * `/memory` 的注入口径。复用 `indexWindow`，所以报出来的数字与实际注入的值不可能不一致。
+ *
+ * 口径：行数 = 窗口内的索引行（**不含**截断标记那一行）；字节数 = 窗口正文的 UTF-8 字节
+ * （行间换行与末尾换行算在内，**不含**截断标记）。未截断且文件是 LF 时，它与 `Index:`
+ * （写入口径，同样用 `splitLines`）对同一份文件报的字节数相同；真实 section 在截断时还多
+ * 出「标记 + 一个换行」。
+ */
 export function indexInjectionCapacity(
 	content: string,
 	maxLines: number,
 	maxBytes: number,
 ): { lineCount: number; byteLength: number; truncated: boolean } {
-	const window = indexWindow(indexLines(content), maxLines, maxBytes);
+	if (maxLines <= 0 || maxBytes <= 0) return { lineCount: 0, byteLength: 0, truncated: false };
+
+	const window = indexWindow(indexWindowLines(content), maxLines, maxBytes);
 	return {
 		lineCount: window.lines.length,
 		byteLength: window.lines.length > 0 ? window.byteLength + 1 : 0,

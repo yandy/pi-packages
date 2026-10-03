@@ -8,6 +8,7 @@ import {
 	buildInjection,
 	buildSideQueryTask,
 	type EntryManifest,
+	ENTRY_TRUNCATION_MARKER,
 	INDEX_TRUNCATION_MARKER,
 	indexInjectionCapacity,
 	injectSurfacedContent,
@@ -87,6 +88,24 @@ describe("truncateForInjection", () => {
 		expect(r.truncated).toBe(true);
 		expect(Buffer.byteLength(r.content.split("\n")[0], "utf8")).toBeLessThanOrEqual(50);
 	});
+
+	// 两种截断的文案必须分开：正文截断发生在 <relevant_memories> 里，说「memory index」会指错对象。
+	it("marks a truncated entry body with the entry marker, not the index one", () => {
+		const r = truncateForInjection("x".repeat(200), 999999, 50);
+
+		expect(r.truncated).toBe(true);
+		expect(r.content).toContain(ENTRY_TRUNCATION_MARKER);
+		expect(r.content).not.toContain(INDEX_TRUNCATION_MARKER);
+	});
+
+	// 按字符削到字节上限时不能把代理对切一半：孤立高代理是无效 UTF-16，编码后变成 U+FFFD。
+	it("never leaves half a surrogate pair behind when cutting by bytes", () => {
+		const r = truncateForInjection("abcd😀", 100, 6);
+
+		expect(r.truncated).toBe(true);
+		// 逐字节往返：留下孤立代理的话，utf8 往返会得到 U+FFFD
+		expect(Buffer.from(r.content.split("\n")[0], "utf8").toString("utf8")).toBe("abcd");
+	});
 });
 
 describe("truncateIndexForInjection", () => {
@@ -103,6 +122,81 @@ describe("truncateIndexForInjection", () => {
 
 	it("returns an empty string for an empty index", () => {
 		expect(truncateIndexForInjection("", 50, 16384)).toEqual({ ok: true, content: "", truncated: false });
+	});
+
+	// 非正预算 = 不注入索引（`memory.json` 里写 0 的语义）—— 与截断是两回事：
+	// 裸标记等于告诉模型「有索引但藏起来了」，恰好与「不要注入」相反。
+	it("injects nothing when the budget is non-positive", () => {
+		const raw = "# Memory Index\n\n- [A](a.md) — d\n";
+
+		expect(truncateIndexForInjection(raw, 0, 16384)).toEqual({ ok: true, content: "", truncated: false });
+		expect(truncateIndexForInjection(raw, 50, 0)).toEqual({ ok: true, content: "", truncated: false });
+		expect(indexInjectionCapacity(raw, 0, 16384)).toEqual({ lineCount: 0, byteLength: 0, truncated: false });
+	});
+
+	// 边界：README 容量一节写的是「48 条及以下整份注入；写满时恰为最新 50 条」。
+	it("injects a rebuilt index whole up to 48 memories and exactly 50 at the boundary", () => {
+		const rebuilt = (n: number) =>
+			`# Memory Index\n\n${Array.from({ length: n }, (_, i) => `- [M${i}](m${i}.md) — d${i}`).join("\n")}\n`;
+
+		expect(truncateIndexForInjection(rebuilt(48), 50, 16384)).toEqual({
+			ok: true,
+			content: rebuilt(48),
+			truncated: false,
+		});
+		// 49 条（51 行）开始截断：头部与空行落在窗口外
+		const at49 = truncateIndexForInjection(rebuilt(49), 50, 16384);
+		expect(at49.truncated).toBe(true);
+		expect((at49.content.match(/^- \[/gm) ?? []).length).toBe(49);
+		// 写满时恰好最新 50 条，且头行已经丢在窗口外
+		const at60 = truncateIndexForInjection(rebuilt(60), 50, 16384);
+		expect((at60.content.match(/^- \[/gm) ?? []).length).toBe(50);
+		expect(at60.content).toContain("- [M10](m10.md)");
+		expect(at60.content).not.toContain("# Memory Index");
+	});
+
+	// `Inject:` 与 `Index:` 必须用同一套「行」的定义（`splitLines` 先做行尾归一）：
+	// 被 Windows 编辑器存过的 CRLF 文件上，两行行数不能互相矛盾。
+	it("normalizes CRLF and lone CR before counting the window", () => {
+		const crlf = "# Memory Index\r\n\r\n- [A](a.md) — d\r\n";
+		const cr = "# Memory Index\r\r- [A](a.md) — d\r";
+
+		for (const raw of [crlf, cr]) {
+			expect(indexInjectionCapacity(raw, 50, 16384).lineCount).toBe(3);
+			expect(indexInjectionCapacity(raw, 50, 16384).truncated).toBe(false);
+		}
+	});
+
+	// 截断后重新拼接的窗口文本不能带 `\r`（否则模型看到的每行尾部都有噪音字符）。
+	it("emits LF-only text when the window has to be rebuilt", () => {
+		const entries = Array.from({ length: 60 }, (_, i) => `- [M${i}](m${i}.md) — d${i}`);
+		const raw = `# Memory Index\r\n\r\n${entries.join("\r\n")}\r\n`;
+
+		const r = truncateIndexForInjection(raw, 50, 16384);
+
+		expect(r.truncated).toBe(true);
+		expect(r.content).not.toContain("\r");
+		expect((r.content.match(/^- \[/gm) ?? []).length).toBe(50);
+	});
+
+	// 尾部多余空行是噪音（`rebuildIndex` 也把它们当噪音），不能白吃窗口行数。
+	it("does not let trailing blank lines eat window slots", () => {
+		const entries = Array.from({ length: 50 }, (_, i) => `- [M${i}](m${i}.md) — d${i}`);
+		const raw = `${entries.join("\n")}\n\n\n\n\n`;
+
+		const r = truncateIndexForInjection(raw, 50, 16384);
+
+		expect(r.truncated).toBe(false);
+		expect(r.content).toBe(raw);
+		expect(indexInjectionCapacity(raw, 50, 16384).lineCount).toBe(50);
+	});
+
+	// 窗口正文超预算的退化分支同样不能切出半个代理对。
+	it("never leaves half a surrogate pair behind in the degenerate byte cut", () => {
+		const r = truncateIndexForInjection(`- [😀](x.md) — ${"y".repeat(200)}\n`, 50, 6);
+
+		expect(r.truncated).toBe(true);
+		expect(Buffer.from(r.content.split("\n")[1], "utf8").toString("utf8")).not.toContain("\uFFFD");
 	});
 
 	// 索引是纯时间序（upsertIndexLine 追加、rebuildIndex 按 modified 升序）：窗口必须保留
@@ -165,6 +259,24 @@ describe("truncateIndexForInjection", () => {
 			byteLength: Buffer.byteLength("- [A](a.md) — d\n", "utf8"),
 			truncated: false,
 		});
+	});
+
+	// `Inject:` 报的是**窗口正文**：含末尾换行、不含截断标记（标记只是给模型的一句说明）。
+	// 未截断时它与 `Index:` 对同一份文件报的字节数相同 —— 这个属性被下面两条断言钉住。
+	it("reports the window body: trailing newline counted, truncation marker not", () => {
+		const small = "# Memory Index\n\n- [A](a.md) — d\n";
+		expect(indexInjectionCapacity(small, 50, 16384).byteLength).toBe(Buffer.byteLength(small, "utf8"));
+
+		const many = Array.from({ length: 60 }, (_, i) => `- [M${i}](m${i}.md) — d${i}`);
+		const long = `${many.join("\n")}\n`;
+		const cap = indexInjectionCapacity(long, 50, 16384);
+		const injected = truncateIndexForInjection(long, 50, 16384);
+
+		expect(cap.truncated).toBe(true);
+		// 真正进 section 的字节数 = 窗口正文 + 标记 + 标记后的换行
+		expect(Buffer.byteLength(injected.content, "utf8")).toBe(
+			cap.byteLength + Buffer.byteLength(INDEX_TRUNCATION_MARKER, "utf8") + 1,
+		);
 	});
 });
 

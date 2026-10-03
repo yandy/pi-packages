@@ -17,7 +17,7 @@ export interface ParsedEntryIndex {
 }
 
 /**
- * 索引唯一的按行拆分入口（解析与写入必须共用它，否则同一个 `lineNo` 在两处含义不同）。
+ * 索引唯一的按行拆分入口（解析、写入与**注入**必须共用它，否则同一个 `lineNo` 在三处含义不同）。
  *
  * CRLF（以及老 Mac 的单独 CR）必须在这里归一：JS 的 `.` 不匹配 `\r`，且无 `m` 标志的 `$`
  * 也无法在一个 `\r` 之前成立 —— `LINE_RE` 对 CRLF 行会**完全匹配不上**，于是每一行都被计成
@@ -25,7 +25,7 @@ export interface ParsedEntryIndex {
  * 归一之后写回仍只输出 `\n`（`joinLines`），因此对 CRLF 文件的首次写入会把它转成 LF ——
  * 这是有意的，它消除的是「混合行尾」这个更糟的中间态。
  */
-function splitLines(raw: string): string[] {
+export function splitLines(raw: string): string[] {
 	const text = raw.includes("\r") ? raw.replace(/\r\n?/g, "\n") : raw;
 	if (text.length === 0) return [];
 	const lines = text.split("\n");
