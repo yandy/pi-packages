@@ -161,7 +161,7 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
 | `memoryDir` | `~/.pi/memory` | 所有记忆数据的根目录 |
 | `memIndexMaxLines` | `200` | 写入口径：`MEMORY.md` 的最大非空行数（`# Memory Index` 头行与手写标题同样占额度，所以并不等于记忆条数） |
 | `memIndexMaxBytes` | `25600` | 写入口径：`MEMORY.md` 的最大字节数 |
-| `memIndexInjectMaxLines` | `50` | 注入口径：放进 `memory_index` section 的最大行数。窗口保留**最新**的行、丢弃**最旧**的行 —— 索引是纯时间序，窗口再小也不会藏住你刚写完的那条 |
+| `memIndexInjectMaxLines` | `50` | 注入口径：放进 `memory_index` section 的最大行数。窗口保留**最新**的行、丢弃**最旧**的行 —— 索引是纯时间序，窗口再小也不会藏住你刚写完的那条。**任一键写 `0` = 完全不注入索引**（section 保持空值） |
 | `memIndexInjectMaxBytes` | `16384` | 注入口径：section 的最大字节数（优先丢最旧的行，截断标记在**开头**） |
 | `lock.timeoutMs` | `5000` | 单次原语等逻辑锁 / 等跨进程 `.lock` 的上限。同时也是 `session_shutdown` 等在途写入的上限 |
 | `lock.snapshotKeep` | `5` | `.backups/` 保留的回滚点数量（`migrate-` 前缀的目录永不裁剪 —— 它们是旧版迁移留下的整目录快照，`originals/` 子目录里装着 2.0 之前的 topic 原文） |
@@ -322,8 +322,8 @@ Last dream: 2026-10-01T22:10:04.882Z
 Lock: free
 ```
 
-- `Index` 用**写入**口径（`memIndexMax*`），并报告索引里有多少非空行解析不出（`# Memory Index` 头行与手写标题会计入）。CRLF（以及单独的 CR）行尾在解析前就被归一为 LF，下一次写入也一律输出 LF，因此被 Windows 编辑器改过行尾的 `MEMORY.md` **不会**推高这个计数。
-- `Inject` 用**注入**口径（`memIndexInjectMax*`），统计窗口内的行数与字节数 —— 即真正会进 `memory_index` section 的索引文本（截断标记本身不计入）。它与真正注入的值由同一份窗口代码算出来，不可能漂移。注意两行的口径不同：`Index` 数的是**非空**行，`Inject` 数的是窗口内的**全部**行，所以规范索引下 `Inject` 会比 `Index` 多一行（头部后面那个空行）而字节数相同。system prompt 里的值是**会话内冻结**的（见[为什么索引是冻结的](#为什么索引是冻结的)）：`session_start` 之后写入的记忆会立刻出现在 `Index`，但要等 compaction 或下一个会话才出现在 `Inject`。
+- `Index` 用**写入**口径（`memIndexMax*`），并报告索引里有多少非空行解析不出（`# Memory Index` 头行与手写标题会计入）。CRLF（以及单独的 CR）行尾在解析前就被归一为 LF，下一次写入也一律输出 LF，因此被 Windows 编辑器改过行尾的 `MEMORY.md` **不会**推高这个计数。注入侧同样做归一：CRLF 文件不会把 `\r` 送进 system prompt。
+- `Inject` 用**注入**口径（`memIndexInjectMax*`），统计窗口内的行数与字节数 —— 即真正会进 `memory_index` section 的索引文本（截断标记本身不计入）。它与真正注入的值由同一份窗口代码算出来，不可能漂移。注意两行的口径不同：`Index` 数的是**非空**行，`Inject` 数的是窗口内的**全部**行，所以规范索引（LF 行尾、以换行结尾、头部后有且仅有一个空行）下 `Inject` 会比 `Index` 多一行而字节数相同。system prompt 里的值是**会话内冻结**的（见[为什么索引是冻结的](#为什么索引是冻结的)）：`session_start` 之后写入的记忆会立刻出现在 `Index`，但要等 compaction 或下一个会话才出现在 `Inject`。
 - `Modules` 报三个模型驱动功能的激活状态：`on(<生效模型>)` / `off`。生效模型 = 该任务自己的 `model`，没有则用 `defaults.model`。`dream` 没有独立开关 —— memory 系统启用它就可用。
 - `Lock` 有三种：`free`、`held by <op> (pid N on <hostname>, started <ISO>)`、`unreadable — run /memory unlock`。`/memory unlock` 的确认框会显示同一行持有者信息。
 - 以 `enabled: false` 启动的会话在启动时不初始化任何东西：`/memory` 报两行（`Memory: disabled` + `Dir: not initialized — set "enabled": true in memory.json and restart`）；会话中途无法开启；`/memory unlock` 不需要 store 也能用。

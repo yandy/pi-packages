@@ -41,7 +41,7 @@ Lock: free
 逐项核对：
 
 - `Index` 的行数 = `MEMORY.md` 的非空行数（文件还不存在时是 0；`# Memory Index` 这行算 1 个 `unrecognized`）；字节数 = 文件真实字节数。
-- `Inject` = 真正进 system prompt 的窗口（默认最新 50 行 / 16384 字节），取索引**最新**一端；规范索引（以换行结尾、头部后有且仅有一个空行）下，未超预算时它与 `Index` 的字节数相同、行数多 1（`Index` 只数**非空**行，`Inject` 数窗口内**全部**行）。
+- `Inject` = 真正进 system prompt 的窗口（默认最新 50 行 / 16384 字节），取索引**最新**一端；规范索引（LF 行尾、以换行结尾、头部后有且仅有一个空行）下，未超预算时它与 `Index` 的字节数相同、行数多 1（`Index` 只数**非空**行，`Inject` 数窗口内**全部**行）。
 - `Modules` = 三个模型驱动功能的激活状态（`dream` / `extractMemories` / `autoSurfacing`）；`dream` 没有独立开关（memory 启用即可用），`off` 的模块不显示模型。
 - `Entries` = 目录里的 entry 文件数（不含 `MEMORY.md`）；空目录为 0。
 - `Last dream`：从未 dream 过时为 `never`。
@@ -82,10 +82,10 @@ Lock: free
 6. **注入窗口**：把索引撑到 50 行以上，再确认窗口只留最新的一段。
    ```bash
    for i in $(seq 1 60); do echo "- [Pad $i](pad-$i.md) — 填充行 $i" >> "$MEM/MEMORY.md"; done
-   /compact    # 或让上下文自动触发 compaction —— 索引只在 compaction 时重读
    ```
+   然后在 pi 里执行 `/compact`（或让上下文自动触发）—— 索引只在 compaction 时重读。
    然后重问第 2 步的问题。
-   **预期**：注入值以 `[truncated: memory index exceeds injection limit; older entries omitted]` **开头**（被丢掉的是开头/最旧的行），后面是**最新**的 50 行；`/memory` 的 `Inject:` 显示 `50/50 lines`，而 `Index:` 显示 `63/200 lines` 之类更大的值。
+   **预期**：注入值以 `[truncated: memory index exceeds injection limit; older entries omitted]` **开头**（被丢掉的是开头/最旧的行），后面是**最新**的 50 行；`/memory` 的 `Inject:` 显示 `50/50 lines`，而 `Index:` 显示你自己索引的非空行数（例如 3 条记忆 + 60 行填充 + 1 行手写 ≈ 64 行）。把 `memIndexInjectMaxLines` 改成 `0` 并重启会话，则是另一种语义 —— **不注入**：section 保持空值，`/memory` 报 `Inject: 0/0 lines, 0/16384 bytes`（不会出现裸标记）。
 
 **resume 验证**：退出 pi，用 `pi --resume`（或在 TUI 里选一个历史会话）恢复同一个会话，再问一次第 2 步的问题。
 **预期**：仍然是恢复前那一份索引（录制值），**不是**磁盘上的最新内容；也不会整段索引消失。
