@@ -78,13 +78,15 @@ export interface RunDreamOpts {
  */
 async function snapshotFiles(memoryDir: string, platform: NodeJS.Platform = process.platform): Promise<string[]> {
 	const entries = await readdir(memoryDir, { withFileTypes: true }).catch(() => []);
-	return entries
-		.filter((entry) => entry.isFile() && !entry.name.startsWith("."))
-		// win32：保留设备名文件按名打开会命中设备（CON 等），`createSnapshot` 的 cp 会失败；
-		// dream 是 fail-closed 的，一次 cp 失败就打断整轮（与 `#entryFiles` 同一契约，spec §4.3）。
-		.filter((entry) => !(platform === "win32" && isReservedWindowsName(entry.name)))
-		.map((entry) => entry.name)
-		.sort();
+	return (
+		entries
+			.filter((entry) => entry.isFile() && !entry.name.startsWith("."))
+			// win32：保留设备名文件按名打开会命中设备（CON 等），`createSnapshot` 的 cp 会失败；
+			// dream 是 fail-closed 的，一次 cp 失败就打断整轮（与 `#entryFiles` 同一契约，spec §4.3）。
+			.filter((entry) => !(platform === "win32" && isReservedWindowsName(entry.name)))
+			.map((entry) => entry.name)
+			.sort()
+	);
 }
 
 /**

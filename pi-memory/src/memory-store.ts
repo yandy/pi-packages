@@ -128,13 +128,15 @@ export class MemoryStore {
 	 *  目录创建失败会在获取锁阶段就干净地报错（无残留）；重试只会拖慢 fail-closed。 */
 	async #entryFiles(): Promise<string[]> {
 		const names = await readdir(this.cfg.memoryDir).catch(() => []);
-		return names
-			.filter((n) => n.endsWith(".md") && n !== INDEX_FILE && !n.startsWith("."))
-			// win32：按名打开保留设备名文件会命中设备（CON 等），`readFile` 会阻塞在控制台而不是
-			// 返回内容。修复前的版本或外部工具可能留下过这种文件，这里把它从清单里剔除 ——
-			// 最坏表现是「该条记忆在本机不可见」，而不是卡住整个扫描（spec Ruling 5）。
-			.filter((n) => !(this.#platform === "win32" && isReservedWindowsName(n)))
-			.sort();
+		return (
+			names
+				.filter((n) => n.endsWith(".md") && n !== INDEX_FILE && !n.startsWith("."))
+				// win32：按名打开保留设备名文件会命中设备（CON 等），`readFile` 会阻塞在控制台而不是
+				// 返回内容。修复前的版本或外部工具可能留下过这种文件，这里把它从清单里剔除 ——
+				// 最坏表现是「该条记忆在本机不可见」，而不是卡住整个扫描（spec Ruling 5）。
+				.filter((n) => !(this.#platform === "win32" && isReservedWindowsName(n)))
+				.sort()
+		);
 	}
 
 	/** 已被占用的文件名：磁盘上的条目文件 + 索引文件本身。

@@ -36,8 +36,7 @@ export function entryFileName(name: string): string {
 	// 的内容会写进控制台，而索引里已经多了一行 —— 静默丢记忆。**全平台**加前缀：git 类记忆目录
 	// 跨机共享，名字必须在两边都安全（spec Ruling 5）。既有文件不受影响：addEntry 按 frontmatter
 	// 的 name 复用已有文件，这里只影响**新建**文件的派生名。
-	const finalStem =
-		stem.length === 0 ? `entry-${shortHash(name)}` : isReservedWindowsName(stem) ? `_${stem}` : stem;
+	const finalStem = stem.length === 0 ? `entry-${shortHash(name)}` : isReservedWindowsName(stem) ? `_${stem}` : stem;
 	return `${finalStem}${ENTRY_EXT}`;
 }
 
