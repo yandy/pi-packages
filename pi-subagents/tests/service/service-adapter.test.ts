@@ -345,12 +345,13 @@ describe("SubagentsServiceAdapter — steer, abort, waitForAll, hasRunning", () 
 			expect(await svc.steer("unknown", "hurry")).toBe(false);
 		});
 
-		it("queues message and returns true when session not ready", async () => {
+		it("buffers the message and returns false when the session is not ready yet", async () => {
 			const record = createTestSubagent({ id: "a-1", status: "running" });
 			const mgr = createManagerStub();
 			mgr.getRecord.mockReturnValue(record);
 			const svc = createSvc(mgr);
-			expect(await svc.steer("a-1", "do this")).toBe(true);
+			// Subagent.steer 返回 false = 已入队缓冲而非立即投递；adapter 透传该语义。
+			expect(await svc.steer("a-1", "do this")).toBe(false);
 			expect(record.pendingSteerCount).toBe(1);
 		});
 

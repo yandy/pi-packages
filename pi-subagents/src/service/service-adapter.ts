@@ -102,8 +102,8 @@ export class SubagentsServiceAdapter implements SubagentsService {
 		if (record?.status !== "running") {
 			return false;
 		}
-		await record.steer(message);
-		return true;
+		// 透传 Subagent.steer() 的返回：true = 已投递到会话，false = 会话未就绪已入队缓冲。
+		return record.steer(message);
 	}
 
 	async waitForAll(): Promise<void> {
