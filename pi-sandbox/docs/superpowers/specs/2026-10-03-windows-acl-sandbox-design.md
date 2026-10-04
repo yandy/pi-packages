@@ -399,6 +399,13 @@ Windows：合成 ACL 场景（缺 `WRITE_DAC` 的目录、显式包允许 ACE �
 
 ### 13.4 人工验收清单（用户执行）
 
+**各条验证对应的提交（可追溯，2026-10-03 复核）**：
+
+- **§1–§13 + §15**：在 `1ec25e51` 上验证。该提交之后沙箱强制链路（`src/win32/**`（除 `skill-paths.ts`）、`runners/fence/shell-ops/powershell-ops/confine/tools.ts`、`index.ts`）**零改动**，`tests/win32/e2e.test.ts`（22/22）也**零改动** → 结论沿用。
+- **§14（Windows 出现）**：在 `9aa989ee` 上确认，但 `67f7458d` 之后技能从 `skills/` 迁到 `resources/skills/`（仅位置与 `files` 打包变化，脚本与 SKILL.md 与该提交**逐字节相同**）→ **此项待复验**。
+- **诊断脚本套件 10/10**：在 `4230584d` 上；此后 `resources/skills/**` 与 `tests/win32/**` **零改动**（只有文档与 `tests/` 其他文件的可移植性修改，见 `06ca28b9`）→ 结论沿用。
+- **§17**：未跑。
+
 | 条目 | 结果 | 证据 |
 |---|---|---|
 | §0 自动化前置（e2e 22 例） | ✅ | `npx vitest run tests/win32/e2e.test.ts` → 22 passed / 0 skipped |
