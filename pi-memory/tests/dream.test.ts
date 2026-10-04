@@ -5,6 +5,7 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildDreamTask, runDream, type RunDreamOpts } from "../src/dream";
 import { MemoryStore, type StoreConfig } from "../src/memory-store";
+import { createReservedNameFixture, removeReservedNameFixture } from "./helpers/reserved-name";
 
 const { runHeadlessAgentMock } = vi.hoisted(() => ({
 	runHeadlessAgentMock: vi.fn(),
@@ -47,6 +48,8 @@ beforeEach(async () => {
 	runHeadlessAgentMock.mockReset();
 });
 afterEach(async () => {
+	// win32 宿主上 rm(dir, { recursive: true }) 删不掉保留名文件，必须先经 \\?\ 前缀摘除
+	await removeReservedNameFixture(dir, "con.md");
 	await rm(dir, { recursive: true, force: true });
 });
 
@@ -192,9 +195,9 @@ describe("runDream", () => {
 		expect(contents).toEqual(["A.md", "MEMORY.md"]);
 	});
 
-	it("skips Windows device-named files in the dream snapshot on win32", async () => {
-		const win = new MemoryStore(CFG(dir, { platform: "win32" }));
-		await writeFile(join(dir, "con.md"), "正文", "utf8");
+	it.skipIf(process.platform !== "win32")("skips Windows device-named files in the dream snapshot on win32", async () => {
+		const win = new MemoryStore(CFG(dir));
+		await createReservedNameFixture(dir, "con.md", "正文");
 		await writeFile(join(dir, "ok.md"), "正文", "utf8");
 		await rm(join(dir, ".backups"), { recursive: true, force: true });
 		runHeadlessAgentMock.mockResolvedValueOnce("ok");
@@ -206,8 +209,8 @@ describe("runDream", () => {
 		expect(contents).toEqual(["ok.md"]);
 	});
 
-	it("keeps Windows device-named files in the dream snapshot on linux", async () => {
-		const posix = new MemoryStore(CFG(dir, { platform: "linux" }));
+	it.skipIf(process.platform === "win32")("keeps Windows device-named files in the dream snapshot on POSIX", async () => {
+		const posix = new MemoryStore(CFG(dir));
 		await writeFile(join(dir, "con.md"), "正文", "utf8");
 		await writeFile(join(dir, "ok.md"), "正文", "utf8");
 		await rm(join(dir, ".backups"), { recursive: true, force: true });
