@@ -43,6 +43,23 @@ function runScript(args: readonly string[]) {
 	return shell(PS, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", SCRIPT, ...args]);
 }
 
+/** 写一条 deny ACE（受托人 = 包 SID）。真机实证：`icacls /deny "*SID:…"` 在本机会**静默不生效**
+ * （status 0 但 SDDL 里没有该 ACE；由脚本 collateral 检查通过反推出写入时就不存在）。
+ * .NET 直接写安全描述符不经过 icacls 的映射，且与本仓已在真机验证可写的能力 ACE 同一条路径；
+ * 写完立即回读断言，失败点落在夹具而不是“脚本没保住一个不存在的 ACE”。 */
+function addPackageDenyAce(path: string): void {
+	const literal = psLiteral(path);
+	const command = [
+		`$sid = [System.Security.Principal.SecurityIdentifier]::new('${PACKAGE_SID}')`,
+		`$acl = Get-Acl -LiteralPath ${literal}`,
+		"$acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($sid, 'ReadAndExecute', 'ContainerInherit, ObjectInherit', 'None', 'Deny'))",
+		`Set-Acl -LiteralPath ${literal} -AclObject $acl`,
+	].join("; ");
+	const result = shell(PS, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command]);
+	expect(result.status, result.output).toBe(0);
+	expect(sddl(path)).toMatch(/\(D;[A-Z]*;[^)]*;;;S-1-15-2-1234567890-1234567890\)/u);
+}
+
 /** PowerShell 字面量（单引号内翻倍）——`-Command` 拼接用。 */
 function psLiteral(value: string): string {
 	return `'${value.replaceAll("'", "''")}'`;
@@ -164,8 +181,7 @@ describe.skipIf(process.platform !== "win32")("diagnose-windows-sandbox-acl scri
 		// DENY 的受托人用**同一个包 SID**（不是当前用户）：真机证明“受托人 = 当前用户”的 deny 只要含
 		// SYNCHRONIZE（icacls 的 (W)/(D) 都会展开出 S）就会打掉 CreateFileW(FILE_WRITE_DAC) 的探测；
 		// 而包 SID 的 deny 对用户的访问检查无影响，同时钉住脚本“同 SID 的 deny 不得被当成冲突移除”。
-		const deny = shell("icacls", [target, "/deny", `*${PACKAGE_SID}:(OI)(CI)(RX)`]);
-		expect(deny.status, deny.output).toBe(0);
+		addPackageDenyAce(target); // 同 SID 的 deny：icacls /deny 在本机静默不生效，必须用 .NET 写并自检
 		const otherAllow = shell("icacls", [target, "/grant", "*S-1-5-32-545:(OI)(CI)(RX)"]);
 		expect(otherAllow.status, otherAllow.output).toBe(0);
 		addPackageAce(target); // 同 SID 的 allow：移除路径必须执行且只移除 allow
