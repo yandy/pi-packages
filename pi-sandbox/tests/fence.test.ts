@@ -161,6 +161,7 @@ describe("win32 containment", () => {
 		// 裸 "C:" 是"每驱动器当前目录"（drive-relative），不是盘根 "C:\"：词法包含要求盘符后紧跟分隔符。
 		// 该结果与 path.sep 无关（POSIX 上根不存在、词法与身份回退都无命中），故不 gated，Linux 也执行；
 		// 正例（"C:\…" 落在 "C:\" 下）只在 win32 成立，放在下面的 win32-gated 用例里。
+		// 实现经 DRIVE_RELATIVE_PATH guard 保证该结果在 win32 宿主上也确定（不再依赖 per-drive CWD）。
 		expect(isWithinRoots("C:", ["C:\\"], false)).toBe(false);
 	});
 
