@@ -213,6 +213,15 @@ describe("SubagentsServiceAdapter — spawn", () => {
 		expect(resolveModel).toHaveBeenCalledWith("haiku", registry);
 	});
 
+	it("throws when no model registry is available for a string model", () => {
+		const svc = new SubagentsServiceAdapter(
+			createManagerStub(),
+			vi.fn(),
+			makeRuntimeStub({ currentCtx: { ...makeStubCtx(), modelRegistry: undefined } }),
+		);
+		expect(() => svc.spawn("Explore", "task", { model: "haiku" })).toThrow(/No model registry available/);
+	});
+
 	it("throws on model resolution failure", () => {
 		const svc = new SubagentsServiceAdapter(
 			createManagerStub(),
