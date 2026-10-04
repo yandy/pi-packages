@@ -4,6 +4,14 @@ import { join, relative, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { assertWriteAllowed, canonicalizeTarget, FenceDenialError, isWithinRoots } from "../src/fence";
 import { escalationHintMarker } from "../src/escalation";
+import { defaultTmpRoots } from "../src/policy";
+
+/**
+ * Windows 上创建符号链接需要特权（开发者模式或管理员），且 junction / 8.3 短名 / 大小写不敏感
+ * 的解析语义与 POSIX 不同，故依赖 `symlinkSync` 的 POSIX 语义用例在 win32 上跳过；Windows 侧的
+ * 链接 / 短名 / 大小写覆盖在 `tests/win32/e2e.test.ts` 与本文件「win32 containment」里 win32 门控的注入用例。
+ */
+const isWin32 = process.platform === "win32";
 
 let dir: string;
 let ws: string;
@@ -24,14 +32,16 @@ beforeEach(() => {
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
 describe("canonicalizeTarget", () => {
-	it("resolves symlinks in the existing prefix, keeps the missing tail", () => {
+	// win32 跳过：建 symlink 需特权（开发者模式/管理员）；Windows 侧链接语义由 tests/win32/e2e.test.ts 覆盖。
+	it.skipIf(isWin32)("resolves symlinks in the existing prefix, keeps the missing tail", () => {
 		symlinkSync(outside, join(ws, "link"));
 		expect(canonicalizeTarget(join(ws, "link", "newfile.txt"))).toBe(join(outside, "newfile.txt"));
 	});
 	it("keeps an entirely missing path's resolved spelling", () => {
 		expect(canonicalizeTarget(join(ws, "a", "b"))).toBe(join(ws, "a", "b"));
 	});
-	it("follows a dangling symlink to its target spelling (Ruling 7)", () => {
+	// win32 跳过：建 symlink 需特权（开发者模式/管理员）；Windows 侧链接语义由 tests/win32/e2e.test.ts 覆盖。
+	it.skipIf(isWin32)("follows a dangling symlink to its target spelling (Ruling 7)", () => {
 		symlinkSync(join(realpathSync.native("/etc"), "sbx-probe-x"), join(ws, "d2"));
 		expect(canonicalizeTarget(join(ws, "d2"))).toBe(join(realpathSync.native("/etc"), "sbx-probe-x"));
 	});
@@ -46,7 +56,8 @@ describe("isWithinRoots", () => {
 		expect(isWithinRoots(join(ws, "a/b"), [ws])).toBe(true);
 		expect(isWithinRoots(`${ws}sibling`, [ws])).toBe(false); // 字符串前缀但非路径段边界
 	});
-	it("ancestor identity walk catches a symlinked spelling that lexically misses", () => {
+	// win32 跳过：建 symlink 需特权（开发者模式/管理员）；Windows 侧祖先身份/短名语义由 tests/win32/e2e.test.ts 覆盖。
+	it.skipIf(isWin32)("ancestor identity walk catches a symlinked spelling that lexically misses", () => {
 		const viaSymlink = join(dir, "ws-link", "f"); // dir/ws-link → ws（词法上不含 ws 前缀）
 		symlinkSync(ws, join(dir, "ws-link"));
 		expect(isWithinRoots(viaSymlink, [ws])).toBe(true);
@@ -60,11 +71,16 @@ describe("assertWriteAllowed", () => {
 	it("allows inside the workspace, including missing tails", () => {
 		expect(() => assertWriteAllowed(join(ws, "new/dir/file.txt"), wsWrite)).not.toThrow();
 	});
-	it("allows /tmp and os.tmpdir()", () => {
-		expect(() => assertWriteAllowed(join(canonicalizeTarget("/tmp"), "sbx-test-x"), wsWrite)).not.toThrow();
+	it("allows every platform tmp root (defaultTmpRoots) and os.tmpdir()", () => {
+		// 平台无关：不写字面 "/tmp"——win32 的 tmp 可写根只有 os.tmpdir()（%TEMP%），字面 "/tmp" 在那里
+		// 应当被拒绝（这正是本用例在 Windows 上曾失败的原因）。缺省 tmp 根由 defaultTmpRoots(platform) 推导。
+		for (const root of defaultTmpRoots(process.platform)) {
+			expect(() => assertWriteAllowed(join(canonicalizeTarget(root), "sbx-test-x"), wsWrite)).not.toThrow();
+		}
 		expect(() => assertWriteAllowed(join(canonicalizeTarget(tmpdir()), "sbx-test-x"), wsWrite)).not.toThrow();
 	});
-	it("denies outside with marker + hint (Review Focus #1: symlink escape)", () => {
+	// win32 跳过：建 symlink 需特权（开发者模式/管理员）；Windows 侧围栏逃逸由 tests/win32/e2e.test.ts 覆盖。
+	it.skipIf(isWin32)("denies outside with marker + hint (Review Focus #1: symlink escape)", () => {
 		// 逃逸目标必须是真·围栏外的既有目录：dir/outside 落在 os.tmpdir() 下，而 tmpdir()
 		// 是 workspace-write 的可写根（spec §4），指过去会被合法放行；计划 Review Focus #1
 		// 指定 /etc。尾部故意不存在（计划原文"目标不存在"），否则整条路径可被 realpath 解出。
@@ -76,17 +92,20 @@ describe("assertWriteAllowed", () => {
 		expect(msg).toContain("[sandbox: file access denied under workspace-write mode]");
 		expect(msg).toContain(escalationHintMarker("operation"));
 	});
-	it("denies a dangling final-component symlink pointing outside (Ruling 7: P1 escape)", () => {
+	// win32 跳过：建 symlink 需特权（开发者模式/管理员）；Windows 侧围栏逃逸由 tests/win32/e2e.test.ts 覆盖。
+	it.skipIf(isWin32)("denies a dangling final-component symlink pointing outside (Ruling 7: P1 escape)", () => {
 		symlinkSync(join(realpathSync.native("/etc"), `sbx-dangling-probe-${process.pid}`), join(ws, "dangling"));
 		expect(() => assertWriteAllowed(join(ws, "dangling"), wsWrite)).toThrow(FenceDenialError);
 	});
-	it("resolves a relative dangling symlink against the link's directory and denies escape (M5)", () => {
+	// win32 跳过：建 symlink 需特权（开发者模式/管理员）；Windows 侧相对链接解析由 tests/win32/e2e.test.ts 覆盖。
+	it.skipIf(isWin32)("resolves a relative dangling symlink against the link's directory and denies escape (M5)", () => {
 		const etcTarget = join(realpathSync.native("/etc"), `sbx-rel-probe-${process.pid}`);
 		symlinkSync(relative(ws, etcTarget), join(ws, "rel-dangling"));
 		expect(canonicalizeTarget(join(ws, "rel-dangling"))).toBe(etcTarget);
 		expect(() => assertWriteAllowed(join(ws, "rel-dangling"), wsWrite)).toThrow(FenceDenialError);
 	});
-	it("allows a dangling final-component symlink pointing inside the workspace", () => {
+	// win32 跳过：建 symlink 需特权（开发者模式/管理员）；Windows 侧链接语义由 tests/win32/e2e.test.ts 覆盖。
+	it.skipIf(isWin32)("allows a dangling final-component symlink pointing inside the workspace", () => {
 		symlinkSync(join(ws, "future.txt"), join(ws, "dangling-in"));
 		expect(() => assertWriteAllowed(join(ws, "dangling-in"), wsWrite)).not.toThrow();
 	});

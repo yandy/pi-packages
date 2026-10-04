@@ -409,7 +409,11 @@ describe("T15: 平台门控与 pwsh 未激活提示（Ruling 8/9）", () => {
 		const activate = await importIndexWithDangerFullAccessOverride();
 		activate(fakePi as never);
 		const notify = vi.fn();
-		await commandHandlers.permission.handler("", { ui: { notify } });
+		// 平台门控：本用例断言的是**非 win32** 行为，必须钉住 platform，否则在 Windows 宿主上
+		// process.platform 会把它切到 win32 分支（状态行会带上 PowerShell 行）而假性失败。
+		await withPlatform("linux", async () => {
+			await commandHandlers.permission.handler("", { ui: { notify } });
+		});
 		expect(notify).toHaveBeenCalledTimes(1);
 		const text = String(notify.mock.calls[0]?.[0]);
 		expect(text).toContain("sandbox mode: danger-full-access (/permission override)");
@@ -597,9 +601,12 @@ describe("T15: 平台门控与 pwsh 未激活提示（Ruling 8/9）", () => {
 		const notify = vi.fn();
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		try {
-			hooks.session_start?.({ type: "session_start" }, uiCtx("p", notify));
-			expect(notify).not.toHaveBeenCalled();
-			expect(warn).not.toHaveBeenCalled();
+			// 平台门控：本用例断言的是**非 win32** 分支（不该催装 pwsh），不钉 platform 在 Windows 上会走 win32 提示分支。
+			await withPlatform("linux", async () => {
+				hooks.session_start?.({ type: "session_start" }, uiCtx("p", notify));
+				expect(notify).not.toHaveBeenCalled();
+				expect(warn).not.toHaveBeenCalled();
+			});
 		} finally {
 			warn.mockRestore();
 		}

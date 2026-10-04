@@ -40,6 +40,10 @@ function makeDeps(overrides: Partial<Parameters<typeof createSandboxTools>[0]> =
 	return {
 		deps: {
 			cwd: ws,
+			// 平台注入：默认钉 linux，使 bash 受限逻辑用例在 Windows 宿主上也真正执行（win32 上
+			// createSandboxBashOps 会在 spawn 前拒绝 bash；win32 覆盖见 tests/win32/* 与下面的
+			// "windows tool wiring"，它们通过 overrides 显式传 platform: "win32"）。
+			platform: "linux" as const,
 			getConfig: () => DEFAULT_SANDBOX_CONFIG,
 			permission: createPermissionState(),
 			spawnFn,

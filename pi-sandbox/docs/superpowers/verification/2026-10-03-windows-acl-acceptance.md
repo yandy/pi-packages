@@ -22,7 +22,7 @@ node --version                                # 记录 Node 版本
 cd C:\pi-packages\pi-sandbox
 npx vitest run tests/win32/e2e.test.ts       # 期望：20 个 win32 用例真正执行（不是 skip）+ 2 个全平台用例，全绿
 npx vitest run tests/win32/diagnose-script.test.ts  # 诊断脚本套件（首次真机运行；10 例；需 pwsh 或 Windows PowerShell 5.1 + icacls）
-npx vitest run                               # 期望：全量绿（integration 的 4 个受限 bash 用例在 win32 上按 Ruling 2 跳过）
+npx vitest run                               # 期望：跨平台逻辑套件全绿；POSIX-only 用例按平台跳过（见下方「平台策略」：当前为 364 通过 / 14 跳过）
 ```
 
 **Windows 机器准备（git-bash）**
@@ -34,7 +34,17 @@ npx vitest run tests/win32/e2e.test.ts
 npx vitest run
 ```
 
-**预期**：e2e 文件在 Windows 上报 **20 个 win32 用例**执行通过，外加 **2 个各平台用例**（`bash` 拒绝、拒绝断言守卫），共 22 通过、0 跳过；诊断脚本套件 `tests/win32/diagnose-script.test.ts` 首次真机执行 **10 例**（它静态依赖脚本契约，首次失败按该计划 Step 2 的三类分流处理）；全量套件全绿——`tests/integration.test.ts` 的 4 个受限 `bash` 用例在 win32 上按 **Ruling 2**（win32 受限模式只支持 pwsh，`createSandboxBashOps` 在任何 spawn 前拒绝 bash）**跳过**，不是失败；win32 专属用例此时真实执行。
+**预期**：e2e 文件在 Windows 上报 **20 个 win32 用例**执行通过，外加 **2 个各平台用例**（`bash` 拒绝、拒绝断言守卫），共 22 通过、0 跳过；诊断脚本套件 `tests/win32/diagnose-script.test.ts` 首次真机执行 **10 例**（它静态依赖脚本契约，首次失败按该计划 Step 2 的三类分流处理）；全量套件按下面的「平台策略」核对（Windows 上**不**要求「全量绿」，POSIX-only 用例带原因跳过）。
+
+**平台策略（可核对的期望）**
+
+- **Windows 上**：验收面 = `tests/win32/{e2e,diagnose-script}.test.ts` 真机执行全绿（20 + 10 例）**加上所有跨平台逻辑套件全绿**；POSIX-only 用例按平台跳过（原因写在各自用例处）。当前预期：**364 通过 / 14 跳过（共 378 例）**，`Test Files` 为 26 passed | 1 skipped（skipped 的是整个 describe 被跳过的 `tests/integration.test.ts`）。14 个跳过逐项为：
+  - `tests/fence.test.ts`（8）：7 例依赖 `symlinkSync` 的 POSIX 符号链接语义（Windows 建符号链接需开发者模式/管理员特权；junction、8.3 短名与大小写不敏感语义由 `tests/win32/e2e.test.ts` 与同文件「win32 containment」里 win32 门控的注入用例覆盖）+ 1 例「POSIX 上尾部反斜杠仍是文件名字符」（`skipIf(sep === "\\")`）。
+  - `tests/policy.test.ts`（1）：`canonicalPath > resolves symlinks`（同上，符号链接特权）。
+  - `tests/integration.test.ts`（4）：真实受限 `bash` 用例——**Ruling 2**（win32 受限模式只支持 pwsh，`createSandboxBashOps` 在任何 spawn 前拒绝 bash），Windows 的真实受限由 `tests/win32/e2e.test.ts` 与本清单覆盖。
+  - `tests/win32-runner.test.ts`（1）：「通过符号链接入口跑 main（realpath 守卫）」（同受符号链接特权限制）。
+  - **不跳过、靠平台注入保留覆盖的**：`tests/bash-ops.test.ts` 的 POSIX 受限逻辑（confined argv / profile / env 清洗 / denial 分类 / 超时与 abort）与 `tests/tools.test.ts` 的 bash 接线都注入 `platform: "linux"`，在 Windows 上照样执行；`tests/index-smoke.test.ts` 的两条「非 win32」用例用文件内 `withPlatform("linux", …)` 钉住平台；`tests/fence.test.ts`/`tests/policy.test.ts` 的「/tmp」用例改成遍历 `defaultTmpRoots(process.platform)` 的平台无关断言。win32 的 bash 拒绝由 `tests/confine.test.ts`、`tests/bash-ops.test.ts` 末尾的 win32 用例与 `tests/win32/*` 覆盖。
+- **Linux/CI**：仍要求**全量绿**（CI 就是 ubuntu）：`npx vitest run` 预期 **347 通过 / 31 跳过（共 378 例）**，`Test Files` 26 passed | 1 skipped；31 个跳过全部是 win32-only 套件——`tests/win32/e2e.test.ts` 的 20 例、`tests/win32/diagnose-script.test.ts` 的 10 例（整个文件跳过）、`tests/fence.test.ts` 的 1 例 win32 门控用例。POSIX-only 用例在 Linux 上全部执行（新增的 `skipIf(win32)` 不改变 Linux 的跳过数）。
 
 **前置：机器状态、`%TEMP%` 授权与复跑**
 
