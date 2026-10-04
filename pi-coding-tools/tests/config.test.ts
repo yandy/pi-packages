@@ -30,7 +30,8 @@ describe("loadConfig", () => {
 		}));
 		vi.doMock("node:fs", () => ({
 			readFileSync: (p: string) => {
-				if (p.endsWith(".pi/coding-tools.json")) return JSON.stringify({ ls: false, find: false, grep: false });
+				const normalized = p.replaceAll("\\", "/");
+				if (normalized.endsWith(".pi/coding-tools.json")) return JSON.stringify({ ls: false, find: false, grep: false });
 				throw new Error("not found");
 			},
 		}));
@@ -46,8 +47,9 @@ describe("loadConfig", () => {
 		}));
 		vi.doMock("node:fs", () => ({
 			readFileSync: (p: string) => {
-				if (p.endsWith("agent/coding-tools.json")) return JSON.stringify({ lsp_hover: false, lsp_symbols: false });
-				if (p.endsWith(".pi/coding-tools.json")) return JSON.stringify({ lsp_hover: true });
+				const normalized = p.replaceAll("\\", "/");
+				if (normalized.endsWith("agent/coding-tools.json")) return JSON.stringify({ lsp_hover: false, lsp_symbols: false });
+				if (normalized.endsWith(".pi/coding-tools.json")) return JSON.stringify({ lsp_hover: true });
 				throw new Error("not found");
 			},
 		}));
@@ -64,7 +66,8 @@ describe("loadConfig", () => {
 		}));
 		vi.doMock("node:fs", () => ({
 			readFileSync: (p: string) => {
-				if (p.endsWith(".pi/coding-tools.json"))
+				const normalized = p.replaceAll("\\", "/");
+				if (normalized.endsWith(".pi/coding-tools.json"))
 					return JSON.stringify({
 						lsp: { disabled: true, servers: { clangd: { disabled: true } } },
 					});
