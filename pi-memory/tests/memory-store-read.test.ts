@@ -9,12 +9,11 @@ import { createReservedNameFixture, removeReservedNameFixture } from "./helpers/
 let dir: string;
 let store: MemoryStore;
 
-const CFG = (memoryDir: string, platform?: NodeJS.Platform): StoreConfig => ({
+const CFG = (memoryDir: string): StoreConfig => ({
 	memoryDir,
 	indexMaxLines: 200,
 	indexMaxBytes: 25600,
 	lock: { timeoutMs: 5000, snapshotKeep: 5 },
-	platform,
 });
 
 function meta(name: string, over: Partial<EntryMeta> = {}): EntryMeta {
