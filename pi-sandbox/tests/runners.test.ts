@@ -1,4 +1,8 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { canonicalPath } from "../src/policy";
 import {
 	bwrapProfileArgs,
 	landlockProfileArgs,
@@ -6,6 +10,8 @@ import {
 	runnerInvocation,
 	seatbeltProfileArgs,
 	selectRunner,
+	windowsAclAvailability,
+	windowsAclRunnerArgv,
 } from "../src/runners";
 
 const WS = "/home/u/project";
@@ -82,9 +88,11 @@ describe("selectRunner", () => {
 		expect(selectRunner(100, { platform: "darwin", probeBwrap })).toEqual({ runner: "seatbelt", enforcement: "full" });
 		expect(probeBwrap).not.toHaveBeenCalled();
 	});
-	it("win32/unknown: unavailable", () => {
+	it("unknown platform: unavailable", () => {
 		resetRunnerCache();
-		expect(selectRunner(100, { platform: "win32" })).toEqual({ runner: "unavailable" });
+		// win32 不再是“未知平台”：真实前置检查依赖宿主上的 koffi / src/win32/runner.js，无法用缺省值跨平台断言；
+		// win32 的可解析与不可解析两条路径见下方 "windows-acl rung"（注入 hook）。
+		expect(selectRunner(100, { platform: "freebsd" })).toEqual({ runner: "unavailable" });
 	});
 	it("caches the verdict: a second call does not re-probe", () => {
 		resetRunnerCache();
@@ -108,5 +116,74 @@ describe("runnerInvocation", () => {
 		const inv = runnerInvocation({ runner: "seatbelt", enforcement: "full" }, ro, { seatbeltExec: "/usr/bin/sbx" });
 		expect(inv[0]).toBe("/usr/bin/sbx");
 		expect(inv[1]).toBe("-p");
+	});
+});
+
+describe("windows-acl rung", () => {
+	it("selects the windows rung as a sole candidate with partial enforcement", () => {
+		resetRunnerCache();
+		const runner = {
+			node: "C:\\node.exe",
+			runner: "C:\\pkg\\src\\win32\\runner.js",
+		};
+		expect(selectRunner(5000, { platform: "win32", windowsAclRung: () => runner })).toEqual({
+			runner: "windows-acl",
+			enforcement: "partial",
+		});
+	});
+
+	it("reports unavailable when the rung cannot be resolved", () => {
+		resetRunnerCache();
+		expect(selectRunner(5000, { platform: "win32", windowsAclRung: () => undefined })).toEqual({ runner: "unavailable" });
+	});
+
+	it("sole candidate: never consults the functional probes (no spawn at selection time)", () => {
+		resetRunnerCache();
+		const probeBwrap = vi.fn(() => true);
+		const probeLandlock = vi.fn(() => "full" as const);
+		const hooks = {
+			platform: "win32",
+			windowsAclRung: () => ({ node: "C:\\node.exe", runner: "C:\\pkg\\src\\win32\\runner.js" }),
+			probeBwrap,
+			probeLandlock,
+		};
+		expect(selectRunner(5000, hooks)).toEqual({ runner: "windows-acl", enforcement: "partial" });
+		expect(probeBwrap).not.toHaveBeenCalled();
+		expect(probeLandlock).not.toHaveBeenCalled();
+	});
+
+	it("requires a runner file, a resolvable koffi, and a node executable", () => {
+		const dir = mkdtempSync(join(tmpdir(), "sbx-rung-"));
+		const runner = join(dir, "runner.js");
+		writeFileSync(runner, "// runner\n");
+		expect(windowsAclAvailability({ nodeExecutable: "C:\\node.exe", windowsRunnerPath: runner, koffiResolvable: () => true }))
+			.toEqual({ node: "C:\\node.exe", runner });
+		expect(windowsAclAvailability({ nodeExecutable: "C:\\node.exe", windowsRunnerPath: runner, koffiResolvable: () => false })).toBeUndefined();
+		expect(windowsAclAvailability({ nodeExecutable: undefined, windowsRunnerPath: runner, koffiResolvable: () => true })).toBeUndefined();
+		expect(windowsAclAvailability({ nodeExecutable: "C:\\node.exe", windowsRunnerPath: join(dir, "missing.js"), koffiResolvable: () => true })).toBeUndefined();
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	it("prefixes node/runner and pins workspace, canonical temp root and mode", () => {
+		const availability = { node: "C:\\node.exe", runner: "C:\\pkg\\src\\win32\\runner.js" };
+		expect(windowsAclRunnerArgv(wsWrite, availability)).toEqual([
+			"C:\\node.exe",
+			"C:\\pkg\\src\\win32\\runner.js",
+			"--workspace",
+			WS,
+			"--temp",
+			canonicalPath(tmpdir()),
+			"--mode",
+			"workspace-write",
+		]);
+		expect(windowsAclRunnerArgv(ro, availability).slice(-2)).toEqual(["--mode", "read-only"]);
+	});
+
+	it("runnerInvocation takes the resolved availability, falls back to the hook, and fails closed otherwise", () => {
+		const availability = { node: "C:\\node.exe", runner: "C:\\pkg\\src\\win32\\runner.js" };
+		const selected = { runner: "windows-acl" as const, enforcement: "partial" as const };
+		expect(runnerInvocation(selected, ro, {}, availability)).toEqual(windowsAclRunnerArgv(ro, availability));
+		expect(runnerInvocation(selected, ro, { windowsAclRung: () => availability })).toEqual(windowsAclRunnerArgv(ro, availability));
+		expect(() => runnerInvocation(selected, ro, { windowsAclRung: () => undefined })).toThrowError(/windows-acl is unavailable/);
 	});
 });

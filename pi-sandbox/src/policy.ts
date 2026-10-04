@@ -26,17 +26,23 @@ export function canonicalPath(path: string): string {
 }
 
 /**
- * workspace-write = workspace + tmp 根（缺省 "/tmp" + os.tmpdir()）（canonical、去重）；read-only 为空。
+ * workspace-write = workspace + tmp 根（缺省 defaultTmpRoots()：POSIX 为 "/tmp" + os.tmpdir()，
+ * win32 只有 os.tmpdir()，即 %TEMP%）（canonical、去重）；read-only 为空。
  * seatbelt profile 与 fs 围栏共用此推导，防止语义漂移（spec §4）——两侧都不传 tmpRoots，
  * 缺省值即生产语义；tmpRoots 仅供测试注入（testing.md「参数注入」）。
  */
 export function writableRoots(
 	mode: SandboxMode,
 	workspaceRoot: string,
-	tmpRoots: readonly string[] = ["/tmp", tmpdir()],
+	tmpRoots: readonly string[] = defaultTmpRoots(),
 ): string[] {
 	if (mode !== "workspace-write") return [];
 	return [...new Set([workspaceRoot, ...tmpRoots].map(canonicalPath))];
+}
+
+/** win32 没有 POSIX 的 /tmp：tmp 根只有 os.tmpdir()（%TEMP%，spec §5；platform 可注入以便单测）。 */
+export function defaultTmpRoots(platform: string = process.platform): string[] {
+	return platform === "win32" ? [tmpdir()] : ["/tmp", tmpdir()];
 }
 
 /**

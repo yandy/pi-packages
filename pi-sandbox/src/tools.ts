@@ -2,13 +2,18 @@ import { access as fsAccess, constants, mkdir as fsMkdir, readFile as fsReadFile
 import { Type, type TSchema } from "typebox";
 import {
 	type AgentToolResult,
+	type BashOperations,
 	createBashToolDefinition,
 	createEditToolDefinition,
 	createWriteToolDefinition,
 	type EditOperations,
 	type ExtensionContext,
+	type ToolDefinition,
 	type WriteOperations,
 } from "@earendil-works/pi-coding-agent";
+// 命名空间导入只用于版本门控探测（createPowerShellToolDefinition 是 pi ≥1.0.0 才有的导出）：
+// pi 是 ESM，静态具名导入一个老宿主不存在的导出会在**链接期**硬失败，属性读取最坏只是 undefined。
+import * as piHost from "@earendil-works/pi-coding-agent";
 import { createSandboxBashOps, type SpawnFn } from "./bash-ops";
 import { getSandboxConfig, type SandboxConfig } from "./config";
 import { getDenialLedger } from "./denial-ledger";
@@ -28,7 +33,47 @@ import { getEscalationBroker } from "./escalation-broker";
 import { assertWriteAllowed, FenceDenialError, type FencePolicy } from "./fence";
 import type { PermissionState } from "./permission";
 import { canonicalPath, resolveEffectiveMode, type SandboxMode } from "./policy";
+import { createSandboxPowerShellOps } from "./powershell-ops";
 import { selectRunner, type RunnerHooks } from "./runners";
+
+/**
+ * 宿主 pwsh 工具工厂的结构类型（pi ≥1.0.0 导出 `createPowerShellToolDefinition(cwd, options)`）。
+ * 本仓 pin 的 devDependency（0.80.2）没有该导出，所以这里不引用其类型、也不静态具名导入；
+ * `ToolDefinition` 本身 0.80.2 就有，可以安全用作返回面。
+ */
+type HostPowerShellToolDefinition = ToolDefinition<TSchema, unknown, unknown>;
+type HostCreatePowerShellToolDefinition = (
+	cwd: string,
+	options?: { operations?: BashOperations },
+) => HostPowerShellToolDefinition;
+
+/**
+ * 宿主探测（lazy + 命名空间 + `typeof === "function"`）：只在 win32 装配时读一次属性。
+ * 老宿主（<1.0.0，含本仓 devDependency 0.80.2）上是 undefined——那时 pi 本来就没有 powershell
+ * 工具，缺省即“不注册、不报错、不阻断”。
+ */
+function hostCreatePowerShellToolDefinition(): HostCreatePowerShellToolDefinition | undefined {
+	const candidate = (piHost as unknown as Record<string, unknown>).createPowerShellToolDefinition;
+	return typeof candidate === "function" ? (candidate as HostCreatePowerShellToolDefinition) : undefined;
+}
+
+/**
+ * I2 fail-safe：宿主 builder 在**构造期**抛错时降级为“无 pwsh 覆盖”（undefined，与老宿主同一路径）。
+ * `createSandboxTools` 绝不能因此抛出——pi 会把整个扩展置 null，bash/write/edit 随即无沙箱裸跑
+ * （fail-open，见 index.ts 的 I2）。execute 期的 builder 抛错是另一回事：只影响那一次 pwsh 调用，
+ * 不涉及扩展装配。
+ */
+function buildHostPowerShellBase(
+	builder: HostCreatePowerShellToolDefinition | undefined,
+	cwd: string,
+): HostPowerShellToolDefinition | undefined {
+	if (builder === undefined) return undefined;
+	try {
+		return builder(cwd);
+	} catch {
+		return undefined;
+	}
+}
 
 export interface SandboxToolDeps {
 	cwd: string;
@@ -39,6 +84,17 @@ export interface SandboxToolDeps {
 	spawnFn?: SpawnFn;
 	/** 测试注入的预解析 runner；生产缺省走 selectRunner 缓存。 */
 	selected?: ReturnType<typeof selectRunner>;
+	/** 宿平台（默认 process.platform）：决定 pwsh 工具是否注册、bash 是否标记为默认不激活（win32），
+	 *  并透传给 shell ops——bash 在 win32 上的拒绝由 bash-ops 的 guard（assertShellAllowed）实现，
+	 *  本文件只负责把 platform 送到。 */
+	platform?: string;
+	/** 测试注入（testing.md「参数注入」）：替换缺省的 createSandboxBashOps；生产不传。 */
+	_buildBashOps?: typeof createSandboxBashOps;
+	/** 测试注入（testing.md「参数注入」）：替换宿主命名空间探测结果；生产不传。
+	 *  需要它是因为本仓 devDependency（0.80.2）的宿主没有 createPowerShellToolDefinition，
+	 *  win32 注册的正例路径在单测里无法自然到达。注入值走与探测同一条 `typeof === "function"` 口径，
+	 *  传非函数值（如 false）即模拟“老宿主无该导出”；传 undefined 则回落真实探测。 */
+	_hostCreatePowerShellToolDefinition?: unknown;
 	/** 测试注入（testing.md「参数注入」）：替换缺省的 "/tmp" + os.tmpdir() tmp 根；生产不传。 */
 	_tmpRoots?: readonly string[];
 }
@@ -303,14 +359,41 @@ function createFencedEditOps(policy: FencePolicy, onDenial?: () => void): EditOp
 }
 
 export function createSandboxTools(deps: SandboxToolDeps) {
+	// 宿平台一次性解析：pwsh 注册门控与 shell ops 的 platform 注入共用同一个值。
+	const platform = deps.platform ?? process.platform;
+	// 测试注入优先；生产缺省为真实的 createSandboxBashOps。
+	const buildBashOps = deps._buildBashOps ?? createSandboxBashOps;
+	// pwsh 覆盖（spec §4.8）：仅 win32 且宿主确实导出工厂时装配；否则 undefined。
+	let createHostPowerShell: HostCreatePowerShellToolDefinition | undefined;
+	if (platform === "win32") {
+		const candidate = deps._hostCreatePowerShellToolDefinition ?? hostCreatePowerShellToolDefinition();
+		if (typeof candidate === "function") createHostPowerShell = candidate as HostCreatePowerShellToolDefinition;
+	}
 	// Ruling 15：以 definition 工厂为 base——自带 promptSnippet/promptGuidelines，
 	// execute 第 5 参 ctx 类型正确（ExtensionContext），spread 后注册不丢系统提示元数据。
 	const baseBash = createBashToolDefinition(deps.cwd);
 	const baseWrite = createWriteToolDefinition(deps.cwd);
 	const baseEdit = createEditToolDefinition(deps.cwd);
+	// pwsh 的 base 只用于元数据（label/description/schema/prepareArguments），execute 会被下面的包装覆盖；
+	// 与 bash 一样，builder 在 execute 时按当次 mode 重新装配受限 ops。
+	// I2 fail-safe：构造抛错降级为“无 pwsh 覆盖”，绝不冒泡出 createSandboxTools（fail-open 防线）。
+	const basePowerShell = buildHostPowerShellBase(createHostPowerShell, deps.cwd);
 
+	// Windows 工具装配（spec D3 第三版，pi 1.0.0 源码实证）：win32 上 bash 必须是“注册但模型不可达”。
+	// 机制两代教训：
+	//   ① `defaultActive: false` **无效**（真机证伪）：pi 1.0.0 的 _buildRuntime 把默认激活名写死为
+	//      ["read","bash","edit","write"]（agent-session.js:2889-2893），_refreshToolRegistry 按**名字**
+	//      从注册表取同名工具激活；而 `defaultActive:false` 的语义恰是“被命名即激活”
+	//      （_isActivatedOnRegistration，types.d.ts:471-475）——本包注册的同名 bash 照旧进入激活集。
+	//   ② 正解 `exposure: "hidden"`：_applyToolLoadout 构建声明集合时**丢弃** hidden
+	//      （agent-session.js:1124），_isDeclarable 对 hidden 返回 false → 自动激活与命名激活
+	//      （defaultTools / --tools / setActiveTools）都不生效；pi 文档：hidden = registered but unreachable。
+	// 同时**绝不能**“win32 上不注册 bash”：扩展工具按名覆盖内建定义（registry.set），不注册就会露出
+	// pi 内置的未受限 bash，显式启用即 fail-open。注册 + hidden = 名字被遮蔽、模型不可达，无 fail-open 路径。
+	// 非 win32 不设该键：bash 必须默认激活（既有行为不变）。
 	const bash = {
 		...baseBash,
+		...(platform === "win32" ? { exposure: "hidden" as const } : {}),
 		label: `${baseBash.label} (sandboxed)`,
 		description: escalationDescription(baseBash.description),
 		promptGuidelines: [...(baseBash.promptGuidelines ?? []), ESCALATION_GUIDELINE],
@@ -327,10 +410,11 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 				? undefined
 				: (deps.selected ?? selectRunner(config.probeTimeoutMs, deps.hooks));
 			const tool = createBashToolDefinition(sessionCwd, {
-				operations: createSandboxBashOps({
+				operations: buildBashOps({
 					mode,
 					workspaceRoot,
 					selected,
+					platform,
 					runnerCommand: config.runnerCommand,
 					runnerFailureSignatures: config.runnerFailureSignatures,
 					probeTimeoutMs: config.probeTimeoutMs,
@@ -396,5 +480,45 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 		},
 	};
 
-	return { bash, write, edit };
+	const powershellBuilder = createHostPowerShell;
+	const powershell = basePowerShell === undefined || powershellBuilder === undefined ? undefined : {
+		...basePowerShell,
+		label: `${basePowerShell.label} (sandboxed)`,
+		description: escalationDescription(basePowerShell.description),
+		promptGuidelines: [...(basePowerShell.promptGuidelines ?? []), ESCALATION_GUIDELINE],
+		parameters: extendParams(basePowerShell.parameters),
+		prepareArguments: withPlaceholderStripping(basePowerShell.prepareArguments),
+		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
+			// 与 bash 完全同路径：同一 sessionCwd 解析、同一 resolveCall（subject 为 command）、同一 ledger 记账、
+			// 同一 prepareArguments/剥参与同档提权标记。
+			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;
+			const workspaceRoot = workspaceRootFor(sessionCwd);
+			const config = configForCall(deps, sessionCwd);
+			const sessionId = readSessionId(ctx);
+			const { mode, escalated, ignoredEscalation } = await resolveCall(params as EscalationParams, ctx, deps, "command", () => String(params.command ?? ""), signal);
+			const selected = mode === "danger-full-access" || (config.runnerCommand?.length ?? 0) > 0
+				? undefined
+				: (deps.selected ?? selectRunner(config.probeTimeoutMs, deps.hooks));
+			const tool = powershellBuilder(sessionCwd, {
+				operations: createSandboxPowerShellOps({
+					mode,
+					workspaceRoot,
+					selected,
+					platform,
+					runnerCommand: config.runnerCommand,
+					runnerFailureSignatures: config.runnerFailureSignatures,
+					probeTimeoutMs: config.probeTimeoutMs,
+					hooks: deps.hooks,
+					spawnFn: deps.spawnFn,
+					// pwsh 的拒绝与 bash 同记账：denial-first 门禁据此放行同一会话的下一笔命令类提权。
+					onDenial: sessionId === null ? undefined : () => getDenialLedger().record(sessionId, "command"),
+				}),
+			});
+			const result = await tool.execute(toolCallId, stripEscalation(params) as never, signal, onUpdate as never, ctx);
+			if (ignoredEscalation) return withIgnoredEscalationNote(result, mode);
+			return escalated ? withEscalationNote(result, mode) : result;
+		},
+	};
+
+	return { bash, write, edit, powershell };
 }

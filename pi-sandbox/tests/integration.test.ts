@@ -9,7 +9,13 @@ import type { ConfinedSandboxMode } from "../src/policy";
 resetRunnerCache();
 const selected = selectRunner(5000);
 
-describe.skipIf(selected.runner === "unavailable")(`real confinement via ${selected.runner}`, () => {
+// On win32 `createSandboxBashOps` refuses bash in every confined mode
+// (Ruling 2), so these four cases cannot pass there by design; the real Windows
+// confinement is covered by `tests/win32/e2e.test.ts` and the acceptance
+// checklist. Skipping keeps "full suite green on Windows" meaningful instead of
+// training the operator to ignore four known-red rows.
+const skipConfinedBashCases = selected.runner === "unavailable" || process.platform === "win32";
+describe.skipIf(skipConfinedBashCases)(`real confinement via ${selected.runner}`, () => {
 	let ws: string;
 
 	beforeAll(() => {

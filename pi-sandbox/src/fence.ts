@@ -1,4 +1,4 @@
-import { basename, dirname, join, resolve as resolvePath } from "node:path";
+import { basename, dirname, join, resolve as resolvePath, sep } from "node:path";
 import { lstatSync, readlinkSync, realpathSync, statSync, type Stats } from "node:fs";
 import { escalationHintMarker, sandboxDenialMarker } from "./escalation";
 import { writableRoots, type SandboxMode } from "./policy";
@@ -52,14 +52,51 @@ function sameIdentity(a: Stats, b: Stats): boolean {
 	return a.dev === b.dev && a.ino === b.ino;
 }
 
+/** 大小写归一：平台不敏感时统一小写（win32 的盘符/目录名拼写差异）。 */
+function comparablePath(path: string, caseSensitive: boolean): string {
+	return caseSensitive ? path : path.toLowerCase();
+}
+
+/** win32 上 "/" 与 "\\" 都是分隔符：比较前先统一成 path.sep；POSIX 不动。 */
+const normalizeSeparators = (p: string) => (sep === "\\" ? p.replaceAll("/", "\\") : p);
+
+/** 尾部分隔符：win32 两种都去（盘根 "C:\\" → "C:"）；POSIX 只去 "/"——"\\" 在那里是合法文件名字符。 */
+const TRAILING_SEPARATORS = sep === "\\" ? /[\\/]+$/ : /\/+$/;
+
+/** 裸盘符（"C:"）：表示"每驱动器当前目录"（drive-relative），不是盘根；子路径必须由分隔符继续。 */
+const DRIVE_LETTER_PREFIX = /^[A-Za-z]:$/;
+
+/**
+ * 词法包含判定：分隔符用 path.sep（win32 上 \ 与 / 都可能出现，先归一化），
+ * 且必须落在分隔符边界上——C:\work\demo2 不是 C:\work\demo 的子路径。
+ * 大小写由调用方按平台约定传入；拼写不同（大小写、8.3 短名、junction）时
+ * 仍由下面的 dev/ino 身份回退兜底。
+ */
+function isLexicallyUnder(target: string, root: string, caseSensitive: boolean): boolean {
+	const t = comparablePath(normalizeSeparators(target), caseSensitive);
+	// 去尾部（重复）分隔符：根前缀不能带分隔符，否则 C:\work\demo2 会被误判为子路径。
+	// POSIX "/" 去尾为空，连同空根一起保持根语义。
+	const r = comparablePath(normalizeSeparators(root).replace(TRAILING_SEPARATORS, "") || sep, caseSensitive);
+	// win32 盘根 "C:\\" 去尾后就是裸盘符 "C:"；裸盘符是"每驱动器当前目录"而非盘根，
+	// 因此必须由分隔符继续（C:\…）才可能是它的子路径——裸 "C:" 与 "C:work" 都不算。
+	if (DRIVE_LETTER_PREFIX.test(r)) return t.startsWith(`${r}${sep}`);
+	if (t === r) return true;
+	return t.startsWith(r === sep ? r : `${r}${sep}`);
+}
+
 /**
  * containment 判定（deepseek dsh-fs-sandbox 语义）：词法快路径处理常规 canonical
  * 拼写；拼写不一致时沿 target 的存在祖先向上 walk，用文件系统身份（dev+ino）
  * 与授予根比较——容忍 missing 后缀，防祖先 symlink 换绑逃逸。
+ * caseSensitive 缺省按平台推导（win32 不敏感）；身份回退本身与大小写无关。
  */
-export function isWithinRoots(target: string, roots: readonly string[]): boolean {
+export function isWithinRoots(
+	target: string,
+	roots: readonly string[],
+	caseSensitive: boolean = process.platform !== "win32",
+): boolean {
 	for (const root of roots) {
-		if (target === root || target.startsWith(`${root}/`)) return true;
+		if (isLexicallyUnder(target, root, caseSensitive)) return true;
 	}
 	for (const root of roots) {
 		let rootInfo: Stats;
@@ -88,7 +125,9 @@ export function isWithinRoots(target: string, roots: readonly string[]): boolean
 export interface FencePolicy {
 	mode: SandboxMode;
 	workspaceRoot: string;
-	/** 测试注入（testing.md「参数注入」）：替换缺省的 "/tmp" + os.tmpdir() tmp 根；生产不传。 */
+	/** 测试注入（testing.md「参数注入」）：围栏比较是否大小写敏感；生产不传，缺省按 process.platform 推导。 */
+	caseSensitive?: boolean;
+	/** 测试注入（testing.md「参数注入」）：替换缺省 tmp 根（`defaultTmpRoots()`：win32 仅 `os.tmpdir()`，其余 `"/tmp"` + `os.tmpdir()`）；生产不传。 */
 	_tmpRoots?: readonly string[];
 }
 
@@ -101,5 +140,6 @@ export function assertWriteAllowed(absPath: string, policy: FencePolicy): void {
 	if (policy.mode === "danger-full-access") return;
 	const roots = writableRoots(policy.mode, policy.workspaceRoot, policy._tmpRoots);
 	const target = canonicalizeTarget(absPath);
-	if (!isWithinRoots(target, roots)) throw new FenceDenialError(resolvePath(absPath), policy.mode);
+	const caseSensitive = policy.caseSensitive ?? process.platform !== "win32";
+	if (!isWithinRoots(target, roots, caseSensitive)) throw new FenceDenialError(resolvePath(absPath), policy.mode);
 }
