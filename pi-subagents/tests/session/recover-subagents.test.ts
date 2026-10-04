@@ -1,3 +1,4 @@
+import { basename, dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { EvictedSubagent } from "../../src/lifecycle/subagent-manager";
 import { recoverEvictedSubagents } from "../../src/session/recover-subagents";
@@ -156,10 +157,13 @@ describe("recoverEvictedSubagents", () => {
 
 		// readFile should be called for the constructed path to verify it exists.
 		// The subagent session file is at <parent-dir>/<parent-basename>/tasks/<id>.jsonl
+		// 期望路径与实现同构（recover-subagents.ts 用 deriveSubagentSessionDir + join 构造），Windows 上才会命中
+		const constructedOutput = join(dirname("/parent.jsonl"), basename("/parent.jsonl", ".jsonl"), "tasks", "old-agent.jsonl");
+
 		const readFile = vi.fn((path: string) => {
 			if (path === "/parent.jsonl") return jsonl;
 			// Simulate the child session file existing
-			if (path === "/parent/tasks/old-agent.jsonl") {
+			if (path === constructedOutput) {
 				return `${JSON.stringify({ type: "session", id: "old-agent", version: 3 })}\n`;
 			}
 			throw new Error("ENOENT");
@@ -169,6 +173,6 @@ describe("recoverEvictedSubagents", () => {
 
 		expect(result).toHaveLength(1);
 		expect(result[0].id).toBe("old-agent");
-		expect(result[0].outputFile).toBe("/parent/tasks/old-agent.jsonl");
+		expect(result[0].outputFile).toBe(constructedOutput);
 	});
 });
