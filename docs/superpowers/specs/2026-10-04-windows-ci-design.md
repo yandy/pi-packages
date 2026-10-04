@@ -101,8 +101,22 @@ npm 11.12.1 对 **workspace 包**的 `os` 字段同样执行平台检查（Arbor
 **修法**：win32 语义下，盘符后不紧跟分隔符的 target（`C:`、`C:work`，即裸盘符与盘符相对路径）语义依赖 per-drive CWD，是歧义路径 → `isWithinRoots` 直接判 false（词法与身份回退都不得命中）。POSIX 宿主行为不变。文件顶部已有 `DRIVE_LETTER_PREFIX = /^[A-Za-z]:$/` 常量可扩展复用（形如 `/^[A-Za-z]:(?![\\/])/`）。既有用例恰好构成验收：`fence.test.ts` 的 "does not treat a bare drive letter as a drive root"（不门控、两端都跑）与 win32-gated 用例内的 `C:work` 断言。
 
 ### 4.5 `pi-coding-tools/tests/lsp/client.test.ts` 清理防抖（顺带防护）
-
 `afterAll` 的 `rmSync(root)` 紧随 `client.stop()`，而实现只 `proc.kill("SIGKILL")` 不等退出；Windows 上子进程 cwd 占用目录会 EBUSY/EPERM → afterAll 报错（POSIX 不复现）。修法：`rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })`，或先 await 子进程 exit 事件再删。属 Option A 节奏下"已知风险先防护"的一部分。
+
+## 4A. 首跑真机偏差与修复（2026-10-04 首个 Windows run 起）
+
+按 §8.4 逐项落定，均已在 windows-latest 真机验证：
+
+| # | 发现 | 定性 | 处置 |
+|---|---|---|---|
+| 1 | `pi-vision-tools` `looksLikePath` 不认 win32 盘符路径；>100 字符的图片路径会掉进 raw-base64 分支 | 实现缺陷 | 实现修复：盘符+分隔符正则（base64 字母表不含 `:`，无误伤）|
+| 2 | runner 的 `os.tmpdir()` 为 8.3 短名（`RUNNER~1`）而 git/realpath 返回长名，`paths.test.ts` 期望值写死 `resolve(dir)` | 测试侧 | 期望值改与实现同源（git toplevel）|
+| 3 | `fs-retry.win32`：600ms 持有 == 600ms 重试等待合计，CI 定时器粒度吃穿边际 | 测试侧 | 持有降 300ms，留硬余量 |
+| 4 | e2e 对共享 `%TEMP%` 树的 ACL 授权传播插入 `diagnose-script` 的前后不变断言 | 竞态 | `pi-sandbox/vitest.config.ts` 设 `fileParallelism: false` |
+| 5 | **`fence.ts` `sameIdentity` 零身份判等**：Windows stat 回退（句柄被 Defender/索引器瞬时占用）给出 ino/dev = 0 的未知身份，`0 === 0` 把不同目录判成同一 → 身份回退 fail-open | **实现安全缺陷** | **实现修复：`ino !== 0` 视为身份未知一律不匹配（fail-closed）**；tools.test.ts 加围栏自检（失败时携带 canonical/roots/tmpdir） |
+| 6 | 矩阵 fail-fast 取消对侧腿 | 编排 | 调试期 `fail-fast: false`，收尾已恢复默认 |
+
+修复 5 的机理确认了 tools.test.ts 的非确定性仅存在于 Windows：POSIX stat 无回退路径，ino 恒为真实值。围栏自检（不分平台）永久保留。
 
 ## 5. CI 设计
 

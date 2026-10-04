@@ -49,7 +49,10 @@ export function canonicalizeTarget(path: string): string {
 }
 
 function sameIdentity(a: Stats, b: Stats): boolean {
-	return a.dev === b.dev && a.ino === b.ino;
+	// libuv 的 Windows stat 回退（目录句柄被 Defender/索引器瞬时占用时）返回 ino/dev = 0 的
+	// “未知身份”；`0 === 0` 会把两个不同的目录判成同一，身份回退 fail-open（2026-10-04 真机
+	// CI 捕获）。身份未知 ≠ 身份相同：零身份一律不匹配。POSIX 的 stat 对存在文件不会给 0。
+	return a.ino !== 0 && a.dev === b.dev && a.ino === b.ino;
 }
 
 /** 大小写归一：平台不敏感时统一小写（win32 的盘符/目录名拼写差异）。 */
