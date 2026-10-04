@@ -25,7 +25,7 @@ pi install npm:@yandy0725/pi-todo
 |------|------|
 | `/skill:supo-brainstorming` | 实现前探索用户意图、需求和设计 |
 | `/skill:supo-systematic-debugging` | 系统化调试，定位根本原因 |
-| `/skill:supo-writing-plans` | 从 spec 编写详细实现计划 |
+| `/skill:supo-writing-plans` | 从 spec 编写精简实现计划 |
 | `/skill:supo-test-driven-development` | 测试驱动开发工作流 |
 | `/skill:supo-using-git-worktrees` | 通过 git worktree 创建隔离工作区 |
 | `/skill:supo-verification-before-completion` | 完成前验证工作正确性 |

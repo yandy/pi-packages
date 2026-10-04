@@ -25,7 +25,7 @@ This package bundles the following skills from [Superpowers](https://github.com/
 |-------|-------------|
 | `/skill:supo-brainstorming` | Explore user intent, requirements and design before implementation |
 | `/skill:supo-systematic-debugging` | Systematic debugging process for finding root causes |
-| `/skill:supo-writing-plans` | Write comprehensive implementation plans from specs |
+| `/skill:supo-writing-plans` | Write lean implementation plans from specs |
 | `/skill:supo-test-driven-development` | Test-first development workflow |
 | `/skill:supo-using-git-worktrees` | Isolated workspace creation via git worktrees |
 | `/skill:supo-verification-before-completion` | Verify work before claiming completion |
