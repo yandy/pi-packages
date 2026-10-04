@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { resolve as resolvePath } from "node:path";
@@ -12,6 +13,15 @@ import { DEFAULT_SBX_CONFIG, getSbxConfigPath, imageRef, loadSbxConfig, resolveE
 
 const TEST_CONFIG_DIR = ".test-cfg";
 const testDir = resolvePath(tmpdir(), `pi-sandbox-test-${Date.now()}`);
+
+const podmanAvailable = (() => {
+	try {
+		execFileSync("podman", ["info"], { stdio: "ignore", timeout: 5000 });
+		return true;
+	} catch {
+		return false;
+	}
+})();
 
 beforeEach(() => {
 	if (existsSync(testDir)) rmSync(testDir, { recursive: true });
@@ -154,8 +164,8 @@ describe("resolveEngine", () => {
 		}
 	});
 
-	it("throws when engine=podman but podman not available", () => {
-		expect(["docker", "podman"]).toContain(resolveEngine("auto"));
+	it.skipIf(podmanAvailable)("throws when engine=podman but podman not available", () => {
+		expect(() => resolveEngine("podman")).toThrow(/not available/i);
 	}, 30_000);
 });
 

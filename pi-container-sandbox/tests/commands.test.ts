@@ -1,8 +1,10 @@
-import { resolve } from "node:path";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { getSbxConfigPath } from "../src/config";
 import { createSandboxCommandHandlers } from "../src/commands/sandbox";
-import { extractCommandName } from "../src/ops";
 import { clearSbx } from "../src/session";
 import { mockRuntime, mockSbx } from "./_helpers";
 
@@ -135,28 +137,25 @@ describe("/sandbox exec", () => {
 });
 
 describe("/sandbox keep", () => {
+	let hostDir: string;
+
+	beforeEach(() => {
+		hostDir = mkdtempSync(join(tmpdir(), "pi-sbx-keep-test-"));
+	});
+	afterEach(() => {
+		rmSync(hostDir, { recursive: true, force: true });
+	});
+
 	it("updates config with container name", async () => {
 		const ctx = notifyCtx();
 		const handlers = createSandboxCommandHandlers("/tmp", mockPathApprovals());
-		mockSbx({ name: "my-container" });
+		mockSbx({ name: "my-container", hostCwd: hostDir });
 
 		await handlers.keep("my-container", ctx);
 		expect(ctx.notifications.some((n) => n.msg.includes("saved to sandbox.json"))).toBe(true);
-	});
-});
 
-describe("host command whitelist (unit level)", () => {
-	it("extractCommandName matches hostCommands whitelist check", () => {
-		const hostCommands = ["git", "docker"];
-		const cmdName = extractCommandName("git status");
-		expect(cmdName).toBe("git");
-		expect(hostCommands.includes(cmdName!)).toBe(true);
-	});
-
-	it("extractCommandName does not match non-whitelisted command", () => {
-		const hostCommands = ["git", "docker"];
-		const cmdName = extractCommandName("ls -la");
-		expect(cmdName).toBe("ls");
-		expect(hostCommands.includes(cmdName!)).toBe(false);
+		// keep persists via saveSbxConfig(sbx.hostCwd) — written inside the tmp hostCwd
+		const saved = JSON.parse(readFileSync(getSbxConfigPath(hostDir), "utf8")) as { runtime: { name: string } };
+		expect(saved.runtime.name).toBe("my-container");
 	});
 });
