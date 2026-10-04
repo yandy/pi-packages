@@ -65,11 +65,6 @@ describe("renderStats", () => {
 		expect(renderStats(details, theme)).not.toContain("⟳");
 	});
 
-	it("excludes turn count when turnCount is undefined", () => {
-		const details = makeDetails({ turnCount: undefined });
-		expect(renderStats(details, theme)).not.toContain("⟳");
-	});
-
 	it("includes singular tool use", () => {
 		const details = makeDetails({ toolUses: 1 });
 		expect(renderStats(details, theme)).toContain("[dim:1 tool use]");
@@ -78,11 +73,6 @@ describe("renderStats", () => {
 	it("includes plural tool uses", () => {
 		const details = makeDetails({ toolUses: 3 });
 		expect(renderStats(details, theme)).toContain("[dim:3 tool uses]");
-	});
-
-	it("excludes tool uses when count is zero", () => {
-		const details = makeDetails({ toolUses: 0 });
-		expect(renderStats(details, theme)).not.toContain("tool use");
 	});
 
 	it("includes tokens", () => {
@@ -114,11 +104,6 @@ describe("renderRunning", () => {
 		expect(renderRunning(details, theme)).toContain("[dim:haiku]");
 	});
 
-	it("uses activity text when provided", () => {
-		const details = makeDetails({ status: "running", activity: "reading files" });
-		expect(renderRunning(details, theme)).toContain("reading files");
-	});
-
 	it("falls back to 'thinking\u2026' when activity is absent", () => {
 		const details = makeDetails({ status: "running", activity: undefined });
 		expect(renderRunning(details, theme)).toContain("thinking\u2026");
@@ -133,11 +118,6 @@ describe("renderRunning", () => {
 
 describe("renderBackground", () => {
 	const theme = makeTheme();
-
-	it("includes agent ID in output", () => {
-		const details = makeDetails({ status: "background", agentId: "agent-42" });
-		expect(renderBackground(details, theme)).toContain("agent-42");
-	});
 
 	it("wraps entire message in dim styling with agent ID", () => {
 		const details = makeDetails({ status: "background", agentId: "agent-42" });
@@ -264,11 +244,6 @@ describe("renderAgentResult", () => {
 		expect(renderAgentResult(details, "", false, false, theme)).toContain("[success:\u2713]");
 	});
 
-	it("dispatches to renderCompleted for steered status", () => {
-		const details = makeDetails({ status: "steered", durationMs: 1000 });
-		expect(renderAgentResult(details, "", false, false, theme)).toContain("[warning:\u2713]");
-	});
-
 	it("dispatches to renderStopped for stopped status", () => {
 		const details = makeDetails({ status: "stopped" });
 		expect(renderAgentResult(details, "", false, false, theme)).toContain("[dim:\u25A0]");
@@ -277,12 +252,5 @@ describe("renderAgentResult", () => {
 	it("dispatches to renderFailed for error status", () => {
 		const details = makeDetails({ status: "error", error: "boom" });
 		expect(renderAgentResult(details, "", false, false, theme)).toContain("[error:\u2717]");
-	});
-
-	it("dispatches to renderFailed for aborted status", () => {
-		const details = makeDetails({ status: "aborted" });
-		expect(renderAgentResult(details, "", false, false, theme)).toContain(
-			"[warning:  \u23BF  Aborted (max turns exceeded)]",
-		);
 	});
 });

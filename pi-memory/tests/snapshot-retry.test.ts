@@ -112,16 +112,6 @@ describe("createSnapshot 的瞬时错误重试", () => {
 			"2026-10-01T00-00-01-000Z-write-2",
 		]);
 	});
-
-	it("keeps skipping files that do not exist while retrying", async () => {
-		const dir = await createSnapshot(backupRoot, "write", ["MEMORY.md", "missing.md"], memoryDir, {
-			keep: 5,
-			now: NOW,
-			platform: "win32",
-		});
-
-		expect(await readdir(dir)).toEqual(["MEMORY.md"]);
-	});
 });
 
 describe("快照重试的平台由调用方传入", () => {

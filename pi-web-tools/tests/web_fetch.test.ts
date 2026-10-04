@@ -58,7 +58,8 @@ describe("webFetch", () => {
 		);
 
 		const result = await webFetch("https://api.example.com", "text", 30, undefined, mockFetch);
-		expect(result.content).toContain('"key"');
+		// JSON is pretty-printed with a 2-space indent — the raw body has no space after the colon.
+		expect(result.content).toContain('"key": "value"');
 	});
 
 	it("throws on non-2xx", async () => {

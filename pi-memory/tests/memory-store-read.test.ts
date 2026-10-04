@@ -95,13 +95,6 @@ describe("listEntries", () => {
 		expect(await store.listEntries()).toEqual([]);
 	});
 
-	it("picks up files added after the first scan via refreshCache", async () => {
-		await store.listEntries();
-		await writeEntry("new.md", meta("New"));
-		await store.refreshCache();
-		expect((await store.listEntries()).map((e) => e.file)).toEqual(["new.md"]);
-	});
-
 	it("skips files named after Windows devices on win32 (reading them would hit the device)", async () => {
 		await writeEntry("con.md", meta("Con entry"));
 		await writeEntry("ok.md", meta("Ok entry"));

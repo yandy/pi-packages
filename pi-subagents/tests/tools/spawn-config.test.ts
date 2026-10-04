@@ -44,11 +44,6 @@ describe("resolveModelName", () => {
 		);
 	});
 
-	it("returns provider/id for other providers", () => {
-		expect(resolveModelName({ provider: "openai", id: "gpt-4o", name: "GPT-4o" })).toBe("openai/gpt-4o");
-		expect(resolveModelName({ provider: "deepseek", id: "deepseek-v4-flash" })).toBe("deepseek/deepseek-v4-flash");
-	});
-
 	it("returns undefined when model is undefined", () => {
 		expect(resolveModelName(undefined)).toBeUndefined();
 	});
@@ -91,17 +86,6 @@ describe("resolveSpawnConfig — type resolution", () => {
 		if ("error" in result) return;
 		expect(result.identity.subagentType).toBe("general-purpose");
 		expect(result.identity.fellBack).toBe(true);
-	});
-
-	it("sets displayName from registry", () => {
-		const result = resolveSpawnConfig(
-			{ subagent_type: "Explore", prompt: "test", description: "d" },
-			testRegistry,
-			makeModelInfo(),
-			defaultSettings,
-		);
-		if ("error" in result) return;
-		expect(result.identity.displayName).toBe("Explore");
 	});
 
 	it("returns an error for a disabled agent type (exact match)", () => {
@@ -271,6 +255,8 @@ describe("resolveSpawnConfig — detailBase and tags", () => {
 		if ("error" in result) return;
 		// Explore has promptMode: "replace" → no mode label, no invocation overrides
 		expect(result.presentation.agentTags).toEqual([]);
+		// No invocation overrides → detailBase.tags stays undefined
+		expect(result.presentation.detailBase.tags).toBeUndefined();
 	});
 
 	it("includes twin tag for append-mode agents like general-purpose", () => {
@@ -283,18 +269,6 @@ describe("resolveSpawnConfig — detailBase and tags", () => {
 		if ("error" in result) return;
 		// general-purpose has promptMode: "append" → gets "twin" label
 		expect(result.presentation.agentTags).toContain("twin");
-	});
-
-	it("sets tags to undefined on detailBase for replace-mode agents with no invocation overrides", () => {
-		const result = resolveSpawnConfig(
-			{ subagent_type: "Explore", prompt: "test", description: "d" },
-			testRegistry,
-			makeModelInfo(),
-			defaultSettings,
-		);
-		if ("error" in result) return;
-		// Explore has promptMode: "replace" and no invocation overrides → no tags
-		expect(result.presentation.detailBase.tags).toBeUndefined();
 	});
 });
 

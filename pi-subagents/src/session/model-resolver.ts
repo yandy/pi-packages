@@ -61,6 +61,11 @@ export function resolveInvocationModel(
 export function resolveModel(input: string, registry: ModelRegistry): any | string {
 	// Available models (those with auth configured)
 	const all = (registry.getAvailable?.() ?? registry.getAll()) as ModelEntry[];
+
+	// 空查询会让 substring/every 判定对每个模型恒真，从而任意命中第一个模型；显式拒绝。
+	if (input.trim() === "") {
+		return noMatchError(input, all);
+	}
 	const availableSet = new Set(all.map((m) => `${m.provider}/${m.id}`.toLowerCase()));
 
 	// 1. Exact match: "provider/modelId" — only if available (has auth)
@@ -113,6 +118,10 @@ export function resolveModel(input: string, registry: ModelRegistry): any | stri
 	}
 
 	// 3. No match — list available models
+	return noMatchError(input, all);
+}
+
+function noMatchError(input: string, all: ModelEntry[]): string {
 	const modelList = all
 		.map((m) => `  ${m.provider}/${m.id}`)
 		.sort()

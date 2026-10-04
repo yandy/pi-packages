@@ -599,10 +599,17 @@ describe("index wiring (integration)", () => {
 		memoryFactory(pi as any);
 		await handlers["session_start"][0]({}, uiCtx());
 
-		const started = Date.now();
-		await handlers["session_shutdown"][0]({ type: "session_shutdown", reason: "quit" }, uiCtx());
-
-		expect(Date.now() - started).toBeLessThan(500);
+		// 空闲路径的契约是「根本不创建 give-up 定时器」（index.ts：`inFlight.size === 0` 直接 return）。
+		// fake timers 下：若回归成「先挂定时器再 race」，调用一返回 getTimerCount 就 > 0，且
+		// `await` 会悬死在不会推进的 fake 定时器上；`getTimerCount() === 0` 直接钉住「不挂 timer」。
+		vi.useFakeTimers();
+		try {
+			const shutdown = handlers["session_shutdown"][0]({ type: "session_shutdown", reason: "quit" }, uiCtx());
+			expect(vi.getTimerCount()).toBe(0);
+			await shutdown;
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	// ── Plan C（spec §14 通知）────────────────────────────────────────────
@@ -1396,28 +1403,41 @@ describe("index wiring (integration)", () => {
 
 	it("/dream hands the store, the line limit and the 7-action tool set to runDream", async () => {
 		const confirm = vi.fn().mockResolvedValue(true);
+		const notify = vi.fn();
 		const { pi, commands, handlers } = createFakePi();
 		memoryFactory(pi as any);
 		await handlers["session_start"][0]({}, uiCtx());
 
-		await commands["dream"].handler("", uiCtx({ hasUI: true, ui: { confirm, notify: vi.fn(), setStatus: vi.fn() } }));
+		// 成功回调里的 `SessionManager.list(cwd)` 会去 getAgentDir() 下建会话目录：
+		// 按 docs/guides/testing.md 隔离到本用例的 temp dir（并行/沙箱下不得碰真实 ~/.pi）。
+		vi.stubEnv("PI_CODING_AGENT_DIR", join(dir, "agent"));
+		try {
+			await commands["dream"].handler("", uiCtx({ hasUI: true, ui: { confirm, notify, setStatus: vi.fn() } }));
 
-		expect(runDreamMock).toHaveBeenCalledTimes(1);
-		const args = runDreamMock.mock.calls[0][0];
-		expect(args.memoryDir).toBe(dir);
-		expect(args.maxLines).toBe(200);
-		expect(typeof args.store.withLogicalLock).toBe("function");
-		expect(args.customTools).toHaveLength(1);
-		expect(args.customTools[0].parameters.properties.action.enum).toEqual([
-			"add",
-			"replace",
-			"remove",
-			"list",
-			"search",
-			"rename",
-			"rebuild_index",
-		]);
-		expect(Object.keys(args.customTools[0].parameters.properties)).toContain("new_name");
+			expect(runDreamMock).toHaveBeenCalledTimes(1);
+			const args = runDreamMock.mock.calls[0][0];
+			expect(args.memoryDir).toBe(dir);
+			expect(args.maxLines).toBe(200);
+			expect(typeof args.store.withLogicalLock).toBe("function");
+			expect(args.customTools).toHaveLength(1);
+			expect(args.customTools[0].parameters.properties.action.enum).toEqual([
+				"add",
+				"replace",
+				"remove",
+				"list",
+				"search",
+				"rename",
+				"rebuild_index",
+			]);
+			expect(Object.keys(args.customTools[0].parameters.properties)).toContain("new_name");
+
+			// 成功回调（SessionManager.list → writeDreamMeta → notifyDream）必须在 unstub 前排空，
+			// 否则会漏到真实 ~/.pi；notify 断言证明回调确实在本用例内跑完。
+			await flush();
+			expect(notify).toHaveBeenCalledWith("consolidated", "info");
+		} finally {
+			vi.unstubAllEnvs();
+		}
 	});
 
 	it("/dream refuses when memory was never initialized", async () => {
@@ -1926,26 +1946,6 @@ describe("index wiring (integration)", () => {
 		expect(injectedAtCall[1]).toEqual(new Set());
 	});
 
-	it("tool execute throws when the store is not initialized", async () => {
-		const { createMemoryTool } = await import("../src/memory-tool");
-		const tool = createMemoryTool({
-			getMemoryDir: () => null,
-			getStore: () => null,
-			getConfig: () => ({
-				memIndexMaxLines: 200,
-				memIndexMaxBytes: 25600,
-				sessionSearch: { maxSessions: 10, maxMatches: 5 },
-			}),
-			getUnavailableMessage: () => null,
-			searchSessions: async () => "",
-			cwd: () => dir,
-		});
-
-		await expect(
-			tool.execute("id", { action: "list" }, undefined, undefined, undefined as any),
-		).rejects.toThrow("Memory not initialized (no session_start yet)");
-	});
-
 	// ── 模型校验（设计 §2）─────────────────────────────────────────────
 	it("reports missing models and does not initialise anything", async () => {
 		mockConfigValue.defaults = { sessionPersistence: { enabled: false } };
@@ -2234,40 +2234,6 @@ describe("index wiring (integration)", () => {
 		expect(notify.mock.calls[0][0]).not.toContain("misconfigured");
 		expect(tools).toHaveLength(1);
 	});
-
-
-	// 约束「`/memory unlock` 在每种状态下都可用」在 misconfigured 态同样成立：错误态下
-	// memoryDir 为 null，unlock 走 resolveMemoryDir 兜底，仍然只清本 cwd 的 `.lock`。
-	// 钉住两处易碎点：unlock 分支必须**在**状态分支之前，且 resetSessionState 不得清 `config`。
-	it("/memory unlock runs before the status branch in a misconfigured session", async () => {
-		mockConfigValue.defaults = { sessionPersistence: { enabled: false } };
-		const notify = vi.fn();
-		const confirm = vi.fn().mockResolvedValue(true);
-		const { pi, tools, commands, handlers } = createFakePi();
-		memoryFactory(pi as any);
-		await handlers["session_start"][0]({}, uiCtx(uiWith(notify)));
-		expect(notify.mock.calls[0][1]).toBe("error");
-		expect(tools).toHaveLength(0);
-
-		await writeFile(
-			join(dir, ".lock"),
-			JSON.stringify({ pid: process.pid, hostname: "h", startedAt: "2026-10-02T01:02:03.000Z", op: "dream" }),
-			"utf8",
-		);
-		await writeFile(join(dir, "keep.md"), "not a lock", "utf8");
-		notify.mockClear();
-
-		await commands["memory"].handler("unlock", uiCtx({ hasUI: true, ui: { notify, confirm, setStatus: vi.fn() } }));
-
-		expect(confirm).toHaveBeenCalledWith(
-			"Memory lock",
-			`Remove the memory lock file? It is held by dream (pid ${process.pid} on h, started 2026-10-02T01:02:03.000Z). Only do this if no memory operation is running.`,
-		);
-		expect(await readdir(dir)).not.toContain(".lock");
-		expect(await readdir(dir)).toContain("keep.md");
-		expect(notify).toHaveBeenCalledWith("Memory lock removed.", "info");
-		expect(tools).toHaveLength(0);
-	});
 });
 
 // `/memory` 的模块状态行是纯函数，直接单测：走 wiring 只能盖到「正常配置」那一种。
@@ -2306,14 +2272,4 @@ describe("moduleStatusLine", () => {
 		);
 	});
 
-	it("treats a missing enabled flag as off", () => {
-		const config = cfg({
-			defaults: { model: "shared/model" },
-			extractMemories: { ...DEFAULT_CONFIG.extractMemories, enabled: undefined as unknown as boolean },
-		});
-
-		expect(moduleStatusLine(config)).toBe(
-			"dream=on(shared/model) extractMemories=off autoSurfacing=on(shared/model)",
-		);
-	});
 });

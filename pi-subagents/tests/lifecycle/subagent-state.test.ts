@@ -295,15 +295,6 @@ describe("SubagentState — activeTools", () => {
 		state.removeActiveTool("Write"); // not present
 		expect(state.activeTools.size).toBe(1);
 	});
-
-	it("activeTools getter returns a ReadonlyMap", () => {
-		const state = new SubagentState();
-		state.addActiveTool("Read");
-		const tools = state.activeTools;
-		// Verify it's a Map (ReadonlyMap is Map at runtime)
-		expect(tools).toBeInstanceOf(Map);
-		expect(tools.size).toBe(1);
-	});
 });
 
 describe("SubagentState — responseText", () => {

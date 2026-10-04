@@ -136,6 +136,8 @@ describe("win32 acl layer", () => {
 		expect(shareMode).toBe(abi.FILE_SHARE_READ | abi.FILE_SHARE_WRITE);
 		expect((shareMode as number) & 0x4).toBe(0); // FILE_SHARE_DELETE 必须不开
 		const order = (api.calls as Array<{ name: string }>).map((c) => c.name);
+		// 先钉存在性：lockFileEx 缺失时 indexOf 为 -1，下面的顺序比较会恒真。
+		expect(order).toContain("lockFileEx");
 		expect(order.indexOf("lockFileEx")).toBeLessThan(order.indexOf("unlockFileEx"));
 		expect(order.lastIndexOf("closeHandle")).toBe(order.length - 1);
 	});

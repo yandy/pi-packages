@@ -92,7 +92,7 @@ describe("loadConfig", () => {
 	it("expands ~ in memoryDir", async () => {
 		await writeFile(join(globalDir, "memory.json"), JSON.stringify({ memoryDir: "~/mymem" }));
 		const cfg = await loadConfig({ cwd: projectDir, isProjectTrusted: () => true, _globalDir: globalDir, _configDirName: ".pi" });
-		expect(cfg.memoryDir).not.toContain("~");
+		expect(cfg.memoryDir).toBe(join(homedir(), "mymem"));
 	});
 	it("handles malformed JSON gracefully", async () => {
 		await writeFile(join(globalDir, "memory.json"), "this is not json");
@@ -169,29 +169,19 @@ describe("loadConfig", () => {
 	});
 
 	it("loads config from memory.json not pi-memory.json", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "cfg-"));
 		const cfgContent = JSON.stringify({
 			autoSurfacing: { enabled: false },
 			extractMemories: { maxContextTokens: 1000 },
 		});
-		await writeFile(join(dir, "memory.json"), cfgContent);
-		const cfg1 = await loadConfig({ cwd: "/tmp", isProjectTrusted: () => true, _globalDir: dir, _configDirName: ".pi" });
-		expect(cfg1.autoSurfacing.enabled).toBe(false);
-		expect(cfg1.extractMemories.maxContextTokens).toBe(1000);
-		expect(cfg1.autoSurfacing.model).toBeUndefined();
-	});
-
-	it("deep-merges autoSurfacing sub-config", async () => {
-		const gdir = await mkdtemp(join(tmpdir(), "gcfg-"));
-		const pdir = await mkdtemp(join(tmpdir(), "pcfg-"));
-		const gcfg = { autoSurfacing: { enabled: false, maxFiles: 3 } };
-		await writeFile(join(gdir, "memory.json"), JSON.stringify(gcfg));
-		const cfg = await loadConfig({ cwd: pdir, isProjectTrusted: () => true, _globalDir: gdir, _configDirName: ".pi" });
+		await writeFile(join(globalDir, "memory.json"), cfgContent);
+		// 标题承诺的负向断言：pi-memory.json（按包名直觉的错拼）必须被忽略 ——
+		// 若它被读进来，enabled 会翻回 true、maxFiles 会变成 99。
+		await writeFile(join(globalDir, "pi-memory.json"), JSON.stringify({ autoSurfacing: { enabled: true, maxFiles: 99 } }));
+		const cfg = await loadConfig({ cwd: projectDir, isProjectTrusted: () => true, _globalDir: globalDir, _configDirName: ".pi" });
 		expect(cfg.autoSurfacing.enabled).toBe(false);
 		expect(cfg.autoSurfacing.maxFiles).toBe(3);
+		expect(cfg.extractMemories.maxContextTokens).toBe(1000);
 		expect(cfg.autoSurfacing.model).toBeUndefined();
-		await rm(gdir, { recursive: true, force: true });
-		await rm(pdir, { recursive: true, force: true });
 	});
 
 	it("propagates defaults.sessionPersistence to all tasks", async () => {
@@ -227,21 +217,6 @@ describe("loadConfig", () => {
 		});
 		expect(cfg.defaults?.sessionPersistence).toEqual({ enabled: true });
 		expect(cfg.dream.sessionPersistence).toEqual({ enabled: false });
-	});
-
-	it("defaults.model propagates correctly", async () => {
-		await writeFile(
-			join(globalDir, "memory.json"),
-			JSON.stringify({ defaults: { model: "deepseek/flash" } }),
-		);
-		const cfg = await loadConfig({
-			cwd: projectDir,
-			isProjectTrusted: () => true,
-			_globalDir: globalDir,
-			_configDirName: ".pi",
-		});
-		expect(cfg.defaults?.model).toBe("deepseek/flash");
-		expect(cfg.dream.model).toBeUndefined();
 	});
 
 	it("per-task model overrides defaults.model", async () => {

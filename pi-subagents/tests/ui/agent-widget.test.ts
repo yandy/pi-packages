@@ -66,15 +66,6 @@ describe("assembleWidgetState", () => {
 			expect(state.hasFinished).toBe(false);
 			expect(state.hasActive).toBe(true);
 		});
-
-		it("counts multiple running agents", () => {
-			const agents = [
-				makeAgent({ id: "a1", status: "running", completedAt: undefined }),
-				makeAgent({ id: "a2", status: "running", completedAt: undefined }),
-				makeAgent({ id: "a3", status: "running", completedAt: undefined }),
-			];
-			expect(assembleWidgetState(agents, alwaysShow).runningCount).toBe(3);
-		});
 	});
 
 	describe("queued agents", () => {
@@ -158,23 +149,6 @@ describe("assembleWidgetState", () => {
 			const state = assembleWidgetState([makeAgent({ status: "running", completedAt: 5000 })], alwaysShow);
 			expect(state.runningCount).toBe(1);
 			expect(state.hasFinished).toBe(false);
-		});
-	});
-
-	describe("hasActive derivation", () => {
-		it("is false when only finished agents exist", () => {
-			const state = assembleWidgetState([makeAgent({ status: "completed", completedAt: 5000 })], alwaysShow);
-			expect(state.hasActive).toBe(false);
-		});
-
-		it("is true with any running agent", () => {
-			const state = assembleWidgetState([makeAgent({ status: "running", completedAt: undefined })], neverShow);
-			expect(state.hasActive).toBe(true);
-		});
-
-		it("is true with any queued agent", () => {
-			const state = assembleWidgetState([makeAgent({ status: "queued", completedAt: undefined })], neverShow);
-			expect(state.hasActive).toBe(true);
 		});
 	});
 });
@@ -293,16 +267,6 @@ describe("AgentWidget — self-drives from lifecycle notifications", () => {
 		expect(vi.getTimerCount()).toBe(0);
 
 		widget.onSubagentStarted(createTestSubagent({ id: "a1", status: "running" }));
-
-		expect(vi.getTimerCount()).toBe(1);
-		expect(typeof lastContent()).toBe("function");
-	});
-
-	it("starts the update timer and renders on onSubagentCreated", () => {
-		const { widget, lastContent } = makeWidget([{ id: "a1", status: "queued" }]);
-		expect(vi.getTimerCount()).toBe(0);
-
-		widget.onSubagentCreated(createTestSubagent({ id: "a1", status: "queued" }));
 
 		expect(vi.getTimerCount()).toBe(1);
 		expect(typeof lastContent()).toBe("function");

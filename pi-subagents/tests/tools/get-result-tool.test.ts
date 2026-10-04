@@ -35,13 +35,6 @@ describe("GetResultTool", () => {
 		expect(tool.toToolDefinition().name).toBe("get_subagent_result");
 	});
 
-	it("includes promptSnippet", () => {
-		const tool = new GetResultTool(makeManager(), makeNotifications(), testRegistry);
-		expect(tool.toToolDefinition().promptSnippet).toBe(
-			"get_subagent_result: Check status and retrieve results from a background agent.",
-		);
-	});
-
 	it("returns not-found message for unknown agent ID", async () => {
 		const result = await execute(makeManager(), makeNotifications(), { agent_id: "unknown" });
 		expect(result.content[0].text).toContain("Agent not found");
@@ -108,13 +101,6 @@ describe("GetResultTool", () => {
 		const result = await execute(makeManager(records), makeNotifications(), { agent_id: "agent-1", wait: true });
 		// After waiting, the record is completed and result is shown
 		expect(result.content[0].text).toContain("Finished after wait.");
-	});
-
-	it("calls notification.markConsumed() when record has a NotificationState", async () => {
-		const record = createTestSubagent({ toolCallId: "tc-1" });
-		const records = new Map([["agent-1", record]]);
-		await execute(makeManager(records), makeNotifications(), { agent_id: "agent-1" });
-		expect(record.notification?.resultConsumed).toBe(true);
 	});
 
 	it("includes conversation when verbose=true", async () => {

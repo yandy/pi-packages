@@ -1,4 +1,7 @@
 import { execSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { expandEnvEntry } from "../src/runtime";
 
@@ -9,13 +12,14 @@ describe("expandEnvEntry", () => {
 	});
 
 	it("expands shell command substitution with $(...)", () => {
-		const tmpFile = `/tmp/pi-test-env-expand-${Date.now()}`;
-		execSync(`echo -n "secret-token" > "${tmpFile}"`);
+		const tmpDir = mkdtempSync(join(tmpdir(), "pi-test-env-expand-"));
+		const tmpFile = join(tmpDir, "token.txt");
 		try {
+			execSync(`echo -n "secret-token" > "${tmpFile}"`);
 			const result = expandEnvEntry(`TOKEN=$(cat "${tmpFile}")`, "/tmp");
 			expect(result).toBe("TOKEN=secret-token");
 		} finally {
-			execSync(`rm -f "${tmpFile}"`);
+			rmSync(tmpDir, { recursive: true, force: true });
 		}
 	});
 
@@ -38,31 +42,5 @@ describe("expandEnvEntry", () => {
 	it("preserves key=value format with multiple equals signs", () => {
 		const result = expandEnvEntry("URL=https://example.com?a=1&b=2", "/tmp");
 		expect(result).toBe("URL=https://example.com?a=1&b=2");
-	});
-
-});
-
-describe("env merge order", () => {
-	it("builtin env comes before user env, user can override", () => {
-		const builtinEnv = ["DEBIAN_FRONTEND=noninteractive"];
-		const userEnv = ["DEBIAN_FRONTEND=dialog", "CUSTOM=val"];
-		const expanded = userEnv.map((e) => expandEnvEntry(e, "/tmp"));
-		const merged = [...builtinEnv, ...expanded];
-		// Docker uses the LAST occurrence for dup keys, so user's override wins
-		expect(merged).toEqual([
-			"DEBIAN_FRONTEND=noninteractive",
-			"DEBIAN_FRONTEND=dialog",
-			"CUSTOM=val",
-		]);
-	});
-
-	it("when env is undefined, use builtin only", () => {
-		const builtinEnv = ["DEBIAN_FRONTEND=noninteractive"];
-		const userEnv: string[] | undefined = undefined;
-		const env = [
-			...builtinEnv,
-			...(userEnv ?? []).map((e) => expandEnvEntry(e, "/tmp")),
-		];
-		expect(env).toEqual(["DEBIAN_FRONTEND=noninteractive"]);
 	});
 });

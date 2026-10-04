@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
 	assertShellAllowed,
@@ -53,14 +56,28 @@ describe("confine", () => {
 		expect(result.denialSignatures).toEqual(["read-only file system", "permission denied"]);
 		expect(result.runnerFailureRules).toEqual([{ fatalSignatures: ["myrunner: "] }]);
 	});
-	it("canonicalizes the workspace root before building the profile", () => {
-		const result = confine(["true"], "workspace-write", "/tmp", {
-			selected: { runner: "bwrap", enforcement: "full" },
-		});
-		// /tmp 在多数系统上已是 canonical；macOS 上 /tmp → /private/tmp
-		const bindIdx = result.argv.indexOf("--bind");
-		expect(result.argv[bindIdx + 1]).toBe(result.argv[bindIdx + 2]);
-		expect(result.argv[bindIdx + 1]).not.toMatch(/\/$/);
+	it.skipIf(process.platform === "win32")("canonicalizes the workspace root before building the profile", () => {
+		// mkdtemp 真实目录 + symlink 根（dir/real 与 dir/link→real）：旧版传 /tmp 在多数系统上
+		// 已是 canonical，去掉 canonicalPath 的变异照样绿；symlink 根让断言真正承重。
+		// win32 建 symlink 需特权（开发者模式/管理员），与 policy.test.ts 同款 skipIf；
+		// Windows 侧链接/junction 解析由 tests/win32/e2e.test.ts 覆盖。
+		const dir = mkdtempSync(join(tmpdir(), "confine-"));
+		try {
+			mkdirSync(join(dir, "real"));
+			symlinkSync(join(dir, "real"), join(dir, "link"));
+			const realRoot = realpathSync.native(join(dir, "real"));
+			const result = confine(["true"], "workspace-write", join(dir, "link"), {
+				selected: { runner: "bwrap", enforcement: "full" },
+			});
+			// bwrap 的 workspace bind 是「源=目标」对（--bind <root> <root>）：两处都必须是
+			// realpath，symlink 拼写不得残留在 argv（去掉 canonicalPath 的变异下两断言皆红）。
+			const bindIdx = result.argv.indexOf(realRoot);
+			expect(bindIdx).toBeGreaterThan(-1);
+			expect(result.argv[bindIdx + 1]).toBe(realRoot);
+			expect(result.argv).not.toContain(join(dir, "link"));
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });
 

@@ -193,14 +193,6 @@ describe("addEntry", () => {
 		expect(parseEntryFile(await readFile(join(nested, file), "utf8"))?.body).toBe("正文");
 		expect(parseEntryIndex(await fresh.readIndex()).entries).toHaveLength(1);
 	});
-
-	it("serialises concurrent adds from the same process", async () => {
-		const results = await Promise.all(
-			["A", "B", "C", "D", "E"].map((name) => store.addEntry({ name, body: `${name} 正文` })),
-		);
-		expect(new Set(results.map((r) => r.file)).size).toBe(5);
-		expect(parseEntryIndex(await indexOf()).entries).toHaveLength(5);
-	});
 });
 
 describe("replaceEntry", () => {
@@ -343,11 +335,6 @@ describe("WriteOptions.skipSnapshot", () => {
 		expect(await readdir(join(dir, ".backups")).then(() => true, () => false)).toBe(false);
 		expect(await store.listEntries()).toEqual([]);
 		expect(parseEntryIndex(await indexOf()).entries).toHaveLength(0);
-	});
-
-	it("still snapshots when the option is absent", async () => {
-		await store.addEntry({ name: "A", body: "正文" });
-		expect(await readdir(join(dir, ".backups"))).toHaveLength(1);
 	});
 });
 

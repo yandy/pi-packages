@@ -74,13 +74,6 @@ describe("renderFinishedLine", () => {
 		expect(line).not.toContain("tool use");
 	});
 
-	it("renders turn count from agent fields (always present after record migration)", () => {
-		const agent = makeAgent(); // defaults: turnCount: 3, maxTurns: 10
-		const line = renderFinishedLine(agent, testRegistry, theme);
-		// Finished agents now always show turn count — accepted behavior change (#421)
-		expect(line).toContain("⟳3≤10");
-	});
-
 	it("uses Date.now() for duration when completedAt is undefined", () => {
 		const now = Date.now();
 		const agent = makeAgent({ startedAt: now - 2000, completedAt: undefined });

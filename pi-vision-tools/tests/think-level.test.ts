@@ -11,11 +11,9 @@ describe("thinkLevelToOptions", () => {
 	});
 
 	const levels: VisionThinkLevel[] = ["minimal", "low", "medium", "high", "xhigh"];
-	for (const lvl of levels) {
-		it(`maps '${lvl}' to { reasoningEffort: '${lvl}' }`, () => {
-			expect(thinkLevelToOptions(lvl)).toEqual({ reasoningEffort: lvl });
-		});
-	}
+	it.each(levels.map((lvl) => ({ lvl })))("maps '$lvl' to { reasoningEffort: '$lvl' }", ({ lvl }) => {
+		expect(thinkLevelToOptions(lvl)).toEqual({ reasoningEffort: lvl });
+	});
 });
 
 describe("effectiveThinkLevel", () => {

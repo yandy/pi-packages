@@ -322,12 +322,6 @@ export class MemoryStore {
 		return out;
 	}
 
-	/** 清空并重建缓存（手工编辑过目录后用）。 */
-	async refreshCache(): Promise<void> {
-		this.#cache.clear();
-		await this.listEntries();
-	}
-
 	/** name 校验：非空、单行、不含 `](`。add 与 replace 共用，否则改名就成了绕过入口。 */
 	#validateName(name: string): void {
 		if (!name) throw new Error("name is required");

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -59,10 +59,14 @@ describe("LspClient end-to-end (fake server)", () => {
 		expect(Array.isArray(refs) ? refs.length : 0).toBeGreaterThan(0);
 	});
 
+	function readCounts(): { didOpen: number; didClose: number } {
+		return JSON.parse(readFileSync(join(root, ".lsp-counts.json"), "utf-8"));
+	}
+
 	it("re-opens file with didClose+didOpen when mtime changes", async () => {
 		// First call → didOpen
 		await client.documentSymbols(sampleFile);
-		const c1 = await client.getCounts();
+		const c1 = readCounts();
 		expect(c1.didOpen).toBe(1);
 		expect(c1.didClose).toBe(0);
 
@@ -72,17 +76,17 @@ describe("LspClient end-to-end (fake server)", () => {
 
 		// Second call → triggers didClose + didOpen (mtime refresh)
 		await client.documentSymbols(sampleFile);
-		const c2 = await client.getCounts();
+		const c2 = readCounts();
 		expect(c2.didClose).toBe(1);
 		expect(c2.didOpen).toBe(2);
 	});
 
 	it("does NOT re-open when mtime is unchanged (skip readFileSync path)", async () => {
 		// Capture counts before the unchanged-mtime call
-		const before = await client.getCounts();
+		const before = readCounts();
 		// Call again without touching mtime → should be a no-op (no didOpen/didClose)
 		await client.documentSymbols(sampleFile);
-		const after = await client.getCounts();
+		const after = readCounts();
 		expect(after.didOpen).toBe(before.didOpen);
 		expect(after.didClose).toBe(before.didClose);
 	});

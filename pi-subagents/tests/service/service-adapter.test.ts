@@ -46,18 +46,6 @@ describe("toSubagentRecord", () => {
 		expect(result).not.toHaveProperty("subagentSession");
 	});
 
-	it("strips abortController from the record", () => {
-		const record = createTestSubagent();
-		const result = toSubagentRecord(record);
-		expect(result).not.toHaveProperty("abortController");
-	});
-
-	it("strips promise from the record", () => {
-		const record = createTestSubagent();
-		const result = toSubagentRecord(record);
-		expect(result).not.toHaveProperty("promise");
-	});
-
 	it("strips abortController, promise, and collaborator fields from the record", () => {
 		const record = createTestSubagent();
 		const result = toSubagentRecord(record);
@@ -174,7 +162,8 @@ describe("SubagentsServiceAdapter — getRecord and listAgents", () => {
 	function createService(records: Subagent[]): SubagentsService {
 		const manager = createManagerStub();
 		manager.getRecord.mockImplementation((id) => records.find((r) => r.id === id));
-		manager.listAgents.mockImplementation(() => [...records].sort((a, b) => b.startedAt - a.startedAt));
+		// Return records in the given order — ordering is the manager's concern, not the adapter's.
+		manager.listAgents.mockImplementation(() => [...records]);
 		return new SubagentsServiceAdapter(manager, () => ({ id: "test" }), makeRuntimeStub());
 	}
 
@@ -192,13 +181,15 @@ describe("SubagentsServiceAdapter — getRecord and listAgents", () => {
 		expect(svc.getRecord("unknown")).toBeUndefined();
 	});
 
-	it("listAgents returns serialized records sorted by startedAt descending", () => {
+	it("listAgents serializes every record via toSubagentRecord and preserves the manager's order", () => {
 		const svc = createService([recordA, recordB]);
 		const list = svc.listAgents();
-		expect(list).toHaveLength(2);
-		expect(list[0].id).toBe("b-2");
-		expect(list[1].id).toBe("a-1");
-		// Verify serialization
+		// Every input record appears in the output, in the manager's order
+		expect(list.map((r) => r.id)).toEqual(["a-1", "b-2"]);
+		// Records go through toSubagentRecord serialization
+		expect(list[0].status).toBe("completed");
+		expect(list[1].status).toBe("running");
+		// Serializable output: internal fields are stripped
 		expect(list[0]).not.toHaveProperty("session");
 		expect(list[1]).not.toHaveProperty("abortController");
 	});
@@ -220,6 +211,15 @@ describe("SubagentsServiceAdapter — spawn", () => {
 		);
 		svc.spawn("Explore", "check TODOs", { model: "haiku" });
 		expect(resolveModel).toHaveBeenCalledWith("haiku", registry);
+	});
+
+	it("throws when no model registry is available for a string model", () => {
+		const svc = new SubagentsServiceAdapter(
+			createManagerStub(),
+			vi.fn(),
+			makeRuntimeStub({ currentCtx: { ...makeStubCtx(), modelRegistry: undefined } }),
+		);
+		expect(() => svc.spawn("Explore", "task", { model: "haiku" })).toThrow(/No model registry available/);
 	});
 
 	it("throws on model resolution failure", () => {
@@ -354,12 +354,13 @@ describe("SubagentsServiceAdapter — steer, abort, waitForAll, hasRunning", () 
 			expect(await svc.steer("unknown", "hurry")).toBe(false);
 		});
 
-		it("queues message and returns true when session not ready", async () => {
+		it("buffers the message and returns false when the session is not ready yet", async () => {
 			const record = createTestSubagent({ id: "a-1", status: "running" });
 			const mgr = createManagerStub();
 			mgr.getRecord.mockReturnValue(record);
 			const svc = createSvc(mgr);
-			expect(await svc.steer("a-1", "do this")).toBe(true);
+			// Subagent.steer 返回 false = 已入队缓冲而非立即投递；adapter 透传该语义。
+			expect(await svc.steer("a-1", "do this")).toBe(false);
 			expect(record.pendingSteerCount).toBe(1);
 		});
 

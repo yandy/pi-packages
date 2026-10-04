@@ -30,11 +30,6 @@ describe("AgentTool", () => {
 		expect(def.label).toBe("Subagent");
 	});
 
-	it("includes promptSnippet", () => {
-		const def = makeTool(createToolDeps()).toToolDefinition();
-		expect(def.promptSnippet).toBe("subagent: Launch a specialized agent for complex, multi-step tasks.");
-	});
-
 	it("derives type list from registry — includes default agents in description", () => {
 		const def = makeTool(createToolDeps()).toToolDefinition();
 		// testRegistry loads default agents: general-purpose, Explore, Plan
@@ -128,22 +123,6 @@ describe("AgentTool — background execution", () => {
 		expect(text).toContain("bg task");
 	});
 
-	it("does not emit subagents:created directly — delegated to observer.onSubagentCreated", async () => {
-		// The subagents:created event is now emitted by SubagentManagerObserver.onSubagentCreated,
-		// called from SubagentManager.spawn(). Tested in subagent-manager.test.ts.
-		// This test ensures the tool no longer holds an emitEvent dep for this purpose.
-		const deps = createToolDeps();
-		deps.manager.getRecord = vi.fn().mockReturnValue(createTestSubagent({ status: "running" }));
-		const result = await execute(deps, {
-			prompt: "do something",
-			description: "bg task",
-			subagent_type: "general-purpose",
-			run_in_background: true,
-		});
-		// Background spawn succeeds — no emitEvent dep required
-		expect(result.content[0].text).toContain("background");
-	});
-
 	it("passes parentSession.toolCallId to manager.spawn so the manager wires NotificationState", async () => {
 		const deps = createToolDeps();
 		deps.manager.getRecord = vi.fn().mockReturnValue(createTestSubagent({ status: "running" }));
@@ -170,6 +149,16 @@ describe("AgentTool — foreground execution", () => {
 		const text = result.content[0].text;
 		expect(text).toContain("Agent completed");
 		expect(text).toContain("Task complete.");
+		// Stats suffix on the completion line (factory-default lifetime usage: 1.0k token)
+		expect(text).toContain("(5 tool uses, 1.0k token)");
+		// details payload carries the same stats for custom rendering
+		expect(result.details).toMatchObject({
+			toolUses: 5,
+			tokens: "1.0k token",
+			turnCount: 1,
+			status: "completed",
+			agentId: "agent-1",
+		});
 	});
 
 	it("returns error message when agent fails", async () => {

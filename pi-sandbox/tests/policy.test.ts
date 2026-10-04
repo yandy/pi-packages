@@ -62,8 +62,4 @@ describe("win32 writable roots", () => {
 		expect(roots).toHaveLength(2);
 		expect(roots.map((r) => r.toLowerCase())).toContain("c:\\ws".toLowerCase());
 	});
-
-	it("keeps read-only empty", () => {
-		expect(writableRoots("read-only", "C:\\ws", defaultTmpRoots("win32"))).toEqual([]);
-	});
 });

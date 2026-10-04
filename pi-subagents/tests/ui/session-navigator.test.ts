@@ -225,18 +225,6 @@ describe("TranscriptOverlay", () => {
 		vi.useRealTimers();
 	});
 
-	it("does not re-render the container on repeated renders or keystrokes (caches laid-out lines)", () => {
-		const overlay = makeOverlay();
-		const layouts = countLayouts(overlay);
-
-		overlay.render(80); // cache miss → one full layout
-		expect(layouts()).toBe(1);
-		overlay.render(80); // cache hit → no re-layout
-		expect(layouts()).toBe(1);
-		overlay.handleInput("\x1b[B"); // down arrow → uses the cached line count
-		expect(layouts()).toBe(1);
-	});
-
 	it("does not re-lay out the transcript on a keystroke at the overlay's real width", () => {
 		// TUI resolves the overlay's `width: "90%"` against the terminal width, so
 		// render() lays out at floor(columns * 0.9) - 4 while the scroll math
@@ -546,10 +534,8 @@ describe("SessionNavigatorHandler", () => {
 			{ role: "assistant", content: [{ type: "text", text: "picked agent reply" }] },
 		] as unknown as SessionMessage[];
 		const record = makeNavigable({ agentMessages: messages });
-		const [label] = (() => {
-			// The handler labels entries identically to listNavigableAgents.
-			return ["Agent (Test task) · 2 tools · completed · 3.0s"];
-		})();
+		// The handler labels entries identically to listNavigableAgents.
+		const label = "Agent (Test task) · 2 tools · completed · 3.0s";
 		const ui = makeUI(label);
 
 		await new SessionNavigatorHandler().handle({

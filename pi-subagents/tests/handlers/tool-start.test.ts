@@ -19,22 +19,6 @@ describe("ToolStartHandler", () => {
 	});
 
 	describe("handleToolExecutionStart", () => {
-		it("calls setUICtx with the context's ui", () => {
-			const ui = { setStatus: vi.fn(), setWidget: vi.fn() };
-
-			handler.handleToolExecutionStart({}, { ui });
-
-			expect(widget.setUICtx).toHaveBeenCalledWith(ui);
-		});
-
-		it("calls onTurnStart", () => {
-			const ui = { setStatus: vi.fn(), setWidget: vi.fn() };
-
-			handler.handleToolExecutionStart({}, { ui });
-
-			expect(widget.onTurnStart).toHaveBeenCalled();
-		});
-
 		it("calls setUICtx before onTurnStart", () => {
 			const callOrder: string[] = [];
 			mockSetUICtx.mockImplementation(() => {

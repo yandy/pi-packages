@@ -152,7 +152,7 @@ export function createSandboxCommandHandlers(
 				return;
 			}
 			try {
-				sbx.runtime.shutdown();
+				await sbx.runtime.shutdown();
 			} catch (e) {
 				ctx.ui.notify(`Stop failed: ${e instanceof Error ? e.message : String(e)}`, "error");
 				return;

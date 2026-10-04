@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { PACKAGE_DOCKER_DIR } from "../src/config";
 import { DockerRuntime, PodmanRuntime, deriveContainerName } from "../src/runtime";
 
 const dockerAvailable = (() => {
@@ -53,33 +54,6 @@ describe("deriveContainerName", () => {
 		const name = deriveContainerName(longDir);
 		expect(name.length).toBeLessThanOrEqual(128);
 		expect(name).toMatch(/^pi-sbx-/);
-	});
-});
-
-describe.skipIf(!dockerAvailable)("DockerRuntime", () => {
-	let runtime: DockerRuntime;
-
-	it("init() pings Docker and sets isReady()", async () => {
-		runtime = new DockerRuntime({
-			image: "debian:12-slim",
-			hostCwd: "/tmp",
-			name: "pi-test-init",
-			allowNetwork: false,
-			resources: { memory: "256m", cpus: "0.5" },
-		});
-		await runtime.init();
-		expect(runtime.isReady()).toBe(false); // not ready until withReady
-	});
-
-	it("returns isReady()=false when Docker is unreachable (mock)", async () => {
-		const badRuntime = new DockerRuntime({
-			image: "debian:12-slim",
-			hostCwd: "/tmp",
-			name: "pi-test-bad",
-			allowNetwork: false,
-			resources: { memory: "256m", cpus: "0.5" },
-		});
-		expect(badRuntime.isReady()).toBe(false);
 	});
 });
 
@@ -262,17 +236,6 @@ describe.skipIf(!dockerAvailable)("DockerRuntime imageExists", () => {
 });
 
 describe("DockerRuntime buildImage / getImage", () => {
-	it("has buildImage method", () => {
-		const runtime = new DockerRuntime({
-			image: "debian:12-slim",
-			hostCwd: "/tmp",
-			name: `pi-test-build-${Date.now()}`,
-			allowNetwork: false,
-			resources: { memory: "256m", cpus: "0.5" },
-		});
-		expect(typeof runtime.buildImage).toBe("function");
-	});
-
 	it("getImage returns the configured image name", () => {
 		const runtime = new DockerRuntime({
 			image: "my-custom-image:v1",
@@ -282,39 +245,6 @@ describe("DockerRuntime buildImage / getImage", () => {
 			resources: { memory: "256m", cpus: "0.5" },
 		});
 		expect(runtime.getImage()).toBe("my-custom-image:v1");
-	});
-});
-
-describe("PACKAGE_DOCKER_DIR", () => {
-	it("resolves to a path ending with /docker", () => {
-		expect(PACKAGE_DOCKER_DIR).toMatch(/\/docker$/);
-	});
-});
-
-describe.skipIf(!podmanAvailable)("PodmanRuntime", () => {
-	let runtime: PodmanRuntime;
-
-	it("init() pings Podman and sets initialized state", async () => {
-		runtime = new PodmanRuntime({
-			image: "debian:12-slim",
-			hostCwd: "/tmp",
-			name: "pi-test-podman-init",
-			allowNetwork: false,
-			resources: {},
-		});
-		await runtime.init();
-		expect(runtime.isReady()).toBe(false);
-	});
-
-	it("returns isReady()=false when Podman is unreachable (mock)", async () => {
-		const badRuntime = new PodmanRuntime({
-			image: "debian:12-slim",
-			hostCwd: "/tmp",
-			name: "pi-test-podman-bad",
-			allowNetwork: false,
-			resources: {},
-		});
-		expect(badRuntime.isReady()).toBe(false);
 	});
 });
 
@@ -471,7 +401,7 @@ describe.skipIf(!podmanAvailable)("PodmanRuntime mount ownership", () => {
 	}, 30000);
 
 	it("mounted host directory files are owned by host user (not root)", async () => {
-		const tmpDir = mkdtempSync("/tmp/pi-test-mount-");
+		const tmpDir = mkdtempSync(join(tmpdir(), "pi-test-mount-"));
 		writeFileSync(`${tmpDir}/test.txt`, "owned-by-user");
 
 		try {
@@ -527,17 +457,6 @@ describe.skipIf(!podmanAvailable)("PodmanRuntime imageExists", () => {
 });
 
 describe.skipIf(!podmanAvailable)("PodmanRuntime buildImage / getImage", () => {
-	it("has buildImage method", () => {
-		const runtime = new PodmanRuntime({
-			image: "debian:12-slim",
-			hostCwd: "/tmp",
-			name: `pi-test-podman-build-${Date.now()}`,
-			allowNetwork: false,
-			resources: {},
-		});
-		expect(typeof runtime.buildImage).toBe("function");
-	});
-
 	it("getImage returns the configured image name", () => {
 		const runtime = new PodmanRuntime({
 			image: "my-custom-image:v1",

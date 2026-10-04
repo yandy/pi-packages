@@ -2,14 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import { createMockSession, emitResumeUsageAndCompaction } from "./mock-session";
 
 describe("createMockSession", () => {
-	it("broadcasts emit to all active subscribers", () => {
-		const session = createMockSession();
-		const events: unknown[] = [];
-		session.subscribe((e) => events.push(e));
-		session.emit({ type: "test" });
-		expect(events).toEqual([{ type: "test" }]);
-	});
-
 	it("supports multiple concurrent subscribers", () => {
 		const session = createMockSession();
 		const a: unknown[] = [];
@@ -29,32 +21,6 @@ describe("createMockSession", () => {
 		unsubscribe();
 		session.emit({ type: "after" });
 		expect(events).toEqual([{ type: "before" }]);
-	});
-
-	it("subscribe is a vi.fn spy", () => {
-		const session = createMockSession();
-		const fn = vi.fn();
-		session.subscribe(fn);
-		expect(session.subscribe).toHaveBeenCalledOnce();
-	});
-
-	it("dispose is a vi.fn stub", () => {
-		const session = createMockSession();
-		session.dispose();
-		expect(session.dispose).toHaveBeenCalledOnce();
-	});
-
-	it("steer is a vi.fn stub that resolves to undefined by default", async () => {
-		const session = createMockSession();
-		const result = await session.steer("hello");
-		expect(result).toBeUndefined();
-		expect(session.steer).toHaveBeenCalledWith("hello");
-	});
-
-	it("sessionManager.getSessionFile is a vi.fn stub", () => {
-		const session = createMockSession();
-		session.sessionManager.getSessionFile();
-		expect(session.sessionManager.getSessionFile).toHaveBeenCalledOnce();
 	});
 
 	it("accepts overrides that replace default fields", async () => {

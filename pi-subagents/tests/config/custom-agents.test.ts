@@ -107,6 +107,28 @@ Just a prompt.`,
 		expect(agent.systemPrompt).toBe("Just a system prompt, no frontmatter.");
 	});
 
+	it("lets a project agent override a global agent with the same name", () => {
+		// global: $HOME/.pi/agent/agents/auditor.md（HOME 已替换为 tmpDir，且未设 PI_CODING_AGENT_DIR）
+		const globalDir = join(tmpDir, ".pi", "agent", "agents");
+		mkdirSync(globalDir, { recursive: true });
+		writeFileSync(
+			join(globalDir, "auditor.md"),
+			"---\ndescription: Global Auditor\n---\n\nGlobal prompt.",
+			"utf8",
+		);
+		// project: <cwd>/.pi/agents/auditor.md
+		writeAgent(
+			"auditor",
+			"---\ndescription: Project Auditor\n---\n\nProject prompt.",
+		);
+
+		const result = loadCustomAgents(tmpDir);
+		expect(result.size).toBe(1);
+		const agent = result.get("auditor")!;
+		expect(agent.description).toBe("Project Auditor");
+		expect(agent.systemPrompt).toBe("Project prompt.");
+	});
+
 	it("handles tools: none → empty array", () => {
 		writeAgent(
 			"notool",
@@ -177,20 +199,6 @@ Negative turns.`,
 
 		const result = loadCustomAgents(tmpDir);
 		expect(result.get("negturns")?.maxTurns).toBeUndefined();
-	});
-
-	it("handles prompt_mode: append", () => {
-		writeAgent(
-			"appender",
-			`---
-prompt_mode: append
----
-
-Extra instructions.`,
-		);
-
-		const result = loadCustomAgents(tmpDir);
-		expect(result.get("appender")?.promptMode).toBe("append");
 	});
 
 	it("defaults unknown prompt_mode to append", () => {

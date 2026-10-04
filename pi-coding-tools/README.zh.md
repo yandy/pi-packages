@@ -61,7 +61,7 @@ pi install npm:@yandy0725/pi-coding-tools
 }
 ```
 
-per-server 覆盖项还支持 `command`（字符串数组，如 `["clangd", "--background-index"]`）和 `env`（字符串键值对）。
+per-server 覆盖项还支持 `command`（字符串数组，如 `["clangd", "--background-index"]`）。
 
 ### 全局配置
 

@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const RELEASE_SUFFIX = ":release";
 
@@ -173,11 +173,6 @@ function setFakeFile(path: string, content: string): void {
 function clearFakeFiles(): void {
 	fakeFiles = {};
 }
-
-beforeAll(() => {
-	// Theme-not-initialised (#17) scenario is covered by the vi.mock above
-	// which returns a brokenMarkdownTheme whose proxy throws on property access.
-});
 
 afterEach(() => {
 	for (const restore of envStubs.splice(0)) restore();
@@ -877,43 +872,6 @@ describe("ask_user", () => {
 		expect(rendered).toContain("Match the current brand palette.");
 	});
 
-	it("enters freeform mode without editor theme crashes", async () => {
-		const tool = await setupTool();
-
-		const result = await tool.execute(
-			"tool-call-id",
-			{
-				question: "Which option should we use?",
-				options: ["A", "B"],
-				allowFreeform: true,
-			},
-			undefined,
-			undefined,
-			{
-				hasUI: true,
-				ui: {
-					custom: async (factory: any) => {
-						const component = factory(
-							{ requestRender() {}, terminal: { rows: 24 } },
-							createTheme(),
-							createKeybindings(),
-							() => {},
-						);
-
-						component.handleInput("down");
-						component.handleInput("down");
-						component.handleInput("enter");
-
-						return null;
-					},
-				},
-			},
-		);
-
-		expect(result.isError).not.toBe(true);
-		expect(result.details.cancelled).toBe(true);
-	});
-
 	it("uses shared confirm keybinding in single-select mode", async () => {
 		const tool = await setupTool();
 
@@ -1190,45 +1148,6 @@ describe("ask_user", () => {
 		expect(result.details.cancelled).toBe(false);
 	});
 
-	it("keeps single-select search usable when comment toggling is enabled", async () => {
-		const tool = await setupTool();
-
-		const result = await tool.execute(
-			"tool-call-id",
-			{
-				question: "Which option should we use?",
-				options: ["Chrome", "Firefox", "Safari"],
-				allowComment: true,
-			},
-			undefined,
-			undefined,
-			{
-				hasUI: true,
-				ui: {
-					custom: async (factory: any) => {
-						let resolved: string | null | undefined;
-						const component = factory(
-							{ requestRender() {}, terminal: { rows: 24 } },
-							createTheme(),
-							createKeybindings(),
-							(value: string | null) => {
-								resolved = value;
-							},
-						);
-
-						component.handleInput("c");
-						component.handleInput("enter");
-						return resolved ?? null;
-					},
-				},
-			},
-		);
-
-		expect(result.isError).not.toBe(true);
-		expect(result.details.response).toEqual({ kind: "selection", selections: ["Chrome"] });
-		expect(result.details.cancelled).toBe(false);
-	});
-
 	it("treats out-of-range number keys as search input in single-select mode", async () => {
 		const tool = await setupTool();
 
@@ -1326,6 +1245,7 @@ describe("ask_user", () => {
 				question: "Which option should we use?",
 				options: ["Alpha", "Beta"],
 				allowFreeform: true,
+				allowComment: false,
 			},
 			undefined,
 			undefined,
@@ -1351,6 +1271,7 @@ describe("ask_user", () => {
 		);
 
 		expect(result.isError).not.toBe(true);
+		expect(helpText).toContain("enter submit");
 		expect(helpText).toContain("alt+o hide");
 		expect(helpText).toContain("q cancel");
 		expect(helpText).not.toContain("ctrl+c cancel");
@@ -2034,42 +1955,6 @@ describe("ask_user", () => {
 			expect(result.details.cancelled).toBe(false);
 		});
 
-		it("single-select can collect an optional comment after choosing an option", async () => {
-			const tool = await setupTool();
-			let inputCalls = 0;
-
-			const result = await tool.execute(
-				"tool-call-id",
-				{
-					question: "Pick a color",
-					options: ["Red", "Blue"],
-					allowComment: true,
-				},
-				undefined,
-				undefined,
-				{
-					hasUI: true,
-					ui: {
-						custom: async () => undefined,
-						select: async () => "Blue",
-						input: async () => {
-							inputCalls += 1;
-							return "Keep it aligned with the settings screen.";
-						},
-					},
-				},
-			);
-
-			expect(inputCalls).toBe(1);
-			expect(result.isError).not.toBe(true);
-			expect(result.details.response).toEqual({
-				kind: "selection",
-				selections: ["Blue"],
-				comment: "Keep it aligned with the settings screen.",
-			});
-			expect(result.details.cancelled).toBe(false);
-		});
-
 		it("returns cancelled when select() returns undefined", async () => {
 			const tool = await setupTool();
 
@@ -2335,30 +2220,6 @@ describe("ask_user", () => {
 
 			// Default alt+o should still work
 			expect(calls).toEqual([true]);
-		});
-
-		it("no config file means default behavior unchanged", async () => {
-			const tool = await setupTool();
-			let capturedOptions: any;
-
-			await tool.execute(
-				"tool-call-id",
-				{ question: "Q", options: ["A"] },
-				undefined,
-				undefined,
-				{
-					hasUI: true,
-					cwd: "/tmp/project",
-					ui: {
-						custom: async (_factory: any, options: any) => {
-							capturedOptions = options;
-							return null;
-						},
-					},
-				},
-			);
-
-			expect(capturedOptions.overlay).toBe(true);
 		});
 	});
 });

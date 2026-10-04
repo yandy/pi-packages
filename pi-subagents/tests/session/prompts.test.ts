@@ -118,23 +118,6 @@ describe("buildAgentPrompt", () => {
 		expect(prompt).not.toContain("<agent_instructions>");
 	});
 
-	it("replace mode includes config systemPrompt last and removes the thin standalone header", () => {
-		const config: AgentConfig = {
-			name: "custom",
-			description: "Custom",
-			builtinToolNames: [],
-			systemPrompt: "You are a specialized agent.",
-			promptMode: "replace",
-			inheritContext: false,
-			runInBackground: false,
-		};
-		const prompt = buildAgentPrompt(config, "/workspace", env);
-		expect(prompt).toContain("You are a specialized agent.");
-		expect(prompt).toContain("/workspace");
-		// The thin two-line standalone header is removed in favour of the parent/genericBase prefix.
-		expect(prompt).not.toContain("You are a pi coding agent sub-agent");
-	});
-
 	it("replace mode includes parent prompt as base (no bridge/wrapper)", () => {
 		const config: AgentConfig = {
 			name: "standalone",
@@ -190,6 +173,8 @@ describe("buildAgentPrompt", () => {
 		expect(idxTag).toBeGreaterThan(idxIdentity);
 		expect(idxEnv).toBeGreaterThan(idxTag);
 		expect(idxCustom).toBeGreaterThan(idxEnv);
+		// The thin two-line standalone header is removed in favour of the parent/genericBase prefix.
+		expect(prompt).not.toContain("You are a pi coding agent sub-agent");
 	});
 
 	it("append mode bridge does not contain tool reminders", () => {
@@ -202,46 +187,10 @@ describe("buildAgentPrompt", () => {
 		expect(prompt).not.toContain("Use the grep tool");
 	});
 
-	it("append mode without parent prompt still has bridge", () => {
-		const config: AgentConfig = {
-			name: "no-parent",
-			description: "No parent",
-			builtinToolNames: [],
-			systemPrompt: "Extra stuff.",
-			promptMode: "append",
-			inheritContext: false,
-			runInBackground: false,
-		};
-		const prompt = buildAgentPrompt(config, "/workspace", env);
-		expect(prompt).toContain("<sub_agent_context>");
-		expect(prompt).not.toContain("<inherited_system_prompt>");
-		expect(prompt).toContain("general-purpose coding agent");
-		expect(prompt).toContain("Extra stuff.");
-	});
-
 	// Patch 3 (RepOne #443): inject <active_agent name="..."/> tag so downstream
 	// extensions can resolve per-agent policy by parsing the child's system
 	// prompt.
 	describe("active_agent tag injection", () => {
-		it("includes <active_agent name=...> tag in replace mode after identity prefix", () => {
-			const config: AgentConfig = {
-				name: "Explore",
-				description: "Explore",
-				builtinToolNames: [],
-				systemPrompt: "You are an explorer.",
-				promptMode: "replace",
-				inheritContext: false,
-				runInBackground: false,
-			};
-			// Replace mode now places identity (parent/genericBase) first for KV
-			// cache reuse; the tag follows after the cacheable prefix.
-			const prompt = buildAgentPrompt(config, "/workspace", env, "Parent identity prefix.");
-			const idxIdentity = prompt.indexOf("Parent identity prefix.");
-			const idxTag = prompt.indexOf('<active_agent name="Explore"/>');
-			expect(idxTag).toBeGreaterThan(-1);
-			expect(idxTag).toBeGreaterThan(idxIdentity);
-		});
-
 		it("includes <active_agent name=...> tag in append mode after sub_agent_context", () => {
 			const config: AgentConfig = {
 				name: "general-purpose",
@@ -259,20 +208,6 @@ describe("buildAgentPrompt", () => {
 			expect(ctxIdx).toBeGreaterThan(-1);
 			// Sub-agent context comes before the agent-specific active_agent tag
 			expect(ctxIdx).toBeLessThan(tagIdx);
-		});
-
-		it("uses agent name verbatim in the tag (no escaping or normalization)", () => {
-			const config: AgentConfig = {
-				name: "my-custom-agent",
-				description: "Custom",
-				builtinToolNames: [],
-				systemPrompt: "You are custom.",
-				promptMode: "replace",
-				inheritContext: false,
-				runInBackground: false,
-			};
-			const prompt = buildAgentPrompt(config, "/workspace", env);
-			expect(prompt).toContain('<active_agent name="my-custom-agent"/>');
 		});
 
 		it("active_agent tag appears before envBlock in both modes", () => {

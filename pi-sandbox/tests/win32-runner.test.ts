@@ -200,7 +200,11 @@ describe("windows-acl runner main", () => {
 		const deps = makeDeps();
 		await main(args("workspace-write", ["pwsh.exe", "-Command", "echo --temp C:\\x"]), deps as never);
 		const spawned = deps.calls.find((c) => c.name === "spawn");
-		expect((spawned?.args[1] as { command: string }).command).toBe("pwsh.exe");
+		const options = spawned?.args[1] as { command: string; args: string[] };
+		expect(options.command).toBe("pwsh.exe");
+		// `--` 之后的 argv 必须逐字透传：哪怕长得像 runner flag（"--temp C:\\x"）
+		// 也不能被二次解析或改写。
+		expect(options.args).toEqual(["-Command", "echo --temp C:\\x"]);
 	});
 
 	it("starts the child in the runner's own cwd, not the workspace root", async () => {
@@ -216,6 +220,8 @@ describe("windows-acl runner main", () => {
 		const deps = makeDeps();
 		await main(args("workspace-write"), deps as never);
 		const names = deps.calls.map((c) => c.name);
+		// 先钉存在性：setConsoleCtrlHandler 缺失时 indexOf 为 -1，顺序比较会恒真。
+		expect(names).toContain("setConsoleCtrlHandler");
 		expect(names.indexOf("setConsoleCtrlHandler")).toBeLessThan(names.indexOf("spawn"));
 	});
 

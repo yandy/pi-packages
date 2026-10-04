@@ -106,8 +106,21 @@ describe("isProcessLockActive", () => {
 		const held = withProcessLock("s", 5000, () => new Promise<void>((resolve) => (release = resolve)));
 		await sleep(1);
 		expect(isProcessLockActive("s")).toBe(true);
+
+		// 持有 + 等待者：持有者未放行时第二个调用入队（held 与 waiters 同时为真）
+		const waiter = withProcessLock("s", 5000, async () => "x");
+		await sleep(1);
+		expect(isProcessLockActive("s")).toBe(true);
 		release?.();
 		await held;
+		await waiter;
 		expect(isProcessLockActive("s")).toBe(false);
+
+		// 仅等待者：入队发生在第一次 await 之前，因此调用返回后立刻断言时
+		// waiters > 0 而 held 尚为 false —— waiters 单独足以让判定为 true。
+		const queued = withProcessLock("s2", 5000, async () => "x");
+		expect(isProcessLockActive("s2")).toBe(true);
+		await queued;
+		expect(isProcessLockActive("s2")).toBe(false);
 	});
 });

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ParentSnapshot } from "../src/lifecycle/parent-snapshot";
-import { createSubagentRuntime, SubagentRuntime } from "../src/runtime";
+import { createSubagentRuntime } from "../src/runtime";
 import type { SessionContext } from "../src/types";
 import { STUB_SNAPSHOT } from "./helpers/stub-ctx";
 
@@ -32,25 +32,6 @@ describe("createSubagentRuntime", () => {
 		const runtime = createSubagentRuntime();
 		expect(runtime.currentCtx).toBeUndefined();
 	});
-
-	it("currentCtx is the stored SessionContext after setSessionContext", () => {
-		const runtime = createSubagentRuntime();
-		const ctx = makeSessionCtx();
-		runtime.setSessionContext(ctx);
-		expect(runtime.currentCtx).toBe(ctx);
-	});
-});
-
-describe("SubagentRuntime class", () => {
-	it("is a class — instances are created with new", () => {
-		const runtime = new SubagentRuntime();
-		expect(runtime).toBeInstanceOf(SubagentRuntime);
-	});
-
-	it("createSubagentRuntime returns an instance of the class", () => {
-		const runtime = createSubagentRuntime();
-		expect(runtime).toBeInstanceOf(SubagentRuntime);
-	});
 });
 
 describe("SubagentRuntime session-context methods", () => {
@@ -65,16 +46,6 @@ describe("SubagentRuntime session-context methods", () => {
 		const runtime = createSubagentRuntime();
 		runtime.setSessionContext(makeSessionCtx());
 		expect(runtime.currentCtx).toBeDefined();
-		runtime.clearSessionContext();
-		expect(runtime.currentCtx).toBeUndefined();
-	});
-
-	it("round-trip: set then clear returns to initial state", () => {
-		const runtime = createSubagentRuntime();
-		expect(runtime.currentCtx).toBeUndefined();
-		const ctx = makeSessionCtx();
-		runtime.setSessionContext(ctx);
-		expect(runtime.currentCtx).toBe(ctx);
 		runtime.clearSessionContext();
 		expect(runtime.currentCtx).toBeUndefined();
 	});

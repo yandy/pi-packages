@@ -54,10 +54,8 @@ describe("translateToolCallPaths", () => {
 		expect(input.prompt).toBe("look at /workspace/x.png");
 		expect(input.path).toBe("rel.png");
 	});
-	it("no-ops on non-object inputs without throwing", () => {
-		expect(() => translateToolCallPaths(null, HOST_CWD)).not.toThrow();
-		expect(() => translateToolCallPaths(42, HOST_CWD)).not.toThrow();
-		expect(() => translateToolCallPaths("just a string", HOST_CWD)).not.toThrow();
+	it.each([null, 42, "just a string"])("no-ops on non-object input (%s) without throwing", (input) => {
+		expect(() => translateToolCallPaths(input, HOST_CWD)).not.toThrow();
 	});
 });
 

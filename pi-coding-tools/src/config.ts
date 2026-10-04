@@ -5,7 +5,6 @@ import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 export interface ServerOverride {
 	command?: string[];
 	disabled?: boolean;
-	env?: Record<string, string>;
 }
 
 export interface LspConfig {

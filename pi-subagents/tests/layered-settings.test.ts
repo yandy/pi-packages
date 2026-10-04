@@ -91,20 +91,6 @@ describe("loadLayeredSettings", () => {
 		});
 	});
 
-	describe("custom filename", () => {
-		it("resolves global file as <agentDir>/<filename>", () => {
-			// Only the global file exists — proves path is <agentDir>/test-settings.json
-			writeGlobal({ count: 7 });
-			expect(load()).toEqual({ count: 7 });
-		});
-
-		it("resolves project file as <cwd>/.pi/<filename>", () => {
-			// Only the project file exists — proves path is <cwd>/.pi/test-settings.json
-			writeProject({ count: 42 });
-			expect(load()).toEqual({ count: 42 });
-		});
-	});
-
 	describe("malformed files", () => {
 		it.each([
 			{ layer: "global", writeMalformed: () => writeFileSync(globalFile(), "not valid {{{{") },

@@ -75,17 +75,6 @@ describe("createChildLifecyclePublisher", () => {
 		});
 	});
 
-	it("passes an undefined parentSessionId through unchanged", () => {
-		const { emit, publisher } = setup();
-
-		publisher.spawning({ agentName: "general-purpose", parentSessionId: undefined });
-
-		expect(emit).toHaveBeenCalledWith(SUBAGENT_CHILD_SPAWNING, {
-			agentName: "general-purpose",
-			parentSessionId: undefined,
-		});
-	});
-
 	it("exposes the canonical channel-name strings", () => {
 		expect(SUBAGENT_CHILD_SPAWNING).toBe("subagents:child:spawning");
 		expect(SUBAGENT_CHILD_SESSION_CREATED).toBe("subagents:child:session-created");

@@ -367,7 +367,7 @@ Windows：合成 ACL 场景（缺 `WRITE_DAC` 的目录、显式包允许 ACE �
 
 命令：`npx vitest run tests/win32/e2e.test.ts`（提交 `efde10cb`）
 
-**结果：22 passed / 0 skipped。** 覆盖并已证实的真机行为：受限令牌创建、能力 SID 的 DACL 授权（工作区 + `%TEMP%`）、`read-only` 拒绝工作区写、四种删除路径（`cmd del` / `Remove-Item` / `.NET File::Delete` / Node `unlink`）在授权根之外全部被拒且宿主文件存活、授权根之外可读、NUL 设备在两种模式下可写、退出码镜像（含 `0xC0000005` 全 32 位）、缺失根时的 `windows-acl-run: ` + exit 127 契约、Win32 失败与"被拒绝"的分类区分、授予根与围栏 `writableRoots` 一致、管道 stdio 孙进程被拒、以及三处跨平台断言（bash 拒绝文案、拒绝断言守卫）。
+**结果：21 passed / 0 skipped。**（2026-10-03 真机当日为 22 passed；2026-10-06 测试精简删除了与 node exit 版同型的 `cmd /c exit 7` 退出码镜像用例——重复覆盖，该行为仍由 `node process.exit(42)` 与 `0xC0000005` 两条用例钉住——计数随之修正为 21。） 覆盖并已证实的真机行为：受限令牌创建、能力 SID 的 DACL 授权（工作区 + `%TEMP%`）、`read-only` 拒绝工作区写、四种删除路径（`cmd del` / `Remove-Item` / `.NET File::Delete` / Node `unlink`）在授权根之外全部被拒且宿主文件存活、授权根之外可读、NUL 设备在两种模式下可写、退出码镜像（含 `0xC0000005` 全 32 位）、缺失根时的 `windows-acl-run: ` + exit 127 契约、Win32 失败与"被拒绝"的分类区分、授予根与围栏 `writableRoots` 一致、管道 stdio 孙进程被拒、以及三处跨平台断言（bash 拒绝文案、拒绝断言守卫）。
 
 ### 13.2 真机回归中发现并修复的两处测试缺陷（后端无缺陷）
 
@@ -401,14 +401,14 @@ Windows：合成 ACL 场景（缺 `WRITE_DAC` 的目录、显式包允许 ACE �
 
 **各条验证对应的提交（可追溯，2026-10-03 复核）**：
 
-- **§1–§13 + §15**：在 `1ec25e51` 上验证。该提交之后沙箱强制链路（`src/win32/**`（除 `skill-paths.ts`）、`runners/fence/shell-ops/powershell-ops/confine/tools.ts`、`index.ts`）**零改动**，`tests/win32/e2e.test.ts`（22/22）也**零改动** → 结论沿用。
+- **§1–§13 + §15**：在 `1ec25e51` 上验证。该提交之后沙箱强制链路（`src/win32/**`（除 `skill-paths.ts`）、`runners/fence/shell-ops/powershell-ops/confine/tools.ts`、`index.ts`）**零改动**，`tests/win32/e2e.test.ts`（2026-10-06 精简后 21/21，见 §13.1 备注）也**零改动** → 结论沿用。
 - **§14（Windows 出现）**：在 `9aa989ee` 上确认，但 `67f7458d` 之后技能从 `skills/` 迁到 `resources/skills/`（仅位置与 `files` 打包变化，脚本与 SKILL.md 与该提交**逐字节相同**）→ **此项待复验**。
 - **诊断脚本套件 10/10**：在 `4230584d` 上；此后 `resources/skills/**` 与 `tests/win32/**` **零改动**（只有文档与 `tests/` 其他文件的可移植性修改，见 `06ca28b9`）→ 结论沿用。
 - **§17**：未跑。
 
 | 条目 | 结果 | 证据 |
 |---|---|---|
-| §0 自动化前置（e2e 22 例） | ✅ | `npx vitest run tests/win32/e2e.test.ts` → 22 passed / 0 skipped |
+| §0 自动化前置（e2e 21 例） | ✅ | `npx vitest run tests/win32/e2e.test.ts` → 22 passed / 0 skipped（真机当日；2026-10-06 精简后同套件为 21，见 §13.1 备注） |
 | §1–§4 shell 工具面（D3 第三版：bash `hidden`） | ✅ | 用户确认通过：`/permission` 显示 `shell: powershell only`（无 `(not activated)`）、模型工具列表无 `bash`、`--tools bash` 也不放行、受限 pwsh 可用 |
 | §5–§13 受限执行/拒绝/围栏/Job/会话隔离 | ✅ | 用户确认通过（未逐条留存原始输出） |
 | §14 技能目录：Windows 出现 | ✅ | 用户真机确认 `diagnose-windows-sandbox-acl` 出现在可用技能中 |

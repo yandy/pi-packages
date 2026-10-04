@@ -43,12 +43,14 @@ describe("createWriteOps.writeFile", () => {
 
 		await ops.writeFile("sub/deep/file.txt", "content");
 
-		const mkdirCall = calls.find((c) => c.startsWith("sh -c mkdir -p"));
-		const writeCall = calls.find((c) => c.includes("base64"));
-		expect(mkdirCall).toBeDefined();
-		expect(mkdirCall).toContain("/workspace/sub/deep");
-		expect(writeCall).toBeDefined();
-		expect(writeCall).toContain("/workspace/sub/deep/file.txt");
+		// execCapture dispatches each command as one `sh -c` exec call:
+		// the first must create the parent dir, the second must write the file.
+		expect(calls).toHaveLength(2);
+		expect(calls[0]).toContain("mkdir -p");
+		expect(calls[0]).toContain("/workspace/sub/deep");
+		expect(calls[0]).not.toContain("file.txt");
+		expect(calls[1]).toContain("base64");
+		expect(calls[1]).toContain("/workspace/sub/deep/file.txt");
 	});
 
 	it("rejects write to read-only mount", async () => {
@@ -169,11 +171,6 @@ describe("execStream timeout", () => {
 });
 
 describe("createHostBashOps", () => {
-	it("returns BashOperations with exec function", () => {
-		const ops = createHostBashOps("/home/user/project", []);
-		expect(typeof ops.exec).toBe("function");
-	});
-
 	it("executes a command on host", async () => {
 		const ops = createHostBashOps(process.cwd(), []);
 		const chunks: Buffer[] = [];

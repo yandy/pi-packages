@@ -1,10 +1,9 @@
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { resolve as resolvePath } from "node:path";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	expandPath,
-	findMount,
 	getExternalPath,
 	hostToContainer,
 	isAllowedExternalResource,
@@ -19,7 +18,7 @@ import {
 import { homedir } from "node:os";
 import type { MountSpec } from "../src/runtime";
 
-const testDir = resolvePath(tmpdir(), `pi-paths-test-${Date.now()}`);
+const testDir = mkdtempSync(join(tmpdir(), "pi-paths-test-"));
 
 beforeEach(() => {
 	if (!existsSync(testDir)) mkdirSync(testDir, { recursive: true });
@@ -114,36 +113,6 @@ describe("isReadOnlyMount with mode", () => {
 	it("returns false for rw mount", () => {
 		const mounts: MountSpec[] = [{ source: "/host/data", target: "/data", mode: "rw" }];
 		expect(isReadOnlyMount("/data/file.txt", mounts)).toBe(false);
-	});
-	it("returns true when mode is not specified (default ro)", () => {
-		const mounts: MountSpec[] = [{ source: "/host/data", target: "/data" }];
-		expect(isReadOnlyMount("/data/file.txt", mounts)).toBe(true);
-	});
-});
-
-describe("findMount", () => {
-	const mounts: MountSpec[] = [
-		{ source: "/host/skills", target: "/skills/my-skill", mode: "ro" },
-		{ source: "/host/data", target: "/data", mode: "rw" },
-	];
-	it("returns mount for exact target match", () => {
-		const result = findMount("/skills/my-skill", mounts);
-		expect(result).toBeDefined();
-		expect(result?.target).toBe("/skills/my-skill");
-		expect(result?.mode).toBe("ro");
-	});
-	it("returns mount for sub-path under target", () => {
-		const result = findMount("/skills/my-skill/SKILL.md", mounts);
-		expect(result).toBeDefined();
-		expect(result?.target).toBe("/skills/my-skill");
-	});
-	it("returns undefined for unrelated path", () => {
-		expect(findMount("/other/path", mounts)).toBeUndefined();
-	});
-	it("returns rw mount when applicable", () => {
-		const result = findMount("/data/file.txt", mounts);
-		expect(result).toBeDefined();
-		expect(result?.mode).toBe("rw");
 	});
 });
 
@@ -297,18 +266,20 @@ describe("PathApprovalStore merge-on-conflict", () => {
 		const dir = `${tmpdir()}/pi-test-approvals-${Date.now()}`;
 		mkdirSync(dir, { recursive: true });
 
-		const store1 = new PathApprovalStore(dir);
-		store1.add("/foo", Infinity);
+		try {
+			const store1 = new PathApprovalStore(dir);
+			store1.add("/foo", Infinity);
 
-		const store2 = new PathApprovalStore(dir);
-		store2.add("/bar", Infinity);
+			const store2 = new PathApprovalStore(dir);
+			store2.add("/bar", Infinity);
 
-		const store3 = new PathApprovalStore(dir);
-		const found = store3.find("/bar");
-		expect(found).toBeDefined();
-		expect(found?.path).toBe("/bar");
-
-		rmSync(dir, { recursive: true, force: true });
+			const store3 = new PathApprovalStore(dir);
+			const found = store3.find("/bar");
+			expect(found).toBeDefined();
+			expect(found?.path).toBe("/bar");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });
 
@@ -353,19 +324,13 @@ describe("expandPath", () => {
 		expect(expandPath("../cache")).toBe("../cache");
 	});
 
-	it("does NOT expand ${userHome} — treat as literal", () => {
-		expect(expandPath("${userHome}/data")).toBe("${userHome}/data");
-	});
-
-	it("${userHome} with cwd resolves as relative path", () => {
-		expect(expandPath("${userHome}/data", cwd)).toBe("/home/user/project/${userHome}/data");
-	});
-
-	it("does not expand ${userhome} (case-sensitive)", () => {
-		expect(expandPath("${userhome}/data")).toBe("${userhome}/data");
-	});
-
-	it("does not expand ${USER_HOME} (case-sensitive)", () => {
-		expect(expandPath("${USER_HOME}/data")).toBe("${USER_HOME}/data");
-	});
+	// ${...} placeholders are not expanded (case-sensitive): treated as literal without
+	// a cwd, and resolved as a plain relative path against cwd when one is provided.
+	it.each(["${userHome}", "${userhome}", "${USER_HOME}"])(
+		"treats %s as literal — no expansion; with cwd resolves as relative path",
+		(placeholder) => {
+			expect(expandPath(`${placeholder}/data`)).toBe(`${placeholder}/data`);
+			expect(expandPath(`${placeholder}/data`, cwd)).toBe(`${cwd}/${placeholder}/data`);
+		},
+	);
 });

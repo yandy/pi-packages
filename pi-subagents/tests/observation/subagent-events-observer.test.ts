@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { buildEventData, type NotificationSystem } from "../../src/observation/notification";
+import { describe, expect, it, vi } from "vitest";
+import type { NotificationSystem } from "../../src/observation/notification";
 import { SubagentEventsObserver } from "../../src/observation/subagent-events-observer";
 import type { CompactionInfo } from "../../src/types";
 import { createTestSubagent } from "../helpers/make-subagent";
@@ -50,7 +50,12 @@ describe("SubagentEventsObserver", () => {
 
 			observer.onSubagentCompleted(record);
 
-			expect(emit).toHaveBeenCalledWith("subagents:completed", buildEventData(record));
+			// Assert the payload against the record directly (not via buildEventData)
+			// so a regression in buildEventData itself is caught by this test.
+			expect(emit).toHaveBeenCalledWith(
+				"subagents:completed",
+				expect.objectContaining({ id: record.id, status: record.status, toolUses: record.toolUses }),
+			);
 		});
 
 		it("emits subagents:failed for an error agent", () => {
@@ -112,21 +117,6 @@ describe("SubagentEventsObserver", () => {
 			});
 		});
 
-		it("persists modelName and toolUses so the record can be recovered after resume/fork", () => {
-			const { observer, appendEntry } = makeObserver();
-			const record = createTestSubagent({
-				status: "completed",
-				invocation: { runInBackground: true, modelName: "sonnet" },
-				toolUses: 4,
-			});
-
-			observer.onSubagentCompleted(record);
-
-			const persisted = appendEntry.mock.calls[0][1] as Record<string, unknown>;
-			expect(persisted.modelName).toBe("sonnet");
-			expect(persisted.toolUses).toBe(4);
-		});
-
 		it("calls notifications.sendCompletion when result is not consumed", () => {
 			const notifications = makeNotifications();
 			const { observer } = makeObserver({ notifications });
@@ -146,13 +136,6 @@ describe("SubagentEventsObserver", () => {
 			observer.onSubagentCompleted(record);
 
 			expect(notifications.sendCompletion).not.toHaveBeenCalled();
-		});
-
-		it("emits exactly once and appends exactly once per call", () => {
-			const { observer, emit, appendEntry } = makeObserver();
-			observer.onSubagentCompleted(createTestSubagent({ status: "completed" }));
-			expect(emit).toHaveBeenCalledTimes(1);
-			expect(appendEntry).toHaveBeenCalledTimes(1);
 		});
 	});
 
@@ -208,31 +191,6 @@ describe("SubagentEventsObserver", () => {
 			observer.onSubagentCreated(createTestSubagent());
 			expect(appendEntry).not.toHaveBeenCalled();
 			expect(notifications.sendCompletion).not.toHaveBeenCalled();
-		});
-	});
-
-	describe("dependency isolation", () => {
-		let emit: ReturnType<typeof vi.fn>;
-		let appendEntry: ReturnType<typeof vi.fn>;
-		let notifications: NotificationSystem;
-		let observer: SubagentEventsObserver;
-
-		beforeEach(() => {
-			({ observer, emit, appendEntry, notifications } = makeObserver());
-		});
-
-		it("does not import or reference pi SDK directly", () => {
-			// If the class was constructed and four methods called with no SDK errors,
-			// it holds no SDK dependency — verified structurally by this test running at all.
-			observer.onSubagentStarted(createTestSubagent());
-			observer.onSubagentCompleted(createTestSubagent({ status: "completed" }));
-			const info: CompactionInfo = { reason: "overflow", tokensBefore: 9999 };
-			observer.onSubagentCompacted(createTestSubagent(), info);
-			observer.onSubagentCreated(createTestSubagent());
-			expect(emit).toHaveBeenCalledTimes(4);
-			expect(appendEntry).toHaveBeenCalledTimes(1);
-			// Notifications were called as a side-effect of onSubagentCompleted.
-			expect(notifications.sendCompletion).toHaveBeenCalledTimes(1);
 		});
 	});
 });

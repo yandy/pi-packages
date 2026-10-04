@@ -1,11 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { TodoItem } from "../src/todo-store.js";
 import { renderWidget } from "../src/widget.js";
 
 // Minimal stub of the Theme shape used by renderWidget.
 const theme = {
 	fg: (_name: string, text: string) => text,
-	strikethrough: (text: string) => text,
+	strikethrough: vi.fn((text: string) => text),
 } as any;
 
 describe("renderWidget", () => {
@@ -24,13 +24,16 @@ describe("renderWidget", () => {
 			{ id: "b", title: "Build", status: "in_progress" },
 			{ id: "c", title: "Shipped", status: "done" },
 		];
+		theme.strikethrough.mockClear();
 		const lines = renderWidget(items, theme);
 		expect(lines).not.toBeNull();
 		expect(lines?.length).toBe(3);
 		expect(lines?.[0]).toContain("○ Plan");
 		expect(lines?.[1]).toContain("◉ Build");
-		// Done items are kept and shown with ✓ (not omitted).
+		// Done items are kept, shown with ✓ (not omitted), and passed through the theme's strikethrough.
 		expect(lines?.[2]).toContain("✓ Shipped");
+		expect(theme.strikethrough).toHaveBeenCalledTimes(1);
+		expect(theme.strikethrough).toHaveBeenCalledWith("Shipped");
 	});
 
 	it("shows the blocked marker for blocked todos", () => {

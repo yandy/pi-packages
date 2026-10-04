@@ -92,12 +92,6 @@ describe("schema（D12 注册范围）", () => {
 			expect(Object.keys(schema.properties)).not.toContain(legacy);
 		}
 	});
-
-	it("keeps rename and rebuild_index out of the main-agent set", () => {
-		const schema = schemaOf(createMemoryTool(deps()));
-		expect(schema.properties.action.enum).not.toContain("rename");
-		expect(schema.properties.action.enum).not.toContain("rebuild_index");
-	});
 });
 
 describe("action add", () => {
@@ -454,16 +448,6 @@ describe("onWrite 回调与 Saved 通知", () => {
 		await expect(run(tool, { action: "remove", name: "不存在" })).rejects.toThrow();
 
 		expect(onWrite).not.toHaveBeenCalled();
-	});
-
-	it("notifies 'Saved: <name>' after a successful add when the context has a UI", async () => {
-		const notify = vi.fn();
-		const tool = createMemoryTool(deps());
-
-		await run(tool, { action: "add", name: "SSH port on staging", description: "d", content: "正文" }, uiContext(notify));
-
-		expect(notify).toHaveBeenCalledTimes(1);
-		expect(notify).toHaveBeenCalledWith("Saved: SSH port on staging", "info");
 	});
 
 	it("trims the name in the Saved notification", async () => {

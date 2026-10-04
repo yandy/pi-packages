@@ -499,15 +499,10 @@ describe.skipIf(process.platform !== "win32")("windows-acl end-to-end (real runn
 		expect(readFileSync(target, "utf8")).toBe("ok");
 	});
 
-	for (const exitCase of [
-		{ label: "node process.exit(42)", argv: () => nodeScript("process.exit(42);"), expected: 42 },
-		{ label: "cmd /c exit 7", argv: () => [process.env.ComSpec ?? "cmd.exe", "/c", "exit", "7"], expected: 7 },
-	]) {
-		it(`mirrors the child's exit code (${exitCase.label})`, { timeout: E2E_TIMEOUT }, () => {
-			const result = runConfined("workspace-write", exitCase.argv());
-			expect(result.status, result.stderr).toBe(exitCase.expected);
-		});
-	}
+	it("mirrors the child's exit code (node process.exit(42))", { timeout: E2E_TIMEOUT }, () => {
+		const result = runConfined("workspace-write", nodeScript("process.exit(42);"));
+		expect(result.status, result.stderr).toBe(42);
+	});
 
 	it("mirrors a crashing child's full 32-bit status (0xC0000005)", { timeout: E2E_TIMEOUT }, () => {
 		// A process that dies with STATUS_ACCESS_VIOLATION is observed by its

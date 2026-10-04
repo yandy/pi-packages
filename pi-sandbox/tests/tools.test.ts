@@ -86,14 +86,6 @@ beforeEach(() => {
 afterEach(() => { resetEscalationBrokerForTests(); resetDenialLedgerForTests(); rmSync(dir, { recursive: true, force: true }); });
 
 describe("createSandboxTools schemas", () => {
-	it("bash keeps command/timeout and gains the escalation pair", () => {
-		const { deps } = makeDeps();
-		const { bash } = createSandboxTools(deps);
-		const props = (bash.parameters as { properties: Record<string, unknown> }).properties;
-		expect(props.command).toBeDefined();
-		expect(props.sandbox_permissions).toBeDefined();
-		expect(props.justification).toBeDefined();
-	});
 	it("提权参数显式声明 null：strict 模式下模型拿到的是 schema 认可的“不提权”取值（而非猜字符串）", () => {
 		const { deps } = makeDeps();
 		const { bash, write, edit } = createSandboxTools(deps);
@@ -115,6 +107,9 @@ describe("createSandboxTools schemas", () => {
 				anyOf: [{ type: "string" }, { type: "null" }],
 			});
 		}
+		// extendParams 不得丢 base 属性：bash 的 command 仍在 schema 中
+		//（并入自已删除的 "bash keeps command/timeout and gains the escalation pair"）。
+		expect((bash.parameters as { properties: Record<string, unknown> }).properties.command).toBeDefined();
 		// 声明仍是 optional：非 strict 提供商下 required 不含这两个字段，模型可以完全不传。
 		const required = (bash.parameters as { required?: string[] }).required ?? [];
 		expect(required).not.toContain("sandbox_permissions");
@@ -155,12 +150,6 @@ describe("createSandboxTools schemas", () => {
 });
 
 describe("prepareArguments（pi 校验前的占位符剥离；edit 必须串联 base 钩子）", () => {
-	it("三个工具都挂了 prepareArguments", () => {
-		const { deps } = makeDeps();
-		const { bash, write, edit } = createSandboxTools(deps);
-		for (const tool of [bash, write, edit]) expect(typeof tool.prepareArguments).toBe("function");
-	});
-
 	it("键名单一来源：ESCALATION_PROPS 的键 == escalation.ts 的 PLACEHOLDER_KEYS（重命名时不得静默漂移）", () => {
 		expect(Object.keys(ESCALATION_PROPS)).toEqual([...PLACEHOLDER_KEYS]);
 	});

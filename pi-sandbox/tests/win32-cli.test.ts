@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs, requireDirectory, RUNNER_FAILURE_EXIT, RUNNER_SIGNATURE } from "../src/win32/cli.js";
+import { classifyRunnerFailure, RUNNER_FAILURE_RULES } from "../src/confine";
 
 const base = ["--workspace", "C:\\ws", "--temp", "C:\\tmp", "--mode", "workspace-write", "--", "pwsh.exe", "-Command", "echo hi"];
 
@@ -52,5 +53,15 @@ describe("win32 runner cli", () => {
 	it("exposes the documented failure contract", () => {
 		expect(RUNNER_SIGNATURE).toBe("windows-acl-run");
 		expect(RUNNER_FAILURE_EXIT).toBe(127);
+		// 跨模块一致性：confine.ts 的 windows-acl 失败规则是手写字面量（不经 cli.js 导入），
+		// 任一侧单方面漂移都会让 runner 失败漏判/误判，这里钉在 runner 侧同一组常量上。
+		const rules = RUNNER_FAILURE_RULES["windows-acl"];
+		expect(rules).toHaveLength(1);
+		expect(rules[0]?.allowedExitCodes).toEqual([RUNNER_FAILURE_EXIT]);
+		expect(rules[0]?.fatalSignatures).toEqual([`${RUNNER_SIGNATURE}: `]);
+		// 分类器按同一组字段判定：127 + 签名行 → 判 runner 失败；其余 exit code 不判。
+		const signatureLine = `${RUNNER_SIGNATURE}: --workspace is not an existing directory: C:\\missing`;
+		expect(classifyRunnerFailure(RUNNER_FAILURE_EXIT, signatureLine, rules)).toBe(signatureLine);
+		expect(classifyRunnerFailure(RUNNER_FAILURE_EXIT + 1, signatureLine, rules)).toBeUndefined();
 	});
 });

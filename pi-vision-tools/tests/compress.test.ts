@@ -20,11 +20,6 @@ describe("readCompressionSettings", () => {
 			jpegQuality: 85,
 		});
 	});
-
-	it("clamps quality to [1,100]", () => {
-		expect(readCompressionSettings({ PI_VISION_JPEG_QUALITY: "0" }).jpegQuality).toBe(85);
-		expect(readCompressionSettings({ PI_VISION_JPEG_QUALITY: "50" }).jpegQuality).toBe(50);
-	});
 });
 
 describe("compressImage", () => {

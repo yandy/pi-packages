@@ -30,9 +30,6 @@ beforeEach(() => {
 });
 
 describe("session state", () => {
-	it("starts with null session", () => {
-		expect(getSbx()).toBeNull();
-	});
 	it("set and get round-trip", () => {
 		setSbx(mockSession);
 		expect(getSbx()).toBe(mockSession);

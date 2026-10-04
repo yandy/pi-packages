@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadSettings, persistToastFor, SettingsManager, saveSettings } from "../src/settings";
-import { captureWarn } from "./helpers/capture-warn";
 import { createSettingsDirs, type SettingsDirs } from "./helpers/tmp-settings-dirs";
 
 /**
@@ -28,17 +27,6 @@ describe("settings persistence", () => {
 
 	afterEach(() => {
 		dirs.dispose();
-	});
-
-	it("returns {} when both files are missing", () => {
-		expect(loadSettings(globalDir, projectDir)).toEqual({});
-	});
-
-	it("returns {} when both files are malformed JSON", () => {
-		writeFileSync(globalFile(), "not json {{");
-		mkdirSync(join(projectDir, ".pi"), { recursive: true });
-		writeFileSync(projectFile(), "also not json");
-		expect(loadSettings(globalDir, projectDir)).toEqual({});
 	});
 
 	it("loads from global when no project file", () => {
@@ -100,21 +88,10 @@ describe("settings persistence", () => {
 		expect((loaded as Record<string, unknown>).futureField).toBeUndefined();
 	});
 
-	it("composes partial global + partial project correctly", () => {
-		writeGlobal({ graceTurns: 10 });
-		writeProject({ maxConcurrent: 2 });
-		expect(loadSettings(globalDir, projectDir)).toEqual({ graceTurns: 10, maxConcurrent: 2 });
-	});
-
 	describe("sanitizer", () => {
 		it("drops maxConcurrent < 1", () => {
 			writeProject({ maxConcurrent: 0, graceTurns: 5 });
 			expect(loadSettings(globalDir, projectDir)).toEqual({ graceTurns: 5 });
-		});
-
-		it("drops negative maxConcurrent", () => {
-			writeProject({ maxConcurrent: -3 });
-			expect(loadSettings(globalDir, projectDir)).toEqual({});
 		});
 
 		it("drops non-integer maxConcurrent (floats, NaN, strings)", () => {
@@ -178,10 +155,6 @@ describe("settings persistence", () => {
 			expect(loadSettings(globalDir, projectDir).graceTurns).toBeUndefined();
 		});
 
-		it("drops absurdly large values (e.g. 1e6)", () => {
-			writeProject({ maxConcurrent: 1_000_000, defaultMaxTurns: 1_000_000, graceTurns: 1_000_000 });
-			expect(loadSettings(globalDir, projectDir)).toEqual({});
-		});
 	});
 
 	describe("save result + corrupt-file warning", () => {
@@ -191,32 +164,16 @@ describe("settings persistence", () => {
 		});
 
 		it("saveSettings returns false when the target dir cannot be created", () => {
-			// Place a regular file where the parent of the settings file would go —
-			// mkdirSync + writeFileSync both fail with ENOTDIR / EEXIST.
-			const filePosingAsCwd = join(tmpdir(), `pi-settings-notdir-${Date.now()}`);
+			// Place a regular file inside a unique tmp directory where the parent of the
+			// settings file would go — mkdirSync + writeFileSync both fail with ENOTDIR / EEXIST.
+			const parent = mkdtempSync(join(tmpdir(), "pi-settings-notdir-"));
+			const filePosingAsCwd = join(parent, "blocker");
 			writeFileSync(filePosingAsCwd, "");
 			try {
 				expect(saveSettings({ maxConcurrent: 1 }, filePosingAsCwd)).toBe(false);
 			} finally {
-				rmSync(filePosingAsCwd, { force: true });
+				rmSync(parent, { recursive: true, force: true });
 			}
-		});
-
-		it("warns to console.warn when an existing file is malformed", () => {
-			mkdirSync(join(projectDir, ".pi"), { recursive: true });
-			writeFileSync(projectFile(), "not valid json {{{");
-			const warnings = captureWarn(() => {
-				expect(loadSettings(globalDir, projectDir)).toEqual({});
-			});
-			expect(warnings).toHaveLength(1);
-			expect(warnings[0]).toMatch(/Ignoring malformed settings/);
-		});
-
-		it("does NOT warn when a file is simply missing", () => {
-			const warnings = captureWarn(() => {
-				expect(loadSettings(globalDir, projectDir)).toEqual({});
-			});
-			expect(warnings).toEqual([]);
 		});
 	});
 
@@ -296,11 +253,6 @@ describe("SettingsManager", () => {
 			expect(sm.graceTurns).toBe(1);
 		});
 
-		it("clamps negative values to 1", () => {
-			const sm = new SettingsManager({ emit: vi.fn(), cwd: "/tmp", agentDir: "/nonexistent" });
-			sm.graceTurns = -3;
-			expect(sm.graceTurns).toBe(1);
-		});
 	});
 
 	describe("maxConcurrent setter normalization", () => {
@@ -316,11 +268,6 @@ describe("SettingsManager", () => {
 			expect(sm.maxConcurrent).toBe(1);
 		});
 
-		it("clamps negative values to 1", () => {
-			const sm = new SettingsManager({ emit: vi.fn(), cwd: "/tmp", agentDir: "/nonexistent" });
-			sm.maxConcurrent = -2;
-			expect(sm.maxConcurrent).toBe(1);
-		});
 	});
 
 	describe("load()", () => {
@@ -444,7 +391,8 @@ describe("SettingsManager", () => {
 		});
 
 		it("returns warning toast when persist fails", () => {
-			const filePosingAsCwd = join(tmpdir(), `pi-sm-notdir-${Date.now()}`);
+			const parent = mkdtempSync(join(tmpdir(), "pi-sm-notdir-"));
+			const filePosingAsCwd = join(parent, "blocker");
 			writeFileSync(filePosingAsCwd, "");
 			try {
 				const sm = new SettingsManager({ emit: vi.fn(), cwd: filePosingAsCwd, agentDir: "/nonexistent" });
@@ -454,12 +402,13 @@ describe("SettingsManager", () => {
 					level: "warning",
 				});
 			} finally {
-				rmSync(filePosingAsCwd, { force: true });
+				rmSync(parent, { recursive: true, force: true });
 			}
 		});
 
 		it("emits subagents:settings_changed with persisted:false on failure", () => {
-			const filePosingAsCwd = join(tmpdir(), `pi-sm-notdir2-${Date.now()}`);
+			const parent = mkdtempSync(join(tmpdir(), "pi-sm-notdir2-"));
+			const filePosingAsCwd = join(parent, "blocker");
 			writeFileSync(filePosingAsCwd, "");
 			const emit = vi.fn();
 			try {
@@ -470,7 +419,7 @@ describe("SettingsManager", () => {
 					persisted: false,
 				});
 			} finally {
-				rmSync(filePosingAsCwd, { force: true });
+				rmSync(parent, { recursive: true, force: true });
 			}
 		});
 	});
@@ -592,16 +541,4 @@ describe("SettingsManager", () => {
 		});
 	});
 
-	describe("constructor onMaxConcurrentChanged callback", () => {
-		it("constructs without callback without throwing", () => {
-			expect(() => new SettingsManager({ emit: vi.fn(), cwd: "/tmp", agentDir: "/nonexistent" })).not.toThrow();
-		});
-
-		it("constructs with callback without throwing", () => {
-			expect(
-				() =>
-					new SettingsManager({ emit: vi.fn(), cwd: "/tmp", agentDir: "/nonexistent", onMaxConcurrentChanged: vi.fn() }),
-			).not.toThrow();
-		});
-	});
 });

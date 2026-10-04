@@ -922,3 +922,36 @@ describe("SubagentManager — registerWorkspaceProvider", () => {
 		expect(manager.workspaceProvider).toBe(second);
 	});
 });
+
+describe("SubagentManager — listAgents ordering", () => {
+	it("returns agents most recent first (startedAt descending, production sort)", () => {
+		vi.useFakeTimers();
+		const { manager } = createManager();
+		try {
+			vi.setSystemTime(1_000);
+			const first = spawnBg(manager, "first");
+			vi.setSystemTime(2_000);
+			const second = spawnBg(manager, "second");
+			vi.setSystemTime(3_000);
+			const third = spawnBg(manager, "third");
+
+			expect(manager.listAgents().map((a) => a.id)).toEqual([third, second, first]);
+		} finally {
+			vi.useRealTimers();
+			manager.dispose();
+		}
+	});
+
+	it("does not mutate the underlying agent map across calls", () => {
+		const { manager } = createManager();
+		try {
+			spawnBg(manager, "only");
+			const first = manager.listAgents();
+			const second = manager.listAgents();
+			expect(second.map((a) => a.id)).toEqual(first.map((a) => a.id));
+			expect(manager.getRecord(first[0]!.id)).toBeDefined();
+		} finally {
+			manager.dispose();
+		}
+	});
+});

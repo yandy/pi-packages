@@ -143,21 +143,10 @@ describe("detectEngine", () => {
 	}, 30_000);
 });
 
-describe("resolveEngine", () => {
-	it("returns podman when engine=podman and podman available", () => {
-		try {
-			const { execFileSync } = require("node:child_process");
-			execFileSync("podman", ["info"], { stdio: "ignore", timeout: 5000 });
-			expect(resolveEngine("podman")).toBe("podman");
-		} catch {
-			// skip if podman not available
-		}
-	});
-
-	it("throws when engine=podman but podman not available", () => {
-		expect(["docker", "podman"]).toContain(resolveEngine("auto"));
-	}, 30_000);
-});
+// resolveEngine 显式 engine 的可用性契约（成功返回 / 失败抛错）由
+// tests/config-resolve-engine.test.ts 用 mock 的 container-cli 在任何环境验证。
+// 不在此处做依赖真实 runtime 的探测：模块加载期的 5s 探测与实现内部 30s 超时
+// 不一致，曾导致「守卫判定不可用、被测代码却成功」的 CI 失败。
 
 describe("new runtime fields", () => {
 	it("parses memory, cpus, swap, pidsLimit, mounts from runtime group", () => {

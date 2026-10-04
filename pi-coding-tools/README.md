@@ -61,7 +61,7 @@ Full shape:
 }
 ```
 
-Per-server overrides also accept `command` (string array, e.g. `["clangd", "--background-index"]`) and `env` (string map).
+Per-server overrides also accept `command` (string array, e.g. `["clangd", "--background-index"]`).
 
 ### Global config
 

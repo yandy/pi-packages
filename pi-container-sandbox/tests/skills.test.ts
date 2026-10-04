@@ -256,7 +256,7 @@ describe("fixSkillLocations", () => {
 		expect(result).toBe(prompt);
 	});
 
-	it("returns empty array for empty input", () => {
+	it("leaves the prompt unchanged when the mapping is empty", () => {
 		const prompt = "some prompt";
 		expect(fixSkillLocations(prompt, [])).toBe(prompt);
 	});

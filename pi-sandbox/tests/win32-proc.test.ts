@@ -1,6 +1,7 @@
 // pi-sandbox/tests/win32-proc.test.ts
 import { describe, expect, it } from "vitest";
 import * as abi from "../src/win32/abi.js";
+import { startupInfoType } from "../src/win32/ffi.js";
 import { buildCommandLine, quoteArg, spawnInheritedJobProcess, waitForProcessExit } from "../src/win32/proc.js";
 
 describe("win32 command line quoting", () => {
@@ -63,16 +64,32 @@ function makeApi(overrides: Record<string, unknown> = {}) {
 
 describe("win32 job-confined spawn", () => {
 	it("creates the child suspended with inherited stdio and hides the window", () => {
-		const api = makeApi();
+		let capturedStartupInfo: { dwFlags: number; wShowWindow: number } | undefined;
+		const api = makeApi({
+			createProcessAsUserW: (...args: unknown[]) => {
+				api.calls.push({ name: "createProcessAsUserW", args });
+				// STARTUPINFOW 由 proc.js 用 koffi struct（startupInfoType()）真实分配并编码；
+				// stub 内按同一类型解码回来直接断言字段值，而不是只检查「最后两个参数是指针」。
+				capturedStartupInfo = koffi.decode(args[args.length - 2] as never, startupInfoType()) as {
+					dwFlags: number;
+					wShowWindow: number;
+				};
+				writeProcessInformation(args[args.length - 1]); // 最后一个参数是 PROCESS_INFORMATION*
+				return 1;
+			},
+		});
 		spawnInheritedJobProcess(api as never, { command: "pwsh.exe", args: ["-Command", "echo hi"], cwd: "C:\\ws", token: 7n as never });
 		const create = api.calls.find((c) => c.name === "createProcessAsUserW");
 		expect(create).toBeDefined();
-		// 参数顺序：token, applicationName, commandLine, …；startupInfo / processInfo 是最后两个（真实 koffi 指针）
-		expect(typeof create?.args[create.args.length - 2]).toBe("bigint");
-		expect(typeof create?.args[create.args.length - 1]).toBe("bigint");
 		const suspend = create?.args.find((a) => typeof a === "number" && a === abi.CREATE_SUSPENDED);
 		expect(suspend).toBe(abi.CREATE_SUSPENDED);
+		// dwFlags 必须同时携带 USESTDHANDLES（继承 stdio）与 USESHOWWINDOW，且 wShowWindow=SW_HIDE；
+		// 字段漏设/漂移在这里直接失败，而不再依赖「指针存在」这类恒真观察。
+		expect(capturedStartupInfo?.dwFlags).toBe(abi.STARTF_USESTDHANDLES | abi.STARTF_USESHOWWINDOW);
+		expect(capturedStartupInfo?.wShowWindow).toBe(abi.SW_HIDE);
 		const order = api.calls.map((c) => c.name);
+		expect(order).toContain("assignProcessToJobObject");
+		expect(order).toContain("resumeThread");
 		expect(order.indexOf("assignProcessToJobObject")).toBeLessThan(order.indexOf("resumeThread"));
 	});
 
