@@ -128,8 +128,10 @@ afterEach(() => {
 | 方式 | 示例 | 适用场景 |
 |------|------|----------|
 | Mock `getAgentDir` | `vi.mock("@earendil-works/pi-coding-agent", () => ({ getAgentDir: () => tempDir }))` | 不关心 `PI_CODING_AGENT_DIR` 环境变量本身的测试 |
-| Stub `PI_CODING_AGENT_DIR` | `vi.stubEnv("PI_CODING_AGENT_DIR", tempDir)` | 需要验证 `PI_CODING_AGENT_DIR` 环境变量行为的测试 |
-| 替换 `HOME` | `process.env.HOME = tempDir` | 模拟无 `PI_CODING_AGENT_DIR` 的场景，让 `getAgentDir` 走默认分支 |
+| Stub `PI_CODING_AGENT_DIR` | `vi.stubEnv("PI_CODING_AGENT_DIR", tempDir)` | 需要验证 `PI_CODING_AGENT_DIR` 环境变量行为的测试；**跨平台首选** |
+| 替换 `HOME` | `process.env.HOME = tempDir` | ⚠️ 仅 POSIX 有效。Windows 上 `os.homedir()` 读 `USERPROFILE` 而非 `HOME`，该方式在 Windows 静默失效（干净 CI runner 上碰巧通过、开发者机器上失败），跨平台测试请改用上面两种方式 |
+
+> **平台注意**：`os.homedir()` 在 Windows 读 `USERPROFILE`，在 POSIX 读 `HOME`。任何依赖 `HOME` 的隔离都必须同时覆盖两个平台的真实读取源，否则 Windows CI 与本地行为会分叉。
 
 三种方式的共同点：`tempDir` 都来自 `mkdtemp(join(tmpdir(), ...))`。
 
@@ -182,5 +184,5 @@ it("reads config from temp dir", async () => {
 | Mock `getAgentDir` + 完整 mock | `pi-coding-tools/tests/config.test.ts`、`pi-web-tools/tests/config.test.ts` |
 | `vi.stubEnv("PI_CODING_AGENT_DIR")` 隔离 getAgentDir + `mkdtempSync` 双目录（global/project）隔离 | `pi-sandbox/tests/config.test.ts` |
 | `vi.hoisted()` + `mkdtempSync` 解决 hoisting | `pi-container-sandbox/tests/config-global-merge.test.ts` |
-| 替换 `HOME` 实现隔离 | `pi-subagents/tests/config/custom-agents.test.ts` |
+| Stub `PI_CODING_AGENT_DIR` 隔离全局目录（跨平台） | `pi-subagents/tests/config/custom-agents.test.ts` |
 | 双目录隔离（globalDir + projectDir）工具函数 | `pi-subagents/tests/helpers/tmp-settings-dirs.ts` |
