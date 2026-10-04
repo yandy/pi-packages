@@ -5,6 +5,8 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSandboxTools, ESCALATION_PROPS, resolveCall, resolveCallMode } from "../src/tools";
+import { canonicalizeTarget, isWithinRoots } from "../src/fence";
+import { writableRoots } from "../src/policy";
 import { createPermissionState, processPermissionState } from "../src/permission";
 import { DEFAULT_SANDBOX_CONFIG } from "../src/config";
 import { PLACEHOLDER_KEYS } from "../src/escalation";
@@ -655,6 +657,16 @@ describe("denial-first 硬门禁（未经真实拒绝不提权）", () => {
 		const { deps } = makeDeps();
 		const { write } = createSandboxTools(deps);
 		const outside = join(outsideDir, `gate-${process.pid}-${Date.now()}.txt`);
+		// 围栏自检（真机首跑曾见 win32 宿主误放行）：outside 必须真在围栏外。runner 的 TMP 是 8.3
+		// 短名（RUNNER~1）而 realpath 是长名，若判定链路把两种形态混入就会漂移——失败时消息
+		// 携带全部判定输入（canonical 目标、生效 roots、tmpdir、平台），把放行归因钉死到一层。
+		const canonical = canonicalizeTarget(outside);
+		const roots = writableRoots("workspace-write", deps.cwd, deps._tmpRoots);
+		const verdict = isWithinRoots(canonical, roots, process.platform !== "win32");
+		expect(
+			verdict,
+			`fence self-check: target=${canonical} roots=${JSON.stringify(roots)} _tmpRoots=${JSON.stringify(deps._tmpRoots)} tmpdir=${tmpdir()} platform=${process.platform}`,
+		).toBe(false);
 		const ctx = toolCtx(true, "Allow once") as { ui: { select: ReturnType<typeof vi.fn> } };
 		// 1) 无前置拒绝 + 提权参数 → 忽略，按 workspace-write 执行 → fence 拒绝（同时记账）
 		await expect(write.execute("g-1", {
