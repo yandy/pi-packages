@@ -1,15 +1,34 @@
 import { createMessageConnection, StreamMessageReader, StreamMessageWriter } from "vscode-jsonrpc/node";
+import { writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 const conn = createMessageConnection(new StreamMessageReader(process.stdin), new StreamMessageWriter(process.stdout));
 
-conn.onRequest("initialize", () => ({
-	capabilities: {
-		hoverProvider: true,
-		documentSymbolProvider: true,
-		definitionProvider: true,
-		referencesProvider: true,
-	},
-}));
+// 测试侧的可观测通道：把 didOpen/didClose 计数同步写到客户端 root 下的文件，
+// 替代曾随包发布的 LspClient.getCounts()（test/counts 专用请求）。
+let rootDir = null;
+let didOpenCount = 0;
+let didCloseCount = 0;
+
+function persistCounts() {
+	if (!rootDir) return;
+	writeFileSync(
+		`${rootDir}/.lsp-counts.json`,
+		JSON.stringify({ didOpen: didOpenCount, didClose: didCloseCount }),
+	);
+}
+
+conn.onRequest("initialize", (p) => {
+	rootDir = p?.rootUri ? fileURLToPath(p.rootUri) : null;
+	return {
+		capabilities: {
+			hoverProvider: true,
+			documentSymbolProvider: true,
+			definitionProvider: true,
+			referencesProvider: true,
+		},
+	};
+});
 
 conn.onRequest("textDocument/documentSymbol", () => [
 	{
@@ -43,17 +62,15 @@ conn.onRequest("textDocument/references", (p) => [
 ]);
 
 conn.onRequest("shutdown", () => null);
-conn.onRequest("test/counts", () => ({ didOpen: didOpenCount, didClose: didCloseCount }));
-
-let didOpenCount = 0;
-let didCloseCount = 0;
 
 conn.onNotification("initialized", () => {});
 conn.onNotification("textDocument/didOpen", () => {
 	didOpenCount++;
+	persistCounts();
 });
 conn.onNotification("textDocument/didClose", () => {
 	didCloseCount++;
+	persistCounts();
 });
 conn.onNotification("exit", () => {
 	conn.dispose();
