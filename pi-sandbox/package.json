@@ -3,7 +3,7 @@
 	"publishConfig": {
 		"access": "public"
 	},
-	"version": "1.4.0",
+	"version": "1.4.1",
 	"description": "pi coding-agent extension: process-level sandbox (bwrap / landlock / seatbelt / windows-acl) — workspace writable, everything else readable, fail-closed",
 	"license": "MIT",
 	"repository": {
