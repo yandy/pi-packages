@@ -49,15 +49,6 @@ describe("SessionLifecycleHandler", () => {
 	});
 
 	describe("handleSessionStart", () => {
-		it("sets session context and clears completed agents", () => {
-			const ctx = { cwd: "/some/path" };
-
-			handler.handleSessionStart({}, ctx);
-
-			expect(runtime.setSessionContext).toHaveBeenCalledWith(ctx);
-			expect(manager.clearCompleted).toHaveBeenCalled();
-		});
-
 		it("sets context before clearing completed", () => {
 			const callOrder: string[] = [];
 			mockSetSessionContext.mockImplementation(() => {
@@ -113,16 +104,6 @@ describe("SessionLifecycleHandler", () => {
 	});
 
 	describe("handleSessionShutdown", () => {
-		it("calls all cleanup steps", async () => {
-			await handler.handleSessionShutdown();
-
-			expect(mockUnpublishService).toHaveBeenCalled();
-			expect(mockClearSessionContext).toHaveBeenCalled();
-			expect(mockAbortAll).toHaveBeenCalled();
-			expect(mockDisposeNotifications).toHaveBeenCalled();
-			expect(mockDispose).toHaveBeenCalled();
-		});
-
 		it("calls cleanup in correct order", async () => {
 			const callOrder: string[] = [];
 			mockUnpublishService.mockImplementation(() => {

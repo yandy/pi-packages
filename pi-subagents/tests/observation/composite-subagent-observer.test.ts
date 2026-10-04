@@ -17,41 +17,20 @@ const COMPACTION: CompactionInfo = { reason: "threshold", tokensBefore: 1000 };
 
 describe("CompositeSubagentObserver", () => {
 	describe("fan-out", () => {
-		it("forwards onSubagentStarted to every delegate with the record", () => {
-			const a = makeDelegate();
-			const b = makeDelegate();
-			const composite = new CompositeSubagentObserver([a, b]);
-			const record = createTestSubagent({ id: "agent-1" });
+		it.each(["onSubagentStarted", "onSubagentCreated", "onSubagentCompleted"] as const)(
+			"forwards %s to every delegate with the record",
+			(method) => {
+				const a = makeDelegate();
+				const b = makeDelegate();
+				const composite = new CompositeSubagentObserver([a, b]);
+				const record = createTestSubagent({ id: "agent-1" });
 
-			composite.onSubagentStarted(record);
+				composite[method](record);
 
-			expect(a.onSubagentStarted).toHaveBeenCalledExactlyOnceWith(record);
-			expect(b.onSubagentStarted).toHaveBeenCalledExactlyOnceWith(record);
-		});
-
-		it("forwards onSubagentCreated to every delegate with the record", () => {
-			const a = makeDelegate();
-			const b = makeDelegate();
-			const composite = new CompositeSubagentObserver([a, b]);
-			const record = createTestSubagent({ id: "agent-2" });
-
-			composite.onSubagentCreated(record);
-
-			expect(a.onSubagentCreated).toHaveBeenCalledExactlyOnceWith(record);
-			expect(b.onSubagentCreated).toHaveBeenCalledExactlyOnceWith(record);
-		});
-
-		it("forwards onSubagentCompleted to every delegate with the record", () => {
-			const a = makeDelegate();
-			const b = makeDelegate();
-			const composite = new CompositeSubagentObserver([a, b]);
-			const record = createTestSubagent({ id: "agent-3" });
-
-			composite.onSubagentCompleted(record);
-
-			expect(a.onSubagentCompleted).toHaveBeenCalledExactlyOnceWith(record);
-			expect(b.onSubagentCompleted).toHaveBeenCalledExactlyOnceWith(record);
-		});
+				expect(a[method]).toHaveBeenCalledExactlyOnceWith(record);
+				expect(b[method]).toHaveBeenCalledExactlyOnceWith(record);
+			},
+		);
 
 		it("forwards onSubagentCompacted to every delegate with record and info", () => {
 			const a = makeDelegate();

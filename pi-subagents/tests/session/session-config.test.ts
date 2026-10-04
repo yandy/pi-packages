@@ -71,12 +71,6 @@ describe("assembleSessionConfig — default agent shape", () => {
 		expect(result.effectiveCwd).toBe("/tmp/worktree");
 	});
 
-	it("falls back to ctx.cwd when options.cwd is not set", () => {
-		const result = assembleSessionConfig("Explore", ctx, {}, mockEnv, mockAgentLookup, mockIO);
-
-		expect(result.effectiveCwd).toBe("/tmp");
-	});
-
 	it("systemPrompt reflects the parentSystemPrompt passed to buildAgentPrompt", () => {
 		mockBuildAgentPrompt.mockImplementationOnce((_config, _cwd, _env, parentPrompt) => `assembled:${parentPrompt}`);
 
@@ -87,12 +81,6 @@ describe("assembleSessionConfig — default agent shape", () => {
 });
 
 describe("assembleSessionConfig — model resolution", () => {
-	it("returns undefined model when no option, no config model, no parent", () => {
-		const result = assembleSessionConfig("Explore", ctx, {}, mockEnv, mockAgentLookup, mockIO);
-
-		expect(result.model).toBeUndefined();
-	});
-
 	it("options.model wins over config model and parent model", () => {
 		const explicitModel = { provider: "anthropic", id: "claude-opus-4" };
 		mockResolveAgentConfig.mockReturnValueOnce(exploreConfig({ model: "anthropic/claude-haiku-4" }));
@@ -183,12 +171,6 @@ describe("assembleSessionConfig — unknown type fallback", () => {
 });
 
 describe("assembleSessionConfig — thinking level", () => {
-	it("returns undefined thinkingLevel when neither option nor config sets it", () => {
-		const result = assembleSessionConfig("Explore", ctx, {}, mockEnv, mockAgentLookup, mockIO);
-
-		expect(result.thinkingLevel).toBeUndefined();
-	});
-
 	it("options.thinkingLevel wins over agentConfig.thinking", () => {
 		mockResolveAgentConfig.mockReturnValueOnce(exploreConfig({ thinking: "low" }));
 

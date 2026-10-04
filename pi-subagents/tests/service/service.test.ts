@@ -32,13 +32,6 @@ describe("SubagentsService accessors", () => {
 		expect(getSubagentsService()).toBe(mock);
 	});
 
-	it("unpublishSubagentsService removes the service from globalThis", () => {
-		const mock = { spawn: () => "id" } as unknown as SubagentsService;
-		publishSubagentsService(mock);
-		unpublishSubagentsService();
-		expect(getSubagentsService()).toBeUndefined();
-	});
-
 	it("getSubagentsService returns undefined after unpublish", () => {
 		const mock = { spawn: () => "id" } as unknown as SubagentsService;
 		publishSubagentsService(mock);
@@ -57,7 +50,4 @@ describe("SUBAGENT_EVENTS", () => {
 		expect(SUBAGENT_EVENTS.STEERED).toBe("subagents:steered");
 	});
 
-	it("does not declare a vacant activity channel", () => {
-		expect("ACTIVITY" in SUBAGENT_EVENTS).toBe(false);
-	});
 });

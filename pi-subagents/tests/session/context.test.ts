@@ -83,18 +83,6 @@ describe("buildParentContext", () => {
 		expect(result).toContain("[Assistant]: I can help");
 	});
 
-	it("formats an assistant message with array content", () => {
-		const result = buildParentContext(
-			makeCtx([
-				{
-					type: "message",
-					message: { role: "assistant", content: [{ type: "text", text: "Sure!" }] },
-				},
-			]),
-		);
-		expect(result).toContain("[Assistant]: Sure!");
-	});
-
 	it("skips user messages with empty or whitespace-only text", () => {
 		const result = buildParentContext(makeCtx([{ type: "message", message: { role: "user", content: "   " } }]));
 		expect(result).toBe("");

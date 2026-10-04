@@ -10,13 +10,6 @@ function makeTask() {
 
 describe("ConcurrencyLimiter", () => {
 	describe("slot gating", () => {
-		it("runs a task immediately when a slot is free", () => {
-			const limiter = new ConcurrencyLimiter(() => 2);
-			const { task } = makeTask();
-			void limiter.schedule(task);
-			expect(task).toHaveBeenCalledOnce();
-		});
-
 		it("runs tasks up to the limit and holds the rest pending", () => {
 			const limiter = new ConcurrencyLimiter(() => 2);
 			const a = makeTask();

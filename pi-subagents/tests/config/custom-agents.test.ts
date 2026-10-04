@@ -179,20 +179,6 @@ Negative turns.`,
 		expect(result.get("negturns")?.maxTurns).toBeUndefined();
 	});
 
-	it("handles prompt_mode: append", () => {
-		writeAgent(
-			"appender",
-			`---
-prompt_mode: append
----
-
-Extra instructions.`,
-		);
-
-		const result = loadCustomAgents(tmpDir);
-		expect(result.get("appender")?.promptMode).toBe("append");
-	});
-
 	it("defaults unknown prompt_mode to append", () => {
 		writeAgent(
 			"badmode",

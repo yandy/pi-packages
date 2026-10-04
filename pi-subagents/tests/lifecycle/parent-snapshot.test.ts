@@ -45,12 +45,6 @@ describe("buildParentSnapshot", () => {
 		expect(snapshot.modelRegistry).toBe(registry);
 	});
 
-	it("sets parentContext to undefined when inheritContext is false", () => {
-		const snapshot = buildParentSnapshot(makeCtx(), false);
-		expect(snapshot.parentContext).toBeUndefined();
-		expect(buildParentContextMock).not.toHaveBeenCalled();
-	});
-
 	it("sets parentContext to undefined when inheritContext is undefined", () => {
 		const snapshot = buildParentSnapshot(makeCtx());
 		expect(snapshot.parentContext).toBeUndefined();

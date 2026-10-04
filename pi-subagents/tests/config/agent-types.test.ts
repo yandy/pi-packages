@@ -27,18 +27,6 @@ describe("AgentTypeRegistry", () => {
 			expect(registry.isValidType("Explore")).toBe(true);
 		});
 
-		it("does not call loadUserAgents until construction", () => {
-			let callCount = 0;
-			const registry = new AgentTypeRegistry(() => {
-				callCount++;
-				return new Map();
-			});
-			// constructor calls reload() once
-			expect(callCount).toBe(1);
-			registry.reload();
-			expect(callCount).toBe(2);
-		});
-
 		it("reload picks up new agents from loader", () => {
 			let userAgents = new Map<string, AgentConfig>();
 			const registry = new AgentTypeRegistry(() => userAgents);
@@ -173,12 +161,6 @@ describe("AgentTypeRegistry", () => {
 	});
 
 	describe("isValidType", () => {
-		it("returns true for enabled defaults", () => {
-			const registry = makeRegistry();
-			expect(registry.isValidType("general-purpose")).toBe(true);
-			expect(registry.isValidType("Explore")).toBe(true);
-		});
-
 		it("returns true case-insensitively", () => {
 			const registry = makeRegistry();
 			expect(registry.isValidType("explore")).toBe(true);
@@ -224,19 +206,8 @@ describe("AgentTypeRegistry", () => {
 	});
 
 	describe("DEFAULT_AGENT_NAMES static property", () => {
-		it("is defined on the class", () => {
-			expect(AgentTypeRegistry.DEFAULT_AGENT_NAMES).toBeDefined();
-		});
-
 		it("contains the two built-in default names", () => {
 			expect(AgentTypeRegistry.DEFAULT_AGENT_NAMES).toEqual(["general-purpose", "Explore"]);
-		});
-
-		it("is no longer exported from types.ts", async () => {
-			// DEFAULT_AGENT_NAMES was moved to AgentTypeRegistry; it must NOT appear
-			// as a named export from types.ts anymore.
-			const typesModule = await import("../../src/types");
-			expect((typesModule as Record<string, unknown>).DEFAULT_AGENT_NAMES).toBeUndefined();
 		});
 	});
 

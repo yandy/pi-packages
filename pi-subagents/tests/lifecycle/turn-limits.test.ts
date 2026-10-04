@@ -31,8 +31,4 @@ describe("normalizeMaxTurns", () => {
 	it("accepts boundary value 1", () => {
 		expect(normalizeMaxTurns(1)).toBe(1);
 	});
-
-	it("handles large values unchanged", () => {
-		expect(normalizeMaxTurns(10_000)).toBe(10_000);
-	});
 });

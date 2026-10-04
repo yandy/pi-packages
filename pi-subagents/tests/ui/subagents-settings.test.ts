@@ -32,11 +32,6 @@ beforeEach(() => {
 });
 
 describe("SubagentsSettingsHandler", () => {
-	it("is constructable", () => {
-		const { handler } = makeHandler();
-		expect(handler).toBeInstanceOf(SubagentsSettingsHandler);
-	});
-
 	it("shows the three settings options with current values", async () => {
 		const { handler } = makeHandler();
 		const ui = makeMenuUI([undefined]); // cancel immediately

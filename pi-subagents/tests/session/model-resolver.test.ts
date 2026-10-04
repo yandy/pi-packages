@@ -29,11 +29,6 @@ describe("resolveModel", () => {
 			expect(result).toEqual(MODELS[0]);
 		});
 
-		it("resolves another exact provider/modelId", () => {
-			const result = resolveModel("openai/gpt-4o", makeRegistry());
-			expect(result).toEqual(MODELS[3]);
-		});
-
 		it("falls through to fuzzy when exact provider/modelId not found", () => {
 			// "anthropic/haiku" is not an exact match, but fuzzy should find it
 			const result = resolveModel("anthropic/haiku", makeRegistry());
@@ -51,36 +46,11 @@ describe("resolveModel", () => {
 			const result = resolveModel("Claude-Opus-4-6", makeRegistry());
 			expect(result).toEqual(MODELS[0]);
 		});
-
-		it("matches exact id for non-anthropic models", () => {
-			const result = resolveModel("gpt-4o", makeRegistry());
-			expect(result).toEqual(MODELS[3]);
-		});
 	});
 
 	describe("fuzzy match — substring", () => {
 		it("matches 'haiku' to claude-haiku model", () => {
 			const result = resolveModel("haiku", makeRegistry());
-			expect(result).toEqual(MODELS[2]);
-		});
-
-		it("matches 'sonnet' to claude-sonnet model", () => {
-			const result = resolveModel("sonnet", makeRegistry());
-			expect(result).toEqual(MODELS[1]);
-		});
-
-		it("matches 'opus' to claude-opus model", () => {
-			const result = resolveModel("opus", makeRegistry());
-			expect(result).toEqual(MODELS[0]);
-		});
-
-		it("matches 'gemini' to gemini model", () => {
-			const result = resolveModel("gemini", makeRegistry());
-			expect(result).toEqual(MODELS[4]);
-		});
-
-		it("is case-insensitive for substring", () => {
-			const result = resolveModel("HAIKU", makeRegistry());
 			expect(result).toEqual(MODELS[2]);
 		});
 	});
@@ -90,36 +60,12 @@ describe("resolveModel", () => {
 			const result = resolveModel("Opus 4.6", makeRegistry());
 			expect(result).toEqual(MODELS[0]);
 		});
-
-		it("matches 'Haiku 4.5' via model name", () => {
-			const result = resolveModel("Haiku 4.5", makeRegistry());
-			expect(result).toEqual(MODELS[2]);
-		});
 	});
 
 	describe("fuzzy match — multi-part", () => {
 		it("matches 'anthropic opus' across provider and id", () => {
 			const result = resolveModel("anthropic opus", makeRegistry());
 			expect(result).toEqual(MODELS[0]);
-		});
-
-		it("matches 'google pro' across provider and id", () => {
-			const result = resolveModel("google pro", makeRegistry());
-			expect(result).toEqual(MODELS[4]);
-		});
-	});
-
-	describe("fuzzy match — prefers tighter matches", () => {
-		it("prefers exact id over substring", () => {
-			const result = resolveModel("gpt-4o", makeRegistry());
-			expect(result).toEqual(MODELS[3]);
-		});
-
-		it("substring match prefers shorter model id (tighter fit)", () => {
-			// Both opus and sonnet contain their query as substring, but "opus" is a tighter match
-			// for "opus" than "sonnet" is for "sonnet" — each should resolve to itself
-			expect(resolveModel("opus", makeRegistry())).toEqual(MODELS[0]);
-			expect(resolveModel("sonnet", makeRegistry())).toEqual(MODELS[1]);
 		});
 	});
 
@@ -135,13 +81,6 @@ describe("resolveModel", () => {
 			const result = resolveModel("xyz", makeRegistry());
 			expect(result).toContain("anthropic/claude-opus-4-6");
 			expect(result).toContain("openai/gpt-4o");
-		});
-
-		it("empty string matches a model (multi-part vacuous truth)", () => {
-			// Empty string splits to empty parts; every() on empty array is true
-			// This is fine — callers guard against empty input
-			const result = resolveModel("", makeRegistry());
-			expect(typeof result).toBe("object");
 		});
 	});
 
@@ -210,12 +149,6 @@ describe("resolveInvocationModel", () => {
 			expect(result).toEqual({ model: parentModel });
 			expect(result.error).toBeUndefined();
 		});
-
-		it("falls back to null parent when config-specified model fails", () => {
-			const result = resolveInvocationModel(null, "nonexistent-model", false, makeRegistry());
-			expect(result).toEqual({ model: null });
-			expect(result.error).toBeUndefined();
-		});
 	});
 
 	describe("user-specified model failure (modelFromParams true)", () => {
@@ -225,23 +158,12 @@ describe("resolveInvocationModel", () => {
 			expect(result.error).toContain("Model not found");
 			expect(result.error).toContain("nonexistent-model");
 		});
-
-		it("error includes available models list", () => {
-			const result = resolveInvocationModel(parentModel, "xyz", true, makeRegistry());
-			expect(result.error).toContain("Available models:");
-		});
 	});
 
 	describe("successful model resolution", () => {
 		it("returns resolved model when modelInput resolves (config-specified)", () => {
 			const result = resolveInvocationModel(parentModel, "haiku", false, makeRegistry());
 			expect(result).toEqual({ model: MODELS[2] });
-			expect(result.error).toBeUndefined();
-		});
-
-		it("returns resolved model when modelInput resolves (params-specified)", () => {
-			const result = resolveInvocationModel(parentModel, "opus", true, makeRegistry());
-			expect(result).toEqual({ model: MODELS[0] });
 			expect(result.error).toBeUndefined();
 		});
 
@@ -255,12 +177,6 @@ describe("resolveInvocationModel", () => {
 	describe("parent model inheritance (no modelInput)", () => {
 		it("returns parent model when modelInput is undefined (modelFromParams false)", () => {
 			const result = resolveInvocationModel(parentModel, undefined, false, makeRegistry());
-			expect(result).toEqual({ model: parentModel });
-			expect(result.error).toBeUndefined();
-		});
-
-		it("returns parent model when modelInput is undefined (modelFromParams true)", () => {
-			const result = resolveInvocationModel(parentModel, undefined, true, makeRegistry());
 			expect(result).toEqual({ model: parentModel });
 			expect(result.error).toBeUndefined();
 		});

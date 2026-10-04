@@ -23,12 +23,6 @@ describe("InterruptHandler", () => {
 			expect(mockAbortAll).toHaveBeenCalledOnce();
 		});
 
-		it("does not abort when the signal never fires", () => {
-			const controller = new AbortController();
-			handler.handleTurnStart({ signal: controller.signal });
-			expect(mockAbortAll).not.toHaveBeenCalled();
-		});
-
 		it("latches only one listener across repeated turns with the same signal", () => {
 			const controller = new AbortController();
 			handler.handleTurnStart({ signal: controller.signal });

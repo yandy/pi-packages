@@ -12,7 +12,8 @@ describe("debugLog", () => {
 	});
 
 	it("does not call console.warn when PI_SUBAGENTS_DEBUG is unset", () => {
-		delete process.env.PI_SUBAGENTS_DEBUG;
+		// stubEnv(name, undefined) deletes the variable; unstubAllEnvs (afterEach) restores it.
+		vi.stubEnv("PI_SUBAGENTS_DEBUG", undefined);
 		debugLog("test context", new Error("boom"));
 		expect(console.warn).not.toHaveBeenCalled();
 	});
@@ -36,7 +37,7 @@ describe("debugLog", () => {
 	});
 
 	it("isDebug() returns false when PI_SUBAGENTS_DEBUG is unset", () => {
-		delete process.env.PI_SUBAGENTS_DEBUG;
+		vi.stubEnv("PI_SUBAGENTS_DEBUG", undefined);
 		expect(isDebug()).toBe(false);
 	});
 });

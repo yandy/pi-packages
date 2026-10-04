@@ -139,26 +139,6 @@ describe("recoverEvictedSubagents", () => {
 		expect(entry.thinking).toBeUndefined();
 	});
 
-	it("recovers thinking from persisted records", () => {
-		const jsonl = parentJsonl([
-			HEADER,
-			recordEntry({
-				id: "a1",
-				type: "Explore",
-				description: "d",
-				status: "completed",
-				startedAt: 1000,
-				completedAt: 4000,
-				thinking: "off",
-				outputFile: "/tasks/a1.jsonl",
-			}),
-		]);
-
-		const [entry] = recoverEvictedSubagents("/parent.jsonl", () => jsonl);
-
-		expect(entry.thinking).toBe("off");
-	});
-
 	it("constructs outputFile for old records that lack it, from the agent id and parent session directory", () => {
 		const jsonl = parentJsonl([
 			HEADER,

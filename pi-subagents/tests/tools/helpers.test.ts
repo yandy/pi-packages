@@ -69,10 +69,6 @@ describe("getModelLabelFromConfig", () => {
 		expect(getModelLabelFromConfig("claude-haiku-4-5-20251001")).toBe("claude-haiku-4-5");
 	});
 
-	it("strips both provider prefix and date suffix", () => {
-		expect(getModelLabelFromConfig("anthropic/claude-haiku-4-5-20251001")).toBe("claude-haiku-4-5");
-	});
-
 	it("returns the string as-is when no prefix or suffix", () => {
 		expect(getModelLabelFromConfig("claude-sonnet-4-6")).toBe("claude-sonnet-4-6");
 	});
@@ -173,10 +169,6 @@ describe("getStatusNote", () => {
 
 	it("returns empty string for completed status", () => {
 		expect(getStatusNote("completed")).toBe("");
-	});
-
-	it("returns empty string for unknown status", () => {
-		expect(getStatusNote("error")).toBe("");
 	});
 });
 

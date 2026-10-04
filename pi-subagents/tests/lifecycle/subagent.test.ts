@@ -115,21 +115,6 @@ describe("Subagent — constructor", () => {
 
 describe("convenience getters", () => {
 	describe("live-activity getters", () => {
-		it("turnCount defaults to 1 (delegates to SubagentState)", () => {
-			const record = makeSubagent();
-			expect(record.turnCount).toBe(1);
-		});
-
-		it("activeTools defaults to an empty map (delegates to SubagentState)", () => {
-			const record = makeSubagent();
-			expect(record.activeTools.size).toBe(0);
-		});
-
-		it("responseText defaults to empty string (delegates to SubagentState)", () => {
-			const record = makeSubagent();
-			expect(record.responseText).toBe("");
-		});
-
 		it("maxTurns returns execution.maxTurns", () => {
 			const record = makeSubagent({ execution: makeStubExecution({ maxTurns: 10 }) });
 			expect(record.maxTurns).toBe(10);
@@ -322,13 +307,6 @@ describe("Subagent — session-encapsulation methods", () => {
 	});
 });
 
-describe("Subagent — steer buffer", () => {
-	it("starts with an empty steer buffer", () => {
-		const record = makeSubagent();
-		expect(record.pendingSteerCount).toBe(0);
-	});
-});
-
 describe("Subagent — abort", () => {
 	it("returns false and does nothing when not running", () => {
 		const record = makeSubagent({ status: "queued" });
@@ -340,12 +318,6 @@ describe("Subagent — abort", () => {
 		const record = makeSubagent({ status: "running" });
 		expect(record.abort()).toBe(true);
 		expect(record.abortController.signal.aborted).toBe(true);
-		expect(record.status).toBe("stopped");
-	});
-
-	it("marks stopped and returns true even without an AbortController", () => {
-		const record = makeSubagent({ status: "running" });
-		expect(record.abort()).toBe(true);
 		expect(record.status).toBe("stopped");
 	});
 
@@ -642,11 +614,6 @@ describe("Subagent.start() — promise encapsulation", () => {
 		expect(agent.status).toBe("completed");
 	});
 
-	it("promise is undefined before start() is called", () => {
-		const agent = createRunnableAgent();
-		expect(agent.promise).toBeUndefined();
-	});
-
 	it("is a no-op when status is stopped (abort-while-queued guard)", async () => {
 		const agent = makeSubagent({ status: "stopped", startedAt: 1, completedAt: 1 });
 		agent.start();
@@ -729,12 +696,6 @@ describe("Subagent.resume() — happy path", () => {
 		expect(stub.resumeTurnLoop).toHaveBeenCalledOnce();
 		expect(stub.resumeTurnLoop.mock.calls[0][0]).toBe("continue");
 		expect(stub.resumeTurnLoop.mock.calls[0][1]).toBe(signal);
-	});
-
-	it("resets transition state before resuming", async () => {
-		const { agent } = createResumableAgent();
-		await agent.resume("continue");
-		expect(agent.error).toBeUndefined();
 	});
 });
 

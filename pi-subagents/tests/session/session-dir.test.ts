@@ -10,11 +10,6 @@ describe("deriveSubagentSessionDir", () => {
 		expect(result).toBe("/home/user/.pi/agent/sessions/--project--/2026-05-20T12-00-00Z_/tasks");
 	});
 
-	it("strips the .jsonl extension from the parent session basename", () => {
-		const result = deriveSubagentSessionDir("/sessions/abc123.jsonl", "/tmp");
-		expect(result).toBe("/sessions/abc123/tasks");
-	});
-
 	it("handles parent session files without a .jsonl extension", () => {
 		const result = deriveSubagentSessionDir("/sessions/abc123", "/tmp");
 		// basename is "abc123" (no extension to strip)

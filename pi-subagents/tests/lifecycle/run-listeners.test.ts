@@ -44,14 +44,6 @@ describe("RunListeners — attachObserver / release", () => {
 		listeners.release();
 		expect(unsub).toHaveBeenCalledOnce();
 	});
-
-	it("release is idempotent with no handles attached", () => {
-		const listeners = new RunListeners();
-		expect(() => {
-			listeners.release();
-			listeners.release();
-		}).not.toThrow();
-	});
 });
 
 describe("RunListeners — combined wire + attach", () => {

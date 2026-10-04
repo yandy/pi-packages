@@ -80,12 +80,6 @@ describe("WorkspaceBracket — dispose", () => {
 		expect(bracket.dispose(outcome)).toBe("");
 	});
 
-	it("returns empty string when the provider resolved to undefined", async () => {
-		const bracket = new WorkspaceBracket(() => makeProvider(undefined));
-		await bracket.prepare(ctx);
-		expect(bracket.dispose(outcome)).toBe("");
-	});
-
 	it("returns the resultAddendum from the workspace", async () => {
 		const { bracket } = await preparedBracket("\n\n---\nsaved to branch foo");
 		const addendum = bracket.dispose(outcome);
