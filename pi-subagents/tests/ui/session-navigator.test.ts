@@ -60,6 +60,45 @@ function makeOverlay(
 	});
 }
 
+/** Scroll keys as the TUI delivers them (pi-tui's key sequence table). */
+const KEYS = {
+	up: "\x1b[A",
+	down: "\x1b[B",
+	pageUp: "\x1b[5~",
+	pageDown: "\x1b[6~",
+	home: "\x1b[H",
+	end: "\x1b[F",
+} as const;
+
+/** Comfortably past the overlay's 120 ms sync throttle. */
+const THROTTLE_FLUSH_MS = 500;
+
+/** A transcript long enough to overflow the mock overlay's content viewport. */
+function longTranscript(): string {
+	return Array.from({ length: 40 }, (_, i) => `line-${i}`).join("\n\n");
+}
+
+/** A live source whose transcript can grow and notify, like a streaming agent. */
+function growableSource(initial: string) {
+	let messages = [{ role: "user", content: initial }] as unknown as SessionMessage[];
+	let listener: (() => void) | undefined;
+	return {
+		source: fakeSource({
+			getMessages: () => messages,
+			subscribe: (onChange) => {
+				listener = onChange;
+				return () => {
+					listener = undefined;
+				};
+			},
+		}),
+		append(content: string) {
+			messages = [...messages, { role: "user", content } as unknown as SessionMessage];
+			listener?.();
+		},
+	};
+}
+
 describe("TranscriptOverlay", () => {
 	it("renders the transcript content", () => {
 		const lines = makeOverlay().render(80);
@@ -343,6 +382,91 @@ describe("TranscriptOverlay", () => {
 		vi.mocked(tui.requestRender).mockClear();
 		overlay.handleInput("\x1b[B"); // down arrow
 		expect(tui.requestRender).toHaveBeenCalled();
+	});
+
+	// The overlay follows the running agent's tail until the operator scrolls into
+	// history. Upward keys pause following unconditionally: the line count a
+	// keypress sees can lag the source by one throttle window, so a "was I at the
+	// bottom?" test there would let the next render snap the viewport back down.
+	// Downward keys pause only when they leave the viewport above the bottom, so
+	// scrolling back down — or pressing one while already there — resumes the tail.
+	describe("follow-the-tail (live auto-scroll)", () => {
+		/** Overlay over a transcript that can grow; fake timers must be installed by the caller. */
+		function liveOverlay(initial: string = longTranscript()) {
+			const { source, append } = growableSource(initial);
+			return {
+				overlay: makeOverlay({ source }),
+				/** Append a message and let the throttled sync land in the line cache. */
+				appendAndSync(content: string) {
+					append(content);
+					vi.advanceTimersByTime(THROTTLE_FLUSH_MS);
+				},
+			};
+		}
+
+		it.each([
+			{ key: "down arrow", sequence: KEYS.down },
+			{ key: "page down", sequence: KEYS.pageDown },
+		])("keeps following when $key is pressed at the bottom", ({ sequence }) => {
+			vi.useFakeTimers();
+			const { overlay, appendAndSync } = liveOverlay();
+			overlay.render(80); // pins the viewport to the bottom
+			overlay.handleInput(sequence);
+			appendAndSync("TAIL-MARKER");
+			expect(overlay.render(80).join("\n")).toContain("TAIL-MARKER");
+			vi.useRealTimers();
+		});
+
+		it.each([
+			{ key: "down arrow", sequence: KEYS.down },
+			{ key: "page down", sequence: KEYS.pageDown },
+		])("resumes following when $key brings the viewport back to the bottom", ({ sequence }) => {
+			vi.useFakeTimers();
+			const { overlay, appendAndSync } = liveOverlay();
+			overlay.render(80);
+			overlay.handleInput(KEYS.up); // into history → paused
+			overlay.handleInput(sequence); // back to the bottom → following
+			appendAndSync("TAIL-MARKER");
+			expect(overlay.render(80).join("\n")).toContain("TAIL-MARKER");
+			vi.useRealTimers();
+		});
+
+		it.each([
+			{ key: "up arrow", sequence: KEYS.up },
+			{ key: "page up", sequence: KEYS.pageUp },
+			{ key: "home", sequence: KEYS.home },
+		])("pauses following when $key is pressed", ({ sequence }) => {
+			vi.useFakeTimers();
+			const { overlay, appendAndSync } = liveOverlay();
+			overlay.render(80);
+			overlay.handleInput(sequence);
+			appendAndSync("TAIL-MARKER");
+			expect(overlay.render(80).join("\n")).not.toContain("TAIL-MARKER");
+			vi.useRealTimers();
+		});
+
+		it("resumes following when end is pressed", () => {
+			vi.useFakeTimers();
+			const { overlay, appendAndSync } = liveOverlay();
+			overlay.render(80);
+			overlay.handleInput(KEYS.up);
+			overlay.handleInput(KEYS.end);
+			appendAndSync("TAIL-MARKER");
+			expect(overlay.render(80).join("\n")).toContain("TAIL-MARKER");
+			vi.useRealTimers();
+		});
+
+		it("stays paused after an upward key when the transcript outgrows the viewport", () => {
+			vi.useFakeTimers();
+			const { overlay, appendAndSync } = liveOverlay("line-0");
+			overlay.render(80); // fits the viewport: nothing to scroll yet
+			overlay.handleInput(KEYS.up);
+			appendAndSync(`${longTranscript()}\n\nTAIL-MARKER`);
+			const out = overlay.render(80).join("\n");
+			expect(out).toContain("line-0");
+			expect(out).not.toContain("TAIL-MARKER");
+			vi.useRealTimers();
+		});
 	});
 
 	it("does not call requestRender when 'q' is pressed (component closes)", () => {

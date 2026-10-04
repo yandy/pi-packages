@@ -7,7 +7,7 @@
 | 包 | 描述 | npm |
 |---|---|---|
 | [pi-ask-user](./pi-ask-user/README.zh.md) | 交互式 ask_user 工具，支持可搜索分栏 UI、多选和自由文本 | `@yandy0725/pi-ask-user` |
-| [pi-coding-tools](./pi-coding-tools/README.zh.md) | AST/LSP 代码智能工具（ast_grep_search/lsp_symbols/lsp_hover/lsp_navigate）+ ls/find/grep | `@yandy0725/pi-coding-tools` |
+| [pi-coding-tools](./pi-coding-tools/README.zh.md) | AST/LSP 代码智能工具（ast_grep_search/ast_grep_replace/lsp_symbols/lsp_hover/lsp_navigate） | `@yandy0725/pi-coding-tools` |
 | [pi-container-sandbox](./pi-container-sandbox/README.zh.md) | Docker 沙箱扩展 | `@yandy0725/pi-container-sandbox` |
 | [pi-dingtalk](./pi-dingtalk/README.zh.md) | 钉钉集成（AI 表格、日历、审批、文档等） | `@yandy0725/pi-dingtalk` |
 | [pi-lark](./pi-lark/README.zh.md) | Lark/飞书集成 | `@yandy0725/pi-lark` |

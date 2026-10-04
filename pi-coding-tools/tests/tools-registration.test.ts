@@ -202,9 +202,6 @@ import type { CodingToolsConfig } from "../src/config";
 import { createLspTools } from "../src/tools/lsp-tools";
 
 const baseTrue: CodingToolsConfig = {
-	ls: true,
-	find: true,
-	grep: true,
 	ast_grep_search: true,
 	ast_grep_replace: true,
 	lsp_symbols: true,

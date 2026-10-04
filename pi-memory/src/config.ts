@@ -47,7 +47,6 @@ export interface ExtractMemoriesConfig {
 }
 
 export interface MemoryConfig {
-	enabled: boolean;
 	/** Shared defaults for model and sessionPersistence. Per-task configs override. */
 	defaults?: DefaultsConfig;
 	memoryDir: string;
@@ -56,12 +55,13 @@ export interface MemoryConfig {
 	/** Write capacity: max bytes of serialized MEMORY.md index. */
 	memIndexMaxBytes: number;
 	/**
-	 * 注入截断：`memory_index` section 最多带多少**行**索引。
-	 * 与 `memIndexMaxLines` **读写同口径**（D3）：v2 一行 = 一条 entry，注入预算若小于写入
-	 * 上限，写满的记忆就有一部分永远看不见。
+	 * 注入截断：`memory_index` section 最多带多少**行**索引（默认 50）。
+	 * 窗口取索引**最新**的一段（索引是纯时间序，见 `truncateIndexForInjection`），所以被丢掉的
+	 * 永远是**最旧**的记忆。写入口径（`memIndexMaxLines`）刻意**不随**它收紧：索引里能留更多条目，
+	 * 超窗口的部分只靠 auto-surfacing / `memory` 工具检索，不进 system prompt。
 	 */
 	memIndexInjectMaxLines: number;
-	/** 注入截断：`memory_index` section 最多带多少**字节**（与 `memIndexMaxBytes` 同口径，D3）。 */
+	/** 注入截断：`memory_index` section 最多带多少**字节**（默认 16384 ≈ 50 条中文索引行的实测上界）。 */
 	memIndexInjectMaxBytes: number;
 	/**
 	 * 两级锁的参数（spec §5.2）。结构与 `StoreConfig["lock"]` 逐字一致，因此可以原样传给
@@ -86,16 +86,16 @@ export interface MemoryConfig {
 }
 
 export const DEFAULT_CONFIG: MemoryConfig = {
-	enabled: true,
 	// headless 子会话默认只在内存里跑：extract / dream / 侧查询都不该往用户的 sessions 目录里落盘。
 	// **没有模型默认值**：model 必须由用户显式配置（defaults.model 或 per-task），否则 session_start 报错。
 	defaults: { sessionPersistence: { enabled: false } },
 	memoryDir: join(homedir(), CONFIG_DIR_NAME, "memory"),
 	memIndexMaxLines: 200,
 	memIndexMaxBytes: 25600,
-	// 读写同口径（D3）：200 行 = 200 条记忆，写满时注入也看得到全部。
-	memIndexInjectMaxLines: 200,
-	memIndexInjectMaxBytes: 25600,
+	// 注入口径独立于写入口径（v2.3.0 起）：窗口只取索引**最新**的 50 行。
+	// 16384 B ≈ 50 条中文索引行的实测上界（本机样本 221–321 B/行），保证「行数」才是真正生效的上限。
+	memIndexInjectMaxLines: 50,
+	memIndexInjectMaxBytes: 16384,
 	lock: { timeoutMs: 5000, snapshotKeep: 5 },
 	dream: { nudgeAfterSessions: 5, nudgeAfterHours: 24, thinkLevel: "high" },
 	sessionSearch: { maxSessions: 10, maxMatches: 5 },
@@ -119,17 +119,15 @@ export const DEFAULT_CONFIG: MemoryConfig = {
 /** 需要显式模型的子任务。顺序固定：dream → extractMemories → autoSurfacing（校验信息按此顺序输出）。 */
 export type ModelTask = "dream" | "extractMemories" | "autoSurfacing";
 
-/** 某任务的模型值：per-task 优先，其次共享的 defaults.model。 */
-function taskModel(cfg: MemoryConfig, task: ModelTask): string | undefined {
-	return cfg[task].model ?? cfg.defaults?.model;
+/** 某任务的模型值：per-task 优先，其次共享的 defaults.model。`/memory` 的模块状态行也用它。 */
+export function taskModel(cfg: MemoryConfig, task: ModelTask): string | undefined {
+	// `?.`：`deepMerge` 把用户写的 `"dream": null` 原样带进来 —— 那时应该报「没有模型」，
+	// 而不是抛 TypeError，把启动校验变成一句看不懂的初始化失败。
+	return cfg[task]?.model ?? cfg.defaults?.model;
 }
 
-/**
- * 会执行的任务及其模型值。`enabled: false` 的会话不执行任何一个任务 —— 包括 dream，
- * 因为 `/dream` 命令与 nudge 都被 `config.enabled` 挡住。
- */
+/** 会执行的任务及其模型值。dream 恒在执行集合内（没有包级开关可以让它不跑）。 */
 export function requiredModels(cfg: MemoryConfig): Array<{ task: ModelTask; value: string | undefined }> {
-	if (!cfg.enabled) return [];
 	const out: Array<{ task: ModelTask; value: string | undefined }> = [
 		{ task: "dream", value: taskModel(cfg, "dream") },
 	];
@@ -164,9 +162,12 @@ export function requiredModel(cfg: MemoryConfig, task: ModelTask): string {
 	return value;
 }
 
-function expandTilde(p: string): string {
+function expandTilde(p: string, platform: NodeJS.Platform = process.platform): string {
 	if (p === "~") return homedir();
 	if (p.startsWith("~/")) return join(homedir(), p.slice(2));
+	// `~\` 只在 Windows 上展开：POSIX 上 `~\foo` 是以 `~` 开头的合法文件名，
+	// 改写它会破坏用户真实的路径（spec Ruling 4）。
+	if (platform === "win32" && p.startsWith("~\\")) return join(homedir(), p.slice(2));
 	return p;
 }
 
@@ -202,6 +203,8 @@ export interface LoadConfigContext {
 	isProjectTrusted(): boolean;
 	_globalDir?: string;
 	_configDirName?: string;
+	/** 测试注入缝：命名/展开规则跟随的平台。默认 `process.platform`。 */
+	_platform?: NodeJS.Platform;
 }
 
 export async function loadConfig(ctx: LoadConfigContext): Promise<MemoryConfig> {
@@ -217,6 +220,6 @@ export async function loadConfig(ctx: LoadConfigContext): Promise<MemoryConfig> 
 		cfg = deepMerge(cfg, readJsonSafe(projectFile));
 	}
 
-	cfg.memoryDir = expandTilde(cfg.memoryDir);
+	cfg.memoryDir = expandTilde(cfg.memoryDir, ctx._platform ?? process.platform);
 	return cfg;
 }

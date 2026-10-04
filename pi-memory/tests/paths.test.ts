@@ -1,25 +1,32 @@
 import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve, win32 } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	assertInsideRoot,
 	normalizeRemoteUrl,
 	projectDirName,
 	projectIdentity,
 	resolveMemoryDir,
 } from "../src/paths";
+import { isReservedWindowsName } from "../src/windows-names";
 
 const execFileP = promisify(execFile);
 
 let dir: string;
+let emptyGitConfig: string;
 
 beforeEach(async () => {
 	// Keep git hermetic: never read the machine's global or system config.
-	vi.stubEnv("GIT_CONFIG_GLOBAL", "/dev/null");
-	vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
+	// 用临时空文件而不是 `/dev/null`：Windows 上它会变成 `C:\dev\null`（不存在也会被 git 忽略，
+	// 但语义依赖平台；临时文件在两个平台上都一样明确）。
 	dir = await mkdtemp(join(tmpdir(), "pi-memory-paths-"));
+	emptyGitConfig = join(dir, "gitconfig-empty");
+	await writeFile(emptyGitConfig, "", "utf8");
+	vi.stubEnv("GIT_CONFIG_GLOBAL", emptyGitConfig);
+	vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
 });
 
 afterEach(async () => {
@@ -41,13 +48,16 @@ describe("resolveMemoryDir", () => {
 	it("joins memoryDir with the git kind and readable dir name", async () => {
 		await initRepo(dir, "https://github.com/yandy/pi-packages.git");
 		expect(await resolveMemoryDir({ memoryDir: "/mem" }, dir)).toBe(
-			join("/mem", "git", "github.com__yandy__pi-packages"),
+			join(resolve("/mem"), "git", "github.com__yandy__pi-packages"),
 		);
 	});
 
 	it("joins memoryDir with the local kind and readable dir name", async () => {
-		const expected = `/mem/local/${resolve(dir).slice(1).split("/").join("__")}`;
-		expect(await resolveMemoryDir({ memoryDir: "/mem" }, dir)).toBe(expected);
+		// memoryDir 与 key 都要先经 resolve()/projectDirName()：win32 上 `resolve("/mem")` 是
+		// `C:\mem`，手写的 `/mem/local/...` 模板不再等于实现返回的宿主机路径。
+		expect(await resolveMemoryDir({ memoryDir: "/mem" }, dir)).toBe(
+			join(resolve("/mem"), "local", projectDirName(resolve(dir))),
+		);
 	});
 
 	it("maps two clones of the same remote to one memory directory", async () => {
@@ -57,8 +67,9 @@ describe("resolveMemoryDir", () => {
 		await mkdir(cloneB, { recursive: true });
 		await initRepo(cloneA, "https://github.com/yandy/pi-packages.git");
 		await initRepo(cloneB, "git@github.com:yandy/pi-packages.git");
-		expect(await resolveMemoryDir({ memoryDir: "/mem" }, cloneA)).toBe("/mem/git/github.com__yandy__pi-packages");
-		expect(await resolveMemoryDir({ memoryDir: "/mem" }, cloneB)).toBe("/mem/git/github.com__yandy__pi-packages");
+		const expected = join(resolve("/mem"), "git", "github.com__yandy__pi-packages");
+		expect(await resolveMemoryDir({ memoryDir: "/mem" }, cloneA)).toBe(expected);
+		expect(await resolveMemoryDir({ memoryDir: "/mem" }, cloneB)).toBe(expected);
 	});
 
 	it("maps a linked worktree to the same memory directory as the main checkout", async () => {
@@ -68,13 +79,15 @@ describe("resolveMemoryDir", () => {
 		await git(["commit", "--allow-empty", "-q", "-m", "init"], dir);
 		const worktree = join(dir, "wt");
 		await git(["worktree", "add", "-q", "-b", "wt-branch", worktree], dir);
-		expect(await resolveMemoryDir({ memoryDir: "/mem" }, worktree)).toBe("/mem/git/github.com__yandy__pi-packages");
+		expect(await resolveMemoryDir({ memoryDir: "/mem" }, worktree)).toBe(
+			join(resolve("/mem"), "git", "github.com__yandy__pi-packages"),
+		);
 	});
 
 	it("honours a custom memoryDir root", async () => {
 		await initRepo(dir, "git@github.com:yandy/pi-packages.git");
 		expect(await resolveMemoryDir({ memoryDir: "/custom/root" }, dir)).toBe(
-			join("/custom/root", "git", "github.com__yandy__pi-packages"),
+			join(resolve("/custom/root"), "git", "github.com__yandy__pi-packages"),
 		);
 	});
 });
@@ -97,7 +110,9 @@ describe("projectDirName", () => {
 	});
 
 	it("keeps backslashes literal (POSIX naming)", () => {
-		expect(projectDirName("/home/a\\b")).toBe("home__a\\b");
+		// 显式传平台：命名规则跟随平台，POSIX 上反斜杠是普通字符（win32 上它是分隔符，
+		// 由下面的 win32 用例覆盖）。
+		expect(projectDirName("/home/a\\b", { platform: "linux" })).toBe("home__a\\b");
 	});
 
 	it("drops empty, . and .. segments", () => {
@@ -145,6 +160,72 @@ describe("projectDirName", () => {
 		const flags = projectDirName(`/home/yandy/${"🇯🇵".repeat(60)}`);
 		const regionalIndicators = flags.match(/[\u{1F1E6}-\u{1F1FF}]/gu) ?? [];
 		expect(regionalIndicators.length % 2).toBe(0);
+	});
+
+	it("splits on backslashes on win32 so a drive path stays one component", () => {
+		expect(projectDirName("C:\\Users\\yandy\\workspace\\proj", { platform: "win32" })).toBe(
+			"C_3a__Users__yandy__workspace__proj",
+		);
+	});
+
+	it("keeps the POSIX result byte-identical when the platform is posix", () => {
+		// D2：win32 专属分支不得影响 POSIX 输出
+		expect(projectDirName("/home/a\\b", { platform: "linux" })).toBe("home__a\\b");
+		expect(projectDirName("C:\\Users\\yandy", { platform: "linux" })).toBe("C_3a\\Users\\yandy");
+	});
+
+	it("neutralises UNC prefixes and mixed separators on win32", () => {
+		expect(projectDirName("\\\\server\\share\\proj", { platform: "win32" })).toBe("server__share__proj");
+		expect(projectDirName("C:/Users\\yandy/proj", { platform: "win32" })).toBe("C_3a__Users__yandy__proj");
+	});
+
+	it("drops dot segments on win32 so a crafted remote cannot climb out", () => {
+		expect(projectDirName("host/a\\..\\..\\..\\etc", { platform: "win32" })).toBe("host__a__etc");
+	});
+
+	it("escapes a trailing dot or space on win32 only", () => {
+		expect(projectDirName("C:\\Users\\yandy\\proj.", { platform: "win32" })).toBe("C_3a__Users__yandy__proj_2e");
+		expect(projectDirName("C:\\Users\\yandy\\proj ", { platform: "win32" })).toBe("C_3a__Users__yandy__proj_20");
+		expect(projectDirName("/home/yandy/proj.", { platform: "linux" })).toBe("home__yandy__proj.");
+	});
+
+	it("prefixes a reserved device name even when it is the first label of the joined name", () => {
+		// Windows 只把「第一个 . 之前的部分」当设备：con.md__repo 仍然命中 CON
+		expect(projectDirName("con.md/repo", { platform: "win32" })).toBe("_con.md__repo");
+		expect(projectDirName("nul", { platform: "win32" })).toBe("_nul");
+	});
+
+	it("keeps a device-looking inner segment untouched when the final name is safe", () => {
+		expect(projectDirName("C:\\con\\proj", { platform: "win32" })).toBe("C_3a__con__proj");
+	});
+
+	it("always yields a single, Windows-legal component for hostile keys", () => {
+		const keys = [
+			"C:\\Users\\yandy\\proj",
+			"\\\\server\\share",
+			"host/a\\..\\..\\..\\etc",
+			"con.md/repo",
+			"nul",
+			"aux.",
+			"C:\\",
+			"..\\..\\..\\",
+			`C:\\${"x".repeat(200)}`,
+			"C:\\Users\\yandy\\proj ",
+			"host\\\\double\\sep",
+			"C:/mixed\\separators/final",
+		];
+		for (const key of keys) {
+			const name = projectDirName(key, { platform: "win32" });
+			expect(name.includes("/"), `${key} -> ${name}`).toBe(false);
+			expect(name.includes("\\"), `${key} -> ${name}`).toBe(false);
+			expect(/[. ]$/.test(name), `${key} -> ${name}`).toBe(false);
+			expect(isReservedWindowsName(name), `${key} -> ${name}`).toBe(false);
+			// 在 win32 语义下 join 进 memoryDir 后仍在 memoryDir 之内
+			const base = "C:\\mem";
+			const dir = win32.resolve(win32.join(base, "local", name));
+			const rel = win32.relative(base, dir);
+			expect(rel.startsWith("..") || isAbsolute(rel), `${key} -> ${dir}`).toBe(false);
+		}
 	});
 });
 
@@ -198,6 +279,24 @@ describe("normalizeRemoteUrl", () => {
 		expect(normalizeRemoteUrl("/srv/repos/bar")).toBeNull();
 		expect(normalizeRemoteUrl("../repo")).toBeNull();
 		expect(normalizeRemoteUrl("")).toBeNull();
+	});
+
+	it("treats a Windows drive-letter remote as a local path on win32, and as scp on POSIX", () => {
+		// win32：Git for Windows 把 `Z:\some.git` 当本地路径（用户可以 clone 它），不应当成 scp 的 host `z`
+		expect(normalizeRemoteUrl("Z:\\some.git", "win32")).toBeNull();
+		expect(normalizeRemoteUrl("Z:/some.git", "win32")).toBeNull();
+		expect(normalizeRemoteUrl("C:\\repos\\foo.git", "win32")).toBeNull();
+		// POSIX：同一串是合法的 scp 写法（host `C` / `Z`），与 git 一致 —— 行为不变
+		expect(normalizeRemoteUrl("C:/repos/foo.git", "linux")).toBe("c/repos/foo");
+		expect(normalizeRemoteUrl("Z:\\some.git", "linux")).toBe("z/\\some");
+	});
+
+	it("keeps UNC, relative and file:// remotes out of the git kind on every platform", () => {
+		for (const platform of ["win32", "linux"] as const) {
+			expect(normalizeRemoteUrl("\\\\server\\share\\repo.git", platform), platform).toBeNull();
+			expect(normalizeRemoteUrl("..\\other.git", platform), platform).toBeNull();
+			expect(normalizeRemoteUrl("file:///srv/repo.git", platform), platform).toBeNull();
+		}
 	});
 	it("rejects URLs without a repository path", () => {
 		expect(normalizeRemoteUrl("https://github.com/")).toBeNull();
@@ -303,10 +402,69 @@ describe("projectIdentity", () => {
 		expect(await projectIdentity(dir)).toEqual({ kind: "local", key: resolve(toplevel) });
 	});
 
+	it("falls back to local for a bare repository with a remote", async () => {
+		// 裸仓库没有工作树：`git rev-parse --show-toplevel` 以 `fatal: this operation must be run in a work tree`
+		// （exit 128）退出 → `gitToplevel` 返回 null → 落回 local/<绝对路径>，不会因 remote 变成 git/<remote 身份>。
+		const bare = join(dir, "bare-with-remote.git");
+		await git(["init", "-q", "--bare", bare], dir);
+		await git(["remote", "add", "origin", "https://github.com/yandy/pi-packages.git"], bare);
+		expect(await projectIdentity(bare)).toEqual({ kind: "local", key: resolve(bare) });
+	});
+
+	it("falls back to local for a bare repository without a remote", async () => {
+		const bare = join(dir, "bare.git");
+		await git(["init", "-q", "--bare", bare], dir);
+		expect(await projectIdentity(bare)).toEqual({ kind: "local", key: resolve(bare) });
+	});
+
+	it("falls back to local when the cwd is inside .git", async () => {
+		// `.git` 内部同样没有工作树（`--show-toplevel` 同样 exit 128 → null），但 `git config` 仍能读到
+		// 仓库的 remote。必须保留既有的 local/<绝对路径> 身份，而不是因 remote 变成 git/<remote 身份>。
+		await initRepo(dir, "https://github.com/yandy/pi-packages.git");
+		expect(await projectIdentity(join(dir, ".git"))).toEqual({ kind: "local", key: resolve(join(dir, ".git")) });
+	});
+
+	it("falls back to local for a drive-letter remote on win32 (git treats it as a local path)", async () => {
+		await initRepo(dir, "Z:\\some.git");
+		// win32：本地路径 → local/<绝对路径>（而不是 git/z__some）
+		expect(await projectIdentity(dir, "win32")).toEqual({ kind: "local", key: resolve(dir) });
+		// POSIX：同一串仍是 scp 形式 → git 身份（与 git 自身行为一致，行为不变）
+		expect(await projectIdentity(dir, "linux")).toEqual({ kind: "git", key: "z/\\some" });
+	});
+
 	it("resolves the same identity from a subdirectory", async () => {
 		await initRepo(dir, "https://github.com/yandy/pi-packages.git");
 		const sub = join(dir, "packages", "inner");
 		await mkdir(sub, { recursive: true });
 		expect(await projectIdentity(sub)).toEqual({ kind: "git", key: "github.com/yandy/pi-packages" });
+	});
+});
+
+describe("assertInsideRoot", () => {
+	it("accepts a directory below the root", () => {
+		expect(() => assertInsideRoot("/mem", join("/mem", "git", "github.com__o__r"))).not.toThrow();
+	});
+
+	it("rejects a directory outside the root or the root itself", () => {
+		expect(() => assertInsideRoot("/mem", "/etc")).toThrow(/escapes/);
+		expect(() => assertInsideRoot("/mem", join("/mem", "..", "etc"))).toThrow(/escapes/);
+		expect(() => assertInsideRoot("/mem", "/mem")).toThrow(/escapes/);
+	});
+
+	it("accepts the pre-fix multi-level name but rejects one that climbs out of the root", () => {
+		// 旧实现在 win32 上把 `C:\Users\yandy` 派生成 `C_3a\Users\yandy`，join 之后变成多级路径
+		const base = "C:\\mem";
+		const escaped = win32.resolve(win32.join(base, "local", "C_3a\\Users\\yandy"));
+		expect(escaped.startsWith(win32.join(base, "local"))).toBe(true); // 只是多级，没逃出
+		expect(() => assertInsideRoot(base, escaped, "win32")).not.toThrow();
+
+		// 带 `..` 的畸形 key 才会真的逃出：这就是断言要拦住的形态
+		const climbing = win32.resolve(win32.join(base, "local", "host__a\\..\\..\\..\\etc"));
+		expect(() => assertInsideRoot(base, climbing, "win32")).toThrow(/escapes/);
+	});
+
+	it("compares case-insensitively on win32", () => {
+		expect(() => assertInsideRoot("C:\\mem", "C:\\MEM\\local\\x", "win32")).not.toThrow();
+		expect(() => assertInsideRoot("/mem", "/MEM/local/x", "linux")).toThrow(/escapes/);
 	});
 });

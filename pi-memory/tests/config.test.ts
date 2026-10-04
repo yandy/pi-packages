@@ -2,16 +2,15 @@ import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { DEFAULT_CONFIG, loadConfig, modelConfigErrors, requiredModel, requiredModels, type MemoryConfig } from "../src/config";
+import { DEFAULT_CONFIG, loadConfig, modelConfigErrors, requiredModel, requiredModels, taskModel, type MemoryConfig } from "../src/config";
 
 describe("DEFAULT_CONFIG", () => {
 	it("has expected defaults", () => {
-		expect(DEFAULT_CONFIG.enabled).toBe(true);
 		expect(DEFAULT_CONFIG.memIndexMaxLines).toBe(200);
 		expect(DEFAULT_CONFIG.memIndexMaxBytes).toBe(25600);
-		// D3：读写同口径
-		expect(DEFAULT_CONFIG.memIndexInjectMaxLines).toBe(200);
-		expect(DEFAULT_CONFIG.memIndexInjectMaxBytes).toBe(25600);
+		// 注入口径**独立于**写入口径（v2.3.0 起）：窗口只取索引最新的 50 行。
+		expect(DEFAULT_CONFIG.memIndexInjectMaxLines).toBe(50);
+		expect(DEFAULT_CONFIG.memIndexInjectMaxBytes).toBe(16384);
 		expect(DEFAULT_CONFIG.lock).toEqual({ timeoutMs: 5000, snapshotKeep: 5 });
 		// 模型没有默认值：必须由用户显式配置，否则启动即报错（设计 §2.1）
 		expect(DEFAULT_CONFIG.defaults).toEqual({ sessionPersistence: { enabled: false } });
@@ -25,11 +24,12 @@ describe("DEFAULT_CONFIG", () => {
 		expect(DEFAULT_CONFIG.extractMemories.maxAssistantChars).toBe(2000);
 	});
 
-	// D3 的实质：一个 entry 一行索引，注入预算必须与写入上限同量级，
-	// 否则写满 200 条时模型只看得到最旧的一批。
-	it("keeps the injection budget at the same scale as the write capacity (D3)", () => {
-		expect(DEFAULT_CONFIG.memIndexInjectMaxLines).toBe(DEFAULT_CONFIG.memIndexMaxLines);
-		expect(DEFAULT_CONFIG.memIndexInjectMaxBytes).toBe(DEFAULT_CONFIG.memIndexMaxBytes);
+	// v2.3.0 起读写**不再**同口径：注入窗口只取索引最新的 50 行（写入口径保持 200 行 / 25600 B，
+	// 窗口外的旧记忆仍可由 auto-surfacing / memory 工具检索）。这两条断言钉的是「窗口确实比写入
+	// 容量小」这件事本身 —— 任何一边被改回同值都会红。
+	it("keeps the injection window smaller than the write capacity", () => {
+		expect(DEFAULT_CONFIG.memIndexInjectMaxLines).toBeLessThan(DEFAULT_CONFIG.memIndexMaxLines);
+		expect(DEFAULT_CONFIG.memIndexInjectMaxBytes).toBeLessThan(DEFAULT_CONFIG.memIndexMaxBytes);
 	});
 });
 
@@ -47,8 +47,21 @@ describe("loadConfig", () => {
 
 	it("returns defaults when no config files exist", async () => {
 		const cfg = await loadConfig({ cwd: projectDir, isProjectTrusted: () => true, _globalDir: globalDir, _configDirName: ".pi" });
-		expect(cfg.enabled).toBe(true);
 		expect(cfg.memIndexMaxLines).toBe(200);
+	});
+
+	// 本次移除的回归钉子：包级 `enabled` 已不是 schema 的一部分。残留键会随 deepMerge 进入运行时
+	// 对象（与 v1 的 maxTopicBytes 同例），但不得影响任何行为 —— `requiredModels` 仍然列出 dream，
+	// 也就是「写 enabled: false 不再能免掉模型校验」。
+	it("ignores a leftover top-level enabled key", async () => {
+		await writeFile(
+			join(globalDir, "memory.json"),
+			JSON.stringify({ enabled: false, autoSurfacing: { enabled: false }, dream: { model: "test/dream" } }),
+		);
+		const cfg = await loadConfig({ cwd: projectDir, isProjectTrusted: () => true, _globalDir: globalDir, _configDirName: ".pi" });
+
+		expect(requiredModels(cfg)).toEqual([{ task: "dream", value: "test/dream" }]);
+		expect(modelConfigErrors(cfg, () => true)).toEqual([]);
 	});
 	it("merges global config over defaults", async () => {
 		await writeFile(join(globalDir, "memory.json"), JSON.stringify({ memIndexMaxLines: 100 }));
@@ -84,13 +97,38 @@ describe("loadConfig", () => {
 	it("handles malformed JSON gracefully", async () => {
 		await writeFile(join(globalDir, "memory.json"), "this is not json");
 		const cfg = await loadConfig({ cwd: projectDir, isProjectTrusted: () => true, _globalDir: globalDir, _configDirName: ".pi" });
-		expect(cfg.enabled).toBe(true);
 		expect(cfg.memIndexMaxLines).toBe(200);
 	});
 	it("expands bare ~ to homedir", async () => {
 		await writeFile(join(globalDir, "memory.json"), JSON.stringify({ memoryDir: "~" }));
 		const cfg = await loadConfig({ cwd: projectDir, isProjectTrusted: () => true, _globalDir: globalDir, _configDirName: ".pi" });
 		expect(cfg.memoryDir).toBe(homedir());
+	});
+
+	it("expands ~\\ in memoryDir on win32", async () => {
+		await writeFile(join(globalDir, "memory.json"), JSON.stringify({ memoryDir: "~\\.pi\\memory" }));
+		const cfg = await loadConfig({
+			cwd: projectDir,
+			isProjectTrusted: () => true,
+			_globalDir: globalDir,
+			_configDirName: ".pi",
+			_platform: "win32",
+		});
+		// 注入的 `_platform` 只改展开条件，拼接仍走宿主的 join（POSIX 上反斜杠是普通字符，不是分隔符）。
+		// 真 Windows 上本期望与 `join(homedir(), ".pi", "memory")` 逐字节相同。
+		expect(cfg.memoryDir).toBe(join(homedir(), ".pi\\memory"));
+	});
+
+	it("leaves ~\\ alone on POSIX (it is a legal file name there)", async () => {
+		await writeFile(join(globalDir, "memory.json"), JSON.stringify({ memoryDir: "~\\.pi\\memory" }));
+		const cfg = await loadConfig({
+			cwd: projectDir,
+			isProjectTrusted: () => true,
+			_globalDir: globalDir,
+			_configDirName: ".pi",
+			_platform: "linux",
+		});
+		expect(cfg.memoryDir).toBe("~\\.pi\\memory");
 	});
 
 	it("has autoSurfacing defaults", async () => {
@@ -322,12 +360,6 @@ describe("model config", () => {
 			...over,
 		});
 
-	it("requires nothing when memory is disabled", () => {
-		const c = cfg({ enabled: false });
-		expect(requiredModels(c)).toEqual([]);
-		expect(modelConfigErrors(c, () => false)).toEqual([]);
-	});
-
 	it("only requires dream when extract and auto-surfacing are disabled", () => {
 		const c = allOn({
 			dream: { ...DEFAULT_CONFIG.dream, model: "test/dream" },
@@ -372,5 +404,36 @@ describe("model config", () => {
 		expect(() => requiredModel(allOn(), "dream")).toThrow(
 			'no model for dream — set "dream.model" or "defaults.model" in memory.json',
 		);
+	});
+
+	// `deepMerge` 会把用户写的 `"dream": null` 原样带进来：不能抛 TypeError，而是退到 defaults.model。
+	it("degrades a module config set to null to defaults.model instead of throwing", () => {
+		const withDefaults = allOn({
+			defaults: { model: "test/shared", sessionPersistence: { enabled: false } },
+			dream: null as unknown as MemoryConfig["dream"],
+		});
+
+		expect(modelConfigErrors(withDefaults, () => true)).toEqual([]);
+		expect(requiredModel(withDefaults, "dream")).toBe("test/shared");
+
+		// 没有 defaults.model 时给出一条可读错误（而不是让 TypeError 变成「初始化失败」）。
+		const withoutDefaults = cfg({
+			dream: null as unknown as MemoryConfig["dream"],
+			autoSurfacing: { ...DEFAULT_CONFIG.autoSurfacing, enabled: false },
+		});
+
+		expect(modelConfigErrors(withoutDefaults, () => true)).toEqual([
+			'no model for dream — set "dream.model" or "defaults.model" in memory.json',
+		]);
+	});
+});
+
+describe("taskModel", () => {
+	it("prefers the per-task model and falls back to defaults.model", () => {
+		const shared = { ...DEFAULT_CONFIG, defaults: { model: "shared/model" } };
+
+		expect(taskModel(shared, "dream")).toBe("shared/model");
+		expect(taskModel({ ...shared, dream: { ...shared.dream, model: "own/model" } }, "dream")).toBe("own/model");
+		expect(taskModel({ ...shared, defaults: undefined }, "autoSurfacing")).toBeUndefined();
 	});
 });

@@ -8,11 +8,12 @@ import { MemoryStore, type StoreConfig } from "../src/memory-store";
 let dir: string;
 let store: MemoryStore;
 
-const CFG = (memoryDir: string): StoreConfig => ({
+const CFG = (memoryDir: string, platform?: NodeJS.Platform): StoreConfig => ({
 	memoryDir,
 	indexMaxLines: 200,
 	indexMaxBytes: 25600,
 	lock: { timeoutMs: 5000, snapshotKeep: 5 },
+	platform,
 });
 
 function meta(name: string, over: Partial<EntryMeta> = {}): EntryMeta {
@@ -99,6 +100,15 @@ describe("listEntries", () => {
 		await writeEntry("new.md", meta("New"));
 		await store.refreshCache();
 		expect((await store.listEntries()).map((e) => e.file)).toEqual(["new.md"]);
+	});
+
+	it("skips files named after Windows devices on win32 (reading them would hit the device)", async () => {
+		await writeEntry("con.md", meta("Con entry"));
+		await writeEntry("ok.md", meta("Ok entry"));
+		const win = new MemoryStore(CFG(dir, "win32"));
+		expect((await win.listEntries()).map((e) => e.file)).toEqual(["ok.md"]);
+		const posix = new MemoryStore(CFG(dir, "linux"));
+		expect((await posix.listEntries()).map((e) => e.file).sort()).toEqual(["con.md", "ok.md"]);
 	});
 });
 

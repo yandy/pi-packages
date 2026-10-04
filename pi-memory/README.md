@@ -6,6 +6,20 @@ Aligned with Claude Code's auto memory mechanism: **one memory = one file**, a `
 
 > ## ⚠️ Breaking changes
 >
+> **In 2.5.0:**
+>
+> - **Windows directory names changed shape.** `local/<project>` keys now split on `\` as well as `/`, so a Windows project directory is one readable component (`C_3a__Users__you__proj`) instead of a nested tree (`C_3a/Users/you/proj`). Memories stored under the old nested layout are orphaned: run `/memory` inside the project to read the new `Dir:` path, then create that directory if it does not exist and move the old project directory's contents into it (in PowerShell: `New-Item -ItemType Directory -Force "<new dir>"` then `Move-Item "<old project dir>\*" "<new dir>"`); the empty intermediate directories left behind can be ignored. `git/<host>__<owner>__<repo>` names are unchanged on POSIX; on Windows they are unchanged too unless the key's first `.`-delimited label is a reserved device name, or the key contains a backslash, or it ends in a dot or a space — those few names are sanitised now (see [Windows](#windows)). POSIX output is byte-identical to before.
+> - **Entry files whose stem is a Windows reserved device name now get a `_` prefix** (`name: "CON"` → `_CON.md`) on every platform, so the name is safe in a shared `git/` directory. Only newly created files are affected — existing entries keep their file names.
+>
+> **In 2.4.0:**
+>
+> - **The package-level `enabled` switch is gone.** `memory.json` has no top-level `enabled` any more: a leftover key is ignored, and `{"enabled": false}` no longer disables anything — it used to skip model validation too, so a disabled config often had no model configured. Disable the extension the way you disable any pi package — by not loading it — see [Disabling the extension](#disabling-the-extension). `dream` is now a required task in every session.
+> - **`/memory` no longer prints a `Memory: enabled|disabled` line.** The healthy status block is 7 lines starting with `Dir:`, and the old disabled state no longer exists — only *healthy* and *misconfigured* remain. Module switches (`autoSurfacing.enabled`, `extractMemories.enabled`) are unchanged.
+>
+> **In 2.3.0:**
+>
+> - **The injected index window is now the newest 50 lines / 16 KiB.** `memIndexInjectMaxLines` 200 → 50 and `memIndexInjectMaxBytes` 25600 → 16384. The write capacity is unchanged (200 lines / 25600 bytes), so memories older than the newest 50 index lines no longer reach the system prompt — they stay reachable through auto-surfacing and the `memory` tool. Configs that already set `memIndexInjectMax*` are unaffected.
+>
 > **In 2.2.0:**
 >
 > - **`extractMemories.enabled` now defaults to `false`.** Per-turn extraction is opt-in: once enabled, every turn ends with a headless model call. Configs that already set `"extractMemories": { "enabled": true }` are unaffected.
@@ -13,7 +27,7 @@ Aligned with Claude Code's auto memory mechanism: **one memory = one file**, a `
 > **In 2.1.0:**
 >
 > - **Models must be configured explicitly.** There is no shipped default and no parent-model fallback: `defaults.model` (or a per-task `model`) must exist and be resolvable, or `session_start` reports a config error and initialises **nothing**. See [Model configuration](#model-configuration).
-> - **`/memory on` and `/memory off` are gone.** `enabled` is a `memory.json` switch read once at session start — changing it needs a session restart.
+> - **`/memory on` and `/memory off` are gone.** `enabled` is a `memory.json` switch read once at session start — changing it needs a session restart. **That key has since been removed** — it is ignored if present; see [Disabling the extension](#disabling-the-extension).
 > - **Automatic 1.x → 2.0 migration has been removed.** Legacy topic files stay on disk untouched but are **invisible** to the memory system (they fail `parseEntryFile`'s five-field v2 frontmatter check). See [1.x data](#1x-data).
 >
 > **In 2.0.0:**
@@ -33,7 +47,7 @@ Aligned with Claude Code's auto memory mechanism: **one memory = one file**, a `
 - **Extract memories** ⭐ — after each run an async headless agent receives a **structured rendering of the whole conversation** (every user message in full, assistant text and tool calls, tool results with error flags), not just two messages. It writes through the same `memory` primitives, under a whole-round logical lock it never waits for: if a dream is running, that turn is simply skipped. This feature is **off by default** — set `extractMemories.enabled: true` to turn it on.
 - **`/dream`** — a headless consolidation agent (Orient → Gather Signal → Consolidate → Prune & Index) that merges duplicates, resolves contradictions, renames entries and rebuilds the index. It has **no raw file access**: it only gets the seven `memory` actions, holds the logical lock for the whole round, and snapshots the entire directory on entry.
 - **Dream nudge** — after N sessions or N hours a notification suggests `/dream`.
-- **`/memory`** — full status (switch, directory, index capacity, entry count, last dream, lock state including the holder), plus `unlock`.
+- **`/memory`** — full status (directory, index capacity, entry count, last dream, lock state including the holder), plus `unlock`.
 - **Two-level locking** — an in-process logical lock carries the *logical* scope (one primitive call, or a whole dream round); the cross-process `.lock` file is held for **milliseconds only** and is **never reclaimed automatically**. There is no TTL, no heartbeat and no takeover, so mutual exclusion is a hard guarantee; the price is that a lock left behind by a crashed process must be removed by a human (`/memory unlock`).
 - **Snapshots** — every write leaves a rollback point under `.backups/<ts>-<label>/`, keeping the last `lock.snapshotKeep` (directories named `migrate-*` — whole-directory snapshots from an earlier 1.x migration, whose `originals/` subdirectory holds the pre-2.0 topic files — are never pruned). `/dream` is the exception: it snapshots the whole directory **once on entry**, and the primitives inside that round skip their per-file snapshots (one round, one rollback point).
 - **Session search** — `memory search scope=sessions` queries past conversation history.
@@ -97,7 +111,7 @@ File names are derived from `name` (unsafe characters replaced, 100-byte cap, `-
 - [Test command](Test-command.md) — run npm test, not npm run test
 ```
 
-Writes are **surgical**: only the target line changes, hand-written headings, groups and comments are preserved byte-for-byte, and line order is stable. The one exception is line endings: CRLF (or lone CR) is normalised to LF before parsing, so the first write to a CRLF file rewrites it with LF.
+Writes are **surgical**: only the target line changes, hand-written headings, groups and comments are preserved byte-for-byte, and line order is stable. The one exception is line endings: CRLF (or lone CR) is normalised to LF before parsing, so the first write to a CRLF file rewrites it with LF. The injected index uses the same normalisation — a CRLF file never sends `\r` into the system prompt.
 
 ### Memory types
 
@@ -112,7 +126,9 @@ Writes are **surgical**: only the target line changes, hand-written headings, gr
 
 The index holds at most `memIndexMaxLines` (200) non-empty lines and `memIndexMaxBytes` (25600) bytes. Those 200 lines are **index lines, not memories**: `rebuildIndex` guarantees at least one header line — an existing hand-written header is kept verbatim (trailing blank lines before the first entry are dropped), otherwise it writes `# Memory Index` — and hand-written headings, groups and comments count too. A rebuilt index therefore holds at most about **199 memories per project directory** (fewer if you keep hand-written headings). Exceeding the limit does **not** fail the write: the write succeeds and the tool returns an actionable warning telling the model to merge or drop entries (everything past the limit is invisible on the next load).
 
-This is why `/dream` is no longer optional housekeeping — it is **capacity management**. Run it (or accept the nudge) before you approach 199 memories.
+**What reaches the model is a separate, smaller window:** `memIndexInjectMaxLines` / `memIndexInjectMaxBytes` (default 50 lines / 16384 bytes). The window is taken from the **newest** end of the index, i.e. from the **bottom of the file**: `memory(action="add")` appends, and `/dream`'s `rebuild_index` re-sorts by `modified`. Two exceptions matter — `memory(action="replace")` rewrites its line **in place**, so an edited older memory keeps its position (and can stay outside the window) until the next `/dream` re-sort; and hand-written headings, groups or notes at the top of the file are positional rather than chronological, so a curated top block is the first thing the window drops. A full index therefore injects the **50 newest memories** (the `# Memory Index` header and its blank line fall outside the window once it truncates); an index of 48 memories or fewer is injected whole. Omitted memories are **not lost**: auto-surfacing, `memory(action="search")` and `/dream` consolidation still see them. `/memory` prints both budgets apart: `Index:` is the write capacity (disk truth), `Inject:` is the window that goes into the system prompt.
+
+This is why `/dream` is no longer optional housekeeping — it is **capacity management**. Two thresholds matter: prompt visibility ends at the injection window, so consolidate **before you pass ~48 memories** if you want every entry in the system prompt, while 199 is only the hard write limit past which the index itself has to shrink.
 
 ## Configuration
 
@@ -120,12 +136,11 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
 
 ```json
 {
-  "enabled": true,
   "memoryDir": "~/.pi/memory",
   "memIndexMaxLines": 200,
   "memIndexMaxBytes": 25600,
-  "memIndexInjectMaxLines": 200,
-  "memIndexInjectMaxBytes": 25600,
+  "memIndexInjectMaxLines": 50,
+  "memIndexInjectMaxBytes": 16384,
   "lock": { "timeoutMs": 5000, "snapshotKeep": 5 },
   "defaults": { "model": "provider/model-id", "sessionPersistence": { "enabled": false } },
   "dream": { "nudgeAfterSessions": 5, "nudgeAfterHours": 24, "thinkLevel": "high" },
@@ -151,12 +166,11 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `enabled` | `true` | Toggle the entire memory system on/off. Read once at session start — changing it requires restarting the session |
-| `memoryDir` | `~/.pi/memory` | Root directory for all memory data |
+| `memoryDir` | `~/.pi/memory` | Root directory for all memory data. `~`, `~/` and (on Windows) `~\` are expanded; relative values are resolved against the working directory |
 | `memIndexMaxLines` | `200` | Write capacity: max non-empty lines in `MEMORY.md` (the `# Memory Index` header and hand-written headings count too, so this is not exactly the memory count) |
 | `memIndexMaxBytes` | `25600` | Write capacity: max bytes of `MEMORY.md` |
-| `memIndexInjectMaxLines` | `200` | Injection budget: max lines of the index put into the `memory_index` section. Same scale as the write capacity on purpose — a smaller budget would hide memories that were written successfully |
-| `memIndexInjectMaxBytes` | `25600` | Injection budget: max bytes of the index section (truncated with a `[truncated: …]` marker) |
+| `memIndexInjectMaxLines` | `50` | Injection window: max lines of the index put into the `memory_index` section. The window keeps the **newest** lines and drops the **oldest** ones — the index is pure chronological order, so a smaller window never hides the memory you just wrote. **`0` (either key) injects no index at all** — the `memory_index` section stays empty |
+| `memIndexInjectMaxBytes` | `16384` | Injection window: max bytes of the index section (older lines are dropped first, with a `[truncated: …]` marker at the **top**) |
 | `lock.timeoutMs` | `5000` | How long a write waits for the logical lock (single primitive) or the cross-process `.lock`. Also the upper bound `session_shutdown` waits for in-flight writes |
 | `lock.snapshotKeep` | `5` | Rollback points kept in `.backups/` (directories named `migrate-*` — whole-directory snapshots from an earlier 1.x migration, whose `originals/` subdirectory holds the pre-2.0 topic files — are never pruned) |
 | `defaults.model` | `— (required)` | Shared model for dream / extract / side query. **No default**: every task that will run must resolve a model, otherwise `session_start` fails (see [Model configuration](#model-configuration)). A per-task `model` overrides it |
@@ -186,17 +200,29 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
 
 Persisted headless sessions default to `<project memory dir>/sessions/` — inside the project's memory directory, not inside your working copy.
 
+### Disabling the extension
+
+pi-memory has no package-level switch of its own — the former top-level `enabled` key in `memory.json` is **gone** and is now ignored if present. Disable the extension the way you disable any pi package, by not loading it:
+
+Project-only (`.pi/settings.json` in the project root — read only after project trust is granted):
+
+```json
+{ "packages": [{ "source": "npm:@yandy0725/pi-memory", "extensions": [] }] }
+```
+
+A project entry replaces the personal entry, so the extension is not loaded in that project. Globally: `pi remove npm:@yandy0725/pi-memory`, or toggle the package's resources with `pi config` (project scope writes `autoload: false` plus `extensions: ["-index.ts"]`). Module switches (`autoSurfacing.enabled`, `extractMemories.enabled`) still turn off individual behaviors while the extension stays loaded.
+
 ## Model configuration
 
 Every task that will run must resolve a model — **there is no shipped default and no parent-model fallback**. `defaults.model` satisfies all of them; a per-task `model` (`dream.model`, `extractMemories.model`, `autoSurfacing.model`) overrides it.
 
 | Task | Required when |
 |------|---------------|
-| `dream` | the memory system is enabled (`enabled: true`) — always required |
+| `dream` | always required — every session validates it at startup |
 | `extractMemories` | `extractMemories.enabled` is true |
 | `autoSurfacing` | `autoSurfacing.enabled` is true |
 
-With `enabled: false` nothing runs — not even `/dream` or the nudge — so no model is required. At `session_start` pi-memory resolves every required model against the model registry. If one is missing or cannot be resolved, it initialises **nothing**: it shows an error notification `pi-memory config error:` followed by one `- <error>` line per problem, and `/memory` reports `Memory: misconfigured` and `Dir: not initialized`, followed by the same lines. The two possible messages are:
+At `session_start` pi-memory resolves every required model against the model registry. If one is missing or cannot be resolved, it initialises **nothing**: it shows an error notification `pi-memory config error:` followed by one `- <error>` line per problem, and `/memory` reports `Memory: misconfigured` and `Dir: not initialized`, followed by the same lines. The two possible messages are:
 
 - `no model for <task> — set "<task>.model" or "defaults.model" in memory.json`
 - `model "<value>" for <task> is not resolvable (unknown id or missing credentials)`
@@ -251,7 +277,7 @@ It runs with the five main-agent actions (never `rename` / `rebuild_index`), no 
 | Level | Scope | Behaviour |
 |---|---|---|
 | In-process logical lock (per memory dir) | one primitive call; or a whole dream round | Waits up to `lock.timeoutMs`, then throws a readable error naming the directory. `extract` uses the non-waiting form and skips the turn |
-| Cross-process `.lock` | milliseconds, around the physical write | Acquired with `link` (atomic), **never reclaimed automatically**: no TTL, no heartbeat, no takeover |
+| Cross-process `.lock` | milliseconds per retried call around the physical write (a retry storm can hold it for a few seconds) | Acquired with `open(…, "wx")` (`O_CREAT|O_EXCL`) — the **create** is atomic on NTFS, ReFS, exFAT/FAT32 and in a network share's namespace, so the lock excludes processes on every machine using that share; in a sync-client folder it only excludes same-machine processes (see [Windows](#windows)). The holder record is written immediately after the file is created. **Never reclaimed automatically**: no TTL, no heartbeat, no takeover |
 
 A crash inside a write can therefore leave a `.lock` behind, and nothing will ever delete it for you — that is the deliberate price of a hard mutual-exclusion guarantee. The error names the pid, op and start time; `/memory unlock` is the one sanctioned way to clear it.
 
@@ -306,17 +332,19 @@ One line per memory: `- name (type, modified …) — description [file]`.
 Status output:
 
 ```
-Memory: enabled
 Dir: /home/you/.pi/memory/git/github.com__owner__repo
 Index: 38/200 lines, 2841/25600 bytes, 1 unrecognized lines
+Inject: 39/50 lines, 2841/16384 bytes
 Entries: 37
+Modules: dream=on(provider/model-a) extractMemories=off autoSurfacing=on(provider/model-b)
 Last dream: 2026-10-01T22:10:04.882Z
 Lock: free
 ```
 
 - `Index` uses the **write** capacity (`memIndexMax*`) and reports how many non-empty lines could not be parsed as index lines (the `# Memory Index` header and hand-written headings count). CRLF (or lone CR) line endings are normalised to LF before parsing, and the next write emits LF too, so a `MEMORY.md` re-saved by a Windows editor does **not** raise this count.
+- `Inject` uses the **injection** window (`memIndexInjectMax*`) and counts the window's lines and bytes — the index text that goes into the `memory_index` section, taken from the **newest** end (the truncation marker itself is not counted). It is computed by the same window code that produces the injected value, so the two cannot drift. Note the two lines count different things: `Index` counts **non-empty** lines, `Inject` counts **every** line of the window, so on a canonical index (LF endings, trailing newline, one blank line after the header) `Inject` reports one more line than `Index` and the same byte count. The value in the system prompt is **frozen for the session** (see [Why the index is frozen](#why-the-index-is-frozen)): a memory written after `session_start` appears in `Index` immediately but in `Inject` only after compaction or in the next session.
+- `Modules` reports the activation state of the three model-driven features as `on(<effective model>)` / `off`. The effective model is the task's own `model`, otherwise `defaults.model`. `dream` has no switch of its own — it is always available in a healthy session.
 - `Lock` is `free`, `held by <op> (pid N on <hostname>, started <ISO>)`, or `unreadable — run /memory unlock`. `/memory unlock` shows the same holder line in its confirmation prompt.
-- In a session started with `enabled: false`, nothing is initialized at boot: `/memory` reports `Memory: disabled` plus `Dir: not initialized — set "enabled": true in memory.json and restart`, there is no way to enable it mid-session, and `/memory unlock` still works without a store.
 - If a required model is missing or cannot be resolved, nothing is initialized and `/memory` reports `Memory: misconfigured` and `Dir: not initialized`, followed by one `- <error>` line per problem. The same errors are shown as an error notification at session start.
 
 ### `/dream`
@@ -353,14 +381,25 @@ Directory names are derived as follows:
 - git repos whose remote is http(s), ssh (including scp-style `[user@]host:owner/repo`, where the user is optional) or `git://`, plus the `git+ssh://` / `git+https://` aliases → `git/<host>__<owner>__<repo>`; port, credentials, trailing `/` and `.git` are stripped and the host is lowercased
 - remote URLs are read from the raw git config (`remote.<name>.url`; `origin` first, then alphabetical, first usable URL wins), so `url.*.insteadOf` rewrites do not change the mapping
 - scheme forms apply WHATWG URL normalization (IDN hosts become punycode, percent-encoding and `.`/`..` folding apply, credentials/queries/fragments are dropped), while scp forms keep the path as written — equivalent remotes written differently can map to different directories
-- everything else — non-git directories, git repos without a remote, `file://` or local-path remotes → `local/<absolute-path>` (git repos use the repository root; a Windows-style drive-letter remote such as `C:/repos/foo.git` is treated as scp-style on POSIX, matching git)
+- everything else — non-git directories, git repos without a remote, `file://`, UNC (`\\server\share\repo.git`), relative and local-path remotes → `local/<absolute-path>` (git repos use the repository root). A Windows drive-letter remote (`Z:\repos\foo.git`) counts as a **local path on Windows**, matching how git treats it there; the same string on POSIX is scp syntax (the drive letter is a host) and still maps to a `git/` name, also matching git
 - `/` becomes `__`; characters that are not portable in file names (`<>:"|?*`, control characters) become `_XX` hex escapes
 - names longer than 120 UTF-8 bytes are truncated to 100 bytes on a code-point boundary plus a `__<hash8>` suffix
-- names target POSIX filesystems: a backslash is an ordinary character, and no Windows device-name or trailing-dot handling is applied
+- names are platform-aware: on Windows a backslash is a separator, and names avoid reserved device names and trailing dots/spaces; on POSIX a backslash stays an ordinary character and these Windows-only rules do not apply. The one rule applied everywhere is the `_` prefix for entry file stems that look like a device name (see [Windows](#windows))
 
 The mapping is not injective: underscores are kept as-is, so `/home/a__b` and `/home/a/b` both map to `home__a__b` (and share one memory directory). Changing or renaming a remote, adding a remote that sorts before the one currently in use, or moving a local directory changes the memory directory, orphaning the old one.
 
 **Older legacy layout:** versions before 1.x stored memory under `~/.pi/memory/<12-char-sha256>/`; those directories are no longer read or written. To migrate a project manually, compute the old hash with `printf '%s' "$(git rev-parse --show-toplevel)" | sha256sum | cut -c1-12` (use `$PWD` outside a git repo), then `mv` that directory to the new location (run `/memory` inside the project to see the new path) and split its topic files by hand (see [1.x data](#1x-data)).
+
+## Windows
+
+pi-memory runs natively on Windows — no WSL required.
+
+- **Directory names.** The name derived from a project key is always a single, legal Windows component: `\` counts as a separator (so `C:\Users\you\proj` → `C_3a__Users__you__proj`), a trailing dot or space is hex-escaped (`proj.` → `proj_2e`), and a name whose first `.`-delimited label is a reserved device name gets a `_` prefix (`nul` → `_nul`). Directory names are identical across platforms for an ordinary remote's `git/` key (`github.com__owner__repo`), so a shared `memoryDir` keeps working when the same repository is opened from Linux and Windows. Keys whose first label collides with a reserved device name (`aux.example.com/...`), that contain a backslash, or that end in a dot or a space can still differ between platforms.
+- **Repository root.** The root comes from `git rev-parse --show-toplevel`, so a repository subdirectory maps to the same memory directory as the repository root. Note the root is taken from git's output as-is: it must be a native Windows path, which Git for Windows prints (`C:/...`). A cygwin/MSYS build of `git` prints POSIX-style paths (`/cygdrive/c/...`), which would place the memory directory under a wrong prefix — put Git for Windows' `git.exe` first on `PATH` if you have several git builds installed.
+- **`memoryDir`.** `~`, `~/` and (on Windows) `~\` are expanded; relative values are resolved to absolute paths. Windows paths and UNC shares both work.
+- **Locking.** The cross-process lock is created with `open(…, "wx")` (`CREATE_NEW`). On a network share that primitive is atomic in the share's single namespace, so the lock excludes processes on every machine using that share — a `memoryDir` on a non-NTFS volume is supported. In a **sync-client folder** (OneDrive, Dropbox, …) there is no single namespace: each machine keeps its own copy, so the lock only excludes processes on the same machine — do not share one `memoryDir` between machines that way; use a network share when you need cross-machine exclusion. A transient `EPERM`/`EACCES`/`EBUSY` from an antivirus scanner, an editor or a file indexer is retried with a short backoff; a persistent failure still reports the original error.
+- **Line endings.** Every memory file pi-memory reads tolerates CRLF and lone CR (they are normalised to LF before parsing), and every write emits LF. A `MEMORY.md` or entry file re-saved by Notepad or another Windows editor therefore neither disappears from the index nor inflates the unrecognised-line count.
+- **Known limitation.** A file whose name is a reserved device name (for example `con.md`, created by hand or by an older version on another platform) is skipped on Windows instead of being read, because opening that name reaches the console device rather than the file. Rename it (using a `\\?\` path) or re-create the memory under a new name. While such a file exists, adding a memory whose name derives to it (`CON` now derives `_CON.md`) creates a second file and a second same-named index line; the next `rebuild_index` — which dream runs regularly — drops the stale line.
 
 ## Notifications
 

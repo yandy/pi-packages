@@ -113,6 +113,14 @@ collapsed form (summaries and previews), so a `read` call is represented by its
 call line only. The viewer has no expand key, so the "… to expand" hints some
 tools print do not apply here.
 
+The viewer follows the live tail: the newest lines stay pinned to the bottom until you scroll up.
+Upward keys (`↑`/`k`, `PgUp`/`shift+up`, `Home`) **unconditionally** pause following — streaming can
+add lines between a keypress and the render, so a "was I at the bottom?" test against that stale
+value would snap a viewport you just left back down. A downward key that lands on the bottom
+(`↓`/`j`, `PgDn`/`shift+down`) resumes following, and `end` jumps to the bottom and force-resumes;
+`q`/`Esc` closes. The paused state has **no visual indicator** (the footer keeps showing
+`<n> lines · <pct>%` and the key hints).
+
 ## Concurrency
 
 Background agents are subject to a configurable concurrency limit (default: 4). Excess agents queue automatically. Foreground agents bypass the queue.

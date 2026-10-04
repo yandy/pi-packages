@@ -372,11 +372,11 @@ describe("guards 与写选项透传", () => {
 			deps({
 				getStore: () => null,
 				getUnavailableMessage: () =>
-					'Memory is disabled — set "enabled": true in memory.json and restart',
+					'Memory not initialized — no model for dream — set "dream.model" or "defaults.model" in memory.json; run /memory for details',
 			}),
 		);
 		await expect(run(tool, { action: "list" })).rejects.toThrow(
-			'Memory is disabled — set "enabled": true in memory.json and restart',
+			'Memory not initialized — no model for dream — set "dream.model" or "defaults.model" in memory.json; run /memory for details',
 		);
 	});
 

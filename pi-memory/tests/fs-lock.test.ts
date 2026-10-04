@@ -70,6 +70,32 @@ describe("withLock", () => {
 		expect(Date.now() - started).toBeLessThan(2000);
 	});
 
+	// `open(wx)` 让锁文件先出现、记录后写入（spec §4.4）：这中间态必须被当作「有人正在建锁」
+	// 等待，而不是「读不懂 → 立刻报遗弃」。
+	it("waits (does not declare abandonment) while another process is mid-acquire", async () => {
+		await writeFile(lockPath, "", "utf8"); // 0 字节：建立中或崩溃在这一瞬间，无法区分
+		const started = Date.now();
+		const err = await withLock(lockPath, "add", { timeoutMs: 150, pollMs: 20 }, async () => "never").catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(MemoryLockedError);
+		expect((err as MemoryLockedError).abandoned).toBe(false);
+		// spec §7 风险表：这类错误必须给出清除指引（`/memory` 也提示 `run /memory unlock`）
+		expect((err as MemoryLockedError).message).toContain(lockPath);
+		expect((err as MemoryLockedError).message).toContain("delete the file");
+		expect(Date.now() - started).toBeGreaterThanOrEqual(140);
+	});
+
+	it("honours a record that appears while waiting", async () => {
+		await writeFile(lockPath, "", "utf8");
+		const writer = setTimeout(() => {
+			void writeLock({ pid: process.pid, op: "dream" });
+		}, 60);
+		const err = await withLock(lockPath, "add", { timeoutMs: 2000, pollMs: 20 }, async () => "never").catch((e: unknown) => e);
+		clearTimeout(writer);
+		expect(err).toBeInstanceOf(MemoryLockedError);
+		expect((err as MemoryLockedError).holder).toMatchObject({ op: "dream" });
+		expect((err as MemoryLockedError).abandoned).toBe(false);
+	});
+
 	// 永不自动回收：另一个进程崩溃留下的锁没有任何人能释放它。回收需要「移走别人的锁」，
 	// 而 POSIX 没有 compare-and-replace —— 任何移走式接管都存在可被合法抢占的空窗，一旦移走的是
 	// 活持有者的记录，互斥就无法再保证。所以这里选择「立刻报一条可操作的错误」。
@@ -113,15 +139,17 @@ describe("withLock", () => {
 		expect(JSON.parse(await readFile(lockPath, "utf8"))).toMatchObject({ op: "thief", pid: process.pid + 1 });
 	});
 
-	it("leaves no temporary files behind after acquiring or failing to acquire", async () => {
+	it("leaves nothing but the lock file behind after acquiring or failing to acquire", async () => {
 		await withLock(lockPath, "a", FAST, async () => "ok");
+		expect(await readdir(dir)).toEqual([]);
 		await writeLock({ pid: process.pid });
 		await expect(withLock(lockPath, "b", FAST, async () => "no")).rejects.toThrow(MemoryLockedError);
-		expect((await readdir(dir)).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+		// 失败路径同样不留任何临时文件（`open(wx)` 直接建锁路径，没有临时文件机制）
+		expect(await readdir(dir)).toEqual([".lock"]);
 	});
 
 	// 这个用例不只是「互斥守卫」：它实际抓到过一个真 bug —— 5 个调用者高速churn 锁时，
-	// 「link 失败 → 读取」之间锁被释放，而早期实现把「读不到文件」当成「无法解释的记录」，
+	// 「open(wx) 失败 → 读取」之间锁被释放，而早期实现把「读不到文件」当成「无法解释的记录」，
 	// 于是把「刚被释放」误报成「遗弃的锁」。absent 与 unreadable 必须分开。
 	it("serialises overlapping withLock calls", async () => {
 		let active = 0;
@@ -151,6 +179,11 @@ describe("tryWithLock", () => {
 
 	it("runs the body when the lock is free", async () => {
 		await expect(tryWithLock(lockPath, "extract", FAST, async () => "ran")).resolves.toBe("ran");
+	});
+
+	it("returns null for a zero-byte lock instead of throwing (that is busy, not abandoned)", async () => {
+		await writeFile(lockPath, "", "utf8");
+		await expect(tryWithLock(lockPath, "extract", FAST, async () => "x")).resolves.toBeNull();
 	});
 });
 

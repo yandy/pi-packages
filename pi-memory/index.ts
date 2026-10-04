@@ -2,13 +2,14 @@ import { unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { loadConfig, modelConfigErrors, requiredModel, type MemoryConfig, type SessionPersistenceConfig } from "./src/config";
+import { loadConfig, modelConfigErrors, requiredModel, taskModel, type MemoryConfig, type SessionPersistenceConfig } from "./src/config";
 import { runDream } from "./src/dream";
 import { indexCapacity, parseEntryIndex } from "./src/entry-index";
 import { runExtract } from "./src/extract";
 import { readLockStatus, type LockInfo } from "./src/fs-lock";
+import { withFsRetry } from "./src/fs-retry";
 import { readRecordedMemoryIndex } from "./src/index-source";
-import { applyIndexSection, buildIndexSection, buildInjection, injectSurfacedContent, runSideQuery, scanEntries } from "./src/inject";
+import { applyIndexSection, buildIndexSection, buildInjection, indexInjectionCapacity, injectSurfacedContent, runSideQuery, scanEntries } from "./src/inject";
 import {
 	createMemoryTool,
 	DREAM_ACTIONS,
@@ -68,6 +69,28 @@ function countInjectedBlocks(content: string): number {
 	return Math.max(0, content.split("\n## ").length - 1);
 }
 
+/**
+ * `/memory` 的模块激活状态一行：`dream=on(model) extractMemories=off autoSurfacing=on(model)`。
+ *
+ * `dream` 没有独立开关 —— 健康会话里（能走到状态分支）它就可用；另外两个直接反映各自的
+ * `enabled`。模型是**生效值**（per-task 优先，其次 `defaults.model`），关闭的模块不显示模型：
+ * 用户问「为什么没生效」时答案在开关上，而不在模型上。
+ *
+ * 导出供测试直接覆盖：正常会话里「模型解析不出」那条路径走不到（`session_start` 会先拦成
+ * misconfigured），只能直接调纯函数。
+ */
+export function moduleStatusLine(cfg: MemoryConfig): string {
+	return (["dream", "extractMemories", "autoSurfacing"] as const)
+		.map((task) => {
+			// `?.` 是防御：`deepMerge` 会把用户写的 `"extractMemories": null` 原样带进来，
+			// 那时 `cfg[task].enabled` 会抛错，把整个 `/memory` 命令带崩。
+			const enabled = task === "dream" ? true : cfg[task]?.enabled;
+			if (!enabled) return `${task}=off`;
+			return `${task}=on(${taskModel(cfg, task) ?? "no model"})`;
+		})
+		.join(" ");
+}
+
 /** `<op> (pid N on <hostname>, started <ISO>)` —— `/memory` 的 Lock 行与 unlock 确认框共用同一份描述。 */
 function describeHolder(holder: LockInfo): string {
 	return `${holder.op} (pid ${holder.pid} on ${holder.hostname}, started ${holder.startedAt})`;
@@ -105,7 +128,10 @@ async function unlockMemory(memoryDir: string, ui: ExtensionUIContext): Promise<
 	const ok = await ui.confirm("Memory lock", question);
 	if (!ok) return;
 	try {
-		await unlink(lockPath);
+		// 恢复路径也要重试：用户正是因为一把可能被瞬时错误困住的锁才走到这里，而删除本身
+		// 同样会被杀软/索引器/同步客户端打断 —— 这里再报一次 EPERM 就是把用户困在原地。
+		// 幂等（删一个已不存在的文件走下面的 ENOENT 分支），重试无副作用。
+		await withFsRetry(() => unlink(lockPath));
 		ui.notify("Memory lock removed.", "info");
 	} catch (e) {
 		// confirm 到 unlink 之间锁自己消失了：那正是想要的结果
@@ -144,11 +170,8 @@ export default function (pi: ExtensionAPI) {
 	 */
 	const inFlight = new Set<Promise<unknown>>();
 
-	/** `enabled: false` 时给用户的唯一动作。工具文案与 `/memory` 状态共用同一份，避免两处漂移。 */
-	const ENABLE_HINT = 'set "enabled": true in memory.json and restart';
-
 	/**
-	 * 清空本 session 的运行时状态。三条早退路径（disabled / 配置错误 / 初始化失败）共用：
+	 * 清空本 session 的运行时状态。两条早退路径（配置错误 / 初始化失败）共用：
 	 * 残留上一 session 的 store 会让后续写入落到别的项目目录（Plan C ledger R51）。
 	 */
 	function resetSessionState(): void {
@@ -185,9 +208,7 @@ export default function (pi: ExtensionAPI) {
 		getUnavailableMessage: () =>
 			configError
 				? `Memory not initialized — ${configError.split("\n")[0]}; run /memory for details`
-				: config?.enabled === false
-					? `Memory is disabled — ${ENABLE_HINT}`
-					: null,
+				: null,
 		searchSessions,
 		cwd: () => currentCwd,
 	};
@@ -195,12 +216,12 @@ export default function (pi: ExtensionAPI) {
 	/**
 	 * 建立本 session 的记忆运行时：目录 → store → 索引来源 → 注册工具。
 	 *
-	 * 只在 `session_start` 调用，且调用方已确认 `config.enabled`（中途启用路径已随 `/memory on` 删除）。
+	 * 只在 `session_start` 调用，且调用方已通过模型校验。
 	 * 抛错 = 初始化失败，由调用方转成配置错误态（`configError`）。
 	 * `reason` 只有 `session_start` 会传：resume / fork / reload 用 transcript 的录制值（D14）。
 	 */
 	async function initMemory(ctx: ExtensionContext, reason?: string): Promise<void> {
-		// biome-ignore lint/style/noNonNullAssertion: 调用方已确认 enabled
+		// biome-ignore lint/style/noNonNullAssertion: 调用方已通过模型校验
 		const cfg = config!;
 		currentCwd = ctx.cwd;
 		const dir = await resolveMemoryDir(cfg, ctx.cwd);
@@ -234,12 +255,14 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 	pi.on("session_start", async (event, ctx) => {
-		// 复位必须在**任何可能抛错的调用之前**跑完：冷启动与 disabled 会话都要有干净的一次失败通知
+		// 复位必须在**任何可能抛错的调用之前**跑完：冷启动与配置错误会话都要有干净的一次失败通知
 		// 配额、干净的错误态，以及**清空的运行时**。loadConfig（里面的 getAgentDir）与下面的
 		// modelConfigErrors（宿主给的 registry 可能既没有 getAvailable 也没有 getAll）都属于宿主契约
 		// 之外的部分：它们一旦抛出而复位还没跑，上一 session 的 store / memoryDir 就会留在**已经注册**
 		// 的 `memory` 工具背后 —— 项目 B 的 agent 能写进项目 A 的目录（Plan C ledger R51）。
 		extractErrorNotified = false;
+		// `configError = null` 是纯防御：所有把 store 置空的路径都会经 failConfig 覆写它，所以这次复位
+		// 本身不可观测 —— 没有测试钉它，删掉也不会让任何用例变红（2026-10-03 final review 的结论）。
 		configError = null;
 		resetSessionState();
 		// `loadConfig` 抛错（`getAgentDir` / `isProjectTrusted` 属宿主契约）与初始化失败同一处理：
@@ -253,8 +276,6 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 		config = loaded;
-		// 状态已经干净，disabled 直接早退即可。
-		if (!loaded.enabled) return;
 		try {
 			// 启动校验（spec §2.3）：模型键缺失 / 不可解析 → 本会话**完全不初始化**
 			//（不解析目录、不建 store、不注册工具），错误态由 `/memory` 重复显示。
@@ -333,7 +354,7 @@ export default function (pi: ExtensionAPI) {
 		lastSystemPrompt = event.systemPrompt;
 		// 先拷到 const：`store` 是工厂作用域的 let，在异步回调里 TS 不会保留它的外层收窄。
 		const activeStore = store;
-		if (!config?.enabled || !memoryDir || !activeStore) return;
+		if (!config || !memoryDir || !activeStore) return;
 
 		// 索引 section：**每一轮无条件**写入冻结值（含 resume / fork / reload）。
 		// 省略这个键 = pi 的 diffSystemPromptSections 生成 { memory_index: null } = 把索引从
@@ -402,7 +423,7 @@ export default function (pi: ExtensionAPI) {
 	// 的边际缓存损失最小，而长会话到这时候往往已经攒下了新记忆（spec §9.1(c) / §10）。
 	pi.on("session_compact", async () => {
 		const activeStore = store;
-		if (!config?.enabled || !activeStore) return;
+		if (!config || !activeStore) return;
 		// compaction 会把已注入的内容挤出上下文：不清空，这些 entry 本会话再也不会浮现。
 		injectedFiles.clear();
 		indexSnapshot = await buildIndexSection(
@@ -434,7 +455,7 @@ export default function (pi: ExtensionAPI) {
 		// 先拷到 const：`store` / `memoryDir` 是工厂作用域的 let，在异步回调里 TS 不保留外层收窄。
 		const activeStore = store;
 		const dir = memoryDir;
-		if (!config?.enabled || !dir || !activeStore) return;
+		if (!config || !dir || !activeStore) return;
 		const extractConfig = config.extractMemories;
 		if (!extractConfig?.enabled) return;
 		if (!event.messages || event.messages.length === 0) return;
@@ -519,7 +540,7 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 			if (args === "unlock") {
-				// `unlock` 只需要**目录**、不需要 store：以 disabled 启动的会话也要能清锁
+				// `unlock` 只需要**目录**、不需要 store：以配置错误启动的会话也要能清锁
 				//（它是崩溃遗留 `.lock` 的唯一人工入口，spec §19）。
 				let dir = memoryDir;
 				if (!dir) {
@@ -542,24 +563,27 @@ export default function (pi: ExtensionAPI) {
 			const activeStore = store;
 			const dir = memoryDir;
 			if (!dir || !activeStore) {
-				// configError 非空 = 校验或初始化失败（`/memory` 是用户重读错误的唯一入口）；
-				// 否则只可能是配置里 enabled 为假。
-				const lines = configError
-					? ["Memory: misconfigured", "Dir: not initialized", ...configError.split("\n").map((e) => `- ${e}`)]
-					: ["Memory: disabled", `Dir: not initialized — ${ENABLE_HINT}`];
+				// `config` 非 null 而 store 为 null 只可能来自 session_start 的两条早退路径，
+				// 因此 configError 在这里必非空；`/memory` 是用户重读错误态的唯一入口。
+				const lines = ["Memory: misconfigured", "Dir: not initialized"];
+				if (configError) lines.push(...configError.split("\n").map((e) => `- ${e}`));
 				ctx.ui.notify(lines.join("\n"), "info");
 				return;
 			}
-			// 容量用写入那一侧的口径（memIndexMax*）：用户要知道的是「还能不能写」，
-			// 而注入口径（memIndexInject*）默认与它同值（D3）。unrecognized 是索引里非空但
-			// 解析不了的行数 —— 手写标题/分组/被 Windows 编辑器改坏的行都在这里露出来。
+			// 两套口径都要报：`Index:` 是写入口径（用户要知道「还能不能写」），`Inject:` 是注入口径
+			// —— 窗口只取索引**最新**的 50 行，与写入口径解耦，只报前者会让用户以为 Entries 全在
+			// prompt 里。`indexInjectionCapacity` 与真正注入共用同一个窗口核心，数字不可能漂移。
+			// unrecognized 是索引里非空但解析不了的行数 —— 手写标题/分组/被 Windows 编辑器改坏的行
+			// 都在这里露出来。
 			const indexRaw = await activeStore.readIndex();
 			const cap = indexCapacity(indexRaw, config.memIndexMaxLines, config.memIndexMaxBytes);
+			const inject = indexInjectionCapacity(indexRaw, config.memIndexInjectMaxLines, config.memIndexInjectMaxBytes);
 			const summary = [
-				`Memory: ${config.enabled ? "enabled" : "disabled"}`,
 				`Dir: ${dir}`,
 				`Index: ${cap.lineCount}/${config.memIndexMaxLines} lines, ${cap.byteLength}/${config.memIndexMaxBytes} bytes, ${parseEntryIndex(indexRaw).unrecognized} unrecognized lines`,
+				`Inject: ${inject.lineCount}/${config.memIndexInjectMaxLines} lines, ${inject.byteLength}/${config.memIndexInjectMaxBytes} bytes`,
 				`Entries: ${(await activeStore.listEntries()).length}`,
+				`Modules: ${moduleStatusLine(config)}`,
 				`Last dream: ${(await readDreamMeta(dir))?.lastDreamAt ?? "never"}`,
 				`Lock: ${await lockStatusLine(dir)}`,
 			].join("\n");
