@@ -15,6 +15,9 @@ cd C:\pi-packages
 git checkout pi-sandbox-windows-support      # 需为已推送的待验收提交
 npm install                                  # 必须装上 koffi（windows-acl runner 的 FFI 依赖）
 pi --version                                 # 需 >= 1.0.0（powershell 工具自该版本提供）
+[System.Environment]::OSVersion.Version       # 记录被测系统（本仓实测：10.0.17763 / LTSC 2019）
+$PSVersionTable.PSVersion                     # 记录 PowerShell 版本（5.1 或 7.x）
+node --version                                # 记录 Node 版本
 
 cd C:\pi-packages\pi-sandbox
 npx vitest run tests/win32/e2e.test.ts       # 期望：20 个 win32 用例真正执行（不是 skip）+ 2 个全平台用例，全绿

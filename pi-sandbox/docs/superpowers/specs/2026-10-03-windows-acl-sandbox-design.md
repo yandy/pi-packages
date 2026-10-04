@@ -378,6 +378,35 @@ Windows：合成 ACL 场景（缺 `WRITE_DAC` 的目录、显式包允许 ACE �
 
 结论：NUL 可写是设备 DACL 的**环境性**属性（两种模式都成立），只能通过设备拼法到达；裸相对名 `NUL` 是普通文件，受工作区边界约束。
 
-### 13.3 待回填
+### 13.3 诊断脚本套件（Windows 10 Enterprise LTSC 2019 / 17763.316）
 
-人工清单：`docs/superpowers/verification/2026-10-03-windows-acl-acceptance.md`（§1-§13、§15 现在可跑；§14 依赖诊断技能内容落地后）。
+命令：`npx vitest run tests/win32/diagnose-script.test.ts`（最终提交 `4230584d`，夹具修正后）
+
+**结果：10 passed / 0 skipped。** 首次真机跑为 6 passed / 4 failed，经五轮收敛（4 → 3 → 2 → 1 → 1 → 0），**全部失败都在测试夹具／工具链一侧，脚本与沙箱后端零缺陷**。用例覆盖：健康目录 `NOT_THIS_CLASS` 且零改动、缺 `WRITE_OWNER` 的补授权 + 备份/恢复产物、包 ACE 移除、**同 SID 的 deny 必须保留**（SDDL 里按 `(A;…)`/`(D;…)` 区分）、`-AllowRoot` 外的包来源拒绝、受保护根（`%ProgramFiles%\WindowsApps`）拒绝、用打印出的 `ROLLBACK` 命令还原、用法错误 exit 2、junction 背后的包来源拒绝、`-Out` 下恰一个 JSONL 报告。
+
+真机暴露的夹具/环境陷阱（均已消除，也是后续写 Windows 夹具的经验）：
+
+| # | 现象 | 根因 | 修法 |
+|---|---|---|---|
+| 1 | `icacls /grant *S-1-4-…` 报 `ERROR_NONE_MAPPED(1332)` | S-1-4（Non-Unique 权威）无名称映射，且 `*SID` 对 `/grant` 也不总是绕过 | 不再由测试写 `S-1-4` 能力 ACE；“S-1-4 不是包 SID”改由 Linux 静态断言钉住 |
+| 2 | 子进程收到的 `$env:ProgramFiles` 仍是原值 | Node 传 `env` 在本机不生效（大小写去重、libuv 排序两种猜测都不对） | 改为在**同一个 PowerShell 进程内**先赋值再 `& <脚本>`，并用 `exit $LASTEXITCODE` 透传 |
+| 3 | 用例 7 撞 vitest 默认 5s 超时 | 每次 PowerShell 启动 ~1.5s，该用例要跑 3 次脚本 + 一次回滚 | 套件级 `{ timeout: 120_000 }` |
+| 4 | `-File` 下 `-Path a b` 未绑成数组，exit 1 | PowerShell 把第二个值位置绑定给 `-AllowRoot` → “参数指定多次” | 改用 `-Command` + `-Path 'a','b'` 显式数组 |
+| 5 | 受托人=当前用户的 deny 含 `SYNCHRONIZE`，打掉 `CreateFileW(FILE_WRITE_DAC)` 探测 | `icacls (W)`/`(D)` 的掩码展开都含 `S`，而 Win32 打开句柄隐式请求 `SYNCHRONIZE`（核心语义，各版本一致） | deny 受托人改为包 SID 自身（对用户访问检查无影响），断言改看 SDDL ACE 类型 |
+| 6 | `icacls /deny "*SID:…"` status 0 但**静默不写 ACE** | 老构建的 icacls 对 `/deny` 的未解析 SID 不落盘（由“脚本 collateral 检查通过 ⇒ 写入时就不存在”反推） | 夹具改用 .NET `Get-Acl`/`AddAccessRule(…,'Deny')`/`Set-Acl`，并**写完立即回读自检**；同时把 deny 放在两条 icacls 写之后 |
+
+### 13.4 人工验收清单（用户执行）
+
+| 条目 | 结果 | 证据 |
+|---|---|---|
+| §0 自动化前置（e2e 22 例） | ✅ | `npx vitest run tests/win32/e2e.test.ts` → 22 passed / 0 skipped |
+| §1–§4 shell 工具面（D3 第三版：bash `hidden`） | ✅ | 用户确认通过：`/permission` 显示 `shell: powershell only`（无 `(not activated)`）、模型工具列表无 `bash`、`--tools bash` 也不放行、受限 pwsh 可用 |
+| §5–§13 受限执行/拒绝/围栏/Job/会话隔离 | ✅ | 用户确认通过（未逐条留存原始输出） |
+| §14 技能目录：Windows 出现 | ✅ | 用户真机确认 `diagnose-windows-sandbox-acl` 出现在可用技能中 |
+| §14 非 Windows 对照 | ✅ | 控制器本地 SDK 探针：移动技能到 `resources/skills/` 后，`packages` 的**字符串与对象两种配置形式**下 Linux 均不出现（移动前对象形式会出现——该漏洞已修，见 §4.10） |
+| §15 常驻 ACL 残留 | ✅ | 用户 `icacls` 原文：工作区根 `S-1-4-539123267-14510658:(OI)(CI)(W,D,DC)`、`%TEMP%` 根 `S-1-4-683821589-677972989-1:(OI)(CI)(W,D,DC)`、两处 `Everyone:(CI)(DENY)(S,DC)` 与 Low 标签，pi 退出后仍在 |
+| §17 诊断技能修复流程 | ⏳ 待跑 | 流程与预期见清单 §17 |
+
+### 13.5 待回填
+
+人工清单：`docs/superpowers/verification/2026-10-03-windows-acl-acceptance.md`（§1–§15、§17；§14 已随技能落地复验通过）。
