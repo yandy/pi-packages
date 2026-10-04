@@ -36,6 +36,8 @@ bash 命令被包装进平台沙箱 runner 后在本地 spawn（**路径透明**
 
 已知限制：**`defaultTools` 去不掉扩展注册的工具**（`-name` 条目只能移除内置工具；扩展工具除非在定义里声明退出，否则会被自动激活）。pi-sandbox 不要求用户为此配置：Windows 上 `bash` 这个名字在**定义层**就已从模型侧撤下（`exposure: "hidden"`），没有可配置掉的余地。若 `powershell` 未激活（低于 1.0.0 的老宿主——该版本没有 `powershell` 工具，或选择列表把它排除在外），`/permission` 状态行显示 `shell: powershell only (not activated)`，并在 `bash` 仍在活动列表时（老宿主）于激活期提示一次；`{ "defaultTools": ["+powershell"] }`（需要 pi >= 1.0.0）可把它加回来。
 
+**已验证平台。** 自动化 e2e 与人工验收清单在 **Windows 10 Enterprise LTSC 2019（build 17763.316）**上执行。后端的强制手段是受限令牌、能力 SID 的 ACL 与 Job 对象，不依赖 `icacls`，因此预期新版本行为一致；但本仓目前只在 build 17763 上做过端到端验证。（随包的诊断技能在修复时确实会调用 `icacls`；该路径属于同一次验收。）
+
 PowerShell 语言模式取决于启动约束，不是 ACL 边界的一部分：`read-only` 下 `%TEMP%` 不可写，pwsh 可能退化为 ConstrainedLanguage（`Add-Type`/COM/反射失败）；`workspace-write` 保持 FullLanguage。
 
 **`NUL` 在两种模式下都可写**——这是**设备自身的环境属性**（设备 DACL 授予 Everyone 读/写/执行），不是沙箱的能力授予，因此与令牌拿到哪些授权根无关。它只能通过设备拼法到达：`cmd` 的 `> NUL`，以及 Node 的 `\\.\NUL`。**相对路径** `NUL` 不是设备：libuv 构造 NT 路径时不做 Win32 设备名映射，因此 `writeFileSync('NUL', …)` 是子进程 cwd 下一个名为 `NUL` 的**普通文件**——在工作区内允许、在工作区外被拒，与其他文件名完全同等。

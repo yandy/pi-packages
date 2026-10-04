@@ -361,7 +361,9 @@ Windows：合成 ACL 场景（缺 `WRITE_DAC` 的目录、显式包允许 ACE �
 
 ## 13. 验收记录（真机执行后回填）
 
-### 13.1 自动化端到端套件（Windows 11，用户机器）
+### 13.1 自动化端到端套件（Windows 10 Enterprise LTSC 2019，build 17763.316，用户机器）
+
+被测环境：Windows 10 Enterprise LTSC 2019（EditionID `EnterpriseS`，build **17763.316**）、PowerShell 版本见当日 `$PSVersionTable`（记录时待补）。
 
 命令：`npx vitest run tests/win32/e2e.test.ts`（提交 `efde10cb`）
 
