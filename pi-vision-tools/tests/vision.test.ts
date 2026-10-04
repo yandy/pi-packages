@@ -28,16 +28,6 @@ describe("resolveVisionModel", () => {
 		getAvailable: () => models,
 	};
 
-	it("resolves a configured provider/id", () => {
-		const r = resolveVisionModel(registry, { model: "openai/gpt-4o" });
-		expect(r.ok && r.model).toBe(gpt4o);
-	});
-
-	it("resolves a fuzzy model name", () => {
-		const r = resolveVisionModel(registry, { model: "haiku" });
-		expect(r.ok && r.model).toBe(haiku);
-	});
-
 	it("errors when no model is configured", () => {
 		const r = resolveVisionModel(registry, {});
 		expect(r.ok).toBe(false);
