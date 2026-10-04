@@ -395,6 +395,8 @@ Windows：合成 ACL 场景（缺 `WRITE_DAC` 的目录、显式包允许 ACE �
 | 5 | 受托人=当前用户的 deny 含 `SYNCHRONIZE`，打掉 `CreateFileW(FILE_WRITE_DAC)` 探测 | `icacls (W)`/`(D)` 的掩码展开都含 `S`，而 Win32 打开句柄隐式请求 `SYNCHRONIZE`（核心语义，各版本一致） | deny 受托人改为包 SID 自身（对用户访问检查无影响），断言改看 SDDL ACE 类型 |
 | 6 | `icacls /deny "*SID:…"` status 0 但**静默不写 ACE** | 老构建的 icacls 对 `/deny` 的未解析 SID 不落盘（由“脚本 collateral 检查通过 ⇒ 写入时就不存在”反推） | 夹具改用 .NET `Get-Acl`/`AddAccessRule(…,'Deny')`/`Set-Acl`，并**写完立即回读自检**；同时把 deny 放在两条 icacls 写之后 |
 
+**参考实现的测试环境（关键事实，2026-10-03 查证）**：dsh 的设计说明写明 **“no new OS floor”**（`.agents/notes/implemented/feature/2026-08-08-windows-acl-restricted-token-sandbox.md:31,43`；它拒绝 mxc 的理由正是 mxc 要 Win11 24H2+）——**支持老 Windows 是这条路线的一部分**；但 dsh 的 Windows CI 车道是 `dsh-windows-2025-{4…96}core` + 自托管 `dsh-win-ci`（`.github/workflows/ci-master.yml:230,330-355`），**它的测试夹具只在 Windows Server 2025（build ≥26100）上验证过**。本包因此不照搬参考夹具，全部改用与系统构建无关的原语（上表 1/5/6 三类 icacls 依赖即是直接后果）；**支持范围与 dsh 一致：不设新 OS 下限**，本仓在 17763 实测。
+
 ### 13.4 人工验收清单（用户执行）
 
 | 条目 | 结果 | 证据 |
