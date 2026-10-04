@@ -1,28 +1,22 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BUILTIN_TOOL_NAMES } from "../../src/config/agent-types";
 import { loadCustomAgents } from "../../src/config/custom-agents";
 
 describe("loadCustomAgents", () => {
 	let tmpDir: string;
-	let originalHome: string | undefined;
-	let originalAgentDir: string | undefined;
 
 	beforeEach(() => {
 		tmpDir = mkdtempSync(join(tmpdir(), "pi-test-"));
-		originalHome = process.env.HOME;
-		originalAgentDir = process.env.PI_CODING_AGENT_DIR;
-		process.env.HOME = tmpDir;
-		delete process.env.PI_CODING_AGENT_DIR;
+		// 全局目录隔离：getAgentDir() 读 PI_CODING_AGENT_DIR（跨平台）；HOME 在 Windows 上不被
+		// os.homedir() 采纳（读 USERPROFILE），不能作为隔离手段（testing.md「getAgentDir 隔离」）。
+		vi.stubEnv("PI_CODING_AGENT_DIR", join(tmpDir, "agent-dir"));
 	});
 
 	afterEach(() => {
-		if (originalHome == null) delete process.env.HOME;
-		else process.env.HOME = originalHome;
-		if (originalAgentDir == null) delete process.env.PI_CODING_AGENT_DIR;
-		else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
+		vi.unstubAllEnvs();
 		rmSync(tmpDir, { recursive: true, force: true });
 	});
 
@@ -108,8 +102,8 @@ Just a prompt.`,
 	});
 
 	it("lets a project agent override a global agent with the same name", () => {
-		// global: $HOME/.pi/agent/agents/auditor.md（HOME 已替换为 tmpDir，且未设 PI_CODING_AGENT_DIR）
-		const globalDir = join(tmpDir, ".pi", "agent", "agents");
+		// global: $PI_CODING_AGENT_DIR/agents/auditor.md（beforeEach 已 stub 指向 tmpDir 内的 agent-dir）
+		const globalDir = join(tmpDir, "agent-dir", "agents");
 		mkdirSync(globalDir, { recursive: true });
 		writeFileSync(
 			join(globalDir, "auditor.md"),
