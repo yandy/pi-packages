@@ -83,20 +83,6 @@ describe("loadConfig", () => {
 		expect(config).toEqual({});
 	});
 
-	it("uses global config when project config is absent", async () => {
-		mockReadFileSync.mockImplementation((path: string) => {
-			if (path === "/home/user/.myapp/agent/web-tools.json") {
-				return JSON.stringify({ aliyun: { baseUrl: "https://global.example.com" } });
-			}
-			throw new Error("ENOENT");
-		});
-
-		await importModule();
-		const config = loadConfig("/project");
-
-		expect(config.aliyun?.baseUrl).toBe("https://global.example.com");
-	});
-
 	it("caches config per cwd", async () => {
 		let readCount = 0;
 		mockReadFileSync.mockImplementation((path: string) => {

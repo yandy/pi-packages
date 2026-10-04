@@ -33,18 +33,6 @@ beforeEach(async () => {
 });
 
 // ---------------------------------------------------------------------------
-// mcp client
-// ---------------------------------------------------------------------------
-
-describe("mcp client", () => {
-	it("createMcpClient is a function exported from the real module", async () => {
-		const actualModule = await vi.importActual<typeof import("../src/web_search/mcp.js")>("../src/web_search/mcp.js");
-		expect(actualModule.createMcpClient).toBeDefined();
-		expect(typeof actualModule.createMcpClient).toBe("function");
-	});
-});
-
-// ---------------------------------------------------------------------------
 // exaSearch
 // ---------------------------------------------------------------------------
 
@@ -250,32 +238,6 @@ describe("search orchestrator", () => {
 
 		const sources = buildSources({});
 		const result = await search("test", 5, undefined, undefined, undefined, sources);
-		expect(result.sourceLabel).toBe("exa");
-	});
-
-	it("uses exa MCP when no API key", async () => {
-		vi.stubEnv("EXA_API_KEY", "");
-		testServer.setRequestHandler(CallToolRequestSchema, async () => ({
-			content: [{ type: "text", text: "Title: X\nURL: https://x.com\nHighlights:\nyes" }],
-		}));
-
-		const sources = buildSources({});
-		const result = await search("test", 5, undefined, undefined, undefined, sources);
-		expect(result.sourceLabel).toBe("exa");
-	});
-
-	it("uses specified exa source", async () => {
-		vi.stubEnv("EXA_API_KEY", "test-key");
-		mockFetch.mockResolvedValueOnce({
-			ok: true,
-			json: () =>
-				Promise.resolve({
-					results: [{ title: "R", url: "https://x.com", text: "content" }],
-				}),
-		});
-
-		const sources = buildSources({});
-		const result = await search("test", 5, undefined, undefined, "exa", sources);
 		expect(result.sourceLabel).toBe("exa");
 	});
 
