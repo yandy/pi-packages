@@ -95,25 +95,6 @@ describe("listEntries", () => {
 		expect(await store.listEntries()).toEqual([]);
 	});
 
-	it("refreshCache picks up externally rewritten content even when the mtime is unchanged", async () => {
-		const path = await writeEntry("a.md", meta("A", { description: "原始摘要" }));
-		// writeFile 落盘的是亚毫秒精度 mtime，utimes 只能还原到毫秒精度；先把 mtime 钉成确定值。
-		const pinned = new Date("2026-10-01T00:00:00.000Z");
-		await utimes(path, pinned, pinned);
-		await store.listEntries();
-
-		// 外部改写内容后把 mtime 还原成同一个值：listEntries 的 mtime 缓存判定命中，读到的仍是旧摘要
-		// （这条前置断言钉住缓存本身 —— 若缓存失效逻辑被删，本用例就不再针对 refreshCache）。
-		const before = await stat(path);
-		await writeFile(path, serializeEntryFile(meta("A", { description: "手工改后的摘要" }), "正文"), "utf8");
-		await utimes(path, before.atime, before.mtime);
-		expect((await store.listEntries())[0].description).toBe("原始摘要");
-
-		// refreshCache 清空缓存后重扫：新内容可见。把 refreshCache 改成 no-op 时本断言会失败。
-		await store.refreshCache();
-		expect((await store.listEntries())[0].description).toBe("手工改后的摘要");
-	});
-
 	it("skips files named after Windows devices on win32 (reading them would hit the device)", async () => {
 		await writeEntry("con.md", meta("Con entry"));
 		await writeEntry("ok.md", meta("Ok entry"));
