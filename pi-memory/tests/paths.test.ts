@@ -420,8 +420,11 @@ describe("projectIdentity", () => {
 
 	it("falls back to local for a drive-letter remote on win32 (git treats it as a local path)", async () => {
 		await initRepo(dir, "Z:\\some.git");
-		// win32：本地路径 → local/<绝对路径>（而不是 git/z__some）
-		expect(await projectIdentity(dir, "win32")).toEqual({ kind: "local", key: resolve(dir) });
+		// win32：本地路径 → local/<绝对路径>（而不是 git/z__some）。
+		// key 以 git 报告的 toplevel 为准（与上方同族用例同源）：runner 的 %TEMP% 是 8.3 短名
+		// （RUNNER~1），git 返回长名，同一目录两种字符串，不能用 resolve(dir) 硬拼。
+		const toplevel = await git(["rev-parse", "--show-toplevel"], dir);
+		expect(await projectIdentity(dir, "win32")).toEqual({ kind: "local", key: resolve(toplevel) });
 		// POSIX：同一串仍是 scp 形式 → git 身份（与 git 自身行为一致，行为不变）
 		expect(await projectIdentity(dir, "linux")).toEqual({ kind: "git", key: "z/\\some" });
 	});

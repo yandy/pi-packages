@@ -77,7 +77,10 @@ describe.skipIf(process.platform !== "win32")("withFsRetry against a real Window
 	}
 
 	it("crosses a short exclusive hold", async () => {
-		startExclusiveHold(600); // 就绪后仅占 600ms ＜ 重试预算 ≈900ms
+		// 就绪后仅占 300ms：默认预算的等待间隔合计已有 600ms（20+40+80+160+300），加上尝试
+		// 本身必然覆盖持有时长。用 600ms 时余量全靠尝试耗时凑，CI 的定时器粒度（15.6ms）
+		// 与就绪轮询延迟（≤50ms）会把边际吃穿（首跑真机已复现）。
+		startExclusiveHold(300);
 		await waitForReady();
 		await expect(withFsRetry(() => writeFile(target, "written", "utf8"))).resolves.toBeUndefined();
 		expect(await readFile(target, "utf8")).toBe("written");
