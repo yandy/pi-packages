@@ -24,9 +24,11 @@ const SUPPORTED_MIMES = new Set(Object.values(EXT_TO_MIME));
 const DATA_URL_RE = /^data:([^;]+)?;base64,(.*)$/s;
 
 function looksLikePath(s: string): boolean {
-	if (s.startsWith("/")) return true;
+	if (s.startsWith("/") || s.startsWith("\\")) return true;
 	if (s.startsWith("./") || s.startsWith("../")) return true;
 	if (s.startsWith("~")) return true;
+	// win32 盘符绝对路径（"C:\…" / "C:/…"）：base64 字母表不含 ":"，不会误伤 base64 分支
+	if (/^[A-Za-z]:[\\/]/.test(s)) return true;
 	// has a dot-extension and is short enough not to be base64
 	const ext = extname(s).toLowerCase();
 	if (ext && EXT_TO_MIME[ext] && s.length <= 100) return true;

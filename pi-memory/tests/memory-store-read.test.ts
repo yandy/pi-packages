@@ -4,16 +4,16 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { serializeEntryFile, type EntryMeta } from "../src/entry-file";
 import { MemoryStore, type StoreConfig } from "../src/memory-store";
+import { createReservedNameFixture, removeReservedNameFixture } from "./helpers/reserved-name";
 
 let dir: string;
 let store: MemoryStore;
 
-const CFG = (memoryDir: string, platform?: NodeJS.Platform): StoreConfig => ({
+const CFG = (memoryDir: string): StoreConfig => ({
 	memoryDir,
 	indexMaxLines: 200,
 	indexMaxBytes: 25600,
 	lock: { timeoutMs: 5000, snapshotKeep: 5 },
-	platform,
 });
 
 function meta(name: string, over: Partial<EntryMeta> = {}): EntryMeta {
@@ -38,6 +38,8 @@ beforeEach(async () => {
 	store = new MemoryStore(CFG(dir));
 });
 afterEach(async () => {
+	// win32 宿主上 rm(dir, { recursive: true }) 删不掉保留名文件，必须先经 \\?\ 前缀摘除
+	await removeReservedNameFixture(dir, "con.md");
 	await rm(dir, { recursive: true, force: true });
 });
 
@@ -95,12 +97,17 @@ describe("listEntries", () => {
 		expect(await store.listEntries()).toEqual([]);
 	});
 
-	it("skips files named after Windows devices on win32 (reading them would hit the device)", async () => {
+	it.skipIf(process.platform !== "win32")("skips files named after Windows devices (reading them would hit the device)", async () => {
+		await createReservedNameFixture(dir, "con.md", "正文");
+		await writeEntry("ok.md", meta("Ok entry"));
+		const win = new MemoryStore(CFG(dir));
+		expect((await win.listEntries()).map((e) => e.file)).toEqual(["ok.md"]);
+	});
+
+	it.skipIf(process.platform === "win32")("keeps Windows device-named files on POSIX (ordinary files there)", async () => {
 		await writeEntry("con.md", meta("Con entry"));
 		await writeEntry("ok.md", meta("Ok entry"));
-		const win = new MemoryStore(CFG(dir, "win32"));
-		expect((await win.listEntries()).map((e) => e.file)).toEqual(["ok.md"]);
-		const posix = new MemoryStore(CFG(dir, "linux"));
+		const posix = new MemoryStore(CFG(dir));
 		expect((await posix.listEntries()).map((e) => e.file).sort()).toEqual(["con.md", "ok.md"]);
 	});
 });

@@ -39,7 +39,8 @@ describe("parseConfig", () => {
 
 describe("configPath", () => {
 	it("joins agentDir with vision-tools.json", () => {
-		expect(configPath("/home/u/.pi/agent")).toBe("/home/u/.pi/agent/vision-tools.json");
+		// 与实现同构：configPath 用 join 拼接（src/config.ts），期望值必须走同一组合，Windows 上才会一致
+		expect(configPath("/home/u/.pi/agent")).toBe(join("/home/u/.pi/agent", "vision-tools.json"));
 	});
 });
 

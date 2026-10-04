@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { assertWriteAllowed, canonicalizeTarget, FenceDenialError, isWithinRoots } from "../src/fence";
 import { escalationHintMarker } from "../src/escalation";
 import { defaultTmpRoots } from "../src/policy";
@@ -161,6 +161,7 @@ describe("win32 containment", () => {
 		// 裸 "C:" 是"每驱动器当前目录"（drive-relative），不是盘根 "C:\"：词法包含要求盘符后紧跟分隔符。
 		// 该结果与 path.sep 无关（POSIX 上根不存在、词法与身份回退都无命中），故不 gated，Linux 也执行；
 		// 正例（"C:\…" 落在 "C:\" 下）只在 win32 成立，放在下面的 win32-gated 用例里。
+		// 实现经 DRIVE_RELATIVE_PATH guard 保证该结果在 win32 宿主上也确定（不再依赖 per-drive CWD）。
 		expect(isWithinRoots("C:", ["C:\\"], false)).toBe(false);
 	});
 
@@ -187,5 +188,28 @@ describe("win32 containment", () => {
 		};
 		expect(() => assertWriteAllowed(join(ws, "file.txt"), policy)).not.toThrow();
 		expect(() => assertWriteAllowed(join(outside, "file.txt"), policy)).toThrowError(/file access denied/);
+	});
+});
+
+describe("identity fallback robustness", () => {
+	it("treats a zero ino (Windows stat fallback) as unknown identity — fail-closed", async () => {
+		// 背景（2026-10-04 真机 CI 捕获）：Windows 上 libuv 的 stat 回退路径（目录句柄被
+		// Defender/索引器瞬时占有时走 GetFileAttributesExW）返回 ino/dev = 0 的“未知身份”。
+		// 同一 Defender 扫描窗口里 root 与 target 的祖先会同时拿到 0 —— `0 === 0` 把两个
+		// 不同的目录判成同一，身份回退 fail-open（围栏误放行）。身份未知 ≠ 身份相同。
+		vi.resetModules();
+		vi.doMock("node:fs", async (importOriginal) => {
+			const actual = await importOriginal<typeof import("node:fs")>();
+			const unknown = { dev: 0, ino: 0 } as unknown as import("node:fs").Stats;
+			return { ...actual, statSync: () => unknown };
+		});
+		try {
+			const { isWithinRoots: withUnknownIdentity } = await import("../src/fence");
+			// root（"…\bbb"）与 target 祖先（"…\aaa"）身份均未知 → 不得视为同一目录
+			expect(withUnknownIdentity("C:\\tmp\\aaa\\f.txt", ["C:\\tmp\\bbb"], false)).toBe(false);
+		} finally {
+			vi.doUnmock("node:fs");
+			vi.resetModules();
+		}
 	});
 });

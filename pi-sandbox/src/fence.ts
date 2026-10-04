@@ -49,7 +49,10 @@ export function canonicalizeTarget(path: string): string {
 }
 
 function sameIdentity(a: Stats, b: Stats): boolean {
-	return a.dev === b.dev && a.ino === b.ino;
+	// libuv 的 Windows stat 回退（目录句柄被 Defender/索引器瞬时占用时）返回 ino/dev = 0 的
+	// “未知身份”；`0 === 0` 会把两个不同的目录判成同一，身份回退 fail-open（2026-10-04 真机
+	// CI 捕获）。身份未知 ≠ 身份相同：零身份一律不匹配。POSIX 的 stat 对存在文件不会给 0。
+	return a.ino !== 0 && a.dev === b.dev && a.ino === b.ino;
 }
 
 /** 大小写归一：平台不敏感时统一小写（win32 的盘符/目录名拼写差异）。 */
@@ -65,6 +68,9 @@ const TRAILING_SEPARATORS = sep === "\\" ? /[\\/]+$/ : /\/+$/;
 
 /** 裸盘符（"C:"）：表示"每驱动器当前目录"（drive-relative），不是盘根；子路径必须由分隔符继续。 */
 const DRIVE_LETTER_PREFIX = /^[A-Za-z]:$/;
+
+/** 盘符相对路径（"C:" / "C:work"）：语义依赖 per-drive CWD，是歧义路径，不得进入围栏判定。 */
+const DRIVE_RELATIVE_PATH = /^[A-Za-z]:(?![\\/])/;
 
 /**
  * 词法包含判定：分隔符用 path.sep（win32 上 \ 与 / 都可能出现，先归一化），
@@ -95,6 +101,9 @@ export function isWithinRoots(
 	roots: readonly string[],
 	caseSensitive: boolean = process.platform !== "win32",
 ): boolean {
+	// win32：裸盘符与盘符相对路径按 per-drive CWD 解析，结果随进程 CWD 漂移；
+	// 围栏判定必须确定，故一律视为不在任何授予根内（POSIX 宿主无此语义，不适用）。
+	if (sep === "\\" && DRIVE_RELATIVE_PATH.test(normalizeSeparators(target))) return false;
 	for (const root of roots) {
 		if (isLexicallyUnder(target, root, caseSensitive)) return true;
 	}

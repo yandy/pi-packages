@@ -17,6 +17,7 @@
 	],
 	"scripts": {
 		"test": "npm run test --workspaces --if-present",
+		"test:windows": "npm test -w pi-ask-user -w pi-coding-tools -w pi-memory -w pi-sandbox -w pi-subagents -w pi-todo -w pi-vision-tools -w pi-web-tools",
 		"typecheck": "npm run typecheck --workspaces --if-present",
 		"lint": "npm run lint --workspaces --if-present",
 		"format": "npm run format --workspaces --if-present",

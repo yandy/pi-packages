@@ -32,7 +32,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
 	await client.stop();
-	rmSync(root, { recursive: true, force: true });
+	// Windows 上被 kill 的子进程（cwd 在 root 内）退出有延迟，立即删除会 EBUSY
+	rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 describe("LspClient end-to-end (fake server)", () => {

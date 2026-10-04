@@ -1,4 +1,10 @@
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// 与实现同构：实现用 resolve(agentDir, "web-tools.json") 与 resolve(cwd, CONFIG_DIR_NAME, "web-tools.json")
+// 构造路径（src/config.ts:34-35），mock 期望值必须走同一组合，Windows 上才会命中。
+const GLOBAL_CONFIG_PATH = resolve("/home/user/.myapp/agent", "web-tools.json");
+const PROJECT_CONFIG_PATH = resolve("/project", ".myapp", "web-tools.json");
 
 const mockReadFileSync = vi.fn();
 vi.mock("node:fs", () => ({
@@ -26,7 +32,7 @@ async function importModule() {
 describe("loadConfig", () => {
 	it("loads global config from AgentDir/web-tools.json", async () => {
 		mockReadFileSync.mockImplementation((path: string) => {
-			if (path === "/home/user/.myapp/agent/web-tools.json") {
+			if (path === GLOBAL_CONFIG_PATH) {
 				return JSON.stringify({ aliyun: { baseUrl: "https://global.example.com" } });
 			}
 			throw new Error("ENOENT");
@@ -40,7 +46,7 @@ describe("loadConfig", () => {
 
 	it("loads project config from cwd/CONFIG_DIR_NAME/web-tools.json", async () => {
 		mockReadFileSync.mockImplementation((path: string) => {
-			if (path === "/project/.myapp/web-tools.json") {
+			if (path === PROJECT_CONFIG_PATH) {
 				return JSON.stringify({ aliyun: { baseUrl: "https://project.example.com" } });
 			}
 			throw new Error("ENOENT");
@@ -54,12 +60,12 @@ describe("loadConfig", () => {
 
 	it("project config overrides global config at section level", async () => {
 		mockReadFileSync.mockImplementation((path: string) => {
-			if (path === "/home/user/.myapp/agent/web-tools.json") {
+			if (path === GLOBAL_CONFIG_PATH) {
 				return JSON.stringify({
 					aliyun: { baseUrl: "https://global.example.com", aliyunProviderKey: "global-provider" },
 				});
 			}
-			if (path === "/project/.myapp/web-tools.json") {
+			if (path === PROJECT_CONFIG_PATH) {
 				return JSON.stringify({ aliyun: { baseUrl: "https://project.example.com" } });
 			}
 			throw new Error("ENOENT");

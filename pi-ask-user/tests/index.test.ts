@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const RELEASE_SUFFIX = ":release";
@@ -169,6 +170,11 @@ function stubEnv(key: string, value: string): void {
 function setFakeFile(path: string, content: string): void {
 	fakeFiles[path] = content;
 }
+
+// 与实现同构：实现用 join(homedir(), ".pi", "agent", "ask-user.json") 与 join(cwd, ".pi", "ask-user.json")
+// 构造路径（index.ts:341,354），键必须走同一组合，Windows 上才会命中。
+const USER_CONFIG_PATH = join("/home/testuser", ".pi", "agent", "ask-user.json");
+const PROJECT_CONFIG_PATH = join("/tmp/project", ".pi", "ask-user.json");
 
 function clearFakeFiles(): void {
 	fakeFiles = {};
@@ -2043,7 +2049,7 @@ describe("ask_user", () => {
 
 	describe("config file", () => {
 		it("reads displayMode from user config file", async () => {
-			setFakeFile("/home/testuser/.pi/agent/ask-user.json", JSON.stringify({ displayMode: "inline" }));
+			setFakeFile(USER_CONFIG_PATH, JSON.stringify({ displayMode: "inline" }));
 			const tool = await setupTool();
 			let capturedOptions: any;
 
@@ -2069,8 +2075,8 @@ describe("ask_user", () => {
 		});
 
 		it("project config overrides user config for displayMode", async () => {
-			setFakeFile("/home/testuser/.pi/agent/ask-user.json", JSON.stringify({ displayMode: "inline" }));
-			setFakeFile("/tmp/project/.pi/ask-user.json", JSON.stringify({ displayMode: "overlay" }));
+			setFakeFile(USER_CONFIG_PATH, JSON.stringify({ displayMode: "inline" }));
+			setFakeFile(PROJECT_CONFIG_PATH, JSON.stringify({ displayMode: "overlay" }));
 			const tool = await setupTool();
 			let capturedOptions: any;
 
@@ -2097,7 +2103,7 @@ describe("ask_user", () => {
 
 		it("env var overrides config file for displayMode", async () => {
 			stubEnv("PI_ASK_USER_DISPLAY_MODE", "inline");
-			setFakeFile("/home/testuser/.pi/agent/ask-user.json", JSON.stringify({ displayMode: "overlay" }));
+			setFakeFile(USER_CONFIG_PATH, JSON.stringify({ displayMode: "overlay" }));
 			const tool = await setupTool();
 			let capturedOptions: any;
 
@@ -2123,7 +2129,7 @@ describe("ask_user", () => {
 		});
 
 		it("reads shortcut keys from config file", async () => {
-			setFakeFile("/home/testuser/.pi/agent/ask-user.json", JSON.stringify({
+			setFakeFile(USER_CONFIG_PATH, JSON.stringify({
 				overlayToggleKey: "alt+h",
 				commentToggleKey: "alt+c",
 			}));
@@ -2162,7 +2168,7 @@ describe("ask_user", () => {
 		});
 
 		it("silently ignores malformed config JSON", async () => {
-			setFakeFile("/home/testuser/.pi/agent/ask-user.json", "not-json{{{");
+			setFakeFile(USER_CONFIG_PATH, "not-json{{{");
 			const tool = await setupTool();
 			let capturedOptions: any;
 
@@ -2188,7 +2194,7 @@ describe("ask_user", () => {
 		});
 
 		it("silently ignores non-string shortcut values in config (spec: type mismatch fallback)", async () => {
-			setFakeFile("/home/testuser/.pi/agent/ask-user.json", JSON.stringify({ overlayToggleKey: 123, commentToggleKey: true }));
+			setFakeFile(USER_CONFIG_PATH, JSON.stringify({ overlayToggleKey: 123, commentToggleKey: true }));
 			const tool = await setupTool();
 			const { handle, calls } = createOverlayHandle();
 			let inputHandler: ((data: string) => any) | undefined;
