@@ -57,6 +57,17 @@ describe("decodeImage — file path", () => {
 		await expect(decodeImage(p)).rejects.toThrow(/unsupported|mime/i);
 	});
 
+	it("recognizes Windows drive-letter paths (reports unsupported extension, not form confusion)", async () => {
+		// win32 形态路径在 POSIX 宿主上也必须被识别为路径：盘符 + 分隔符；.txt 不在图片表 → unsupported
+		await expect(decodeImage("C:\\Users\\someone\\x.txt")).rejects.toThrow(/unsupported|mime/i);
+	});
+
+	it("treats a long Windows path with a supported extension as a path, not raw base64", async () => {
+		// >100 字符的 win32 图片路径绝不能掉进 raw-base64 分支被当成图像数据：应走路径分支报读失败
+		const longPath = `C:\\Users\\someone\\${"d".repeat(120)}\\photo.png`;
+		await expect(decodeImage(longPath)).rejects.toThrow(/read|not found|no such/i);
+	});
+
 	it("rejects a missing file", async () => {
 		await expect(decodeImage(join(dir, "nope.png"))).rejects.toThrow(/read|not found|no such/i);
 	});
