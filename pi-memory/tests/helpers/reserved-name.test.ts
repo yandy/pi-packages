@@ -10,6 +10,9 @@ describe("reserved-name fixture helper", () => {
 		dir = await mkdtemp(join(tmpdir(), "mem-rn-"));
 	});
 	afterEach(async () => {
+		// 与 dream / memory-store-read 同契约：先经 helper 摘除保留名文件，
+		// 否则 win32 上 rm(dir, { recursive: true }) 删不掉 con.md
+		await removeReservedNameFixture(dir, "con.md");
 		await rm(dir, { recursive: true, force: true });
 	});
 
