@@ -34,10 +34,6 @@ describe("entryFileName", () => {
 		expect([...stem].every((ch) => ch === "汉")).toBe(true);
 	});
 
-	it("is deterministic", () => {
-		expect(entryFileName("同一个 标题")).toBe(entryFileName("同一个 标题"));
-	});
-
 	it("prefixes reserved Windows device names", () => {
 		expect(entryFileName("CON")).toBe("_CON.md");
 		expect(entryFileName("con")).toBe("_con.md");

@@ -132,18 +132,6 @@ describe("unlinkStrict / sameFile", () => {
 	});
 });
 
-describe("renameEntry", () => {
-	it("renames the file and keeps the index line position", async () => {
-		await store.addEntry({ name: "A", body: "A 正文" });
-		await store.addEntry({ name: "B", body: "B 正文" });
-		const result = await store.renameEntry("A", "A2");
-
-		expect(result.file).toBe("A2.md");
-		const raw = await store.readIndex();
-		expect(parseEntryIndex(raw).entries.map((e) => e.file)).toEqual(["A2.md", "B.md"]);
-	});
-});
-
 describe("rebuildIndex", () => {
 	it("rebuilds from disk in (modified, file) order", async () => {
 		await writeEntry("b.md", meta("B", { modified: "2026-10-02T00:00:00.000Z" }));

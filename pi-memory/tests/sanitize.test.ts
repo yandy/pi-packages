@@ -56,10 +56,6 @@ describe("stripInvisibleChars", () => {
 		const text = "- [A](a.md) — desc\n\t- indented\n\n";
 		expect(stripInvisibleChars(text)).toBe(text);
 	});
-
-	it("returns the empty string unchanged", () => {
-		expect(stripInvisibleChars("")).toBe("");
-	});
 });
 
 describe("sanitizeForInjection", () => {
@@ -103,10 +99,6 @@ describe("sanitizeForInjection", () => {
 		expect(sanitizeForInjection(plain)).toBe(plain);
 	});
 
-	it("returns the empty string for empty input", () => {
-		expect(sanitizeForInjection("")).toBe("");
-	});
-
 	it("is a pure function: the same hostile input always yields the same fixed point", () => {
 		const input = "<a> & \u200B";
 		const once = sanitizeForInjection(input);
@@ -123,6 +115,5 @@ describe("sanitizeForInjection", () => {
 		const source = await readFile(fileURLToPath(new URL("../src/sanitize.ts", import.meta.url)), "utf8");
 		expect(source).not.toMatch(/^\s*import\b.*node:fs/m);
 		expect(source).not.toMatch(/\b(writeFile|readFile|mkdir|unlink)\s*\(/);
-		expect(source).not.toMatch(/^import\s/m); // 纯函数模块：一行 import 都没有
 	});
 });

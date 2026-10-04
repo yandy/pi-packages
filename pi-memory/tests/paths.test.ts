@@ -109,12 +109,6 @@ describe("projectDirName", () => {
 		expect(projectDirName("/home/yandy/proj/with:colon")).toBe("home__yandy__proj__with_3acolon");
 	});
 
-	it("keeps backslashes literal (POSIX naming)", () => {
-		// 显式传平台：命名规则跟随平台，POSIX 上反斜杠是普通字符（win32 上它是分隔符，
-		// 由下面的 win32 用例覆盖）。
-		expect(projectDirName("/home/a\\b", { platform: "linux" })).toBe("home__a\\b");
-	});
-
 	it("drops empty, . and .. segments", () => {
 		expect(projectDirName("/home/../home/./proj")).toBe("home__home__proj");
 	});

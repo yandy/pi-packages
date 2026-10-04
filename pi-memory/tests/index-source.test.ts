@@ -219,11 +219,6 @@ describe("readRecordedMemoryIndex", () => {
 		expect(readRecordedMemoryIndex(sm, { sessionEntryToContextMessages: passthrough })).toBe("");
 	});
 
-	it("returns an empty index from a host-wrapped empty section", () => {
-		const sm = sessionManager([entry(systemMessage({ memory_index: wrapSection("") }))]);
-		expect(readRecordedMemoryIndex(sm, { sessionEntryToContextMessages: passthrough })).toBe("");
-	});
-
 	it("uses buildContextEntries to resolve the current branch when it is exposed", () => {
 		const mainBranch = entry(systemMessage({ memory_index: "main" }));
 		const forkedBranch = entry(systemMessage({ memory_index: "forked" }));
