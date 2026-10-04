@@ -77,6 +77,15 @@ describe("resolveModel", () => {
 			expect(result).toContain("Available models:");
 		});
 
+		it("rejects an empty query instead of vacuously matching the first model", () => {
+			// "".split 后 every 恒真、id.includes("") 恒真 —— 修复前空串会任意命中第一个可用模型。
+			const empty = resolveModel("", makeRegistry());
+			expect(typeof empty).toBe("string");
+			expect(empty).toContain('Model not found: ""');
+			const whitespace = resolveModel("   ", makeRegistry());
+			expect(whitespace).toContain('Model not found: "   "');
+		});
+
 		it("error lists available models", () => {
 			const result = resolveModel("xyz", makeRegistry());
 			expect(result).toContain("anthropic/claude-opus-4-6");
