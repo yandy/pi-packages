@@ -12,7 +12,7 @@
 | [pi-dingtalk](./pi-dingtalk/README.zh.md) | 钉钉集成（AI 表格、日历、审批、文档等） | `@yandy0725/pi-dingtalk` |
 | [pi-lark](./pi-lark/README.zh.md) | Lark/飞书集成 | `@yandy0725/pi-lark` |
 | [pi-memory](./pi-memory/README.zh.md) | 基于文件系统的持久化记忆层，为 pi 编程代理提供跨会话记忆 | `@yandy0725/pi-memory` |
-| [pi-sandbox](./pi-sandbox/README.zh.md) | 进程级沙箱扩展（bwrap/landlock/seatbelt）：工作目录可写、其余宿主文件可读，fail-closed | `@yandy0725/pi-sandbox` |
+| [pi-sandbox](./pi-sandbox/README.zh.md) | 进程级沙箱扩展（bwrap/landlock/seatbelt/windows-acl）：工作目录可写、其余宿主文件可读，fail-closed | `@yandy0725/pi-sandbox` |
 | [pi-subagents](./pi-subagents/README.zh.md) | 进程内子代理核心，支持后台执行和类型化 API | `@yandy0725/pi-subagents` |
 | [pi-superpowers](./pi-superpowers/README.zh.md) | Superpowers 结构化开发工作流（brainstorming、TDD、调试等） | `@yandy0725/pi-superpowers` |
 | [pi-todo](./pi-todo/README.zh.md) | 极简 todo 工具，带编辑器嵌入式小组件 | `@yandy0725/pi-todo` |
