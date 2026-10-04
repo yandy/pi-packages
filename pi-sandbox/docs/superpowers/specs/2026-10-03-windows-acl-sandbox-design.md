@@ -367,7 +367,7 @@ Windows：合成 ACL 场景（缺 `WRITE_DAC` 的目录、显式包允许 ACE �
 
 命令：`npx vitest run tests/win32/e2e.test.ts`（提交 `efde10cb`）
 
-**结果：22 passed / 0 skipped。** 覆盖并已证实的真机行为：受限令牌创建、能力 SID 的 DACL 授权（工作区 + `%TEMP%`）、`read-only` 拒绝工作区写、四种删除路径（`cmd del` / `Remove-Item` / `.NET File::Delete` / Node `unlink`）在授权根之外全部被拒且宿主文件存活、授权根之外可读、NUL 设备在两种模式下可写、退出码镜像（含 `0xC0000005` 全 32 位）、缺失根时的 `windows-acl-run: ` + exit 127 契约、Win32 失败与"被拒绝"的分类区分、授予根与围栏 `writableRoots` 一致、管道 stdio 孙进程被拒、以及三处跨平台断言（bash 拒绝文案、拒绝断言守卫）。
+**结果：21 passed / 0 skipped。**（2026-10-03 真机当日为 22 passed；2026-10-06 测试精简删除了与 node exit 版同型的 `cmd /c exit 7` 退出码镜像用例——重复覆盖，该行为仍由 `node process.exit(42)` 与 `0xC0000005` 两条用例钉住——计数随之修正为 21。） 覆盖并已证实的真机行为：受限令牌创建、能力 SID 的 DACL 授权（工作区 + `%TEMP%`）、`read-only` 拒绝工作区写、四种删除路径（`cmd del` / `Remove-Item` / `.NET File::Delete` / Node `unlink`）在授权根之外全部被拒且宿主文件存活、授权根之外可读、NUL 设备在两种模式下可写、退出码镜像（含 `0xC0000005` 全 32 位）、缺失根时的 `windows-acl-run: ` + exit 127 契约、Win32 失败与"被拒绝"的分类区分、授予根与围栏 `writableRoots` 一致、管道 stdio 孙进程被拒、以及三处跨平台断言（bash 拒绝文案、拒绝断言守卫）。
 
 ### 13.2 真机回归中发现并修复的两处测试缺陷（后端无缺陷）
 

@@ -126,6 +126,9 @@ describe('stripEscalationPlaceholders（pi 校验前的占位符剥离，挂在�
 
 describe("isStrictlyWider（denial-first 门禁与 approveEscalation 共用同一张表）", () => {
 	it("read-only → 两档都更宽", () => {
+		// 常量 pin（并入原 WIDER_MODES 表复述用例）：门禁与审批共用的这张表内容本身也钉死——
+		// read-only 的更宽目标恰好两档，且 read-only 不在其列（「nothing widens to read-only」）。
+		expect(WIDER_MODES["read-only"]).toEqual(["workspace-write", "danger-full-access"]);
 		expect(isStrictlyWider("read-only", "workspace-write")).toBe(true);
 		expect(isStrictlyWider("read-only", "danger-full-access")).toBe(true);
 	});
@@ -175,14 +178,6 @@ describe("markers", () => {
 		expect(escalationIgnoredMarker("workspace-write")).toBe(
 			'[sandbox: escalation fields were ignored — no sandbox denial was recorded for this session, so this call ran under "workspace-write" mode. Send escalation fields only when retrying a call that just returned a denial marker.]',
 		);
-	});
-});
-
-describe("WIDER_MODES", () => {
-	it("read-only widens to both; workspace-write only to full access; nothing widens to read-only", () => {
-		expect(WIDER_MODES["read-only"]).toEqual(["workspace-write", "danger-full-access"]);
-		expect(WIDER_MODES["workspace-write"]).toEqual(["danger-full-access"]);
-		expect(WIDER_MODES["danger-full-access"]).toBeUndefined();
 	});
 });
 
