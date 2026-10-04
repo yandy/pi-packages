@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { resolve as resolvePath } from "node:path";
@@ -13,15 +12,6 @@ import { DEFAULT_SBX_CONFIG, getSbxConfigPath, imageRef, loadSbxConfig, resolveE
 
 const TEST_CONFIG_DIR = ".test-cfg";
 const testDir = resolvePath(tmpdir(), `pi-sandbox-test-${Date.now()}`);
-
-const podmanAvailable = (() => {
-	try {
-		execFileSync("podman", ["info"], { stdio: "ignore", timeout: 5000 });
-		return true;
-	} catch {
-		return false;
-	}
-})();
 
 beforeEach(() => {
 	if (existsSync(testDir)) rmSync(testDir, { recursive: true });
@@ -153,21 +143,10 @@ describe("detectEngine", () => {
 	}, 30_000);
 });
 
-describe("resolveEngine", () => {
-	it("returns podman when engine=podman and podman available", () => {
-		try {
-			const { execFileSync } = require("node:child_process");
-			execFileSync("podman", ["info"], { stdio: "ignore", timeout: 5000 });
-			expect(resolveEngine("podman")).toBe("podman");
-		} catch {
-			// skip if podman not available
-		}
-	});
-
-	it.skipIf(podmanAvailable)("throws when engine=podman but podman not available", () => {
-		expect(() => resolveEngine("podman")).toThrow(/not available/i);
-	}, 30_000);
-});
+// resolveEngine 显式 engine 的可用性契约（成功返回 / 失败抛错）由
+// tests/config-resolve-engine.test.ts 用 mock 的 container-cli 在任何环境验证。
+// 不在此处做依赖真实 runtime 的探测：模块加载期的 5s 探测与实现内部 30s 超时
+// 不一致，曾导致「守卫判定不可用、被测代码却成功」的 CI 失败。
 
 describe("new runtime fields", () => {
 	it("parses memory, cpus, swap, pidsLimit, mounts from runtime group", () => {
