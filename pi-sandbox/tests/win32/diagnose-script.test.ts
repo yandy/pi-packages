@@ -181,10 +181,12 @@ describe.skipIf(process.platform !== "win32")("diagnose-windows-sandbox-acl scri
 		// DENY 的受托人用**同一个包 SID**（不是当前用户）：真机证明“受托人 = 当前用户”的 deny 只要含
 		// SYNCHRONIZE（icacls 的 (W)/(D) 都会展开出 S）就会打掉 CreateFileW(FILE_WRITE_DAC) 的探测；
 		// 而包 SID 的 deny 对用户的访问检查无影响，同时钉住脚本“同 SID 的 deny 不得被当成冲突移除”。
-		addPackageDenyAce(target); // 同 SID 的 deny：icacls /deny 在本机静默不生效，必须用 .NET 写并自检
 		const otherAllow = shell("icacls", [target, "/grant", "*S-1-5-32-545:(OI)(CI)(RX)"]);
 		expect(otherAllow.status, otherAllow.output).toBe(0);
 		addPackageAce(target); // 同 SID 的 allow：移除路径必须执行且只移除 allow
+		// deny 放在最后写：icacls 的 grant 会重写整个 DACL，排在它前面可能被重新推导/固化的写盘扰动；
+		// 同时 icacls /deny 在本机静默不生效（status 0 但无 ACE），所以用 .NET 写并自检。
+		addPackageDenyAce(target);
 		const run = runScript(["-Path", target, "-AllowRoot", scratch, "-Out", join(scratch, "out")]);
 		expect(run.status, run.output).toBe(0);
 		const after = sddl(target);
