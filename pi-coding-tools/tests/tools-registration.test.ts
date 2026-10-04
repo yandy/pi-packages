@@ -22,8 +22,8 @@ const mockClient = {
 		{
 			name: "UserService",
 			kind: 5,
-			range: { start: { line: 0, column: 0 }, end: { line: 9, column: 0 } },
-			selectionRange: { start: { line: 0, column: 6 }, end: { line: 0, column: 16 } },
+			range: { start: { line: 0, character: 0 }, end: { line: 9, character: 0 } },
+			selectionRange: { start: { line: 0, character: 6 }, end: { line: 0, character: 16 } },
 			children: [],
 		},
 	]),
