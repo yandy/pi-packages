@@ -1,8 +1,8 @@
-import { existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSandboxTools, ESCALATION_PROPS, resolveCall, resolveCallMode } from "../src/tools";
 import { canonicalizeTarget, isWithinRoots } from "../src/fence";
@@ -663,9 +663,26 @@ describe("denial-first 硬门禁（未经真实拒绝不提权）", () => {
 		const canonical = canonicalizeTarget(outside);
 		const roots = writableRoots("workspace-write", deps.cwd, deps._tmpRoots);
 		const verdict = isWithinRoots(canonical, roots, process.platform !== "win32");
+		// 失败时的身份证据：roots 与 target 祖先链的 dev:ino —— 若出现相同身份即身份回退命中，
+		// 若身份各异则判定来自词法分支。工具调用前先暴露，避免事后无法重现。
+		const statId = (p: string): string => {
+			try {
+				const s = statSync(p);
+				return `${s.dev}:${s.ino}`;
+			} catch {
+				return "ENOENT";
+			}
+		};
+		const ancestorIds: string[] = [];
+		for (let a = canonical; ; ) {
+			ancestorIds.push(`${a} [${statId(a)}]`);
+			const parent = dirname(a);
+			if (parent === a) break;
+			a = parent;
+		}
 		expect(
 			verdict,
-			`fence self-check: target=${canonical} roots=${JSON.stringify(roots)} _tmpRoots=${JSON.stringify(deps._tmpRoots)} tmpdir=${tmpdir()} platform=${process.platform}`,
+			`fence self-check: target=${canonical} verdict=${verdict} roots=${JSON.stringify(roots.map((r) => `${r} [${statId(r)}]`))} ancestors=${JSON.stringify(ancestorIds)} _tmpRoots=${JSON.stringify(deps._tmpRoots)} tmpdir=${tmpdir()} platform=${process.platform}`,
 		).toBe(false);
 		const ctx = toolCtx(true, "Allow once") as { ui: { select: ReturnType<typeof vi.fn> } };
 		// 1) 无前置拒绝 + 提权参数 → 忽略，按 workspace-write 执行 → fence 拒绝（同时记账）
