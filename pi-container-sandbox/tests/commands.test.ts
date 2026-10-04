@@ -68,6 +68,45 @@ describe("/sandbox stop", () => {
 		expect(shutdownCalled).toBe(true);
 		expect(ctx.notifications.some((n) => n.msg.includes("stopped and removed"))).toBe(true);
 	});
+
+	it("awaits shutdown before clearing state and notifying success", async () => {
+		const ctx = notifyCtx();
+		const handlers = createSandboxCommandHandlers("/tmp", mockPathApprovals());
+
+		let shutdownSettled = false;
+		const rt = mockRuntime({
+			shutdown: () =>
+				new Promise<void>((resolve) => {
+					setImmediate(() => {
+						shutdownSettled = true;
+						resolve();
+					});
+				}),
+		});
+		mockSbx({ keep: false, runtime: rt });
+
+		await handlers.stop("", ctx);
+		// shutdown 是异步的：handler 必须 await 它（settled 先于成功通知），
+		// 否则容器还没停完就已 clearSbx 并报成功。
+		expect(shutdownSettled).toBe(true);
+		expect(ctx.notifications.some((n) => n.msg.includes("stopped and removed"))).toBe(true);
+	});
+
+	it("reports Stop failed when shutdown rejects", async () => {
+		const ctx = notifyCtx();
+		const handlers = createSandboxCommandHandlers("/tmp", mockPathApprovals());
+
+		const rt = mockRuntime({
+			shutdown: async () => {
+				throw new Error("docker stop timed out");
+			},
+		});
+		mockSbx({ keep: false, runtime: rt });
+
+		await handlers.stop("", ctx);
+		expect(ctx.notifications.some((n) => n.level === "error" && n.msg.includes("Stop failed"))).toBe(true);
+		expect(ctx.notifications.some((n) => n.msg.includes("stopped and removed"))).toBe(false);
+	});
 });
 
 describe("/sandbox build", () => {
