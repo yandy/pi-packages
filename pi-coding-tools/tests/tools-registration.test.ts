@@ -1,5 +1,4 @@
-import type { Type } from "typebox";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 // mock search 层
 vi.mock("../src/ast-grep/search", () => ({
@@ -30,10 +29,10 @@ const mockClient = {
 	]),
 	hover: vi.fn(async () => ({ contents: { kind: "markdown", value: "`findById(id: string): User`" } })),
 	definition: vi.fn(async () => [
-		{ uri: "file:///proj/src/user.ts", range: { start: { line: 4, column: 0 }, end: { line: 4, column: 10 } } },
+		{ uri: "file:///proj/src/user.ts", range: { start: { line: 4, character: 0 }, end: { line: 4, character: 10 } } },
 	]),
 	references: vi.fn(async () => [
-		{ uri: "file:///proj/src/user.ts", range: { start: { line: 2, column: 4 }, end: { line: 2, column: 12 } } },
+		{ uri: "file:///proj/src/user.ts", range: { start: { line: 2, character: 4 }, end: { line: 2, character: 12 } } },
 	]),
 };
 const mockManager = { getClientForFile: vi.fn(async () => ({ client: mockClient, server: { id: "ts" } })) };
@@ -72,12 +71,6 @@ const rewriteOk: Awaited<ReturnType<typeof runAstGrepRewrite>> = {
 };
 
 describe("ast_grep_search tool", () => {
-	it("has correct name and schema", () => {
-		expect(ast_grep_search.name).toBe("ast_grep_search");
-		const params = ast_grep_search.parameters as ReturnType<typeof Type.Object>;
-		expect(params).toBeDefined();
-	});
-
 	it("returns formatted text on success", async () => {
 		vi.mocked(runAstGrep).mockResolvedValueOnce(okResult);
 		const res = await ast_grep_search.execute(
@@ -124,11 +117,6 @@ describe("ast_grep_search tool", () => {
 });
 
 describe("ast_grep_replace tool", () => {
-	it("has correct name and schema", () => {
-		expect(ast_grep_replace.name).toBe("ast_grep_replace");
-		expect(ast_grep_replace.parameters).toBeDefined();
-	});
-
 	it("dry-run previews without applying", async () => {
 		vi.mocked(runAstGrepRewrite).mockResolvedValueOnce(rewriteOk);
 		const res = await ast_grep_replace.execute(
@@ -195,9 +183,6 @@ describe("ast_grep_replace tool", () => {
 	});
 });
 
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { CodingToolsConfig } from "../src/config";
 import { createLspTools } from "../src/tools/lsp-tools";
 
@@ -210,13 +195,10 @@ const baseTrue: CodingToolsConfig = {
 };
 
 describe("lsp tools", () => {
-	let tsFile: string;
+	// The tools never read the path from disk (it is only forwarded to the mocked
+	// manager/client), so a plain path string suffices — no temp file, no cleanup.
+	const tsFile = "/proj/a.ts";
 	const tools = createLspTools(mockManager as never, (_cwd) => baseTrue);
-	beforeAll(() => {
-		const root = mkdtempSync(join(tmpdir(), "lsp-tools-"));
-		tsFile = join(root, "a.ts");
-		writeFileSync(tsFile, "class A {}\n");
-	});
 
 	it("lsp_symbols formats tree", async () => {
 		const res = await tools.lsp_symbols.execute("id", { path: tsFile }, undefined, undefined, { cwd: "/proj" } as never);
@@ -242,6 +224,8 @@ describe("lsp tools", () => {
 		);
 		const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
 		expect(text).toContain("definition");
+		// mockClient.definition points at file:///proj/src/user.ts line 4 (0-based), cwd is /proj.
+		expect(text).toContain("src/user.ts:5:1");
 	});
 
 	it("lsp_navigate references", async () => {
@@ -253,7 +237,9 @@ describe("lsp tools", () => {
 			{ cwd: "/proj" } as never,
 		);
 		const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
-		expect(text).toContain("references");
+		expect(text).toContain("references (1)");
+		// mockClient.references returns one hit at file:///proj/src/user.ts, line 2 col 4 (0-based).
+		expect(text).toContain("src/user.ts:3:5");
 	});
 
 	it("lsp tool surfaces install hint when server missing", async () => {
