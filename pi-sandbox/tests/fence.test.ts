@@ -212,4 +212,54 @@ describe("identity fallback robustness", () => {
 			vi.resetModules();
 		}
 	});
+
+	it("compares the full 64-bit ino, not the rounded number form (win32 NTFS FileId)", async () => {
+		// 背景（2026-10-05 真机 CI 捕获）：NTFS FileId 是 64 位（16 位序列号 + 48 位 MFT 记录号），
+		// 同一父目录下相邻的两个目录只差 1。`Stats.ino` 的 number 形态超过 2^53 后按偶舍入：
+		// 真机 CI 里围栏外的 outside（真身 …C5）与授予根 fake-tmp（…C4）都被读成
+		// `14355223812536772`，身份回退把 outside 判成 fake-tmp（tools.test.ts 的围栏自检
+		// verdict=true，fail-open，且判定链完全落在身份回退这一层上）。身份必须按完整 64 位判等。
+		const rootIno = 14355223812536772n; // …C4：偶数，number 形态可精确表示（真机值）
+		const targetIno = 14355223812536773n; // …C5：相邻记录，number 形态舍入到 …C4（真机值）
+		expect(Number(targetIno)).toBe(Number(rootIno)); // 夹具自检：number 形态确实相撞
+		vi.resetModules();
+		vi.doMock("node:fs", async (importOriginal) => {
+			const actual = await importOriginal<typeof import("node:fs")>();
+			// 模拟 win32 宿主：`{ bigint: true }` 给完整 FileId，number 读取给舍入后的值。
+			const statSync = ((path: string, opts?: { bigint?: boolean }) => {
+				const ino = String(path).includes("fake-tmp") ? rootIno : targetIno;
+				return opts?.bigint ? { dev: 1n, ino } : { dev: 1, ino: Number(ino) };
+			}) as unknown as typeof actual.statSync;
+			return { ...actual, statSync };
+		});
+		try {
+			const { isWithinRoots: withExactIdentity } = await import("../src/fence");
+			// 退回 number 身份时两侧都是 14355223812536772 → 误判为同一目录 → true
+			expect(withExactIdentity("C:\\tmp\\outside\\f.txt", ["C:\\tmp\\fake-tmp"], false)).toBe(false);
+		} finally {
+			vi.doUnmock("node:fs");
+			vi.resetModules();
+		}
+	});
+
+	it("treats an already-rounded number ino as unknown identity — fail-closed", async () => {
+		// 身份读取的防线：异常宿主忽略 `{ bigint: true }`、只给 number 形态时，超过 2^53 的值
+		// 已无法区分相邻 FileId（上一条的真机证据）。此时它不是“相同身份”，而是“无法证明身份”，
+		// 与零身份同待遇：不精确 = 不匹配。这条守住 `exact` 的 isSafeInteger 口径——若退回
+		// isInteger，两个不同目录的舍入值会被判成同一，fail-open 原样复现。
+		vi.resetModules();
+		vi.doMock("node:fs", async (importOriginal) => {
+			const actual = await importOriginal<typeof import("node:fs")>();
+			// 两个不同目录的真身在 number 形态下都是这个舍入结果（真机 CI 的观测值）
+			const statSync = (() => ({ dev: 1, ino: 14355223812536772 })) as unknown as typeof actual.statSync;
+			return { ...actual, statSync };
+		});
+		try {
+			const { isWithinRoots: withRoundedIdentity } = await import("../src/fence");
+			expect(withRoundedIdentity("C:\\tmp\\outside\\f.txt", ["C:\\tmp\\fake-tmp"], false)).toBe(false);
+		} finally {
+			vi.doUnmock("node:fs");
+			vi.resetModules();
+		}
+	});
 });
