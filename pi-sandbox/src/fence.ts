@@ -59,6 +59,10 @@ type FileIdentity = { dev: bigint | number; ino: bigint | number };
  *
  * number 形态只在注入/异常宿主出现（生产一律 `{ bigint: true }` 读取），且只有
  * `Number.isSafeInteger` 内的值才保证未被舍入——不精确即身份未知，不得用于判等。
+ *
+ * 注：number 分支在生产路径不可达，但**不是死代码**——它是注入/异常宿主（mock fs、忽略
+ * options 的宿主）降级返回 number 身份时的 fail-closed 护栏，由 `fence.test.ts` 的「零身份」
+ * 与「已舍入 number 按未知」两条用例钉住。删掉它会让那类宿主直接 fail-open。
  */
 function exact(value: bigint | number): bigint | undefined {
 	if (typeof value === "bigint") return value;
