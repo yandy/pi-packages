@@ -48,43 +48,11 @@ export function canonicalizeTarget(path: string): string {
 	}
 }
 
-/** 文件系统身份：`ino`/`dev` 的宿主形态随读取方式而变（bigint 读取为 BigInt，number 读取为 Number）。 */
-type FileIdentity = { dev: bigint | number; ino: bigint | number };
-
-/**
- * 身份的精确化：win32 的 NTFS FileId 是 64 位（16 位序列号 + 48 位 MFT 记录号），同一父目录下
- * 相邻目录只差 1；`Stats.ino` 的 number 形态超过 `2^53` 后按偶舍入——真机 CI 上 `outside` 的真身
- * `…C5` 与 `fake-tmp` 的 `…C4` 都被显示成 `14355223812536772`（2026-10-05 由围栏自检捕获），
- * 身份回退于是把围栏外判成授予根，fail-open。故身份比较一律经 BigInt。
- *
- * number 形态只在注入/异常宿主出现（生产一律 `{ bigint: true }` 读取），且只有
- * `Number.isSafeInteger` 内的值才保证未被舍入——不精确即身份未知，不得用于判等。
- */
-function exact(value: bigint | number): bigint | undefined {
-	if (typeof value === "bigint") return value;
-	return Number.isSafeInteger(value) ? BigInt(value) : undefined;
-}
-
-function sameIdentity(a: FileIdentity, b: FileIdentity): boolean {
-	const aIno = exact(a.ino);
-	const bIno = exact(b.ino);
-	const aDev = exact(a.dev);
-	const bDev = exact(b.dev);
-	// 身份未知 ≠ 身份相同：libuv 的 Windows stat 回退（目录句柄被 Defender/索引器瞬时占用时）
-	// 给出 ino/dev = 0 的“未知身份”，`0 === 0` 会把两个不同目录判成同一（2026-10-04 真机 CI
-	// 捕获）。零身份、以及无法精确化为 BigInt 的身份，两侧任一命中都一律不匹配。
-	if (aIno === undefined || bIno === undefined || aDev === undefined || bDev === undefined) return false;
-	if (aIno === 0n || bIno === 0n) return false;
-	return aIno === bIno && aDev === bDev;
-}
-
-/**
- * 身份读取：`{ bigint: true }` 拿到完整 64 位 FileId，避开 `Stats.ino` 的 number 精度陷阱。
- * 注入/异常宿主即使忽略 options 返回 number 形态，也只有 `Number.isSafeInteger` 内的值会参与判等
- * （see `exact`）——已舍入的 number 身份按未知处理，不可能再撞成“同一目录”。
- */
-function readIdentity(path: string): FileIdentity {
-	return statSync(path, { bigint: true });
+function sameIdentity(a: Stats, b: Stats): boolean {
+	// libuv 的 Windows stat 回退（目录句柄被 Defender/索引器瞬时占用时）返回 ino/dev = 0 的
+	// “未知身份”；`0 === 0` 会把两个不同的目录判成同一，身份回退 fail-open（2026-10-04 真机
+	// CI 捕获）。身份未知 ≠ 身份相同：零身份一律不匹配。POSIX 的 stat 对存在文件不会给 0。
+	return a.ino !== 0 && a.dev === b.dev && a.ino === b.ino;
 }
 
 /** 大小写归一：平台不敏感时统一小写（win32 的盘符/目录名拼写差异）。 */
@@ -124,8 +92,8 @@ function isLexicallyUnder(target: string, root: string, caseSensitive: boolean):
 
 /**
  * containment 判定（deepseek dsh-fs-sandbox 语义）：词法快路径处理常规 canonical
- * 拼写；拼写不一致时沿 target 的存在祖先向上 walk，用文件系统身份（dev+ino，一律按 bigint
- * 读取与比较）与授予根比较——容忍 missing 后缀，防祖先 symlink 换绑逃逸。
+ * 拼写；拼写不一致时沿 target 的存在祖先向上 walk，用文件系统身份（dev+ino）
+ * 与授予根比较——容忍 missing 后缀，防祖先 symlink 换绑逃逸。
  * caseSensitive 缺省按平台推导（win32 不敏感）；身份回退本身与大小写无关。
  */
 export function isWithinRoots(
@@ -140,17 +108,17 @@ export function isWithinRoots(
 		if (isLexicallyUnder(target, root, caseSensitive)) return true;
 	}
 	for (const root of roots) {
-		let rootInfo: FileIdentity;
+		let rootInfo: Stats;
 		try {
-			rootInfo = readIdentity(root);
+			rootInfo = statSync(root);
 		} catch {
 			continue; // 授予根不存在：匹配不到任何东西
 		}
 		let ancestor = target;
 		for (;;) {
-			let info: FileIdentity | undefined;
+			let info: Stats | undefined;
 			try {
-				info = readIdentity(ancestor);
+				info = statSync(ancestor);
 			} catch {
 				info = undefined;
 			}
