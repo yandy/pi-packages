@@ -115,8 +115,11 @@ npm 11.12.1 对 **workspace 包**的 `os` 字段同样执行平台检查（Arbor
 | 4 | e2e 对共享 `%TEMP%` 树的 ACL 授权传播插入 `diagnose-script` 的前后不变断言 | 竞态 | `pi-sandbox/vitest.config.ts` 设 `fileParallelism: false` |
 | 5 | **`fence.ts` `sameIdentity` 零身份判等**：Windows stat 回退（句柄被 Defender/索引器瞬时占用）给出 ino/dev = 0 的未知身份，`0 === 0` 把不同目录判成同一 → 身份回退 fail-open | **实现安全缺陷** | **实现修复：`ino !== 0` 视为身份未知一律不匹配（fail-closed）**；tools.test.ts 加围栏自检（失败时携带 canonical/roots/tmpdir） |
 | 6 | 矩阵 fail-fast 取消对侧腿 | 编排 | 调试期 `fail-fast: false`，收尾已恢复默认 |
+| 7 | **`fence.ts` `sameIdentity` number 精度**：NTFS FileId 是 64 位（16 位序列号 + 48 位 MFT 记录号），同一父目录下相邻目录只差 1；`Stats.ino` 的 number 形态超过 `2^53` 后按偶舍入，`outside`（真身 `…C5`）与授予根 `fake-tmp`（`…C4`）都读成 `14355223812536772` → 身份回退把围栏外判成授予根，fail-open（tools.test.ts 围栏自检 `verdict=true`，判定链落在身份回退层）| **实现安全缺陷**（与 5 同层、成因不同：5 治“身份为零”，7 治“身份丢精度”）| **实现修复：身份一律 `statSync(path, { bigint: true })` 读完整 64 位；number 形态只在注入/异常宿主出现，须落在 `Number.isSafeInteger` 内才参与判等，否则按身份未知 fail-closed**；`fence.test.ts` 加两条注入回归（完整 64 位判等 / 舍入 number 按未知）|
 
 修复 5 的机理确认了 tools.test.ts 的非确定性仅存在于 Windows：POSIX stat 无回退路径，ino 恒为真实值。围栏自检（不分平台）永久保留。
+
+修复 7 的时机与机理：`a3f51d14`（run 37216747798）转绿后，随后的 push 又在同一条自检上红（run 37218493035 `fake-tmp`/`outside` 同为 `…C0`、run 37220597523 同为 `…C4`）。两次的判定输入都是**相邻的 FileId 记录**——奇数真身被 number 形态舍入到偶数邻居，恰好撞上授予根。故 5 的零身份守门不够：身份回退还必须拿到未舍入的身份。修复后 `outside` 与 `fake-tmp` 的真身不同即不判等，自检由完整 64 位身份给出 `verdict=false`（两个失败 run 的其余 7 个包均全绿，与本地 Linux 结果一致）。
 
 ## 5. CI 设计
 
