@@ -25,9 +25,9 @@
 		"check:host-deps": "node scripts/check-host-deps.mjs"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.5.14",
+		"@biomejs/biome": "^2.5.15",
 		"typescript": "~7.0.2",
-		"@types/node": "^26.6.3",
-		"vitest": "^5.0.2"
+		"@types/node": "^26.6.4",
+		"vitest": "^5.0.3"
 	}
 }
