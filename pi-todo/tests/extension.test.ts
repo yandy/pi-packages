@@ -53,7 +53,7 @@ describe("prompt", () => {
 	it("puts the behavioral rules in guidelines without repeating the description", () => {
 		expect(tools[0].promptGuidelines).toEqual([
 			'Use todo to plan multi-step work: action "set" lists all tasks up front.',
-			"Set a task in_progress before you start it, and keep exactly one in_progress at a time.",
+			"Mark a task in_progress before starting it; keep exactly one in_progress unless tasks really run concurrently (e.g. one per dispatched subagent).",
 			"Mark a task done as soon as it passes — never batch completions to the end of the run.",
 			'Call todo action "list" when you need the current ids or statuses — the extension does not re-send the list on its own.',
 		]);
@@ -73,6 +73,26 @@ describe("todo tool execute", () => {
 		});
 		const result = await run({ action: "update", id: "1", status: "done" });
 		expect(result.content[0].text).toBe("✓ #1 写单测 done (1/2 done) · next: #2 修 CI");
+	});
+
+	it("warns when set renumbers ids while work is in flight", async () => {
+		await run({
+			action: "set",
+			items: [
+				{ title: "A", status: "pending" },
+				{ title: "B", status: "pending" },
+			],
+		});
+		await run({ action: "update", id: "2", status: "in_progress" }, "c2");
+		const r = await run({ action: "set", items: [{ title: "C", status: "pending" }] }, "c3");
+		expect(r.content[0].text).toContain("ids renumbered");
+		expect(r.content[0].text).toContain("#2 B");
+	});
+
+	it("stays quiet when nothing was in flight", async () => {
+		await run({ action: "set", items: [{ title: "A", status: "pending" }] });
+		const r = await run({ action: "set", items: [{ title: "B", status: "pending" }] }, "c2");
+		expect(r.content[0].text).not.toContain("renumbered");
 	});
 
 	it("set still returns the whole list", async () => {

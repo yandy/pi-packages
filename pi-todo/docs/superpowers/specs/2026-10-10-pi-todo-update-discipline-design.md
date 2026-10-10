@@ -352,3 +352,27 @@ fresh reviewer 提的 8 条 Minor，按「minor 不做顺手修」的规矩留�
 **唯一没能救活它的论点**：compaction 之后 todo toolResult 会被摘要掉，而 `reconstructTodos` 读的 `getBranch()` 是原始链（扩展记得、模型忘了），此时 echo 是唯一通道。这条推理成立，但**一次都没实测过**（三个会话都没触发压缩）——为一个未验证的场景保留一个已验证会变坏的副作用，不划算。若将来要真解 run 内漂移或压缩后丢状态，候选是 §T3-A（tool_result 尾追，需限频）或 §T3-C（turn_end + context_edit 自替换），且必须先做 A/B：同一长任务开关注入，数 missed update。
 
 现在状态的可观测来源收敛为两条：`update` 返回的 ack（每次变更都复述进度与下一个任务）与 `list`（按需）。guideline 第 4 条也据此改写，避免模型以为有小抄可抄。
+
+## 单写者 · 多在飞（并行派发 subagent）
+
+需求澄清后得到的定位：**看板是 per-session 的，写者只有一个（父会话）**；并行不是「多个 worker 共写一张板」，而是「父同时把多个 item 发出去、并自己维护它们的状态」。
+
+事实依据（pi-subagents @ 本仓库，父→子）：子会话**总是**加载父的全部扩展，`todo` 工具因此被子 agent 继承（`src/lifecycle/create-subagent-session.ts:25-26, 172`）；但子会话是 `sessionManager.newSession(...)` 建出的**全新空 branch**（同文件 `:191-193`），扩展工厂**每个 session 各调一次**（`subagent-manager.ts:247`），所以子 agent 的 `todos` 是自己那份空闭包 —— 它 `list` 得到 `No todos`，`update id:"3"` 得到 `Task not found`。`inherit_context` 只给**文本**（`src/session/context.ts:57-73`），不构成可引用状态。结论：跨会话共写本包不支持，也不支持过；正确用法是父作唯一写者。
+
+两处本来挡路的，都不是状态机（`in_progress` 只是字符串值，多份合法；`execute` 内无 `await`，同消息并行调用不会丢写）：
+
+1. **guideline 原文 `keep exactly one in_progress at a time`** 把并行派发直接说成违规。改为：`keep exactly one in_progress unless tasks really run concurrently (e.g. one per dispatched subagent)` —— 保留串行默认，给出并行例外。
+2. **`pickNext` 会把已在飞的任务当 `next` 推荐**（候选集只排 `done`）。这是 §T3-B 那个 C1 缺陷的单写者版本：父标 #1 done 时 ack 说 `next: #2`，而 #2 正被 subagent 做 → 诱导重复派发。RED 实测：`expected '2' to be '3'`、`✓ #2 B done (1/3 done) · next: #1 A`（#1 是 in_progress）。
+
+改后的规则（`pickNext` / `formatAck`）：
+
+| 情形 | 输出 |
+|---|---|
+| `next` 候选 | 只看 `pending`（`in_progress` 一律排除），第一个未阻塞的；全阻塞时退化到第一个 pending 并标 `(blocked by #x)` |
+| 本次把某项设为 in_progress | `◉ #2 B in_progress (1/5 done · 3 pending)` —— 给可领数量，但**不**递 `next`，不主动催生并发 |
+| 无 pending 可领、仍有在飞 | `✓ #1 A done (1/3 done) · 2 in flight` —— 不沉默，否则父会以为完工 |
+| `set` 时板上有在飞任务 | 清单后附 `⚠ ids renumbered by this set; previously in flight: #2 B. Re-mark them...` |
+
+最后一条是位置式 id 的必然代价：`set` 重编号会让父手里的引用静默失效，串行时无所谓（就它一个人），并行时是真事故。这里选择**警告而不禁止** —— `set` 的语义本就是整表替换，拦下来会让「重新规划」变成需要两次调用的操作。
+
+明确不做（若要做得另起 spec）：跨会话的 `owner` / `claim` / 共享存储 —— 那会同时牺牲 branch-safety（`/fork`、`/tree` 的还原语义）和「id 由工具拥有」这条定案，属于另一种产品。

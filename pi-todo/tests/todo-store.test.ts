@@ -179,6 +179,24 @@ describe("pickNext", () => {
 		{ id: "3", title: "C", status: "pending" },
 	];
 
+	it("skips tasks that are already in flight", () => {
+		// 并行派发：#2 正在被另一个 worker 做，不能再被当成「下一个」推荐出去
+		const flying: TodoItem[] = [
+			{ id: "1", title: "A", status: "done" },
+			{ id: "2", title: "B", status: "in_progress" },
+			{ id: "3", title: "C", status: "pending" },
+		];
+		expect(pickNext(flying)?.id).toBe("3");
+	});
+
+	it("returns nothing when the only open work is in flight", () => {
+		const flying: TodoItem[] = [
+			{ id: "1", title: "A", status: "done" },
+			{ id: "2", title: "B", status: "in_progress" },
+		];
+		expect(pickNext(flying, { excludeId: "1", includeBlocked: true })).toBeUndefined();
+	});
+
 	it("skips the excluded id even when it is the earliest open task", () => {
 		expect(pickNext(list, { excludeId: "2" })?.id).toBe("3");
 	});
@@ -226,9 +244,27 @@ describe("formatAck", () => {
 		expect(formatAck(items, "2")).toBe("✓ #2 修 CI done (2/5 done) · next: #3 更新文档");
 	});
 
-	it("reports an in_progress task without a next hint", () => {
+	it("reports an in_progress task with the pending count, not a next hint", () => {
 		const list = items.map((t) => (t.id === "3" ? { ...t, status: "in_progress" as const } : t));
-		expect(formatAck(list, "3")).toBe("◉ #3 更新文档 in_progress (2/5 done)");
+		expect(formatAck(list, "3")).toBe("◉ #3 更新文档 in_progress (2/5 done · 2 pending)");
+	});
+
+	it("never suggests an in-flight task as next", () => {
+		const flying: TodoItem[] = [
+			{ id: "1", title: "写单测", status: "done" },
+			{ id: "2", title: "修 CI", status: "in_progress" },
+			{ id: "3", title: "更新文档", status: "pending" },
+		];
+		expect(formatAck(flying, "1")).toBe("✓ #1 写单测 done (1/3 done) · next: #3 更新文档");
+	});
+
+	it("says what is in flight when nothing is left to pick up", () => {
+		const flying: TodoItem[] = [
+			{ id: "1", title: "A", status: "in_progress" },
+			{ id: "2", title: "B", status: "done" },
+			{ id: "3", title: "C", status: "in_progress" },
+		];
+		expect(formatAck(flying, "2")).toBe("✓ #2 B done (1/3 done) · 2 in flight");
 	});
 
 	it("picks the earliest unblocked task as next", () => {

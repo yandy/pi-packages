@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
+	clipTitle,
 	formatAck,
 	isBlocked,
 	listTodos,
@@ -70,7 +71,7 @@ export default function (pi: ExtensionAPI) {
 		promptSnippet: "Track a task list (set/update/list); keep statuses current.",
 		promptGuidelines: [
 			'Use todo to plan multi-step work: action "set" lists all tasks up front.',
-			"Set a task in_progress before you start it, and keep exactly one in_progress at a time.",
+			"Mark a task in_progress before starting it; keep exactly one in_progress unless tasks really run concurrently (e.g. one per dispatched subagent).",
 			"Mark a task done as soon as it passes — never batch completions to the end of the run.",
 			'Call todo action "list" when you need the current ids or statuses — the extension does not re-send the list on its own.',
 		],
@@ -124,6 +125,8 @@ export default function (pi: ExtensionAPI) {
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			let result: TodoResult;
+			// set 会重编号：先记下上一张板上谁在飞，否则父会话手里的 id 会静默失效
+			const preInFlight = todos.filter((t) => t.status === "in_progress");
 
 			switch (params.action) {
 				case "set": {
@@ -156,8 +159,16 @@ export default function (pi: ExtensionAPI) {
 
 			const text =
 				result.error ?? (params.action === "update" ? formatAck(todos, result.id ?? params.id ?? "") : listTodos(todos));
+			// 并行派发最常见的误操作：任务还在跑就重新规划。不拦（set 的语义就是整表替换），
+			// 但必须点名刚刚失效的 id，让模型能重新对齐。
+			const warning =
+				!result.error && params.action === "set" && preInFlight.length > 0
+					? `\n⚠ ids renumbered by this set; previously in flight: ${preInFlight
+							.map((t) => `#${t.id} ${clipTitle(t.title)}`)
+							.join(", ")}. Re-mark them with their new ids if they are still running.`
+					: "";
 			return {
-				content: [{ type: "text", text }],
+				content: [{ type: "text", text: text + warning }],
 				details: { action: params.action, todos: [...todos], error: result.error } as TodoDetails,
 			};
 		},

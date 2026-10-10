@@ -78,24 +78,25 @@ export function setTodos(items: TodoDraft[]): TodoResult {
 }
 
 export interface PickNextOptions {
-	/** 要跳过的任务（通常是当前 in_progress 或刚被更新的那个）。 */
+	/** 要跳过的任务（通常是刚被更新的那个）。 */
 	excludeId?: string;
-	/** 全部候选都被阻塞时，是否退化到第一个开放任务（ack 会标注 blocked by）。 */
+	/** 全部 pending 都被阻塞时，是否退化到第一个 pending 项（ack 会标注 blocked by）。 */
 	includeBlocked?: boolean;
 }
 
 /**
- * 下一个该做的任务：第一个「未完成、未被阻塞、且不是 excludeId」的任务。
- * formatAck 与注入快照共用这一条规则：两边各写一份曾经给出自相矛盾的提示。
+ * 下一个可以领的任务：`pending` 里第一个未被阻塞且不是 excludeId 的。
+ * **已 in_progress 的不算候选**：它已经在某个 worker 手里；并行派发时推荐它
+ * 等于建议重做一遍。
  */
 export function pickNext(todos: TodoItem[], opts: PickNextOptions = {}): TodoItem | undefined {
-	const open = todos.filter((t) => t.id !== opts.excludeId && t.status !== "done");
-	const unblocked = open.find((t) => !isBlocked(todos, t));
+	const candidates = todos.filter((t) => t.id !== opts.excludeId && t.status === "pending");
+	const unblocked = candidates.find((t) => !isBlocked(todos, t));
 	if (unblocked) return unblocked;
-	return opts.includeBlocked ? open[0] : undefined;
+	return opts.includeBlocked ? candidates[0] : undefined;
 }
 
-/** 内联进错误信息的清单上限行数（模型需要的是可拄回的 id，不是整面墙）。 */
+/** 内联进错误信息的清单上限行数（模型需要的是可抄回的 id，不是整面墙）。 */
 const ERROR_BOARD_CAP = 20;
 
 export function updateTodo(
@@ -146,20 +147,27 @@ export function formatAck(todos: TodoItem[], id: string): string {
 	if (!target) return `${done}/${total} done`;
 
 	if (target.status === "in_progress") {
-		return `◉ #${target.id} ${clipTitle(target.title)} in_progress (${done}/${total} done)`;
+		// 并行派发时需要知道还剩多少可领，但不递「next」去催生新的并发
+		const pending = todos.filter((t) => t.status === "pending").length;
+		const tail = pending > 0 ? ` · ${pending} pending` : "";
+		return `◉ #${target.id} ${clipTitle(target.title)} in_progress (${done}/${total} done${tail})`;
 	}
 
 	const marker = target.status === "done" ? "✓" : "○";
 	const head = `${marker} #${target.id} ${clipTitle(target.title)} ${target.status} (${done}/${total} done)`;
 
 	const next = pickNext(todos, { excludeId: target.id, includeBlocked: true });
-	if (!next) return head;
+	if (next) {
+		const byId = new Map(todos.map((t) => [t.id, t]));
+		const blockers = (next.blockedBy ?? []).filter((dep) => byId.get(dep)?.status !== "done");
+		const suffix =
+			isBlocked(todos, next) && blockers.length > 0 ? ` (blocked by ${blockers.map((b) => `#${b}`).join(", ")})` : "";
+		return `${head} · next: #${next.id} ${clipTitle(next.title)}${suffix}`;
+	}
 
-	const byId = new Map(todos.map((t) => [t.id, t]));
-	const blockers = (next.blockedBy ?? []).filter((dep) => byId.get(dep)?.status !== "done");
-	const suffix =
-		isBlocked(todos, next) && blockers.length > 0 ? ` (blocked by ${blockers.map((b) => `#${b}`).join(", ")})` : "";
-	return `${head} · next: #${next.id} ${clipTitle(next.title)}${suffix}`;
+	// 没东西可领但还有在飞的：报数而不是沉默，否则父会以为已经完工
+	const inFlight = todos.filter((t) => t.status === "in_progress").length;
+	return inFlight > 0 ? `${head} · ${inFlight} in flight` : head;
 }
 
 const STATUS_MARKER: Record<TodoItem["status"], string> = {
