@@ -1,7 +1,7 @@
 # Design: pi-todo — 让 LLM 真正持续更新 todo（提示词 + 反馈闭环 + 状态可见性）
 
 **Date:** 2026-10-10
-**Status:** proposed（未实现，待评审；本文只做设计，不含代码改动）
+**Status:** implemented（0.2.0，T1+T2+T3-B 合并发布，待合并后 release）
 
 ## Summary
 
