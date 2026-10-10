@@ -97,9 +97,10 @@ function assignIds(items: TodoDraft[]): { items: TodoItem[]; error?: string } {
 export function setTodos(items: TodoDraft[]): TodoResult {
 	const assigned = assignIds(items);
 	if (assigned.error) return { todos: [], error: assigned.error };
-	const error = validateDependencies(assigned.items);
-	if (error) return { todos: [], error };
-	return { todos: assigned.items.map((i) => ({ ...i })) };
+	const resolved = normalizeItemDeps(assigned.items);
+	const error = validateDependencies(resolved);
+	if (error) return { todos: [], error: `${error}\n${listTodos(resolved, ERROR_BOARD_CAP)}` };
+	return { todos: resolved.map((i) => ({ ...i })) };
 }
 
 /** 归一化引用文本：小写 + 去掉空白与常见分隔符，使「修 CI」与「修ci」等价。 */
@@ -131,8 +132,42 @@ export function resolveTodoRef(todos: TodoItem[], ref: string): TodoRefResult {
 	}
 
 	const normalized = normalizeRefText(needle);
+	// 单字符 ref 只做「归一化后全等」：否则 "a" 会子串命中 "Add caching"，
+	// 静默把错的任务标成 done（widget、details.todos、下次注入跟着错）。
+	const exactTitle = todos.filter((t) => normalizeRefText(t.title) === normalized);
+	if (exactTitle.length === 1) return { item: exactTitle[0], candidates: exactTitle };
+	if (normalized.length < 2) return { candidates: exactTitle };
 	const byTitle = todos.filter((t) => normalizeRefText(t.title).includes(normalized));
 	return byTitle.length === 1 ? { item: byTitle[0], candidates: byTitle } : { candidates: byTitle };
+}
+
+export interface PickNextOptions {
+	/** 要跳过的任务（通常是当前 in_progress 或刚被更新的那个）。 */
+	excludeId?: string;
+	/** 全部候选都被阻塞时，是否退化到第一个开放任务（ack 会标注 blocked by）。 */
+	includeBlocked?: boolean;
+}
+
+/**
+ * 下一个该做的任务：第一个「未完成、未被阻塞、且不是 excludeId」的任务。
+ * formatAck 与注入快照共用这一条规则：两边各写一份曾经给出自相矛盾的提示。
+ */
+export function pickNext(todos: TodoItem[], opts: PickNextOptions = {}): TodoItem | undefined {
+	const open = todos.filter((t) => t.id !== opts.excludeId && t.status !== "done");
+	const unblocked = open.find((t) => !isBlocked(todos, t));
+	if (unblocked) return unblocked;
+	return opts.includeBlocked ? open[0] : undefined;
+}
+
+/** 内联进错误信息的清单上限行数（模型需要的是候选 id，不是整面墙）。 */
+const ERROR_BOARD_CAP = 20;
+/** 歧义错误里列出的候选上限。 */
+const CANDIDATE_CAP = 8;
+
+function renderCandidates(candidates: TodoItem[]): string {
+	const shown = candidates.slice(0, CANDIDATE_CAP).map((t) => `#${t.id} ${clipTitle(t.title)}`);
+	if (candidates.length > CANDIDATE_CAP) shown.push(`… +${candidates.length - CANDIDATE_CAP} more`);
+	return shown.join(", ");
 }
 
 export function updateTodo(
@@ -149,23 +184,39 @@ export function updateTodo(
 		const needle = ref?.trim() ?? "";
 		if (!needle) return { todos: [...todos], error: "Task reference is required" };
 		if (candidates.length > 1) {
-			const listing = candidates.map((t) => `#${t.id} ${t.title}`).join(", ");
-			return { todos: [...todos], error: `Ambiguous task reference "${needle}": ${listing}` };
+			return {
+				todos: [...todos],
+				error: `Ambiguous task reference "${needle}": ${renderCandidates(candidates)}`,
+			};
 		}
-		// 未命中时内联完整清单，让模型不需要额外调 list 就能自纠
-		return { todos: [...todos], error: `Task not found: "${needle}"\n${listTodos(todos)}` };
+		// 未命中时内联清单，让模型不需要额外调 list 就能自纠
+		return { todos: [...todos], error: `Task not found: "${needle}"\n${listTodos(todos, ERROR_BOARD_CAP)}` };
 	}
 
 	const updated: TodoItem = { ...target };
 	if (patch.status !== undefined) updated.status = patch.status;
 	if (patch.title !== undefined) updated.title = patch.title;
-	if (patch.blockedBy !== undefined) updated.blockedBy = [...patch.blockedBy];
+	if (patch.blockedBy !== undefined) updated.blockedBy = normalizeDeps(todos, patch.blockedBy);
 
 	const next = todos.map((t) => (t.id === target.id ? updated : t));
 	const error = validateDependencies(next);
-	if (error) return { todos: [...todos], error };
+	if (error) return { todos: [...todos], error: `${error}\n${listTodos(todos, ERROR_BOARD_CAP)}` };
 
 	return { todos: next, id: target.id };
+}
+
+/**
+ * 把 blockedBy 里的宽松引用（title 片段 / 序号 / id 前缀）换成规范 id。
+ * 解析不出或歧义时保留原样，由 validateDependencies 报错（否则模型拿到的是一句没有候选的 unknown id）。
+ */
+function normalizeDeps(todos: TodoItem[], blockedBy: string[]): string[] {
+	return blockedBy.map((dep) => resolveTodoRef(todos, dep).item?.id ?? dep);
+}
+
+function normalizeItemDeps(items: TodoItem[]): TodoItem[] {
+	return items.map((item) =>
+		item.blockedBy?.length ? { ...item, blockedBy: normalizeDeps(items, item.blockedBy) } : item,
+	);
 }
 
 /** title 过长时截断到 60 字符，避免 ack 与注入快照把上下文吃掉。 */
@@ -192,8 +243,7 @@ export function formatAck(todos: TodoItem[], id: string): string {
 	const marker = target.status === "done" ? "✓" : "○";
 	const head = `${marker} #${target.id} ${clipTitle(target.title)} ${target.status} (${done}/${total} done)`;
 
-	const open = todos.filter((t) => t.id !== target.id && t.status !== "done");
-	const next = open.find((t) => !isBlocked(todos, t)) ?? open[0];
+	const next = pickNext(todos, { excludeId: target.id, includeBlocked: true });
 	if (!next) return head;
 
 	const byId = new Map(todos.map((t) => [t.id, t]));
@@ -219,14 +269,20 @@ export function isBlocked(todos: TodoItem[], item: TodoItem): boolean {
 	return false;
 }
 
-export function listTodos(todos: TodoItem[]): string {
+/**
+ * 面对模型的清单文本。统一用 `#<id>` 记法（与 ack / 快照 / 错误信息一致），
+ * 因为模型要把看到的 id 拄回去；capLines 用于错误内联，避免大清单撞爆 tool result。
+ */
+export function listTodos(todos: TodoItem[], capLines?: number): string {
 	if (todos.length === 0) return "No todos";
-	return todos
-		.map((t) => {
-			const marker = isBlocked(todos, t) ? "🔒" : STATUS_MARKER[t.status];
-			return `${marker} [${t.id}] ${t.title}`;
-		})
-		.join("\n");
+	const lines = todos.map((t) => {
+		const marker = isBlocked(todos, t) ? "🔒" : STATUS_MARKER[t.status];
+		return `${marker} #${t.id} ${clipTitle(t.title)}`;
+	});
+	if (capLines !== undefined && lines.length > capLines) {
+		return [...lines.slice(0, capLines), `… +${lines.length - capLines} more`].join("\n");
+	}
+	return lines.join("\n");
 }
 
 /** Reconstruct the current todo list from session branch entries (last-write-wins). */

@@ -40,7 +40,8 @@ todo(action: "set" | "update" | "list", items?, id?, status?, title?, blockedBy?
 ### 任务 id 与引用
 
 - `set` 时 `items[].id` 可省略，会按位置自动分配短 id `1..n`（跳过已被显式 id 占用的数字）；显式 id（旧会话的 uuid）原样保留。
-- `update` 的 `id` 可以是：完整 id、任务在 `set` 里的位置序号、唯一的 id 前缀，或 title 片段（大小写与空白不敏感）。
+- `update` 的 `id` 可以是：完整 id、任务在 `set` 里的位置序号、唯一的 id 前缀，或 title 片段（大小写与空白不敏感，至少 2 个字符，单字符只当整体 title 匹配时生效）。
+- `blockedBy` 里的依赖同样支持上述宽松写法，会被归一化成规范 id；解析不出来的才报 `blockedBy unknown id`。
 - 引用歧义或未命中时，错误信息会列出候选项或完整清单，无需额外调 `list` 即可自纠。
 - 自动 id 按位置分配，而 `set` 是整表替换；重新规划后请以最新 `set`/`update` 回显的 id 为准。
 

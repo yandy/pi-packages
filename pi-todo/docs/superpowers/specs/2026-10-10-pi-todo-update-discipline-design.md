@@ -282,3 +282,11 @@ system prompt 位于请求最前，任何改动都会让**整条前缀缓存失�
 | pi 宿主 `dist/core/extensions/types.d.ts` | `BeforeAgentStartEventResult.message`、`ToolResultEventResult`、`BoundaryResult.entries` 三个注入点契约 |
 | `pi-memory/src/inject.ts` | system prompt section 注入的代价与「null 陷阱」，本次据此否决 T3-D |
 | `pi-coding-tools` `coding-tools.json` | 若采纳 T3-A 的配置文件模式 |
+
+## 落地补记（0.2.0，2026-10-10）
+
+- T1 / T2 / T3-B 全部实现；三层合并在同一个 `0.2.0`（原计划分 0.2.0 / 0.3.0 以便归因，实际按用户选择一起做，代价是贡献无法单独归因）。
+- **§T2.2 的 `blockedBy` 归一化在实施计划里被漏掉**，全分支评审时发现并补上：`set` 与 `update` 的依赖引用现在都走 `resolveTodoRef`，解析不出/歧义的才交给 `validateDependencies` 报错。教训：spec 的要求如果没进任何测试断言，就会在 spec→plan 这一跳丢失。
+- 评审带出的三个规格外缺陷已修：注入的 discipline 行会把当前 `in_progress` 任务再指为下一个（自相矛盾）；单字符 title 引用会静默命中错误任务（英文标题尤其容易）；`in_progress` 段无上限且不提示「同时只能一个」。
+- 已知代价（评审提出、本轮不修）：**每个 user turn 注入一条快照且永久留在上下文**，N 轮提问就有 N 份 `<todo-state>`，靠 recency 取对的那份。彻底修法需要 `turn_end` + `context_edit` 替换上一条（即被否决的 T3-C 家族）；是否要做，等真实会话里量化了占用再定。
+- 注入文本第二行是自报身份的框定语（`Automatic status echo …, not a request from the user.`），对齐宿主 compaction/branch-summary 的惯例；「模型会不会把它当用户指令」仍需按 §未解决 #2 实测确认。

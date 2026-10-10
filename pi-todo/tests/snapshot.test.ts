@@ -44,6 +44,50 @@ describe("formatSnapshot", () => {
 		expect(snap).not.toContain("任务 9");
 	});
 
+	it("never tells the model to re-enter the task that is already in_progress", () => {
+		const snap = formatSnapshot([
+			{ id: "1", title: "写单测", status: "done" },
+			{ id: "2", title: "修 CI", status: "in_progress" },
+			{ id: "3", title: "更新文档", status: "pending" },
+		]);
+		expect(snap).toContain("then set #3 in_progress");
+		expect(snap).not.toContain("then set #2 in_progress");
+	});
+
+	it("frames the snapshot as an automatic echo, not a user request", () => {
+		const snap = formatSnapshot([{ id: "1", title: "写单测", status: "pending" }]);
+		expect(snap.split("\n")[1]).toContain("not a request from the user");
+	});
+
+	it("caps the in_progress segment and calls out more than one", () => {
+		const many: TodoItem[] = Array.from({ length: 12 }, (_, i) => ({
+			id: String(i + 1),
+			title: `任务 ${i + 1}`,
+			status: "in_progress" as const,
+		}));
+		const snap = formatSnapshot(many);
+		expect(snap).toContain("… +4 more");
+		expect(snap).toContain("12 tasks are in_progress but exactly one is allowed");
+	});
+
+	it("has exactly the shape the model receives", () => {
+		const snap = formatSnapshot([
+			{ id: "1", title: "写单测", status: "done" },
+			{ id: "2", title: "修 CI", status: "in_progress" },
+			{ id: "3", title: "更新文档", status: "pending" },
+			{ id: "4", title: "发布", status: "pending", blockedBy: ["3"] },
+		]);
+		expect(snap).toBe(
+			[
+				"<todo-state>",
+				"Automatic status echo from the pi-todo extension, not a request from the user.",
+				"1/4 done · in_progress: #2 修 CI · pending: #3 更新文档, #4 发布 (blocked by #3)",
+				"Discipline: mark #2 done as soon as it passes, then set #3 in_progress. Never batch completions.",
+				"</todo-state>",
+			].join("\n"),
+		);
+	});
+
 	it("truncates long titles", () => {
 		const snap = formatSnapshot([{ id: "1", title: "y".repeat(200), status: "in_progress" }]);
 		expect(snap.length).toBeLessThan(400);

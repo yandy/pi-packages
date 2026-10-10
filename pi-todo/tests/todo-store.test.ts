@@ -3,9 +3,11 @@ import {
 	clipTitle,
 	formatAck,
 	listTodos,
+	pickNext,
 	reconstructTodos,
 	resolveTodoRef,
 	setTodos,
+	type TodoDraft,
 	type TodoItem,
 	updateTodo,
 } from "../src/todo-store.js";
@@ -103,10 +105,10 @@ describe("listTodos", () => {
 			{ id: "d", title: "Task D", status: "pending", blockedBy: ["a"] },
 		];
 		const text = listTodos(items);
-		expect(text).toContain("○ [a] Task A");
-		expect(text).toContain("◉ [b] Task B");
-		expect(text).toContain("✓ [c] Task C");
-		expect(text).toContain("🔒 [d] Task D");
+		expect(text).toContain("○ #a Task A");
+		expect(text).toContain("◉ #b Task B");
+		expect(text).toContain("✓ #c Task C");
+		expect(text).toContain("🔒 #d Task D");
 	});
 });
 
@@ -141,6 +143,18 @@ describe("updateTodo", () => {
 		expect(result.todos).toEqual(base);
 	});
 
+	it("bounds the candidate list in an ambiguity error", () => {
+		const same: TodoItem[] = Array.from({ length: 40 }, (_, i) => ({
+			id: String(i + 1),
+			title: `部署步骤 ${i + 1}`,
+			status: "pending" as const,
+		}));
+		const r = updateTodo(same, "部署步骤", { status: "done" });
+		expect(r.error).toMatch(/ambiguous/i);
+		expect(r.error).toContain("… +32 more");
+		expect(r.error!.length).toBeLessThan(800);
+	});
+
 	it("leaves other fields untouched when patch is partial", () => {
 		const result = updateTodo(base, "b", { status: "done" });
 		expect(result.error).toBeUndefined();
@@ -152,29 +166,107 @@ describe("updateTodo", () => {
 		expect(updateTodo(base, "a", { status: "done" }).id).toBe("a");
 	});
 
+	it("does not let a one-character ref hit a random title", () => {
+		const ascii: TodoItem[] = [
+			{ id: "1", title: "Add caching", status: "pending" },
+			{ id: "2", title: "Fix login bug", status: "pending" },
+		];
+		expect(resolveTodoRef(ascii, "a").item).toBeUndefined();
+		const r = updateTodo(ascii, "a", { status: "done" });
+		expect(r.error).toMatch(/not found/i);
+		expect(r.todos).toEqual(ascii);
+	});
+
 	it("reports ambiguity with every candidate title", () => {
 		const r = updateTodo(
 			[
-				{ id: "1", title: "写单测", status: "pending" },
-				{ id: "2", title: "写文档", status: "pending" },
+				{ id: "1", title: "查询用户", status: "pending" },
+				{ id: "2", title: "查询订单", status: "pending" },
 			],
-			"写",
+			"查询",
 			{ status: "done" },
 		);
 		expect(r.error).toMatch(/ambiguous/i);
-		expect(r.error).toContain("写单测");
-		expect(r.error).toContain("写文档");
+		expect(r.error).toContain("查询用户");
+		expect(r.error).toContain("查询订单");
 	});
 
 	it("lists the whole board when the ref matches nothing", () => {
 		const r = updateTodo(base, "zzz", { status: "done" });
 		expect(r.error).toMatch(/not found/i);
-		expect(r.error).toContain("[a] Task A");
-		expect(r.error).toContain("[b] Task B");
+		expect(r.error).toContain("#a Task A");
+		expect(r.error).toContain("#b Task B");
 	});
 
 	it("rejects an empty ref", () => {
 		expect(updateTodo(base, "", { status: "done" }).error).toMatch(/required/i);
+	});
+});
+
+describe("pickNext", () => {
+	const list: TodoItem[] = [
+		{ id: "1", title: "A", status: "done" },
+		{ id: "2", title: "B", status: "in_progress" },
+		{ id: "3", title: "C", status: "pending" },
+	];
+
+	it("skips the excluded id even when it is the earliest open task", () => {
+		expect(pickNext(list, { excludeId: "2" })?.id).toBe("3");
+	});
+
+	it("does not fall back to a blocked task by default", () => {
+		const blocked: TodoItem[] = [
+			{ id: "1", title: "A", status: "in_progress" },
+			{ id: "2", title: "B", status: "pending", blockedBy: ["1"] },
+		];
+		expect(pickNext(blocked, { excludeId: "1" })).toBeUndefined();
+	});
+
+	it("falls back to a blocked task only when includeBlocked is set", () => {
+		const blocked: TodoItem[] = [
+			{ id: "1", title: "A", status: "done" },
+			{ id: "2", title: "B", status: "pending", blockedBy: ["3"] },
+			{ id: "3", title: "C", status: "pending", blockedBy: ["2"] },
+		];
+		expect(pickNext(blocked, { excludeId: "1", includeBlocked: true })?.id).toBe("2");
+	});
+});
+
+describe("blockedBy reference normalization", () => {
+	it("resolves a title fragment given as a dependency", () => {
+		const result = setTodos([
+			{ title: "写单测", status: "pending" },
+			{ title: "写文档", status: "pending", blockedBy: ["写单测"] },
+		] as TodoDraft[]);
+		expect(result.error).toBeUndefined();
+		expect(result.todos[1].blockedBy).toEqual(["1"]);
+	});
+
+	it("resolves a position when the ids are uuids", () => {
+		const result = setTodos([
+			{ id: "6f1e2d3c", title: "A", status: "pending" },
+			{ id: "a1b2c3d4", title: "B", status: "pending", blockedBy: ["1"] },
+		]);
+		expect(result.error).toBeUndefined();
+		expect(result.todos[1].blockedBy).toEqual(["6f1e2d3c"]);
+	});
+
+	it("still rejects a dependency that resolves to nothing", () => {
+		const result = setTodos([
+			{ title: "A", status: "pending" },
+			{ title: "B", status: "pending", blockedBy: ["不存在的任务"] },
+		] as TodoDraft[]);
+		expect(result.error).toMatch(/blockedBy/);
+	});
+
+	it("normalizes dependencies on update too", () => {
+		const list: TodoItem[] = [
+			{ id: "1", title: "写单测", status: "pending" },
+			{ id: "2", title: "修 CI", status: "pending" },
+		];
+		const r = updateTodo(list, "2", { blockedBy: ["写单测"] });
+		expect(r.error).toBeUndefined();
+		expect(r.todos[1].blockedBy).toEqual(["1"]);
 	});
 });
 
@@ -234,6 +326,17 @@ describe("formatAck", () => {
 		expect(formatAck(long, "1").length).toBeLessThan(100);
 		expect(formatAck(long, "1")).toContain("…");
 	});
+
+	it("bounds the board it inlines into an error", () => {
+		const many: TodoItem[] = Array.from({ length: 60 }, (_, i) => ({
+			id: String(i + 1),
+			title: `任务 ${i + 1} ${"z".repeat(200)}`,
+			status: "pending" as const,
+		}));
+		const r = updateTodo(many, "不存在的引用", { status: "done" });
+		expect(r.error).toContain("… +40 more");
+		expect(r.error!.length).toBeLessThan(3000);
+	});
 });
 
 describe("resolveTodoRef", () => {
@@ -267,12 +370,17 @@ describe("resolveTodoRef", () => {
 
 	it("returns candidates when ambiguous", () => {
 		const dup: TodoItem[] = [
-			{ id: "1", title: "写单测", status: "pending" },
-			{ id: "2", title: "写文档", status: "pending" },
+			{ id: "1", title: "查询用户", status: "pending" },
+			{ id: "2", title: "查询订单", status: "pending" },
 		];
-		const r = resolveTodoRef(dup, "写");
+		const r = resolveTodoRef(dup, "查询");
 		expect(r.item).toBeUndefined();
 		expect(r.candidates.map((t) => t.id)).toEqual(["1", "2"]);
+	});
+
+	it("matches a single-character ref only against the whole title", () => {
+		const list2: TodoItem[] = [{ id: "1", title: "写", status: "pending" }];
+		expect(resolveTodoRef(list2, "写").item?.id).toBe("1");
 	});
 
 	it("returns nothing for an empty or blank ref", () => {

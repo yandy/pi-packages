@@ -40,7 +40,8 @@ todo(action: "set" | "update" | "list", items?, id?, status?, title?, blockedBy?
 ### Task ids and references
 
 - In `set`, `items[].id` may be omitted: short ids `1..n` are assigned by position (numbers already used by explicit ids are skipped); explicit ids — including uuids from older sessions — are kept as-is.
-- `update`'s `id` accepts an exact id, a 1-based position, a unique id prefix, or a title fragment (case- and whitespace-insensitive).
+- `update`'s `id` accepts an exact id, a 1-based position, a unique id prefix, or a title fragment (case- and whitespace-insensitive; a one-character ref only matches a whole title).
+- `blockedBy` accepts the same loose references and normalizes them to canonical ids; only unresolvable ones are reported as `blockedBy unknown id`.
 - On an ambiguous or unmatched reference the error lists the candidates or the whole board, so the model can correct itself without calling `list`.
 - Auto ids are positional and `set` replaces the whole list: after replanning, trust the ids echoed by the latest `set`/`update`.
 

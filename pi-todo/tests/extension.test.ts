@@ -74,7 +74,15 @@ describe("todo tool execute", () => {
 
 	it("set still returns the whole list", async () => {
 		const result = await run({ action: "set", items: [{ id: "1", title: "写单测", status: "pending" }] });
-		expect(result.content[0].text).toContain("○ [1] 写单测");
+		expect(result.content[0].text).toContain("○ #1 写单测");
+	});
+});
+
+describe("tool schema", () => {
+	it("no longer requires items[].id (the uuid-friction fix)", () => {
+		const itemSchema = (tools[0].parameters.properties.items as any).items;
+		expect(itemSchema.required).not.toContain("id");
+		expect(itemSchema.properties.id).toBeDefined();
 	});
 });
 
