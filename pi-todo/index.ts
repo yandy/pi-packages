@@ -1,7 +1,15 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { isBlocked, listTodos, reconstructTodos, setTodos, type TodoItem, updateTodo } from "./src/todo-store.js";
+import {
+	isBlocked,
+	listTodos,
+	reconstructTodos,
+	setTodos,
+	type TodoDraft,
+	type TodoItem,
+	updateTodo,
+} from "./src/todo-store.js";
 import { renderWidget } from "./src/widget.js";
 
 const WIDGET_ID = "pi-todo";
@@ -35,7 +43,7 @@ export default function (pi: ExtensionAPI) {
 		items: Type.Optional(
 			Type.Array(
 				Type.Object({
-					id: Type.String(),
+					id: Type.Optional(Type.String()),
 					title: Type.String(),
 					status: Type.String({ enum: ["pending", "in_progress", "done"] }),
 					blockedBy: Type.Optional(Type.Array(Type.String())),
@@ -113,7 +121,7 @@ export default function (pi: ExtensionAPI) {
 
 			switch (params.action) {
 				case "set": {
-					result = setTodos((params.items ?? []) as TodoItem[]);
+					result = setTodos((params.items ?? []) as TodoDraft[]);
 					break;
 				}
 				case "update": {

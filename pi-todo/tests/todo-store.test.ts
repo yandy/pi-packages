@@ -38,6 +38,47 @@ describe("setTodos", () => {
 		expect(result.error).toBeUndefined();
 		expect(result.todos).toEqual([]);
 	});
+
+	it("assigns short positional ids when id is missing or blank", () => {
+		const result = setTodos([
+			{ title: "A", status: "pending" },
+			{ id: "  ", title: "B", status: "pending" },
+		]);
+		expect(result.error).toBeUndefined();
+		expect(result.todos.map((t) => t.id)).toEqual(["1", "2"]);
+	});
+
+	it("skips numbers already taken by explicit ids", () => {
+		const result = setTodos([
+			{ id: "1", title: "A", status: "pending" },
+			{ title: "B", status: "pending" },
+		]);
+		expect(result.todos.map((t) => t.id)).toEqual(["1", "2"]);
+	});
+
+	it("keeps explicit uuid ids untouched (old-session compatibility)", () => {
+		const uuid = "6f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
+		const result = setTodos([{ id: uuid, title: "A", status: "pending" }]);
+		expect(result.todos[0].id).toBe(uuid);
+	});
+
+	it("accepts blockedBy referencing auto-assigned ids", () => {
+		const result = setTodos([
+			{ title: "A", status: "pending" },
+			{ title: "B", status: "pending", blockedBy: ["1"] },
+		]);
+		expect(result.error).toBeUndefined();
+		expect(result.todos[1].blockedBy).toEqual(["1"]);
+	});
+
+	it("rejects duplicate explicit ids", () => {
+		const result = setTodos([
+			{ id: "1", title: "A", status: "pending" },
+			{ id: "1", title: "B", status: "pending" },
+		]);
+		expect(result.error).toMatch(/duplicate.*id/i);
+		expect(result.todos).toEqual([]);
+	});
 });
 
 describe("listTodos", () => {

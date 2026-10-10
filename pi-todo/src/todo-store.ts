@@ -53,10 +53,46 @@ export function validateDependencies(items: TodoItem[]): string | undefined {
 	return undefined;
 }
 
-export function setTodos(items: TodoItem[]): TodoResult {
-	const error = validateDependencies(items);
+/** `set` 接收的任务条目：`id` 可缺失，由 `assignIds` 按位置补上短 id。 */
+export type TodoDraft = {
+	id?: string;
+	title: string;
+	status: TodoItem["status"];
+	blockedBy?: string[];
+};
+
+/**
+ * 两遍扫描：先收集显式 id（并查重），再为 id 缺失或空白的项按位置分配不冲突的短 id。
+ * 显式 id 原样保留（旧 session 的 uuid 不受影响）；重复的显式 id 是错误。
+ */
+function assignIds(items: TodoDraft[]): { items: TodoItem[]; error?: string } {
+	const taken = new Set<string>();
+	for (const item of items) {
+		const explicit = item.id?.trim();
+		if (!explicit) continue;
+		if (taken.has(explicit)) return { items: [], error: `Duplicate task id: ${explicit}` };
+		taken.add(explicit);
+	}
+
+	let next = 1;
+	const resolved = items.map<TodoItem>((item) => {
+		const explicit = item.id?.trim();
+		if (explicit) return { ...item, id: explicit };
+		while (taken.has(String(next))) next += 1;
+		const id = String(next);
+		taken.add(id);
+		next += 1;
+		return { ...item, id };
+	});
+	return { items: resolved };
+}
+
+export function setTodos(items: TodoDraft[]): TodoResult {
+	const assigned = assignIds(items);
+	if (assigned.error) return { todos: [], error: assigned.error };
+	const error = validateDependencies(assigned.items);
 	if (error) return { todos: [], error };
-	return { todos: items.map((i) => ({ ...i })) };
+	return { todos: assigned.items.map((i) => ({ ...i })) };
 }
 
 export function updateTodo(
