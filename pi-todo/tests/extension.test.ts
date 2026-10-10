@@ -110,6 +110,48 @@ describe("tool schema", () => {
 	});
 });
 
+describe("parallel dispatch", () => {
+	// 不真起 subagent：只验两个硬性要求——能同时挂两个 in_progress，且 next 从不推荐已在飞的任务。
+	// 走 tools[0].execute 而不是直接调 store，所以这是「模型看到的东西」那一层的断言。
+	it("holds two tasks in flight and never re-suggests one as next", async () => {
+		await run({
+			action: "set",
+			items: [
+				{ title: "读 README", status: "pending" },
+				{ title: "数文件", status: "pending" },
+				{ title: "报告", status: "pending" },
+			],
+		});
+
+		const first = await run({ action: "update", id: "1", status: "in_progress" }, "d1");
+		expect(first.content[0].text).toBe("◉ #1 读 README in_progress (0/3 done · 2 pending)");
+
+		const second = await run({ action: "update", id: "2", status: "in_progress" }, "d2");
+		expect(second.content[0].text).toBe("◉ #2 数文件 in_progress (0/3 done · 1 pending)");
+
+		// 两个同时 in_progress 合法，list 也能看到
+		const board = await run({ action: "list" }, "d3");
+		expect(board.content[0].text).toBe("◉ #1 读 README\n◉ #2 数文件\n○ #3 报告");
+
+		// #1 完成后，next 必须是唯一还没在飞的 #3，而不是已被别人占着的 #2
+		const done = await run({ action: "update", id: "1", status: "done" }, "d4");
+		expect(done.content[0].text).toBe("✓ #1 读 README done (1/3 done) · next: #3 报告");
+	});
+
+	it("reports in flight instead of a next when everything left is occupied", async () => {
+		await run({
+			action: "set",
+			items: [
+				{ title: "A", status: "in_progress" },
+				{ title: "B", status: "pending" },
+			],
+		});
+		await run({ action: "update", id: "2", status: "in_progress" }, "e1");
+		const r = await run({ action: "update", id: "1", status: "done" }, "e2");
+		expect(r.content[0].text).toBe("✓ #1 A done (1/2 done) · 1 in flight");
+	});
+});
+
 describe("context injection", () => {
 	// T3-B（before_agent_start 注入 <todo-state>）已于 0.2.0 发布前删除：价值未被证明，
 	// 且每轮一份会累积出「冒充当下、实为过去」的矛盾快照。见 spec §决策变更。
