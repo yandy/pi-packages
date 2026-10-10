@@ -290,3 +290,17 @@ system prompt 位于请求最前，任何改动都会让**整条前缀缓存失�
 - 评审带出的三个规格外缺陷已修：注入的 discipline 行会把当前 `in_progress` 任务再指为下一个（自相矛盾）；单字符 title 引用会静默命中错误任务（英文标题尤其容易）；`in_progress` 段无上限且不提示「同时只能一个」。
 - 已知代价（评审提出、本轮不修）：**每个 user turn 注入一条快照且永久留在上下文**，N 轮提问就有 N 份 `<todo-state>`，靠 recency 取对的那份。彻底修法需要 `turn_end` + `context_edit` 替换上一条（即被否决的 T3-C 家族）；是否要做，等真实会话里量化了占用再定。
 - 注入文本第二行是自报身份的框定语（`Automatic status echo …, not a request from the user.`），对齐宿主 compaction/branch-summary 的惯例；「模型会不会把它当用户指令」仍需按 §未解决 #2 实测确认。
+
+## 评审遗留（deferred minors，未进入 0.2.0 的 fix pass）
+
+fresh reviewer 提的 8 条 Minor，按「minor 不做顺手修」的规矩留在这里，供后续单独 PR 处理：
+
+| # | 位置 | 现象 |
+|---|---|---|
+| M1 | `index.ts` update 分支 | 空 `id` 的守卫与 store 的 `Task reference is required` 重复且文案不一致，两条都不内联清单；`id` 变 optional 后模型整条漏填的概率上升 |
+| M3 | `resolveTodoRef` | 纯数字 ref 序号落空后不再尝试 id 前缀：uuid 清单上「是合法前缀但超出序号范围」的数字会 miss |
+| M4 | `assignIds` | 显式 id 与自动 id 混用时序号与 id 分叉（`set([{id:"5"},{},{}])` → `["5","1","2"]`，此后 `"2"` 与 `"3"` 都命中第三个任务）；README 可补一句警告 |
+| M5 | `isBlocked` / `describeTodo` | 每项都重建整表 Map，n=150 时注入路径 O(n²) 常数大；`byId` 提到调用顶部即可 |
+| M6 | `widget.ts` | 不截断 title，300 字符 title 会撑爆编辑器上方组件（`clipTitle` 现在就在手边） |
+| M7 | `before_agent_start` | 未像 pi-memory 那样跳过 subagent 会话；当前 subagent 闭包为空所以实际不注入，但一旦能重建清单就白付 token |
+| M8 | 两份 README | ack 描述不完全对称 |
