@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { listTodos, reconstructTodos, setTodos, type TodoItem, updateTodo } from "../src/todo-store.js";
+import {
+	listTodos,
+	reconstructTodos,
+	resolveTodoRef,
+	setTodos,
+	type TodoItem,
+	updateTodo,
+} from "../src/todo-store.js";
 
 describe("setTodos", () => {
 	it("accepts a valid list of todos", () => {
@@ -137,6 +144,86 @@ describe("updateTodo", () => {
 		expect(result.error).toBeUndefined();
 		expect(result.todos[1].title).toBe("Task B");
 		expect(result.todos[1].blockedBy).toEqual(["a"]);
+	});
+
+	it("returns the resolved canonical id on success", () => {
+		expect(updateTodo(base, "a", { status: "done" }).id).toBe("a");
+	});
+
+	it("reports ambiguity with every candidate title", () => {
+		const r = updateTodo(
+			[
+				{ id: "1", title: "写单测", status: "pending" },
+				{ id: "2", title: "写文档", status: "pending" },
+			],
+			"写",
+			{ status: "done" },
+		);
+		expect(r.error).toMatch(/ambiguous/i);
+		expect(r.error).toContain("写单测");
+		expect(r.error).toContain("写文档");
+	});
+
+	it("lists the whole board when the ref matches nothing", () => {
+		const r = updateTodo(base, "zzz", { status: "done" });
+		expect(r.error).toMatch(/not found/i);
+		expect(r.error).toContain("[a] Task A");
+		expect(r.error).toContain("[b] Task B");
+	});
+
+	it("rejects an empty ref", () => {
+		expect(updateTodo(base, "", { status: "done" }).error).toMatch(/required/i);
+	});
+});
+
+describe("resolveTodoRef", () => {
+	const list: TodoItem[] = [
+		{ id: "1", title: "写单测", status: "done" },
+		{ id: "2", title: "修 CI", status: "in_progress" },
+		{ id: "10", title: "写文档", status: "pending" },
+	];
+
+	it("matches an exact id", () => {
+		expect(resolveTodoRef(list, "10").item?.title).toBe("写文档");
+	});
+
+	it("matches a 1-based index when ids are not numeric-friendly", () => {
+		const uuids: TodoItem[] = [
+			{ id: "6f1e2d3c", title: "A", status: "pending" },
+			{ id: "a1b2c3d4", title: "B", status: "pending" },
+		];
+		expect(resolveTodoRef(uuids, "2").item?.title).toBe("B");
+	});
+
+	it("matches a unique id prefix", () => {
+		expect(resolveTodoRef(list, "2").item?.id).toBe("2"); // 序号与 id 一致
+		const uuids: TodoItem[] = [{ id: "6f1e2d3c", title: "A", status: "pending" }];
+		expect(resolveTodoRef(uuids, "6f1e").item?.title).toBe("A");
+	});
+
+	it("matches by normalized title substring", () => {
+		expect(resolveTodoRef(list, "修 ci").item?.id).toBe("2");
+	});
+
+	it("returns candidates when ambiguous", () => {
+		const dup: TodoItem[] = [
+			{ id: "1", title: "写单测", status: "pending" },
+			{ id: "2", title: "写文档", status: "pending" },
+		];
+		const r = resolveTodoRef(dup, "写");
+		expect(r.item).toBeUndefined();
+		expect(r.candidates.map((t) => t.id)).toEqual(["1", "2"]);
+	});
+
+	it("returns nothing for an empty or blank ref", () => {
+		expect(resolveTodoRef(list, "  ").item).toBeUndefined();
+		expect(resolveTodoRef(list, "  ").candidates).toEqual([]);
+	});
+
+	it("matches the current title after a rename, not the old one", () => {
+		const renamed = updateTodo(list, "2", { title: "修复流水线" });
+		expect(resolveTodoRef(renamed.todos, "修 CI").item).toBeUndefined();
+		expect(resolveTodoRef(renamed.todos, "修复流水线").item?.id).toBe("2");
 	});
 });
 

@@ -34,4 +34,13 @@ todo(action: "set" | "update" | "list", items?, id?, status?, title?, blockedBy?
 - `update` — 根据 `id` 更新任务（`status`、`title`、`blockedBy` 可选）
 - `list` — 返回当前列表
 
+### 任务 id 与引用
+
+- `set` 时 `items[].id` 可省略，会按位置自动分配短 id `1..n`（跳过已被显式 id 占用的数字）；显式 id（旧会话的 uuid）原样保留。
+- `update` 的 `id` 可以是：完整 id、任务在 `set` 里的位置序号、唯一的 id 前缀，或 title 片段（大小写与空白不敏感）。
+- 引用歧义或未命中时，错误信息会列出候选项或完整清单，无需额外调 `list` 即可自纠。
+- 自动 id 按位置分配，而 `set` 是整表替换；重新规划后请以最新 `set`/`update` 回显的 id 为准。
+
+`update` 成功时返回单行 ack：本次变更、进度，以及下一个任务。
+
 全部任务完成后，组件会自动隐藏。

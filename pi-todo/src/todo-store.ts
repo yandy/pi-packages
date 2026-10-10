@@ -8,6 +8,13 @@ export interface TodoItem {
 export interface TodoResult {
 	todos: TodoItem[];
 	error?: string;
+	/** update 成功时 = 命中任务的规范 id（供 ack 与渲染使用）。 */
+	id?: string;
+}
+
+export interface TodoRefResult {
+	item?: TodoItem;
+	candidates: TodoItem[];
 }
 
 /**
@@ -95,18 +102,58 @@ export function setTodos(items: TodoDraft[]): TodoResult {
 	return { todos: assigned.items.map((i) => ({ ...i })) };
 }
 
+/** 归一化引用文本：小写 + 去掉空白与常见分隔符，使「修 CI」与「修ci」等价。 */
+function normalizeRefText(value: string): string {
+	return value.toLowerCase().replace(/[\s\-_:：，,。.、]/g, "");
+}
+
+/**
+ * 把模型给的任务引用解析成唯一任务。顺序：精确 id → 纯数字按 1-based 序号 →
+ * 唯一 id 前缀（忽略大小写）→ 规范化 title 包含匹配。
+ * 纯数字只走序号而不走前缀，否则 "1" 会同时前缀命中 "1"/"10"/"11" 造成假歧义。
+ */
+export function resolveTodoRef(todos: TodoItem[], ref: string): TodoRefResult {
+	const needle = ref?.trim() ?? "";
+	if (!needle) return { candidates: [] };
+
+	const exact = todos.find((t) => t.id === needle);
+	if (exact) return { item: exact, candidates: [exact] };
+
+	if (/^\d+$/.test(needle)) {
+		const byIndex = todos[Number(needle) - 1];
+		return byIndex ? { item: byIndex, candidates: [byIndex] } : { candidates: [] };
+	}
+
+	const lower = needle.toLowerCase();
+	const byPrefix = todos.filter((t) => t.id.toLowerCase().startsWith(lower));
+	if (byPrefix.length > 0) {
+		return byPrefix.length === 1 ? { item: byPrefix[0], candidates: byPrefix } : { candidates: byPrefix };
+	}
+
+	const normalized = normalizeRefText(needle);
+	const byTitle = todos.filter((t) => normalizeRefText(t.title).includes(normalized));
+	return byTitle.length === 1 ? { item: byTitle[0], candidates: byTitle } : { candidates: byTitle };
+}
+
 export function updateTodo(
 	todos: TodoItem[],
-	id: string,
+	ref: string,
 	patch: {
 		status?: "pending" | "in_progress" | "done";
 		title?: string;
 		blockedBy?: string[];
 	},
 ): TodoResult {
-	const target = todos.find((t) => t.id === id);
+	const { item: target, candidates } = resolveTodoRef(todos, ref);
 	if (!target) {
-		return { todos: [...todos], error: `Task not found: ${id}` };
+		const needle = ref?.trim() ?? "";
+		if (!needle) return { todos: [...todos], error: "Task reference is required" };
+		if (candidates.length > 1) {
+			const listing = candidates.map((t) => `#${t.id} ${t.title}`).join(", ");
+			return { todos: [...todos], error: `Ambiguous task reference "${needle}": ${listing}` };
+		}
+		// 未命中时内联完整清单，让模型不需要额外调 list 就能自纠
+		return { todos: [...todos], error: `Task not found: "${needle}"\n${listTodos(todos)}` };
 	}
 
 	const updated: TodoItem = { ...target };
@@ -114,11 +161,11 @@ export function updateTodo(
 	if (patch.title !== undefined) updated.title = patch.title;
 	if (patch.blockedBy !== undefined) updated.blockedBy = [...patch.blockedBy];
 
-	const next = todos.map((t) => (t.id === id ? updated : t));
+	const next = todos.map((t) => (t.id === target.id ? updated : t));
 	const error = validateDependencies(next);
 	if (error) return { todos: [...todos], error };
 
-	return { todos: next };
+	return { todos: next, id: target.id };
 }
 
 const STATUS_MARKER: Record<TodoItem["status"], string> = {
