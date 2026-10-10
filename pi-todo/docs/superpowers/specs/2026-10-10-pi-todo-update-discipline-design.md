@@ -1,0 +1,378 @@
+# Design: pi-todo — 让 LLM 真正持续更新 todo（提示词 + 反馈闭环 + 状态可见性）
+
+**Date:** 2026-10-10
+**Status:** implemented（0.2.0，T1+T2+T3-B 合并发布，待合并后 release）
+
+## Summary
+
+用户实测反馈：**LLM 用 `todo action="set"` 建清单没问题，但之后总不记得 `update`**。
+
+排查结论：这不是单一的「提示词写得不好」，而是三个因素叠加，其中**提示词只占次要地位**：
+
+1. **提示词过软**——description 只讲「有哪些 action」，不讲「何时必须调用」；两条 guidelines 是软措辞，混在 `<rules>` 的 20+ 条 bullet 里。
+2. **状态对模型不可见**（根因）——widget 只渲染给用户；`set` 之后 todo 列表只存在于一条 toolResult 里，随对话推进不断远离生成点，没有任何周期性复述；`update` 只回 `"OK"`，模型得不到闭环反馈。
+3. **`update` 调用摩擦大**——id 是模型自编的 uuid，`update`/`blockedBy` 都要精确复现，抄错即 `Task not found`，失败一次模型就倾向于不再更新。
+
+对应三层方案：**T1 提示词重写**、**T2 反馈闭环 + 降低 update 摩擦**、**T3 把状态周期性送回模型眼前**。建议按阶段分别发布，以便归因。
+
+### 关键决策摘要
+
+| 决策 | 结论 | 理由 |
+|------|------|------|
+| 病因定性 | 提示词弱 + 状态不可见 + update 摩擦大，三者叠加；**根因是状态不可见** | 证据见「背景事实」与「问题诊断」 |
+| T1 提示词重写 | **采纳，必做** | 零风险、10 行改动，但单独做不足以解决遗忘 |
+| T2.1 `update` 回显进度与下一个任务 | **采纳** | 把 `"OK"` 换成带状态的 ack，形成正反馈闭环 |
+| T2.2 短 id + 宽松引用解析 | **采纳** | 消除 uuid 抄错；错误信息带候选列表，让模型一次自纠 |
+| T3-B `before_agent_start` 注入快照 | ~~采纳~~ → **发布前删除**（见决策变更三） | 原理由（缓存友好、20 行）成立，但价值未证明且会累积冒充当下的快照 |
+| T3-A `tool_result` 尾追提醒（Claude Code 式） | **列为可选增强**，实测 B 不足再上 | 效果最强但有噪声、token 成本与 `structuredContent` 陷阱 |
+| T3-C `turn_end` 追加 `custom_message` | **暂不采纳** | 每轮刷新但每轮往 session 写 entry，长 run 条目膨胀，影响 `/tree`、resume、compaction |
+| T3-D 改 `systemPromptOptions.sections.todo` | **否决** | 每次 run 改 system prompt → 整条 prompt cache 前缀失效；刷新频率并不比 B 高 |
+| 是否引入配置文件 | 仅当采纳 T3-A 时需要（提醒模式/频率） | B 无需配置；A 硬编码则噪声不可回退 |
+| 兼容性 | 不破坏旧 session：`details.todos` 结构不变，`id` 仍可为任意字符串 | `reconstructTodos` 只依赖 `details.todos` |
+| 版本 | `0.1.2 → 0.2.0`（T1+T2），T3 另起 minor | 0.x 用 minor 承载行为/schema 变化，与 pi-coding-tools 的约定一致 |
+
+## 背景事实（决策依据，均已在 pi 1.1.0 核对）
+
+### 提示词的落点与权重
+
+- 工具级 `promptSnippet` → 系统提示 `<tools>` 一行；`promptGuidelines` → 按工具名收集进 `toolGuidelines`（`dist/core/agent-session.js:2844-2849`），再由 `buildRules` 拼成 `<rules>` 的 bullet（`dist/core/system-prompt.js:31-64`，第 61 行遍历 `promptGuidelines`）。
+- `buildRules` 只对 **active**（`selectedTools` 且未 hidden）的工具注入 guidelines；todo 默认注册即激活，所以两条都会出现。
+- bullet 去重按 trim 后的字符串（`system-prompt.js:33-40`）。
+- 当前实际注入内容：
+  - `<tools>`：`- todo: Track tasks with a todo list (set/update/list actions).`（`index.ts:58`）
+  - `<rules>`：两条（`index.ts:59-62`），与 bash/edit/read/write/ast-grep/lsp/ask-user/memory 等包的 guidelines 混排，总量 20+ 条。
+- 结论：注入通道是通的，**问题在文案本身没有触发条件与强制语气**。
+
+### 模型看不到 todo 状态
+
+- widget 走 `ctx.ui.setWidget(WIDGET_ID, lines)`（`index.ts:21`），`docs/tui.md:13` 明确其为「编辑器附近的持久内容」——**纯 UI，不进模型上下文**。
+- `update` 的返回文本是常量 `"OK"`（`index.ts:143`）；只有 `set`/`list` 才回 `listTodos(todos)`。
+- 状态持久化靠 toolResult `details.todos` + `session_start`/`session_tree` 重建（`src/todo-store.ts:115-127`）。这对**分支安全**是正确的，但它只服务重建，不会主动回到模型眼前。
+
+### update 的摩擦点
+
+- `setTodos` 原样接受 items、**不生成 id**（`src/todo-store.ts:56-60`）；schema 里 `items[].id` 是必填 `Type.String()`（`index.ts:38`），description 又把它描述成 uuid → 模型自编长随机串。
+- `updateTodo` 精确匹配 id，未命中即 `Task not found: ${id}`（`src/todo-store.ts:73`），错误信息不含候选列表，模型只能再调一次 `list` 才能自纠。
+- `blockedBy` 同样要引用这些 id（`validateDependencies`，`src/todo-store.ts:14-53`），抄错会连带 set 失败。
+
+### 宿主可用的注入点（T3 的技术基础）
+
+| 注入点 | 机制 | 已核对证据 |
+|---|---|---|
+| `before_agent_start` 返回 `{ message }` | 追加一条 `role:"custom"` 消息到本次 run 的消息列表，并持久化为 `custom_message` entry | `agent-session.js:1615-1624`（收集 `result.messages`）、`agent-session.js:1822`（`appendCustomMessageEntry`） |
+| custom message 如何进 LLM | 投影为 **user 角色**消息；`display` 只影响 TUI 渲染，**不影响是否发给模型** | `dist/core/messages.js:89-95`（`case "custom"` → `role:"user"`）、`session-manager.js:179-183` |
+| `tool_result` 返回 `{ content }` | 改写后的 content **写回 transcript 并持久化**（不是仅本次请求） | `agent-session.js:349-385`（`_afterToolCall`） |
+| `tool_result` 的组合语义 | `details`/`isError`/`usage` 不返回即保留原值；**替换 content 而不返回 `structuredContent` 会删除 structuredContent** | `dist/core/extensions/runner.js:900-957`（912-915 行 delete）、`types.d.ts:1085-1096` 注释亦明示 |
+| `turn_end` / `agent_before_settle` | 可链式追加 `custom`/`custom_message`/`context_edit`/`compaction` entry，`continue:true` 才触发下一次请求 | `types.d.ts:730-760`（`BoundaryResult`）、`agent-session.js:588`、`docs/extensions.md:117` |
+| 注入 custom message 会否干扰模型路由 | 不会：虚拟模型路由的 `userTurn` 判定用 AgentMessage 的 `role === "user"`，`custom` 不算 | `agent-session.js:463-464` |
+
+## 问题诊断
+
+「建清单没问题、之后不更新」这个**具体现象**能被上述三点完整解释：
+
+- `set` 发生在模型刚写完计划的那一刻，任务与意图在同一注意力窗口内，**不需要提醒**就会调用；
+- `update` 需要在几十轮工具调用之间**自发想起**，而上下文中：
+  - 没有任何一条消息复述当前 todo 状态（widget 模型看不到）；
+  - 上一次 `update` 的回报只有 `"OK"`，没有「还剩几个 / 下一个是谁」的强化信号；
+  - 系统提示里只有 `mark tasks in_progress/done as you complete them` 这种无触发条件、无强制语气的软措辞；
+  - 调用本身还要求精确复现 uuid，失败成本高于收益。
+- 对照 Claude Code 的 `TodoWrite`：它的描述里写死了 7 条使用场景 + `Mark tasks complete IMMEDIATELY after finishing (don't batch completions)` + `Exactly ONE task must be in_progress at any time`，并且宿主会在 tool result 后挂 `<system-reminder>` 复述 todo 状态。**pi-todo 缺的正是「强措辞 + 周期性复述」这两层。**
+
+## T1：提示词重写（必做）
+
+**职责划分（发布前定稿）**：`description` 只讲 **API 事实**（工具是什么、参数形状、返回什么），`promptGuidelines` 只管 **行为规则**（何时调用、什么节奏）。两者不重复——重复既浪费 token，也让同一条规则有两个可能互相矛盾的说法。
+
+### `description`（404 字符，纯 API）
+
+```
+Track a task list for the current session.
+"set" replaces the whole list with items {title, status: pending|in_progress|done, blockedBy?: ids} and returns it. The tool owns ids: it assigns 1..n by position and renumbers them on every set, so never pass an id.
+"update" changes one task by its exact id (status / title / blockedBy) and returns progress plus the next task.
+"list" returns the current list.
+```
+
+### `promptGuidelines`（4 条 when→then，进 `<rules>`）
+
+```
+Use todo to plan multi-step work: action "set" lists all tasks up front.
+Set a task in_progress before you start it, and keep exactly one in_progress at a time.
+Mark a task done as soon as it passes — never batch completions to the end of the run.
+Call todo action "list" when you need the current ids or statuses — the extension does not re-send the list on its own.
+```
+
+`promptSnippet`：`Track a task list (set/update/list); keep statuses current.`
+
+### 意图说明
+
+| 文案 | 针对的失败模式 |
+|---|---|
+| `before you start it` / `exactly one in_progress` | 可校验的硬约束，模型能自查；也避免「全部 pending 直到最后一次性刷 done」 |
+| `as soon as it passes` / `never batch` | 压制「批量补记」倾向；措辞强度是 T1 的全部价值，所以必须留在 guidelines 而不是散在描述里 |
+| `the extension does not re-send the list on its own` | 明确状态的来源只有 tool result 与 `list`，别让模型以为每轮会有小抄可抄 |
+| `does not refresh mid-run — call "list" when unsure` | 一次 run 内几十轮工具调用之间状态会变；给出自纠通道 |
+| description 里的 `The tool owns ids … never pass an id` | 直接消灭病因 3（自编 uuid 抄错），且它是 schema 事实，放 description 才与 `items` 里没有 `id` 字段一致 |
+
+## T2：反馈闭环 + 降低 update 摩擦
+
+### T2.1 `update` 返回进度 ack（替换 `"OK"`）
+
+新增 `src/todo-store.ts` 导出：
+
+```ts
+/** update 成功后的单行 ack：进度 + 下一个可做任务，给模型闭环反馈。 */
+export function formatAck(todos: TodoItem[], id: string): string;
+```
+
+输出规格：
+
+| 情形 | 文本示例 |
+|---|---|
+| 常规 | `✓ #2 done (3/5) · next: #3 写测试` |
+| 下一个被阻塞 | `✓ #1 done (1/5) · next: #3 写测试 (blocked by #2)` |
+| 全部完成 | `✓ all 5 tasks done` |
+| 标记 in_progress | `◉ #3 写测试 in_progress (2/5 done)` |
+
+`index.ts:143` 改为：`params.action === "update" ? formatAck(todos, params.id) : listTodos(todos)`。渲染层（`renderResult` 的 update 分支）保持前缀 `✓` 即可，无需改动。
+
+### T2.2 短 id + 宽松引用解析
+
+- `setTodos`：`item.id` 缺失或空串 → 按位置分配 `"1".."n"`；显式 id 原样保留（**兼容旧 session 的 uuid**）。
+- schema：`items[].id` 由必填改 `Type.Optional(Type.String())`；description 中把 id 说明为短 id，不再要求 uuid。
+- 新增解析器：
+
+```ts
+/** 把模型给的引用解析成唯一任务。顺序：精确 id → 唯一前缀 → 1-based 序号 → 规范化 title 包含匹配。 */
+export function resolveTodoRef(todos: TodoItem[], ref: string): { item?: TodoItem; candidates: TodoItem[] };
+```
+
+- `updateTodo` 改用 `resolveTodoRef`；未命中/歧义时错误信息**内联候选与完整列表**，例如：
+  `Ambiguous ref "写": #2 写测试, #4 写文档\n当前列表：\n○ #1 … ✓ #2 …`
+  → 模型无需额外 `list` 调用即可自纠（省一轮往返，也降低「失败后放弃更新」的概率）。
+- `blockedBy` 的引用同样过 `resolveTodoRef`（在 `validateDependencies` 之前做一次归一化），避免依赖校验因 id 写法不一致而误报。
+
+### T2.3 兼容与风险
+
+- `details.todos` 结构完全不变 → `reconstructTodos`、widget、`renderResult` 全部不受影响。
+- 自动短 id 在 `set` 全量替换时是稳定的（按位置），但**追加式修改列表会让 id 语义漂移**；因为 `set` 的语义本来就是「整表替换 + 重新规划」，可接受。文档需写明：改结构后请以最新 `set`/`update` 回显的 id 为准。
+- 宽松匹配是「先精确、后模糊」，不会让原本正确的调用行为发生变化。
+
+## T3：把状态周期性送回模型眼前
+
+### ~~T3-B：`before_agent_start` 注入快照~~ —— **0.2.0 发布前已整条删除**（理由见文末「决策变更三」。以下内容保留为设计与取证记录，不代表当前实现。）
+
+```ts
+pi.on("before_agent_start", async () => {
+  if (!hasOpenTodos(todos)) return undefined;
+  return { message: { customType: "pi-todo", content: buildSnapshot(todos), display: false } };
+});
+```
+
+`buildSnapshot` 输出（**必须**用 XML 标签包裹 + 第三人称，避免被当成用户指令）：
+
+```
+<todo-state>
+2/5 done. in_progress: #3 写测试. pending: #4 修 CI, #5 更新文档.
+Discipline: mark #3 done as soon as it passes, then set #4 in_progress. Never batch completions.
+</todo-state>
+```
+
+成本与风险：
+
+- 每个 user prompt 多一条 **user 角色**消息（`messages.js:89-95`）。措辞需明确这是状态回显而非用户请求；`<todo-state>` 标签 + 无祈使句指向用户，可降低误读。
+- **一次 run 内不刷新**：长 run（几十轮工具调用）仍可能遗忘 → 这是保留 T3-A 的原因。
+- `display:false` → 用户看不到，但 entry 会写进 session（`agent-session.js:1822`），resume/`/tree` 时存在；单条几十 token，可忽略。
+- 缓存：追加在新一轮用户消息之后，**不动 system prompt，前缀缓存完好**。
+- 与 `reconstructTodos` 无冲突：它只扫 `role==="toolResult" && toolName==="todo"`（`todo-store.ts:115-127`）。
+
+### T3-A（可选增强）：`tool_result` 尾追提醒
+
+```ts
+let sinceTodoCall = 0;
+pi.on("tool_result", async (event) => {
+  if (event.toolName === "todo") { sinceTodoCall = 0; return undefined; }
+  if (!hasOpenTodos(todos)) return undefined;
+  if (++sinceTodoCall < REMIND_EVERY) return undefined; // 默认 4
+  sinceTodoCall = 0;
+  return {
+    content: [...event.content, { type: "text", text: buildReminder(todos) }],
+    ...(event.structuredContent === undefined ? {} : { structuredContent: event.structuredContent }),
+  };
+});
+```
+
+必须遵守的坑（均已核对）：
+
+1. **追加而非重组**：`[...event.content, extra]`。若把文本抽出来重新拼，会丢掉图片块。
+2. **透传 `structuredContent`**：替换 content 而不返回它，宿主会 `delete currentEvent.structuredContent`（`runner.js:912-915`），破坏带 `outputSchema` 的工具。
+3. **不要回传 `details`**：不返回即保留原值（`runner.js:917-920`）；显式回传 `undefined` 之外的值会覆盖其他包的渲染数据。
+4. **永久写入 transcript**：`_afterToolCall` 的结果会被持久化（`agent-session.js:349-385`），所以**必须限频**，每条一行。
+5. **前序 handler 的组合**：拿到的是 `currentEvent`，已含其他扩展的修改；本包按扩展加载顺序最后追加即可。
+6. **可见性**：内置 bash/read/edit 走 `details` 渲染，追加文本用户基本看不到；以 content 渲染的自定义工具会露出 `<todo-state>` 一行——可接受，但需在 README 说明。
+
+触发条件可优于纯计数：**「in_progress 陈旧」检测**——连续 N 次工具调用且 `in_progress` 项未变 → 提醒；全部 pending 且已有 K 轮无任何 todo 调用 → 提醒「你似乎忘了维护清单」。
+
+### T3-C（替代，暂不做）：`turn_end` 追加 `custom_message`
+
+每轮都能刷新，但每轮往 session 写 entry，长 run 条目膨胀，且 `/tree`、resume、compaction 都要带着它。除非 B+A 实测不足，否则不引入。
+
+### T3-D（否决）：改 `systemPromptOptions.sections.todo`
+
+system prompt 位于请求最前，任何改动都会让**整条前缀缓存失效**；而刷新频率与 B 相同（都是每 run 一次）。pi-memory 为 `memory_index` 付这个代价，是因为索引必须常驻系统提示（见 `pi-memory/src/inject.ts:190-206`）；todo 状态不需要，故否决。
+
+## 配置（仅当采纳 T3-A）
+
+首版建议硬编码常量；若 A 上线，参照 pi-coding-tools 的 `coding-tools.json` 模式提供 `todo.json`：
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `reminder` | `"run"` | `off` \| `run`（仅 B）\| `tool_result`（B+A） |
+| `remindEvery` | `4` | A 模式每 N 次非 todo 工具调用提醒一次 |
+
+## 兼容性 / 迁移
+
+- 版本：`0.1.2 → 0.2.0`（T1+T2：新增行为 + schema 放宽），T3 各阶段另起 minor。
+- 旧 session：`details.todos` 结构不变，resume/fork 后状态照常重建；uuid id 仍能精确命中。
+- `items[].id` 必填 → 可选：老调用完全不受影响。
+- 新增 `customType: "pi-todo"` 的 `custom_message` entry：`display:false`，不参与状态重建。
+- README / README.zh.md 需补：更新纪律说明、（若做 A）提醒行为与开关、id 规则变化。
+
+## 测试计划（`tests/`，遵循 `docs/guides/testing.md`）
+
+- `todo-store`
+  - 短 id 自动分配（缺失/空串）、显式 id 保留、混合情形。
+  - `resolveTodoRef`：精确 / 唯一前缀 / 序号 / title 包含 / 歧义（返回 candidates）/ 未命中。
+  - `formatAck`：done、in_progress、next 存在、next 被阻塞、全部完成。
+  - `blockedBy` 归一化后依赖校验仍拦截自依赖与环。
+- 提示词：对 `description`/`promptGuidelines` 断言少量关键短语（`IMMEDIATELY`、`Exactly one`、`not re-shown`），避免整串快照造成脆断言。
+- 注入（mock `ExtensionAPI`）
+  - `before_agent_start`：有开放任务时返回 `message` 且 `display === false`、内容含进度与 `in_progress`；空列表/全 done 时返回 `undefined`。
+  - （若做 A）`tool_result`：content 为**追加**、`structuredContent` 透传、`details` 未被覆盖、限频计数正确、`todo` 自身结果不追加、全 done 后不再追加。
+
+## 分阶段落地
+
+| 阶段 | 内容 | 版本 | 验收 |
+|---|---|---|---|
+| 1 | T1 提示词 + T2.1 ack + T2.2 短 id/宽松匹配 | 0.2.0 | 真实会话中 update 频次明显上升；无 `Task not found` 反复失败 |
+| 2 | T3-B `before_agent_start` 快照 | 0.3.0 | 长任务跨多轮后仍持续更新 |
+| 3 | T3-A `tool_result` 限频提醒 + 配置 | 0.4.0 | 单次 run 内数十轮工具调用后仍不脱轨；噪声可关 |
+
+每阶段单独发布：提示词效果与注入效果必须能分开归因，否则无法判断哪一层真正起作用。
+
+## 未解决 / 需评审
+
+1. **短 id vs uuid**：是否有用户依赖 id 的跨 `set` 稳定性？建议默认自动短 id、允许显式指定（当前方案）。
+2. ~~**B 注入的 user 角色消息是否会被模型误当用户指令？**~~（T3-B 已删除，此项作废） → **已实测否定**（三轮真宿主跑动，注入后的第一个动作都是 `todo update`，没有一次把它当成用户在说话）。但样本限制要说清：单次、脚本化任务、便宜模型；而且注入位置在**用户那句话之后**（请求里连续两条 user），所以框定语不是可拆的装饰。
+3. ~~**`REMIND_EVERY` 默认值**~~ —— T3-A 本轮未做，此项仅当后续引入 A 时有效。
+4. **是否引入「陈旧 in_progress」检测**替代纯计数触发（更精准，但需要记录轮次与状态快照）。
+5. **是否给 `list` 加轻量默认**：例如每个 run 首次工具调用前自动等价一次 `list`（与 B 重叠，倾向不做）。
+
+## 参考
+
+| 来源 | 借鉴点 |
+|---|---|
+| Claude Code `TodoWrite` 工具描述 | 使用场景枚举 + `IMMEDIATELY` / `Exactly ONE in_progress` 强措辞；tool result 后挂 `<system-reminder>` 复述状态 |
+| pi 宿主 `dist/core/extensions/types.d.ts` | `BeforeAgentStartEventResult.message`、`ToolResultEventResult`、`BoundaryResult.entries` 三个注入点契约 |
+| `pi-memory/src/inject.ts` | system prompt section 注入的代价与「null 陷阱」，本次据此否决 T3-D |
+| `pi-coding-tools` `coding-tools.json` | 若采纳 T3-A 的配置文件模式 |
+
+## 落地补记（0.2.0，2026-10-10）
+
+- T1 / T2 / T3-B 都曾实现并合并到同一个 `0.2.0`（原计划分 0.2.0 / 0.3.0 以便归因，实际一起做，代价是贡献无法单独归因）；**T3-B 在发布前删除**，最终 0.2.0 = T1 + T2。
+- 发布前有一次设计回退：**id 收归工具所有，引用只认精确匹配**，§T2.2 的宽松引用与 `blockedBy` 归一化随之作废，详见文末「发布前决策变更」。其中一条教训留下：§T2.2 的 `blockedBy` 归一化先是在 spec→plan 这一跳被漏掉、评审时才发现补上，最后又整块拆掉 —— **spec 的要求如果没进任何测试断言，计划就会丢；而丢了也不一定是损失，得允许自己撤回。**
+- 发布前把提示词重新分工了一轮（见 §T1）：原先 `description` 长 1105 字符、内含 5 条祈使句，跟 `promptGuidelines` 大量重叠；现在 description 404 字符只讲 API 事实，行为规则全归 guidelines（4 条）。**同时修掉一个自相矛盾**：旧 description 里的 `The list is NOT re-shown to you automatically` 在 T3-B 落地后已经是假话（每个 run 都会回显一份），现在改成「会回显、但一次 run 内不刷新」。
+- 评审带出的三个规格外缺陷已修：注入的 discipline 行会把当前 `in_progress` 任务再指为下一个（自相矛盾，已抽 `pickNext` 共用）；错误信息内联的清单不设上限（已 clip + 限 20 行）；`in_progress` 段无上限且不提示「同时只能一个」（已加 cap 与纠正提示）。另两条——单字符 title 引用静默命中错任务、`blockedBy` 宽松归一化——随「只认精确 id」的回退整块消失。
+- ~~已知代价：每个 user turn 注入一条快照且永久留在上下文~~ —— **该问题随 T3-B 删除而消失**，不再需要 `context_edit` 方案。原始量化留在文末验证节。，N 轮提问就有 N 份 `<todo-state>`，靠 recency 取对的那份。**已量化**：单份 243–272 字符（约 60–90 token），第 3 轮请求里并存 2 份（进度 `1/3 done` 与 `2/3 done`）。彻底修法需要 `turn_end` + `context_edit` 替换上一条（即被否决的 T3-C 家族）；以 20 轮提问的会话估算约多占 1.5k token，是否值得做按真实使用再定。
+- 注入文本第二行是自报身份的框定语（`Automatic status echo …, not a request from the user.`），对齐宿主 compaction/branch-summary 的惯例；「模型会不会把它当用户指令」已实测否定（见文末「T3-B 端到端验证」）。
+
+## 评审遗留（deferred minors，未进入 0.2.0 的 fix pass）
+
+fresh reviewer 提的 8 条 Minor，按「minor 不做顺手修」的规矩留在这里，供后续单独 PR 处理：
+
+| # | 位置 | 现象 |
+|---|---|---|
+| M1 | `index.ts` update 分支 | 空 `id` 的守卫与 store 的 `Task reference is required` 重复且文案不一致，两条都不内联清单；`id` 变 optional 后模型整条漏填的概率上升 |
+| ~~M3~~ | ~~`resolveTodoRef`~~ | **已随「只认精确 id」的决策变更失效** |
+| M4 | ~~`assignIds`~~ | **已失效**：id 不再接受显式传入，序号与 id 不可能分叉 |
+| M5 | `isBlocked` / `describeTodo` | 每项都重建整表 Map，n=150 时注入路径 O(n²) 常数大；`byId` 提到调用顶部即可 |
+| M6 | `widget.ts` | 不截断 title，300 字符 title 会撑爆编辑器上方组件（`clipTitle` 现在就在手边） |
+| ~~M7~~ | ~~`before_agent_start`~~ | **已随 T3-B 删除而失效** |
+| M8 | 两份 README | ack 描述不完全对称 |
+
+## 发布前决策变更：id 收归工具所有，只认精确匹配
+
+人工复核后撤掉 §T2.2 的宽松引用设计，理由只有一条：**宽松匹配存在的唯一理由是救「模型自编 uuid 抄错」；id 不再由模型编之后，这个理由消失，而风险留下**（评审 I1 实测：title 子串会把 `a` 命中 `Add caching`，静默把错的任务标成 done，widget / `details.todos` / 下次注入全部跟着错）。
+
+保留的自纠通道：写错 id 时错误信息内联当前清单（title 截断、最多 20 行），所以不需要额外调 `list`；`update` 仍返回 ack（进度 + 下一个任务）。
+
+| 原设计（§T2.2） | 现在（0.2.0） |
+|---|---|
+| `items[].id` 可选，显式 id（含旧 uuid）原样保留 | `items` 没有 `id` 字段；`set` 一律按位置分配 `1..n`，传来的 id 被覆盖 |
+| `update` 接受精确 id → 序号 → 唯一前缀 → title 片段 | 只接受逐字精确 id |
+| `blockedBy` 走 `resolveTodoRef` 归一化 | 只接受精确 id；错写直接 `blockedBy unknown id` + 内联清单 |
+| 歧义引用回报候选列表 | 不存在歧义；`Task not found` + 内联清单（最多 20 行、title 截断） |
+
+连带效应：评审遗留的 **M3（数字 ref 不再尝试前缀）与 M4（显式/自动 id 混用时序号分叉）自动失效**，因为两者的前提都不存在了。`resolveTodoRef` / `TodoRefResult` / `normalizeDeps` / `normalizeItemDeps` / `renderCandidates` 一并删除，store 的公开面变小。
+
+最后一句关于旧 session：「精确匹配」对任何字符串成立，所以历史上用 uuid id 建过清单的 session 在被重建后仍能逐字引用那个 uuid——这不是兼容设计，而是精确匹配的自然结果，不再为它写测试或写文档。下一次 `set` 之后，这张表里只会有 `1..n`。
+
+## T3-B 端到端验证（2026-10-10，真宿主实跑，非单测）
+
+> **该实现随后已被删除**（见「决策变更三」）。本节保留，因为它正是删除的依据：机制全部按设计工作，但没有任何一条数据能把「模型持续更新」归因给它。
+
+方法：`pi -ne -e pi-todo/index.ts -e <spy.ts> --session-dir /tmp/pi-todo-verify/sessions` 连续三个 user turn（第 2、3 轮用 `--continue`，是**新起的 pi 进程**）。spy 是临时观察扩展，监听 `before_provider_request`，把每次发给 provider 的请求骨架落盘：消息数、角色序列、`<todo-state>` 出现的下标与份数、每份的进度行、以及 system 文本的 sha256。任务：建 3 步清单并逐步完成。
+
+两个测量坑（都已踩过并修正，复现时别再踩）：
+1. **`payload.system` 对某些 provider 是空的**（megcore 把 system 放在 `messages[0]`，role 为 `system`）。第一版 spy 哈希 `payload.system ?? ""`，于是哈希了一个恒定空串，「多次请求 system 全同」这条结论当时**并不成立**，只是看起来成立 —— 已改为 `payload.system ?? messages.find(role === "system")` 并重跑取证。
+2. **`guidelines` 里出现了 `<todo-state>` 字面量**（这是有意的，模型需要知道该块是谁生成的），所以「按文本搜 `<todo-state>` 统计注入份数」会把 system 消息也算进去。统计时必须排除 `role === "system"`，否则会虚报成 2 份。
+
+重跑（新提示词分工后）的实测结果 —— 2 个 user turn、11 次 provider 请求：
+
+| 断言项 | 结果 |
+|---|---|
+| 注入是否真进了发给模型的请求 | ✅ 第 2 轮起每个请求的**最后一条**消息是 `<todo-state>`（`role=user`，下标 11；第 3 轮追加下标 20），session 文件里同时存在 `customType:"pi-todo"` / `display:false` 的 `custom_message` 条目 |
+| 是否破坏 prompt 前缀缓存 | ✅ 修正 spy 后重测：该 provider 把 system 放在 `messages[0]`（`payload.system` 为空），11 次请求的 system sha256 全为 `e387fb5053dc384b`，**其中 6 次是带注入的请求** → 注入不动 system prompt，当初否决 T3-D 的论据成立 |
+| 跨进程重建后是否仍注入正确状态 | ✅ 第 2、3 轮的快照进度分别是 `1/3 done`、`2/3 done`，与新进程从 `details.todos` 重建的内存状态一致 |
+| 模型是否把它当成用户的新指令 | ❌ 未出现。注入后的第一个动作就是 `todo update → in_progress`；三轮共 7 次 todo 调用，`set→in_progress→done` 逐任务推进，最后一次返回 `✓ all 3 tasks done`，全 done 后不再注入 |
+| 已知代价的实际量级 | ⚠️ 每个 user turn 多一份快照：单份 243–272 字符（约 60–90 token），第 3 轮请求里同时有 2 份（`1/3 done` 与 `2/3 done`）。本次模型按 recency 取对了最新那份，但这只在 n 小时成立；长跑需要 `turn_end` + `context_edit` 方案 |
+
+样本限制：**单次、脚本化任务、便宜模型（qwen3.8-flash）**。它证明的是机制正确（注入到达模型、不碰缓存、跨进程重建），不是「真实日常使用里 update 频次上升多少」——后者只能靠实际会话观察。
+
+复现：spy 扩展只需注册 `before_provider_request` 并 dump 上述字段（约 30 行，未入库）。注意 pi 需要写 `~/.pi/agent/*.lock`，在只读 `HOME` 的沙箱里会静默失败——把 `HOME` 指到一个只放**符号链接**（不复制凭据）的临时目录即可绕过。
+
+## 决策变更三：删除 T3-B（`before_agent_start` 快照注入）
+
+发布前人工评估后整条移除，`src/snapshot.ts`、`tests/snapshot.test.ts`、handler 与 README 相应条目一并删除（测试 60 → 46，其中 −14 条属于 T3-B，新增 2 条「不该注册任何 context 注入钩子」的门）。
+
+三条理由，按分量排序：
+
+1. **价值未被证明，而且我的实验设计上无法证明。** 三轮真宿主跑动里，第 1 轮**一份注入都没有**（`before_agent_start` 触发时清单还是空的），行为却已经完美：`set → in_progress → done` 逐任务交替。也就是说 T1+T2 已足以解释观察到的全部好行为；第 2 轮虽有注入，但用户那句话自己写了「每步照规则更新」，同样混淆。**我把相关当成了因果写进了 PR。**
+2. **触发点与病因错位。** 诊断说的根因是「一个 run 内跑着跑着忘了」，而 `before_agent_start` 只在 run **边界**触发一次。典型失败场景（一句话 → 几十次工具调用 → 从不 update）里，它恰好什么都覆盖不到：注入发生在清单尚空时，此后整轮不再注入。
+3. **副作用是结构性的，不是常数级的。** 每个 user turn 一份、永久留在上下文，实测第 3 轮请求里并存两份（`1/3 done` 与 `2/3 done`）。toolResult 绑定在它发生的那一刻、不会说谎；而 echo 以「现在的状态 + 该怎么做」的口吻写成，多份并存时其中必有**冒充当下、实为过去**的指令，且它以 user 角色送达。把旧的那份当指令执行，比没有它更糟。
+
+**唯一没能救活它的论点**：compaction 之后 todo toolResult 会被摘要掉，而 `reconstructTodos` 读的 `getBranch()` 是原始链（扩展记得、模型忘了），此时 echo 是唯一通道。这条推理成立，但**一次都没实测过**（三个会话都没触发压缩）——为一个未验证的场景保留一个已验证会变坏的副作用，不划算。若将来要真解 run 内漂移或压缩后丢状态，候选是 §T3-A（tool_result 尾追，需限频）或 §T3-C（turn_end + context_edit 自替换），且必须先做 A/B：同一长任务开关注入，数 missed update。
+
+现在状态的可观测来源收敛为两条：`update` 返回的 ack（每次变更都复述进度与下一个任务）与 `list`（按需）。guideline 第 4 条也据此改写，避免模型以为有小抄可抄。
+
+## 单写者 · 多在飞（并行派发 subagent）
+
+需求澄清后得到的定位：**看板是 per-session 的，写者只有一个（父会话）**；并行不是「多个 worker 共写一张板」，而是「父同时把多个 item 发出去、并自己维护它们的状态」。
+
+事实依据（pi-subagents @ 本仓库，父→子）：子会话**总是**加载父的全部扩展，`todo` 工具因此被子 agent 继承（`src/lifecycle/create-subagent-session.ts:25-26, 172`）；但子会话是 `sessionManager.newSession(...)` 建出的**全新空 branch**（同文件 `:191-193`），扩展工厂**每个 session 各调一次**（`subagent-manager.ts:247`），所以子 agent 的 `todos` 是自己那份空闭包 —— 它 `list` 得到 `No todos`，`update id:"3"` 得到 `Task not found`。`inherit_context` 只给**文本**（`src/session/context.ts:57-73`），不构成可引用状态。结论：跨会话共写本包不支持，也不支持过；正确用法是父作唯一写者。
+
+两处本来挡路的，都不是状态机（`in_progress` 只是字符串值，多份合法；`execute` 内无 `await`，同消息并行调用不会丢写）：
+
+1. **guideline 原文 `keep exactly one in_progress at a time`** 把并行派发直接说成违规。改为：`keep exactly one in_progress unless tasks really run concurrently (e.g. one per dispatched subagent)` —— 保留串行默认，给出并行例外。
+2. **`pickNext` 会把已在飞的任务当 `next` 推荐**（候选集只排 `done`）。这是 §T3-B 那个 C1 缺陷的单写者版本：父标 #1 done 时 ack 说 `next: #2`，而 #2 正被 subagent 做 → 诱导重复派发。RED 实测：`expected '2' to be '3'`、`✓ #2 B done (1/3 done) · next: #1 A`（#1 是 in_progress）。
+
+改后的规则（`pickNext` / `formatAck`）：
+
+| 情形 | 输出 |
+|---|---|
+| `next` 候选 | 只看 `pending`（`in_progress` 一律排除），第一个未阻塞的；全阻塞时退化到第一个 pending 并标 `(blocked by #x)` |
+| 本次把某项设为 in_progress | `◉ #2 B in_progress (1/5 done · 3 pending)` —— 给可领数量，但**不**递 `next`，不主动催生并发 |
+| 无 pending 可领、仍有在飞 | `✓ #1 A done (1/3 done) · 2 in flight` —— 不沉默，否则父会以为完工 |
+| `set` 时板上有在飞任务 | 清单后附 `⚠ ids renumbered by this set; previously in flight: #2 B. Re-mark them...` |
+
+最后一条是位置式 id 的必然代价：`set` 重编号会让父手里的引用静默失效，串行时无所谓（就它一个人），并行时是真事故。这里选择**警告而不禁止** —— `set` 的语义本就是整表替换，拦下来会让「重新规划」变成需要两次调用的操作。
+
+明确不做（若要做得另起 spec）：跨会话的 `owner` / `claim` / 共享存储 —— 那会同时牺牲 branch-safety（`/fork`、`/tree` 的还原语义）和「id 由工具拥有」这条定案，属于另一种产品。

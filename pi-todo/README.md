@@ -5,6 +5,8 @@ A minimal pi package that adds a single `todo` tool with an editor-overhead widg
 ## Features
 
 - **One tool**, three actions: `set` (plan all tasks), `update` (change one task), `list` (review progress)
+- **Update discipline in the prompt**: the tool description and guidelines pin down *when* to update (one `in_progress` per in-flight task, mark `done` immediately)
+- **Feedback on every update**: `update` returns progress plus the next task (`✓ #2 写单测 done (2/5 done) · next: #3 修 CI`), not a bare `OK`
 - **3 states**: `pending` → `in_progress` → `done`
 - **Dependencies**: optional `blockedBy` array, with self-dependency and cycle detection
 - **Compact widget** above the editor: `○` pending · `◉` in_progress · `✓` done · `🔒` blocked
@@ -31,7 +33,24 @@ todo(action: "set" | "update" | "list", items?, id?, status?, title?, blockedBy?
 ```
 
 - `set` — replace the whole list with `items` (use at planning time)
-- `update` — update the task with `id` (`status`, `title`, `blockedBy` optional)
+- `update` — update the task referenced by `id` (`status`, `title`, `blockedBy` optional)
 - `list` — return the current list
+
+### Task ids
+
+- The tool owns ids: `set` assigns `1..n` by position and ignores any `id` present in the items it receives.
+- `update`'s `id` must match one of those ids exactly (send `3`, not `#3`); `blockedBy` takes exact ids too.
+- A wrong id is never guessed at: the error echoes the current board (titles clipped, up to 20 lines) so it can be corrected without an extra `list` call.
+- `set` replaces the whole list, so ids are renumbered — trust the ids echoed by the latest `set`/`update`.
+
+### Parallel work and subagents
+
+The board belongs to **one session**: a subagent runs its own `todo` instance and can neither see nor update yours. So keep the parent as the only writer — hand item #2 to a subagent, and mark it yourself.
+
+Parallel dispatch is supported:
+
+- mark an item `in_progress` when you dispatch it, `done` when its result comes back; several items may be `in_progress` at once
+- `next` never suggests a task that is already in flight, and an ack reports `· 2 in flight` when nothing is left to pick up
+- `set` replaces the board and renumbers ids; if items were in flight it appends a `⚠ ids renumbered` line naming them, because your in-hand references just broke
 
 The widget hides automatically when every task is done.

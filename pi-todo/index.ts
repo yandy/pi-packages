@@ -1,10 +1,22 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { isBlocked, listTodos, reconstructTodos, setTodos, type TodoItem, updateTodo } from "./src/todo-store.js";
+import {
+	clipTitle,
+	formatAck,
+	isBlocked,
+	listTodos,
+	reconstructTodos,
+	setTodos,
+	type TodoDraft,
+	type TodoItem,
+	type TodoResult,
+	updateTodo,
+} from "./src/todo-store.js";
 import { renderWidget } from "./src/widget.js";
 
-const WIDGET_ID = "pi-todo";
+// 编辑器上方 widget 的 slot id（值就是本包的标识）。
+const PACKAGE_ID = "pi-todo";
 
 interface TodoDetails {
 	action: "set" | "update" | "list";
@@ -18,7 +30,7 @@ export default function (pi: ExtensionAPI) {
 	const refreshWidget = (ctx: ExtensionContext) => {
 		if (!ctx.hasUI) return;
 		const lines = renderWidget(todos, ctx.ui.theme);
-		ctx.ui.setWidget(WIDGET_ID, lines ?? undefined);
+		ctx.ui.setWidget(PACKAGE_ID, lines ?? undefined);
 	};
 
 	// Reconstruct branch-safe state from tool-result details on (re)start / tree navigation.
@@ -35,7 +47,6 @@ export default function (pi: ExtensionAPI) {
 		items: Type.Optional(
 			Type.Array(
 				Type.Object({
-					id: Type.String(),
 					title: Type.String(),
 					status: Type.String({ enum: ["pending", "in_progress", "done"] }),
 					blockedBy: Type.Optional(Type.Array(Type.String())),
@@ -52,13 +63,17 @@ export default function (pi: ExtensionAPI) {
 		name: "todo",
 		label: "Todo",
 		description:
-			"Track tasks with a todo list. action 'set' replaces the full list (plan all tasks up front); " +
-			"action 'update' changes one task by id (status/title/blockedBy); action 'list' returns the current list. " +
-			"Each item: id (uuid), title, status (pending|in_progress|done), optional blockedBy (ids it waits on).",
-		promptSnippet: "Track tasks with a todo list (set/update/list actions).",
+			"Track a task list for the current session.\n" +
+			'"set" replaces the whole list with items {title, status: pending|in_progress|done, blockedBy?: ids} and returns it. ' +
+			"The tool owns ids: it assigns 1..n by position and renumbers them on every set, so never pass an id.\n" +
+			'"update" changes one task by its exact id (status / title / blockedBy) and returns progress plus the next task.\n' +
+			'"list" returns the current list.',
+		promptSnippet: "Track a task list (set/update/list); keep statuses current.",
 		promptGuidelines: [
 			'Use todo to plan multi-step work: action "set" lists all tasks up front.',
-			'Use todo action "update" to mark tasks in_progress/done as you complete them.',
+			"Mark a task in_progress before starting it; keep exactly one in_progress unless tasks really run concurrently (e.g. one per dispatched subagent).",
+			"Mark a task done as soon as it passes — never batch completions to the end of the run.",
+			'Call todo action "list" when you need the current ids or statuses — the extension does not re-send the list on its own.',
 		],
 		parameters: TodoParams,
 
@@ -103,17 +118,19 @@ export default function (pi: ExtensionAPI) {
 				return new Text(out, 0, 0);
 			}
 
-			// update
+			// update：ack 自带状态图标，不能再拼前缀，否则渲染出两个 ✓
 			const text = result.content?.[0];
-			return new Text(theme.fg("success", "✓ ") + theme.fg("muted", text?.type === "text" ? text.text : ""), 0, 0);
+			return new Text(theme.fg("success", text?.type === "text" ? text.text : ""), 0, 0);
 		},
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			let result: { todos: TodoItem[]; error?: string };
+			let result: TodoResult;
+			// set 会重编号：先记下上一张板上谁在飞，否则父会话手里的 id 会静默失效
+			const preInFlight = todos.filter((t) => t.status === "in_progress");
 
 			switch (params.action) {
 				case "set": {
-					result = setTodos((params.items ?? []) as TodoItem[]);
+					result = setTodos((params.items ?? []) as TodoDraft[]);
 					break;
 				}
 				case "update": {
@@ -140,9 +157,18 @@ export default function (pi: ExtensionAPI) {
 
 			refreshWidget(ctx);
 
-			const text = result.error ?? (params.action === "update" ? "OK" : listTodos(todos));
+			const text =
+				result.error ?? (params.action === "update" ? formatAck(todos, result.id ?? params.id ?? "") : listTodos(todos));
+			// 并行派发最常见的误操作：任务还在跑就重新规划。不拦（set 的语义就是整表替换），
+			// 但必须点名刚刚失效的 id，让模型能重新对齐。
+			const warning =
+				!result.error && params.action === "set" && preInFlight.length > 0
+					? `\n⚠ ids renumbered by this set; previously in flight: ${preInFlight
+							.map((t) => `#${t.id} ${clipTitle(t.title)}`)
+							.join(", ")}. Re-mark them with their new ids if they are still running.`
+					: "";
 			return {
-				content: [{ type: "text", text }],
+				content: [{ type: "text", text: text + warning }],
 				details: { action: params.action, todos: [...todos], error: result.error } as TodoDetails,
 			};
 		},
