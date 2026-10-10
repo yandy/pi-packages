@@ -168,6 +168,41 @@ export function updateTodo(
 	return { todos: next, id: target.id };
 }
 
+/** title 过长时截断，避免 ack 与后续注入把上下文吃掉。 */
+function clip(title: string): string {
+	return title.length > 60 ? `${title.slice(0, 60)}…` : title;
+}
+
+/**
+ * update 成功后的单行 ack：本次变更、进度、下一个该做的任务。
+ * 它面向模型而非用户：给出闭环信号，让「完成即更新」能被强化。
+ */
+export function formatAck(todos: TodoItem[], id: string): string {
+	const total = todos.length;
+	const done = todos.filter((t) => t.status === "done").length;
+	if (total > 0 && done === total) return `✓ all ${total} tasks done`;
+
+	const target = todos.find((t) => t.id === id);
+	if (!target) return `${done}/${total} done`;
+
+	if (target.status === "in_progress") {
+		return `◉ #${target.id} ${clip(target.title)} in_progress (${done}/${total} done)`;
+	}
+
+	const marker = target.status === "done" ? "✓" : "○";
+	const head = `${marker} #${target.id} ${clip(target.title)} ${target.status} (${done}/${total} done)`;
+
+	const open = todos.filter((t) => t.id !== target.id && t.status !== "done");
+	const next = open.find((t) => !isBlocked(todos, t)) ?? open[0];
+	if (!next) return head;
+
+	const byId = new Map(todos.map((t) => [t.id, t]));
+	const blockers = (next.blockedBy ?? []).filter((dep) => byId.get(dep)?.status !== "done");
+	const suffix =
+		isBlocked(todos, next) && blockers.length > 0 ? ` (blocked by ${blockers.map((b) => `#${b}`).join(", ")})` : "";
+	return `${head} · next: #${next.id} ${clip(next.title)}${suffix}`;
+}
+
 const STATUS_MARKER: Record<TodoItem["status"], string> = {
 	pending: "○",
 	in_progress: "◉",

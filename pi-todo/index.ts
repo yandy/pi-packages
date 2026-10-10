@@ -2,12 +2,14 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
+	formatAck,
 	isBlocked,
 	listTodos,
 	reconstructTodos,
 	setTodos,
 	type TodoDraft,
 	type TodoItem,
+	type TodoResult,
 	updateTodo,
 } from "./src/todo-store.js";
 import { renderWidget } from "./src/widget.js";
@@ -111,13 +113,13 @@ export default function (pi: ExtensionAPI) {
 				return new Text(out, 0, 0);
 			}
 
-			// update
+			// update：ack 自带状态图标，不能再拼前缀，否则渲染出两个 ✓
 			const text = result.content?.[0];
-			return new Text(theme.fg("success", "✓ ") + theme.fg("muted", text?.type === "text" ? text.text : ""), 0, 0);
+			return new Text(theme.fg("success", text?.type === "text" ? text.text : ""), 0, 0);
 		},
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			let result: { todos: TodoItem[]; error?: string };
+			let result: TodoResult;
 
 			switch (params.action) {
 				case "set": {
@@ -148,7 +150,8 @@ export default function (pi: ExtensionAPI) {
 
 			refreshWidget(ctx);
 
-			const text = result.error ?? (params.action === "update" ? "OK" : listTodos(todos));
+			const text =
+				result.error ?? (params.action === "update" ? formatAck(todos, result.id ?? params.id ?? "") : listTodos(todos));
 			return {
 				content: [{ type: "text", text }],
 				details: { action: params.action, todos: [...todos], error: result.error } as TodoDetails,

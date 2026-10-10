@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	formatAck,
 	listTodos,
 	reconstructTodos,
 	resolveTodoRef,
@@ -173,6 +174,52 @@ describe("updateTodo", () => {
 
 	it("rejects an empty ref", () => {
 		expect(updateTodo(base, "", { status: "done" }).error).toMatch(/required/i);
+	});
+});
+
+describe("formatAck", () => {
+	const items: TodoItem[] = [
+		{ id: "1", title: "写单测", status: "done" },
+		{ id: "2", title: "修 CI", status: "done" },
+		{ id: "3", title: "更新文档", status: "pending" },
+		{ id: "4", title: "发布", status: "pending", blockedBy: ["3"] },
+		{ id: "5", title: "写发布说明", status: "pending" },
+	];
+
+	it("reports progress and the next unblocked task", () => {
+		expect(formatAck(items, "2")).toBe("✓ #2 修 CI done (2/5 done) · next: #3 更新文档");
+	});
+
+	it("reports an in_progress task without a next hint", () => {
+		const list = items.map((t) => (t.id === "3" ? { ...t, status: "in_progress" as const } : t));
+		expect(formatAck(list, "3")).toBe("◉ #3 更新文档 in_progress (2/5 done)");
+	});
+
+	it("picks the earliest unblocked task as next", () => {
+		const list = items.map((t) => (t.id === "3" ? { ...t, status: "done" as const } : t));
+		// #4 的阻塞者 #3 刚变 done 故不再阻塞，next 取靠前的 #4 而非 #5
+		expect(formatAck(list, "3")).toContain("next: #4 发布");
+	});
+
+	it("reports when everything is done", () => {
+		const list = items.map((t) => ({ ...t, status: "done" as const }));
+		expect(formatAck(list, "5")).toBe("✓ all 5 tasks done");
+	});
+
+	it("annotates the next task when every remaining task is blocked", () => {
+		const stuck: TodoItem[] = [
+			{ id: "1", title: "A", status: "done" },
+			{ id: "2", title: "B", status: "pending", blockedBy: ["1", "3"] },
+			{ id: "3", title: "C", status: "pending", blockedBy: ["2"] },
+		];
+		// #2 的依赖 #1 已 done 故不列出；#2/#3 互相阻塞，next 取列表靠前的 #2
+		expect(formatAck(stuck, "1")).toBe("✓ #1 A done (1/3 done) · next: #2 B (blocked by #3)");
+	});
+
+	it("truncates very long titles", () => {
+		const long: TodoItem[] = [{ id: "1", title: "x".repeat(200), status: "in_progress" }];
+		expect(formatAck(long, "1").length).toBeLessThan(100);
+		expect(formatAck(long, "1")).toContain("…");
 	});
 });
 
