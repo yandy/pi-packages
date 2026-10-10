@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	clipTitle,
 	formatAck,
 	listTodos,
 	reconstructTodos,
@@ -174,6 +175,18 @@ describe("updateTodo", () => {
 
 	it("rejects an empty ref", () => {
 		expect(updateTodo(base, "", { status: "done" }).error).toMatch(/required/i);
+	});
+});
+
+describe("clipTitle", () => {
+	it("returns a short title untouched", () => {
+		expect(clipTitle("写单测")).toBe("写单测");
+	});
+
+	it("clips a long title to 60 chars plus an ellipsis", () => {
+		const out = clipTitle("x".repeat(200));
+		expect(out).toHaveLength(61);
+		expect(out.endsWith("…")).toBe(true);
 	});
 });
 
