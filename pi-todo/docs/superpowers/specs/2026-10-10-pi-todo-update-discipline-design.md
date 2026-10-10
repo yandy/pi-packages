@@ -269,8 +269,8 @@ system prompt 位于请求最前，任何改动都会让**整条前缀缓存失�
 ## 未解决 / 需评审
 
 1. **短 id vs uuid**：是否有用户依赖 id 的跨 `set` 稳定性？建议默认自动短 id、允许显式指定（当前方案）。
-2. **user 角色注入的误读风险**：B 的快照会以 user 消息进入上下文，是否会被模型当成用户新指令（例如误答「好的，我来…」）？需实测；必要时改为 `turn_end` 的 `custom_message`（C）。
-3. **`REMIND_EVERY` 默认值**：太小 → 噪声与 token 浪费；太大 → 无效。需实测标定。
+2. ~~**B 注入的 user 角色消息是否会被模型误当用户指令？**~~ → **已实测否定**（三轮真宿主跑动，注入后的第一个动作都是 `todo update`，没有一次把它当成用户在说话）。但样本限制要说清：单次、脚本化任务、便宜模型；而且注入位置在**用户那句话之后**（请求里连续两条 user），所以框定语不是可拆的装饰。
+3. ~~**`REMIND_EVERY` 默认值**~~ —— T3-A 本轮未做，此项仅当后续引入 A 时有效。
 4. **是否引入「陈旧 in_progress」检测**替代纯计数触发（更精准，但需要记录轮次与状态快照）。
 5. **是否给 `list` 加轻量默认**：例如每个 run 首次工具调用前自动等价一次 `list`（与 B 重叠，倾向不做）。
 
@@ -288,7 +288,7 @@ system prompt 位于请求最前，任何改动都会让**整条前缀缓存失�
 - T1 / T2 / T3-B 全部实现；三层合并在同一个 `0.2.0`（原计划分 0.2.0 / 0.3.0 以便归因，实际按用户选择一起做，代价是贡献无法单独归因）。
 - 发布前有一次设计回退：**id 收归工具所有，引用只认精确匹配**，§T2.2 的宽松引用与 `blockedBy` 归一化随之作废，详见文末「发布前决策变更」。其中一条教训留下：§T2.2 的 `blockedBy` 归一化先是在 spec→plan 这一跳被漏掉、评审时才发现补上，最后又整块拆掉 —— **spec 的要求如果没进任何测试断言，计划就会丢；而丢了也不一定是损失，得允许自己撤回。**
 - 评审带出的三个规格外缺陷已修：注入的 discipline 行会把当前 `in_progress` 任务再指为下一个（自相矛盾）；单字符 title 引用会静默命中错误任务（英文标题尤其容易，已随上面的回退整块关掉）；`in_progress` 段无上限且不提示「同时只能一个」。
-- 已知代价（评审提出、本轮不修）：**每个 user turn 注入一条快照且永久留在上下文**，N 轮提问就有 N 份 `<todo-state>`，靠 recency 取对的那份。彻底修法需要 `turn_end` + `context_edit` 替换上一条（即被否决的 T3-C 家族）；是否要做，等真实会话里量化了占用再定。
+### 已知代价（评审提出、本轮不修）：**每个 user turn 注入一条快照且永久留在上下文**，N 轮提问就有 N 份 `<todo-state>`，靠 recency 取对的那份。**已量化**：单份 243–272 字符（约 60–90 token），第 3 轮请求里并存 2 份（进度 `1/3 done` 与 `2/3 done`）。彻底修法需要 `turn_end` + `context_edit` 替换上一条（即被否决的 T3-C 家族）；以 20 轮提问的会话估算约多占 1.5k token，是否值得做按真实使用再定。
 - 注入文本第二行是自报身份的框定语（`Automatic status echo …, not a request from the user.`），对齐宿主 compaction/branch-summary 的惯例；「模型会不会把它当用户指令」仍需按 §未解决 #2 实测确认。
 
 ## 评审遗留（deferred minors，未进入 0.2.0 的 fix pass）
@@ -321,3 +321,21 @@ fresh reviewer 提的 8 条 Minor，按「minor 不做顺手修」的规矩留�
 连带效应：评审遗留的 **M3（数字 ref 不再尝试前缀）与 M4（显式/自动 id 混用时序号分叉）自动失效**，因为两者的前提都不存在了。`resolveTodoRef` / `TodoRefResult` / `normalizeDeps` / `normalizeItemDeps` / `renderCandidates` 一并删除，store 的公开面变小。
 
 最后一句关于旧 session：「精确匹配」对任何字符串成立，所以历史上用 uuid id 建过清单的 session 在被重建后仍能逐字引用那个 uuid——这不是兼容设计，而是精确匹配的自然结果，不再为它写测试或写文档。下一次 `set` 之后，这张表里只会有 `1..n`。
+
+## T3-B 端到端验证（2026-10-10，真宿主实跑，非单测）
+
+方法：`pi -ne -e pi-todo/index.ts -e <spy.ts> --session-dir /tmp/pi-todo-verify/sessions` 连续三个 user turn（第 2、3 轮用 `--continue`，是**新起的 pi 进程**）。spy 是临时观察扩展，监听 `before_provider_request`，把每次发给 provider 的请求骨架落盘：消息数、角色序列、`<todo-state>` 出现的下标与份数、每份的进度行、以及 system 文本的 sha256。任务：建 3 步清单并逐步完成。
+
+13 次 provider 请求的实测结果：
+
+| 断言项 | 结果 |
+|---|---|
+| 注入是否真进了发给模型的请求 | ✅ 第 2 轮起每个请求的**最后一条**消息是 `<todo-state>`（`role=user`，下标 11；第 3 轮追加下标 20），session 文件里同时存在 `customType:"pi-todo"` / `display:false` 的 `custom_message` 条目 |
+| 是否破坏 prompt 前缀缓存 | ✅ 13 次请求的 system sha256 **全部相同**（`12ae32cb1ec02d01`）→ 注入不动 system prompt，当初否决 T3-D 的论据成立 |
+| 跨进程重建后是否仍注入正确状态 | ✅ 第 2、3 轮的快照进度分别是 `1/3 done`、`2/3 done`，与新进程从 `details.todos` 重建的内存状态一致 |
+| 模型是否把它当成用户的新指令 | ❌ 未出现。注入后的第一个动作就是 `todo update → in_progress`；三轮共 7 次 todo 调用，`set→in_progress→done` 逐任务推进，最后一次返回 `✓ all 3 tasks done`，全 done 后不再注入 |
+| 已知代价的实际量级 | ⚠️ 每个 user turn 多一份快照：单份 243–272 字符（约 60–90 token），第 3 轮请求里同时有 2 份（`1/3 done` 与 `2/3 done`）。本次模型按 recency 取对了最新那份，但这只在 n 小时成立；长跑需要 `turn_end` + `context_edit` 方案 |
+
+样本限制：**单次、脚本化任务、便宜模型（qwen3.8-flash）**。它证明的是机制正确（注入到达模型、不碰缓存、跨进程重建），不是「真实日常使用里 update 频次上升多少」——后者只能靠实际会话观察。
+
+复现：spy 扩展只需注册 `before_provider_request` 并 dump 上述字段（约 30 行，未入库）。注意 pi 需要写 `~/.pi/agent/*.lock`，在只读 `HOME` 的沙箱里会静默失败——把 `HOME` 指到一个只放**符号链接**（不复制凭据）的临时目录即可绕过。
