@@ -13,8 +13,10 @@ import {
 	updateTodo,
 } from "./src/todo-store.js";
 import { renderWidget } from "./src/widget.js";
+import { formatSnapshot, hasOpenTodos } from "./src/snapshot.js";
 
-const WIDGET_ID = "pi-todo";
+// 同时用作编辑器上方 widget 的 slot id 与注入消息的 customType（就是本包的标识）。
+const PACKAGE_ID = "pi-todo";
 
 interface TodoDetails {
 	action: "set" | "update" | "list";
@@ -28,7 +30,7 @@ export default function (pi: ExtensionAPI) {
 	const refreshWidget = (ctx: ExtensionContext) => {
 		if (!ctx.hasUI) return;
 		const lines = renderWidget(todos, ctx.ui.theme);
-		ctx.ui.setWidget(WIDGET_ID, lines ?? undefined);
+		ctx.ui.setWidget(PACKAGE_ID, lines ?? undefined);
 	};
 
 	// Reconstruct branch-safe state from tool-result details on (re)start / tree navigation.
@@ -39,6 +41,13 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => reconstructState(ctx));
 	pi.on("session_tree", async (_event, ctx) => reconstructState(ctx));
+
+	// 模型看不到 widget，也不会被自动回显清单：每个 run 开始时把当前状态送回上下文。
+	// display:false 只影响 TUI，仍会以 user 角色发给模型；旧宿主不认识 message 字段则静默无效。
+	pi.on("before_agent_start", async () => {
+		if (!hasOpenTodos(todos)) return undefined;
+		return { message: { customType: PACKAGE_ID, content: formatSnapshot(todos), display: false } };
+	});
 
 	const TodoParams = Type.Object({
 		action: Type.String({ enum: ["set", "update", "list"] }),

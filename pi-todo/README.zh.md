@@ -5,6 +5,9 @@
 ## 功能
 
 - **一个工具**，三种操作：`set`（规划所有任务）、`update`（更改一个任务）、`list`（查看进度）
+- **提示词里写死更新纪律**：工具描述与 guidelines 明确了何时必须更新（同时只能一个 `in_progress`、完成后立即 `done`）
+- **每次 update 都有反馈**：`update` 返回进度与下一个任务（`✓ #2 写单测 done (2/5 done) · next: #3 修 CI`），不再只是一个 `OK`
+- **状态回注**：每个 run 开始时把当前清单以隐藏消息送回模型上下文，避免模型建完清单就遗忘（需要较新版本的 pi 宿主）
 - **三种状态**：`pending` → `in_progress` → `done`
 - **依赖关系**：可选的 `blockedBy` 数组，含自依赖和循环检测
 - **紧凑组件**悬于编辑器上方：`○` pending · `◉` in_progress · `✓` done · `🔒` blocked
@@ -43,4 +46,4 @@ todo(action: "set" | "update" | "list", items?, id?, status?, title?, blockedBy?
 
 `update` 成功时返回单行 ack：本次变更、进度，以及下一个任务。
 
-全部任务完成后，组件会自动隐藏。
+全部任务完成后，组件会自动隐藏。每个 run 开始时注入的状态快照在 UI 里不可见（`display: false`）。

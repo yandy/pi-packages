@@ -78,6 +78,56 @@ describe("todo tool execute", () => {
 	});
 });
 
+describe("before_agent_start", () => {
+	const fire = () => handlers["before_agent_start"]?.[0]({ type: "before_agent_start" }, ctx);
+
+	it("registers exactly one before_agent_start handler", () => {
+		expect(handlers["before_agent_start"]).toHaveLength(1);
+	});
+
+	it("injects nothing when there are no todos", async () => {
+		expect(await fire()).toBeUndefined();
+	});
+
+	it("injects a hidden snapshot when tasks are open", async () => {
+		await run({
+			action: "set",
+			items: [
+				{ title: "写单测", status: "pending" },
+				{ title: "修 CI", status: "pending" },
+			],
+		});
+		const r = await fire();
+		expect(r.message.customType).toBe("pi-todo");
+		expect(r.message.display).toBe(false);
+		expect(r.message.content).toContain("<todo-state>");
+		expect(r.message.content).toContain("0/2 done");
+	});
+
+	it("stops injecting once every task is done", async () => {
+		await run({ action: "set", items: [{ title: "写单测", status: "pending" }] });
+		await run({ action: "update", id: "1", status: "done" }, "c2");
+		expect(await fire()).toBeUndefined();
+	});
+
+	it("injects after state is reconstructed from a resumed session", async () => {
+		// 重建路径必须用另一个 harness 实例：todos 关在 extension 闭包里
+		const resumed = createHarness(() => [
+			{
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolName: "todo",
+					details: { todos: [{ id: "1", title: "写单测", status: "pending" }] },
+				},
+			},
+		]);
+		await resumed.handlers["session_start"][0]({ type: "session_start", reason: "startup" }, resumed.ctx);
+		const r = await resumed.handlers["before_agent_start"][0]({ type: "before_agent_start" }, resumed.ctx);
+		expect(r.message.content).toContain("写单测");
+	});
+});
+
 describe("todo tool renderResult", () => {
 	const todos: TodoItem[] = [
 		{ id: "1", title: "写单测", status: "done" },
