@@ -62,13 +62,22 @@ export default function (pi: ExtensionAPI) {
 		name: "todo",
 		label: "Todo",
 		description:
-			"Track tasks with a todo list. action 'set' replaces the full list (plan all tasks up front); " +
-			"action 'update' changes one task by id (status/title/blockedBy); action 'list' returns the current list. " +
-			"Each item: id (uuid), title, status (pending|in_progress|done), optional blockedBy (ids it waits on).",
-		promptSnippet: "Track tasks with a todo list (set/update/list actions).",
+			"Track a task list for multi-step work.\n" +
+			'Actions: "set" replaces the whole list with items (plan up front); "update" changes one task by id; "list" returns the current list.\n' +
+			'Item fields: id (short, e.g. "1"), title, status (pending|in_progress|done), optional blockedBy (ids this task waits on).\n' +
+			"Use it for any work needing 3+ distinct steps, a user-provided task list, or multi-file changes. Skip it for a single trivial task.\n" +
+			"Update discipline (required):\n" +
+			"- Mark a task in_progress BEFORE you start it. Exactly one task in_progress at a time.\n" +
+			"- Mark it done IMMEDIATELY after it finishes. Never batch completions, never defer to the end of the run.\n" +
+			"- After each tool batch, re-check the list: if a finished task is still pending/in_progress, update it now.\n" +
+			"- Only mark done when fully achieved (tests pass, nothing left over); otherwise keep it in_progress.\n" +
+			'- The list is NOT re-shown to you automatically. Call action "list" whenever you are unsure, and keep it current — the user watches a live widget driven by your updates.',
+		promptSnippet: "Track a task list (set/update/list); keep statuses current.",
 		promptGuidelines: [
 			'Use todo to plan multi-step work: action "set" lists all tasks up front.',
-			'Use todo action "update" to mark tasks in_progress/done as you complete them.',
+			"Before starting a task: todo update → in_progress. Exactly one in_progress at a time.",
+			"Immediately after finishing a task: todo update → done. Never batch completions or defer them to the end.",
+			'The todo state is not re-shown to you automatically; call todo action "list" when unsure and keep the list current.',
 		],
 		parameters: TodoParams,
 

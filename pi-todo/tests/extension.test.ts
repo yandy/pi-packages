@@ -35,6 +35,30 @@ beforeEach(() => {
 const run = (params: Record<string, unknown>, id = "call") =>
 	tools[0].execute(id, params, undefined, undefined, ctx);
 
+describe("prompt", () => {
+	it("pins the update-discipline wording in the tool description", () => {
+		const def = tools[0];
+		expect(def.description).toContain("IMMEDIATELY");
+		expect(def.description).toContain("Exactly one task in_progress at a time");
+		expect(def.description).toContain("NOT re-shown to you automatically");
+		expect(def.description).toContain("Never batch completions");
+	});
+
+	it("gives every guideline a trigger and an action", () => {
+		expect(tools[0].promptGuidelines).toEqual([
+			'Use todo to plan multi-step work: action "set" lists all tasks up front.',
+			"Before starting a task: todo update → in_progress. Exactly one in_progress at a time.",
+			"Immediately after finishing a task: todo update → done. Never batch completions or defer them to the end.",
+			'The todo state is not re-shown to you automatically; call todo action "list" when unsure and keep the list current.',
+		]);
+	});
+
+	it("mentions short ids instead of uuids in the description", () => {
+		expect(tools[0].description).toContain('id (short, e.g. "1")');
+		expect(tools[0].description).not.toContain("uuid");
+	});
+});
+
 describe("todo tool execute", () => {
 	it("update returns an ack instead of a bare OK", async () => {
 		await run({
