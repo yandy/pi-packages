@@ -23,7 +23,7 @@
 | T1 提示词重写 | **采纳，必做** | 零风险、10 行改动，但单独做不足以解决遗忘 |
 | T2.1 `update` 回显进度与下一个任务 | **采纳** | 把 `"OK"` 换成带状态的 ack，形成正反馈闭环 |
 | T2.2 短 id + 宽松引用解析 | **采纳** | 消除 uuid 抄错；错误信息带候选列表，让模型一次自纠 |
-| T3-B `before_agent_start` 注入快照（`display:false` 的 custom message） | **采纳，T3 首选** | 缓存友好（追加在新一轮尾部）、约 20 行、无 session 膨胀 |
+| T3-B `before_agent_start` 注入快照 | ~~采纳~~ → **发布前删除**（见决策变更三） | 原理由（缓存友好、20 行）成立，但价值未证明且会累积冒充当下的快照 |
 | T3-A `tool_result` 尾追提醒（Claude Code 式） | **列为可选增强**，实测 B 不足再上 | 效果最强但有噪声、token 成本与 `structuredContent` 陷阱 |
 | T3-C `turn_end` 追加 `custom_message` | **暂不采纳** | 每轮刷新但每轮往 session 写 entry，长 run 条目膨胀，影响 `/tree`、resume、compaction |
 | T3-D 改 `systemPromptOptions.sections.todo` | **否决** | 每次 run 改 system prompt → 整条 prompt cache 前缀失效；刷新频率并不比 B 高 |
@@ -97,7 +97,7 @@ Track a task list for the current session.
 Use todo to plan multi-step work: action "set" lists all tasks up front.
 Set a task in_progress before you start it, and keep exactly one in_progress at a time.
 Mark a task done as soon as it passes — never batch completions to the end of the run.
-pi-todo echoes the list as <todo-state> at the start of each run; that echo is extension-generated, not a user message, and it does not refresh mid-run — call action "list" when unsure.
+Call todo action "list" when you need the current ids or statuses — the extension does not re-send the list on its own.
 ```
 
 `promptSnippet`：`Track a task list (set/update/list); keep statuses current.`
@@ -108,7 +108,7 @@ pi-todo echoes the list as <todo-state> at the start of each run; that echo is e
 |---|---|
 | `before you start it` / `exactly one in_progress` | 可校验的硬约束，模型能自查；也避免「全部 pending 直到最后一次性刷 done」 |
 | `as soon as it passes` / `never batch` | 压制「批量补记」倾向；措辞强度是 T1 的全部价值，所以必须留在 guidelines 而不是散在描述里 |
-| `that echo is extension-generated, not a user message` | T3-B 的快照会被宿主投影成 user 角色、且排在用户那句话之后 —— 这条告诉模型它的来源，别当成用户改口 |
+| `the extension does not re-send the list on its own` | 明确状态的来源只有 tool result 与 `list`，别让模型以为每轮会有小抄可抄 |
 | `does not refresh mid-run — call "list" when unsure` | 一次 run 内几十轮工具调用之间状态会变；给出自纠通道 |
 | description 里的 `The tool owns ids … never pass an id` | 直接消灭病因 3（自编 uuid 抄错），且它是 schema 事实，放 description 才与 `items` 里没有 `id` 字段一致 |
 
@@ -158,7 +158,7 @@ export function resolveTodoRef(todos: TodoItem[], ref: string): { item?: TodoIte
 
 ## T3：把状态周期性送回模型眼前
 
-### T3-B（首选）：`before_agent_start` 注入快照
+### ~~T3-B：`before_agent_start` 注入快照~~ —— **0.2.0 发布前已整条删除**（理由见文末「决策变更三」。以下内容保留为设计与取证记录，不代表当前实现。）
 
 ```ts
 pi.on("before_agent_start", async () => {
@@ -261,7 +261,7 @@ system prompt 位于请求最前，任何改动都会让**整条前缀缓存失�
 ## 未解决 / 需评审
 
 1. **短 id vs uuid**：是否有用户依赖 id 的跨 `set` 稳定性？建议默认自动短 id、允许显式指定（当前方案）。
-2. ~~**B 注入的 user 角色消息是否会被模型误当用户指令？**~~ → **已实测否定**（三轮真宿主跑动，注入后的第一个动作都是 `todo update`，没有一次把它当成用户在说话）。但样本限制要说清：单次、脚本化任务、便宜模型；而且注入位置在**用户那句话之后**（请求里连续两条 user），所以框定语不是可拆的装饰。
+2. ~~**B 注入的 user 角色消息是否会被模型误当用户指令？**~~（T3-B 已删除，此项作废） → **已实测否定**（三轮真宿主跑动，注入后的第一个动作都是 `todo update`，没有一次把它当成用户在说话）。但样本限制要说清：单次、脚本化任务、便宜模型；而且注入位置在**用户那句话之后**（请求里连续两条 user），所以框定语不是可拆的装饰。
 3. ~~**`REMIND_EVERY` 默认值**~~ —— T3-A 本轮未做，此项仅当后续引入 A 时有效。
 4. **是否引入「陈旧 in_progress」检测**替代纯计数触发（更精准，但需要记录轮次与状态快照）。
 5. **是否给 `list` 加轻量默认**：例如每个 run 首次工具调用前自动等价一次 `list`（与 B 重叠，倾向不做）。
@@ -277,11 +277,11 @@ system prompt 位于请求最前，任何改动都会让**整条前缀缓存失�
 
 ## 落地补记（0.2.0，2026-10-10）
 
-- T1 / T2 / T3-B 全部实现；三层合并在同一个 `0.2.0`（原计划分 0.2.0 / 0.3.0 以便归因，实际按用户选择一起做，代价是贡献无法单独归因）。
+- T1 / T2 / T3-B 都曾实现并合并到同一个 `0.2.0`（原计划分 0.2.0 / 0.3.0 以便归因，实际一起做，代价是贡献无法单独归因）；**T3-B 在发布前删除**，最终 0.2.0 = T1 + T2。
 - 发布前有一次设计回退：**id 收归工具所有，引用只认精确匹配**，§T2.2 的宽松引用与 `blockedBy` 归一化随之作废，详见文末「发布前决策变更」。其中一条教训留下：§T2.2 的 `blockedBy` 归一化先是在 spec→plan 这一跳被漏掉、评审时才发现补上，最后又整块拆掉 —— **spec 的要求如果没进任何测试断言，计划就会丢；而丢了也不一定是损失，得允许自己撤回。**
 - 发布前把提示词重新分工了一轮（见 §T1）：原先 `description` 长 1105 字符、内含 5 条祈使句，跟 `promptGuidelines` 大量重叠；现在 description 404 字符只讲 API 事实，行为规则全归 guidelines（4 条）。**同时修掉一个自相矛盾**：旧 description 里的 `The list is NOT re-shown to you automatically` 在 T3-B 落地后已经是假话（每个 run 都会回显一份），现在改成「会回显、但一次 run 内不刷新」。
 - 评审带出的三个规格外缺陷已修：注入的 discipline 行会把当前 `in_progress` 任务再指为下一个（自相矛盾，已抽 `pickNext` 共用）；错误信息内联的清单不设上限（已 clip + 限 20 行）；`in_progress` 段无上限且不提示「同时只能一个」（已加 cap 与纠正提示）。另两条——单字符 title 引用静默命中错任务、`blockedBy` 宽松归一化——随「只认精确 id」的回退整块消失。
-- 已知代价（评审提出、本轮不修）：**每个 user turn 注入一条快照且永久留在上下文**，N 轮提问就有 N 份 `<todo-state>`，靠 recency 取对的那份。**已量化**：单份 243–272 字符（约 60–90 token），第 3 轮请求里并存 2 份（进度 `1/3 done` 与 `2/3 done`）。彻底修法需要 `turn_end` + `context_edit` 替换上一条（即被否决的 T3-C 家族）；以 20 轮提问的会话估算约多占 1.5k token，是否值得做按真实使用再定。
+- ~~已知代价：每个 user turn 注入一条快照且永久留在上下文~~ —— **该问题随 T3-B 删除而消失**，不再需要 `context_edit` 方案。原始量化留在文末验证节。，N 轮提问就有 N 份 `<todo-state>`，靠 recency 取对的那份。**已量化**：单份 243–272 字符（约 60–90 token），第 3 轮请求里并存 2 份（进度 `1/3 done` 与 `2/3 done`）。彻底修法需要 `turn_end` + `context_edit` 替换上一条（即被否决的 T3-C 家族）；以 20 轮提问的会话估算约多占 1.5k token，是否值得做按真实使用再定。
 - 注入文本第二行是自报身份的框定语（`Automatic status echo …, not a request from the user.`），对齐宿主 compaction/branch-summary 的惯例；「模型会不会把它当用户指令」已实测否定（见文末「T3-B 端到端验证」）。
 
 ## 评审遗留（deferred minors，未进入 0.2.0 的 fix pass）
@@ -295,7 +295,7 @@ fresh reviewer 提的 8 条 Minor，按「minor 不做顺手修」的规矩留�
 | M4 | ~~`assignIds`~~ | **已失效**：id 不再接受显式传入，序号与 id 不可能分叉 |
 | M5 | `isBlocked` / `describeTodo` | 每项都重建整表 Map，n=150 时注入路径 O(n²) 常数大；`byId` 提到调用顶部即可 |
 | M6 | `widget.ts` | 不截断 title，300 字符 title 会撑爆编辑器上方组件（`clipTitle` 现在就在手边） |
-| M7 | `before_agent_start` | 未像 pi-memory 那样跳过 subagent 会话；当前 subagent 闭包为空所以实际不注入，但一旦能重建清单就白付 token |
+| ~~M7~~ | ~~`before_agent_start`~~ | **已随 T3-B 删除而失效** |
 | M8 | 两份 README | ack 描述不完全对称 |
 
 ## 发布前决策变更：id 收归工具所有，只认精确匹配
@@ -317,6 +317,8 @@ fresh reviewer 提的 8 条 Minor，按「minor 不做顺手修」的规矩留�
 
 ## T3-B 端到端验证（2026-10-10，真宿主实跑，非单测）
 
+> **该实现随后已被删除**（见「决策变更三」）。本节保留，因为它正是删除的依据：机制全部按设计工作，但没有任何一条数据能把「模型持续更新」归因给它。
+
 方法：`pi -ne -e pi-todo/index.ts -e <spy.ts> --session-dir /tmp/pi-todo-verify/sessions` 连续三个 user turn（第 2、3 轮用 `--continue`，是**新起的 pi 进程**）。spy 是临时观察扩展，监听 `before_provider_request`，把每次发给 provider 的请求骨架落盘：消息数、角色序列、`<todo-state>` 出现的下标与份数、每份的进度行、以及 system 文本的 sha256。任务：建 3 步清单并逐步完成。
 
 两个测量坑（都已踩过并修正，复现时别再踩）：
@@ -336,3 +338,17 @@ fresh reviewer 提的 8 条 Minor，按「minor 不做顺手修」的规矩留�
 样本限制：**单次、脚本化任务、便宜模型（qwen3.8-flash）**。它证明的是机制正确（注入到达模型、不碰缓存、跨进程重建），不是「真实日常使用里 update 频次上升多少」——后者只能靠实际会话观察。
 
 复现：spy 扩展只需注册 `before_provider_request` 并 dump 上述字段（约 30 行，未入库）。注意 pi 需要写 `~/.pi/agent/*.lock`，在只读 `HOME` 的沙箱里会静默失败——把 `HOME` 指到一个只放**符号链接**（不复制凭据）的临时目录即可绕过。
+
+## 决策变更三：删除 T3-B（`before_agent_start` 快照注入）
+
+发布前人工评估后整条移除，`src/snapshot.ts`、`tests/snapshot.test.ts`、handler 与 README 相应条目一并删除（测试 60 → 46，其中 −14 条属于 T3-B，新增 2 条「不该注册任何 context 注入钩子」的门）。
+
+三条理由，按分量排序：
+
+1. **价值未被证明，而且我的实验设计上无法证明。** 三轮真宿主跑动里，第 1 轮**一份注入都没有**（`before_agent_start` 触发时清单还是空的），行为却已经完美：`set → in_progress → done` 逐任务交替。也就是说 T1+T2 已足以解释观察到的全部好行为；第 2 轮虽有注入，但用户那句话自己写了「每步照规则更新」，同样混淆。**我把相关当成了因果写进了 PR。**
+2. **触发点与病因错位。** 诊断说的根因是「一个 run 内跑着跑着忘了」，而 `before_agent_start` 只在 run **边界**触发一次。典型失败场景（一句话 → 几十次工具调用 → 从不 update）里，它恰好什么都覆盖不到：注入发生在清单尚空时，此后整轮不再注入。
+3. **副作用是结构性的，不是常数级的。** 每个 user turn 一份、永久留在上下文，实测第 3 轮请求里并存两份（`1/3 done` 与 `2/3 done`）。toolResult 绑定在它发生的那一刻、不会说谎；而 echo 以「现在的状态 + 该怎么做」的口吻写成，多份并存时其中必有**冒充当下、实为过去**的指令，且它以 user 角色送达。把旧的那份当指令执行，比没有它更糟。
+
+**唯一没能救活它的论点**：compaction 之后 todo toolResult 会被摘要掉，而 `reconstructTodos` 读的 `getBranch()` 是原始链（扩展记得、模型忘了），此时 echo 是唯一通道。这条推理成立，但**一次都没实测过**（三个会话都没触发压缩）——为一个未验证的场景保留一个已验证会变坏的副作用，不划算。若将来要真解 run 内漂移或压缩后丢状态，候选是 §T3-A（tool_result 尾追，需限频）或 §T3-C（turn_end + context_edit 自替换），且必须先做 A/B：同一长任务开关注入，数 missed update。
+
+现在状态的可观测来源收敛为两条：`update` 返回的 ack（每次变更都复述进度与下一个任务）与 `list`（按需）。guideline 第 4 条也据此改写，避免模型以为有小抄可抄。

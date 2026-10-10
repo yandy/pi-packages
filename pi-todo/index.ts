@@ -13,9 +13,8 @@ import {
 	updateTodo,
 } from "./src/todo-store.js";
 import { renderWidget } from "./src/widget.js";
-import { formatSnapshot, hasOpenTodos } from "./src/snapshot.js";
 
-// 同时用作编辑器上方 widget 的 slot id 与注入消息的 customType（就是本包的标识）。
+// 编辑器上方 widget 的 slot id（值就是本包的标识）。
 const PACKAGE_ID = "pi-todo";
 
 interface TodoDetails {
@@ -41,13 +40,6 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => reconstructState(ctx));
 	pi.on("session_tree", async (_event, ctx) => reconstructState(ctx));
-
-	// 模型看不到 widget，也不会被自动回显清单：每个 run 开始时把当前状态送回上下文。
-	// display:false 只影响 TUI，仍会以 user 角色发给模型；旧宿主不认识 message 字段则静默无效。
-	pi.on("before_agent_start", async () => {
-		if (!hasOpenTodos(todos)) return undefined;
-		return { message: { customType: PACKAGE_ID, content: formatSnapshot(todos), display: false } };
-	});
 
 	const TodoParams = Type.Object({
 		action: Type.String({ enum: ["set", "update", "list"] }),
@@ -80,7 +72,7 @@ export default function (pi: ExtensionAPI) {
 			'Use todo to plan multi-step work: action "set" lists all tasks up front.',
 			"Set a task in_progress before you start it, and keep exactly one in_progress at a time.",
 			"Mark a task done as soon as it passes — never batch completions to the end of the run.",
-			'pi-todo echoes the list as <todo-state> at the start of each run; that echo is extension-generated, not a user message, and it does not refresh mid-run — call action "list" when unsure.',
+			'Call todo action "list" when you need the current ids or statuses — the extension does not re-send the list on its own.',
 		],
 		parameters: TodoParams,
 

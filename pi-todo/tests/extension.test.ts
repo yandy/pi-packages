@@ -55,7 +55,7 @@ describe("prompt", () => {
 			'Use todo to plan multi-step work: action "set" lists all tasks up front.',
 			"Set a task in_progress before you start it, and keep exactly one in_progress at a time.",
 			"Mark a task done as soon as it passes — never batch completions to the end of the run.",
-			'pi-todo echoes the list as <todo-state> at the start of each run; that echo is extension-generated, not a user message, and it does not refresh mid-run — call action "list" when unsure.',
+			'Call todo action "list" when you need the current ids or statuses — the extension does not re-send the list on its own.',
 		]);
 		const repeated = tools[0].promptGuidelines.filter((g: string) => tools[0].description.includes(g));
 		expect(repeated).toEqual([]);
@@ -90,53 +90,16 @@ describe("tool schema", () => {
 	});
 });
 
-describe("before_agent_start", () => {
-	const fire = () => handlers["before_agent_start"]?.[0]({ type: "before_agent_start" }, ctx);
-
-	it("registers exactly one before_agent_start handler", () => {
-		expect(handlers["before_agent_start"]).toHaveLength(1);
+describe("context injection", () => {
+	// T3-B（before_agent_start 注入 <todo-state>）已于 0.2.0 发布前删除：价值未被证明，
+	// 且每轮一份会累积出「冒充当下、实为过去」的矛盾快照。见 spec §决策变更。
+	// 这条断言是回归门：重新加回注入前先读完那段理由。
+	it("registers no before_agent_start handler", () => {
+		expect(handlers["before_agent_start"]).toBeUndefined();
 	});
 
-	it("injects nothing when there are no todos", async () => {
-		expect(await fire()).toBeUndefined();
-	});
-
-	it("injects a hidden snapshot when tasks are open", async () => {
-		await run({
-			action: "set",
-			items: [
-				{ title: "写单测", status: "pending" },
-				{ title: "修 CI", status: "pending" },
-			],
-		});
-		const r = await fire();
-		expect(r.message.customType).toBe("pi-todo");
-		expect(r.message.display).toBe(false);
-		expect(r.message.content).toContain("<todo-state>");
-		expect(r.message.content).toContain("0/2 done");
-	});
-
-	it("stops injecting once every task is done", async () => {
-		await run({ action: "set", items: [{ title: "写单测", status: "pending" }] });
-		await run({ action: "update", id: "1", status: "done" }, "c2");
-		expect(await fire()).toBeUndefined();
-	});
-
-	it("injects after state is reconstructed from a resumed session", async () => {
-		// 重建路径必须用另一个 harness 实例：todos 关在 extension 闭包里
-		const resumed = createHarness(() => [
-			{
-				type: "message",
-				message: {
-					role: "toolResult",
-					toolName: "todo",
-					details: { todos: [{ id: "1", title: "写单测", status: "pending" }] },
-				},
-			},
-		]);
-		await resumed.handlers["session_start"][0]({ type: "session_start", reason: "startup" }, resumed.ctx);
-		const r = await resumed.handlers["before_agent_start"][0]({ type: "before_agent_start" }, resumed.ctx);
-		expect(r.message.content).toContain("写单测");
+	it("does not write custom_message entries", () => {
+		expect(Object.keys(handlers).sort()).toEqual(["session_start", "session_tree"]);
 	});
 });
 
