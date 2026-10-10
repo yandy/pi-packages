@@ -12,11 +12,6 @@ export interface TodoResult {
 	id?: string;
 }
 
-export interface TodoRefResult {
-	item?: TodoItem;
-	candidates: TodoItem[];
-}
-
 /**
  * Validate blockedBy references: existence, no self-dependency, no cycles.
  * Returns an error message string, or undefined when valid.
@@ -60,85 +55,26 @@ export function validateDependencies(items: TodoItem[]): string | undefined {
 	return undefined;
 }
 
-/** `set` 接收的任务条目：`id` 可缺失，由 `assignIds` 按位置补上短 id。 */
+/** `set` 接收的任务条目：**没有 id 字段**，id 由工具按位置分配，模型不自己编。 */
 export type TodoDraft = {
-	id?: string;
 	title: string;
 	status: TodoItem["status"];
 	blockedBy?: string[];
 };
 
 /**
- * 两遍扫描：先收集显式 id（并查重），再为 id 缺失或空白的项按位置分配不冲突的短 id。
- * 显式 id 原样保留（旧 session 的 uuid 不受影响）；重复的显式 id 是错误。
+ * 按位置分配短 id `1..n`。模型若仍传了 id（旧习惯），会被后面的 `id` 键盖掉：
+ * 只此一种 id 形式，所以下游引用只需要精确匹配。
  */
-function assignIds(items: TodoDraft[]): { items: TodoItem[]; error?: string } {
-	const taken = new Set<string>();
-	for (const item of items) {
-		const explicit = item.id?.trim();
-		if (!explicit) continue;
-		if (taken.has(explicit)) return { items: [], error: `Duplicate task id: ${explicit}` };
-		taken.add(explicit);
-	}
-
-	let next = 1;
-	const resolved = items.map<TodoItem>((item) => {
-		const explicit = item.id?.trim();
-		if (explicit) return { ...item, id: explicit };
-		while (taken.has(String(next))) next += 1;
-		const id = String(next);
-		taken.add(id);
-		next += 1;
-		return { ...item, id };
-	});
-	return { items: resolved };
+function assignIds(items: TodoDraft[]): TodoItem[] {
+	return items.map((item, i) => ({ ...item, id: String(i + 1) }));
 }
 
 export function setTodos(items: TodoDraft[]): TodoResult {
 	const assigned = assignIds(items);
-	if (assigned.error) return { todos: [], error: assigned.error };
-	const resolved = normalizeItemDeps(assigned.items);
-	const error = validateDependencies(resolved);
-	if (error) return { todos: [], error: `${error}\n${listTodos(resolved, ERROR_BOARD_CAP)}` };
-	return { todos: resolved.map((i) => ({ ...i })) };
-}
-
-/** 归一化引用文本：小写 + 去掉空白与常见分隔符，使「修 CI」与「修ci」等价。 */
-function normalizeRefText(value: string): string {
-	return value.toLowerCase().replace(/[\s\-_:：，,。.、]/g, "");
-}
-
-/**
- * 把模型给的任务引用解析成唯一任务。顺序：精确 id → 纯数字按 1-based 序号 →
- * 唯一 id 前缀（忽略大小写）→ 规范化 title 包含匹配。
- * 纯数字只走序号而不走前缀，否则 "1" 会同时前缀命中 "1"/"10"/"11" 造成假歧义。
- */
-export function resolveTodoRef(todos: TodoItem[], ref: string): TodoRefResult {
-	const needle = ref?.trim() ?? "";
-	if (!needle) return { candidates: [] };
-
-	const exact = todos.find((t) => t.id === needle);
-	if (exact) return { item: exact, candidates: [exact] };
-
-	if (/^\d+$/.test(needle)) {
-		const byIndex = todos[Number(needle) - 1];
-		return byIndex ? { item: byIndex, candidates: [byIndex] } : { candidates: [] };
-	}
-
-	const lower = needle.toLowerCase();
-	const byPrefix = todos.filter((t) => t.id.toLowerCase().startsWith(lower));
-	if (byPrefix.length > 0) {
-		return byPrefix.length === 1 ? { item: byPrefix[0], candidates: byPrefix } : { candidates: byPrefix };
-	}
-
-	const normalized = normalizeRefText(needle);
-	// 单字符 ref 只做「归一化后全等」：否则 "a" 会子串命中 "Add caching"，
-	// 静默把错的任务标成 done（widget、details.todos、下次注入跟着错）。
-	const exactTitle = todos.filter((t) => normalizeRefText(t.title) === normalized);
-	if (exactTitle.length === 1) return { item: exactTitle[0], candidates: exactTitle };
-	if (normalized.length < 2) return { candidates: exactTitle };
-	const byTitle = todos.filter((t) => normalizeRefText(t.title).includes(normalized));
-	return byTitle.length === 1 ? { item: byTitle[0], candidates: byTitle } : { candidates: byTitle };
+	const error = validateDependencies(assigned);
+	if (error) return { todos: [], error: `${error}\n${listTodos(assigned, ERROR_BOARD_CAP)}` };
+	return { todos: assigned.map((i) => ({ ...i })) };
 }
 
 export interface PickNextOptions {
@@ -159,16 +95,8 @@ export function pickNext(todos: TodoItem[], opts: PickNextOptions = {}): TodoIte
 	return opts.includeBlocked ? open[0] : undefined;
 }
 
-/** 内联进错误信息的清单上限行数（模型需要的是候选 id，不是整面墙）。 */
+/** 内联进错误信息的清单上限行数（模型需要的是可拄回的 id，不是整面墙）。 */
 const ERROR_BOARD_CAP = 20;
-/** 歧义错误里列出的候选上限。 */
-const CANDIDATE_CAP = 8;
-
-function renderCandidates(candidates: TodoItem[]): string {
-	const shown = candidates.slice(0, CANDIDATE_CAP).map((t) => `#${t.id} ${clipTitle(t.title)}`);
-	if (candidates.length > CANDIDATE_CAP) shown.push(`… +${candidates.length - CANDIDATE_CAP} more`);
-	return shown.join(", ");
-}
 
 export function updateTodo(
 	todos: TodoItem[],
@@ -179,16 +107,11 @@ export function updateTodo(
 		blockedBy?: string[];
 	},
 ): TodoResult {
-	const { item: target, candidates } = resolveTodoRef(todos, ref);
+	const needle = ref?.trim() ?? "";
+	if (!needle) return { todos: [...todos], error: "Task reference is required" };
+
+	const target = todos.find((t) => t.id === needle);
 	if (!target) {
-		const needle = ref?.trim() ?? "";
-		if (!needle) return { todos: [...todos], error: "Task reference is required" };
-		if (candidates.length > 1) {
-			return {
-				todos: [...todos],
-				error: `Ambiguous task reference "${needle}": ${renderCandidates(candidates)}`,
-			};
-		}
 		// 未命中时内联清单，让模型不需要额外调 list 就能自纠
 		return { todos: [...todos], error: `Task not found: "${needle}"\n${listTodos(todos, ERROR_BOARD_CAP)}` };
 	}
@@ -196,27 +119,13 @@ export function updateTodo(
 	const updated: TodoItem = { ...target };
 	if (patch.status !== undefined) updated.status = patch.status;
 	if (patch.title !== undefined) updated.title = patch.title;
-	if (patch.blockedBy !== undefined) updated.blockedBy = normalizeDeps(todos, patch.blockedBy);
+	if (patch.blockedBy !== undefined) updated.blockedBy = [...patch.blockedBy];
 
 	const next = todos.map((t) => (t.id === target.id ? updated : t));
 	const error = validateDependencies(next);
 	if (error) return { todos: [...todos], error: `${error}\n${listTodos(todos, ERROR_BOARD_CAP)}` };
 
 	return { todos: next, id: target.id };
-}
-
-/**
- * 把 blockedBy 里的宽松引用（title 片段 / 序号 / id 前缀）换成规范 id。
- * 解析不出或歧义时保留原样，由 validateDependencies 报错（否则模型拿到的是一句没有候选的 unknown id）。
- */
-function normalizeDeps(todos: TodoItem[], blockedBy: string[]): string[] {
-	return blockedBy.map((dep) => resolveTodoRef(todos, dep).item?.id ?? dep);
-}
-
-function normalizeItemDeps(items: TodoItem[]): TodoItem[] {
-	return items.map((item) =>
-		item.blockedBy?.length ? { ...item, blockedBy: normalizeDeps(items, item.blockedBy) } : item,
-	);
 }
 
 /** title 过长时截断到 60 字符，避免 ack 与注入快照把上下文吃掉。 */

@@ -53,8 +53,10 @@ describe("prompt", () => {
 		]);
 	});
 
-	it("mentions short ids instead of uuids in the description", () => {
-		expect(tools[0].description).toContain('id (short, e.g. "1")');
+	it("mentions short ids owned by the tool instead of uuids", () => {
+		expect(tools[0].description).toContain("The tool assigns ids 1..n by position");
+		expect(tools[0].description).toContain("never pass your own id");
+		expect(tools[0].description).toContain("Pass the exact id");
 		expect(tools[0].description).not.toContain("uuid");
 	});
 });
@@ -79,10 +81,11 @@ describe("todo tool execute", () => {
 });
 
 describe("tool schema", () => {
-	it("no longer requires items[].id (the uuid-friction fix)", () => {
+	it("does not accept items[].id at all (ids belong to the tool)", () => {
 		const itemSchema = (tools[0].parameters.properties.items as any).items;
-		expect(itemSchema.required).not.toContain("id");
-		expect(itemSchema.properties.id).toBeDefined();
+		expect(itemSchema.properties.id).toBeUndefined();
+		expect(itemSchema.required).toContain("title");
+		expect(itemSchema.required).toContain("status");
 	});
 });
 

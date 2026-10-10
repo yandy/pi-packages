@@ -54,7 +54,6 @@ export default function (pi: ExtensionAPI) {
 		items: Type.Optional(
 			Type.Array(
 				Type.Object({
-					id: Type.Optional(Type.String()),
 					title: Type.String(),
 					status: Type.String({ enum: ["pending", "in_progress", "done"] }),
 					blockedBy: Type.Optional(Type.Array(Type.String())),
@@ -73,9 +72,11 @@ export default function (pi: ExtensionAPI) {
 		description:
 			"Track a task list for multi-step work.\n" +
 			'Actions: "set" replaces the whole list with items (plan up front); "update" changes one task by id; "list" returns the current list.\n' +
-			'Item fields: id (short, e.g. "1"), title, status (pending|in_progress|done), optional blockedBy (ids this task waits on).\n' +
+			"Item fields: title, status (pending|in_progress|done), optional blockedBy (ids this task waits on).\n" +
+			"The tool assigns ids 1..n by position on every set — never pass your own id.\n" +
 			"Use it for any work needing 3+ distinct steps, a user-provided task list, or multi-file changes. Skip it for a single trivial task.\n" +
 			"Update discipline (required):\n" +
+			'- Pass the exact id shown by the tool (it prints #3, you send "3"); ids are renumbered on every set.\n' +
 			"- Mark a task in_progress BEFORE you start it. Exactly one task in_progress at a time.\n" +
 			"- Mark it done IMMEDIATELY after it finishes. Never batch completions, never defer to the end of the run.\n" +
 			"- After each tool batch, re-check the list: if a finished task is still pending/in_progress, update it now.\n" +

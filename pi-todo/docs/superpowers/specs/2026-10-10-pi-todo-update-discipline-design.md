@@ -286,8 +286,8 @@ system prompt 位于请求最前，任何改动都会让**整条前缀缓存失�
 ## 落地补记（0.2.0，2026-10-10）
 
 - T1 / T2 / T3-B 全部实现；三层合并在同一个 `0.2.0`（原计划分 0.2.0 / 0.3.0 以便归因，实际按用户选择一起做，代价是贡献无法单独归因）。
-- **§T2.2 的 `blockedBy` 归一化在实施计划里被漏掉**，全分支评审时发现并补上：`set` 与 `update` 的依赖引用现在都走 `resolveTodoRef`，解析不出/歧义的才交给 `validateDependencies` 报错。教训：spec 的要求如果没进任何测试断言，就会在 spec→plan 这一跳丢失。
-- 评审带出的三个规格外缺陷已修：注入的 discipline 行会把当前 `in_progress` 任务再指为下一个（自相矛盾）；单字符 title 引用会静默命中错误任务（英文标题尤其容易）；`in_progress` 段无上限且不提示「同时只能一个」。
+- 发布前有一次设计回退：**id 收归工具所有，引用只认精确匹配**，§T2.2 的宽松引用与 `blockedBy` 归一化随之作废，详见文末「发布前决策变更」。其中一条教训留下：§T2.2 的 `blockedBy` 归一化先是在 spec→plan 这一跳被漏掉、评审时才发现补上，最后又整块拆掉 —— **spec 的要求如果没进任何测试断言，计划就会丢；而丢了也不一定是损失，得允许自己撤回。**
+- 评审带出的三个规格外缺陷已修：注入的 discipline 行会把当前 `in_progress` 任务再指为下一个（自相矛盾）；单字符 title 引用会静默命中错误任务（英文标题尤其容易，已随上面的回退整块关掉）；`in_progress` 段无上限且不提示「同时只能一个」。
 - 已知代价（评审提出、本轮不修）：**每个 user turn 注入一条快照且永久留在上下文**，N 轮提问就有 N 份 `<todo-state>`，靠 recency 取对的那份。彻底修法需要 `turn_end` + `context_edit` 替换上一条（即被否决的 T3-C 家族）；是否要做，等真实会话里量化了占用再定。
 - 注入文本第二行是自报身份的框定语（`Automatic status echo …, not a request from the user.`），对齐宿主 compaction/branch-summary 的惯例；「模型会不会把它当用户指令」仍需按 §未解决 #2 实测确认。
 
@@ -298,9 +298,26 @@ fresh reviewer 提的 8 条 Minor，按「minor 不做顺手修」的规矩留�
 | # | 位置 | 现象 |
 |---|---|---|
 | M1 | `index.ts` update 分支 | 空 `id` 的守卫与 store 的 `Task reference is required` 重复且文案不一致，两条都不内联清单；`id` 变 optional 后模型整条漏填的概率上升 |
-| M3 | `resolveTodoRef` | 纯数字 ref 序号落空后不再尝试 id 前缀：uuid 清单上「是合法前缀但超出序号范围」的数字会 miss |
-| M4 | `assignIds` | 显式 id 与自动 id 混用时序号与 id 分叉（`set([{id:"5"},{},{}])` → `["5","1","2"]`，此后 `"2"` 与 `"3"` 都命中第三个任务）；README 可补一句警告 |
+| ~~M3~~ | ~~`resolveTodoRef`~~ | **已随「只认精确 id」的决策变更失效** |
+| M4 | ~~`assignIds`~~ | **已失效**：id 不再接受显式传入，序号与 id 不可能分叉 |
 | M5 | `isBlocked` / `describeTodo` | 每项都重建整表 Map，n=150 时注入路径 O(n²) 常数大；`byId` 提到调用顶部即可 |
 | M6 | `widget.ts` | 不截断 title，300 字符 title 会撑爆编辑器上方组件（`clipTitle` 现在就在手边） |
 | M7 | `before_agent_start` | 未像 pi-memory 那样跳过 subagent 会话；当前 subagent 闭包为空所以实际不注入，但一旦能重建清单就白付 token |
 | M8 | 两份 README | ack 描述不完全对称 |
+
+## 发布前决策变更：id 收归工具所有，只认精确匹配
+
+人工复核后撤掉 §T2.2 的宽松引用设计，理由只有一条：**宽松匹配存在的唯一理由是救「模型自编 uuid 抄错」；id 不再由模型编之后，这个理由消失，而风险留下**（评审 I1 实测：title 子串会把 `a` 命中 `Add caching`，静默把错的任务标成 done，widget / `details.todos` / 下次注入全部跟着错）。
+
+保留的自纠通道：写错 id 时错误信息内联当前清单（title 截断、最多 20 行），所以不需要额外调 `list`；`update` 仍返回 ack（进度 + 下一个任务）。
+
+| 原设计（§T2.2） | 现在（0.2.0） |
+|---|---|
+| `items[].id` 可选，显式 id（含旧 uuid）原样保留 | `items` 没有 `id` 字段；`set` 一律按位置分配 `1..n`，传来的 id 被覆盖 |
+| `update` 接受精确 id → 序号 → 唯一前缀 → title 片段 | 只接受逐字精确 id |
+| `blockedBy` 走 `resolveTodoRef` 归一化 | 只接受精确 id；错写直接 `blockedBy unknown id` + 内联清单 |
+| 歧义引用回报候选列表 | 不存在歧义；`Task not found` + 内联清单（最多 20 行、title 截断） |
+
+连带效应：评审遗留的 **M3（数字 ref 不再尝试前缀）与 M4（显式/自动 id 混用时序号分叉）自动失效**，因为两者的前提都不存在了。`resolveTodoRef` / `TodoRefResult` / `normalizeDeps` / `normalizeItemDeps` / `renderCandidates` 一并删除，store 的公开面变小。
+
+最后一句关于旧 session：「精确匹配」对任何字符串成立，所以历史上用 uuid id 建过清单的 session 在被重建后仍能逐字引用那个 uuid——这不是兼容设计，而是精确匹配的自然结果，不再为它写测试或写文档。下一次 `set` 之后，这张表里只会有 `1..n`。

@@ -37,12 +37,11 @@ todo(action: "set" | "update" | "list", items?, id?, status?, title?, blockedBy?
 - `update` — update the task referenced by `id` (`status`, `title`, `blockedBy` optional)
 - `list` — return the current list
 
-### Task ids and references
+### Task ids
 
-- In `set`, `items[].id` may be omitted: short ids `1..n` are assigned by position (numbers already used by explicit ids are skipped); explicit ids — including uuids from older sessions — are kept as-is.
-- `update`'s `id` accepts an exact id, a 1-based position, a unique id prefix, or a title fragment (case- and whitespace-insensitive; a one-character ref only matches a whole title).
-- `blockedBy` accepts the same loose references and normalizes them to canonical ids; only unresolvable ones are reported as `blockedBy unknown id`.
-- On an ambiguous or unmatched reference the error lists the candidates or the whole board, so the model can correct itself without calling `list`.
-- Auto ids are positional and `set` replaces the whole list: after replanning, trust the ids echoed by the latest `set`/`update`.
+- The tool owns ids: `set` assigns `1..n` by position and ignores any `id` present in the items it receives.
+- `update`'s `id` must match one of those ids exactly (send `3`, not `#3`); `blockedBy` takes exact ids too.
+- A wrong id is never guessed at: the error echoes the current board (titles clipped, up to 20 lines) so it can be corrected without an extra `list` call.
+- `set` replaces the whole list, so ids are renumbered — trust the ids echoed by the latest `set`/`update`.
 
 The widget hides automatically when every task is done. The status snapshot injected at the start of each run is invisible in the UI (`display: false`).
