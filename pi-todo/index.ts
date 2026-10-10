@@ -70,24 +70,17 @@ export default function (pi: ExtensionAPI) {
 		name: "todo",
 		label: "Todo",
 		description:
-			"Track a task list for multi-step work.\n" +
-			'Actions: "set" replaces the whole list with items (plan up front); "update" changes one task by id; "list" returns the current list.\n' +
-			"Item fields: title, status (pending|in_progress|done), optional blockedBy (ids this task waits on).\n" +
-			"The tool assigns ids 1..n by position on every set — never pass your own id.\n" +
-			"Use it for any work needing 3+ distinct steps, a user-provided task list, or multi-file changes. Skip it for a single trivial task.\n" +
-			"Update discipline (required):\n" +
-			'- Pass the exact id shown by the tool (it prints #3, you send "3"); ids are renumbered on every set.\n' +
-			"- Mark a task in_progress BEFORE you start it. Exactly one task in_progress at a time.\n" +
-			"- Mark it done IMMEDIATELY after it finishes. Never batch completions, never defer to the end of the run.\n" +
-			"- After each tool batch, re-check the list: if a finished task is still pending/in_progress, update it now.\n" +
-			"- Only mark done when fully achieved (tests pass, nothing left over); otherwise keep it in_progress.\n" +
-			'- The list is NOT re-shown to you automatically. Call action "list" whenever you are unsure, and keep it current — the user watches a live widget driven by your updates.',
+			"Track a task list for the current session.\n" +
+			'"set" replaces the whole list with items {title, status: pending|in_progress|done, blockedBy?: ids} and returns it. ' +
+			"The tool owns ids: it assigns 1..n by position and renumbers them on every set, so never pass an id.\n" +
+			'"update" changes one task by its exact id (status / title / blockedBy) and returns progress plus the next task.\n' +
+			'"list" returns the current list.',
 		promptSnippet: "Track a task list (set/update/list); keep statuses current.",
 		promptGuidelines: [
 			'Use todo to plan multi-step work: action "set" lists all tasks up front.',
-			"Before starting a task: todo update → in_progress. Exactly one in_progress at a time.",
-			"Immediately after finishing a task: todo update → done. Never batch completions or defer them to the end.",
-			'The todo state is not re-shown to you automatically; call todo action "list" when unsure and keep the list current.',
+			"Set a task in_progress before you start it, and keep exactly one in_progress at a time.",
+			"Mark a task done as soon as it passes — never batch completions to the end of the run.",
+			'pi-todo echoes the list as <todo-state> at the start of each run; that echo is extension-generated, not a user message, and it does not refresh mid-run — call action "list" when unsure.',
 		],
 		parameters: TodoParams,
 

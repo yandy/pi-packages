@@ -80,45 +80,37 @@
 
 ## T1：提示词重写（必做）
 
-设计原则：**每条规则都带触发时机（when）+ 动作（then）**，用强制词（IMMEDIATELY / exactly one / never batch），并显式告知「状态不会自动回显给你」。
+**职责划分（发布前定稿）**：`description` 只讲 **API 事实**（工具是什么、参数形状、返回什么），`promptGuidelines` 只管 **行为规则**（何时调用、什么节奏）。两者不重复——重复既浪费 token，也让同一条规则有两个可能互相矛盾的说法。
 
-### `description` 草案
+### `description`（404 字符，纯 API）
 
 ```
-Track a task list for multi-step work.
-Actions: "set" replaces the whole list with items (plan up front); "update" changes one task by id; "list" returns the current list.
-Item fields: id (short, e.g. "1"), title, status (pending|in_progress|done), optional blockedBy (ids this task waits on).
-Use it for any work needing 3+ distinct steps, a user-provided task list, or multi-file changes. Skip it for a single trivial task.
-Update discipline (required):
-- Mark a task in_progress BEFORE you start it. Exactly one task in_progress at a time.
-- Mark it done IMMEDIATELY after it finishes. Never batch completions, never defer to the end of the run.
-- After each tool batch, re-check the list: if a finished task is still pending/in_progress, update it now.
-- Only mark done when fully achieved (tests pass, nothing left over); otherwise keep it in_progress.
-- The list is NOT re-shown to you automatically. Call action "list" whenever you are unsure, and keep it current — the user watches a live widget driven by your updates.
+Track a task list for the current session.
+"set" replaces the whole list with items {title, status: pending|in_progress|done, blockedBy?: ids} and returns it. The tool owns ids: it assigns 1..n by position and renumbers them on every set, so never pass an id.
+"update" changes one task by its exact id (status / title / blockedBy) and returns progress plus the next task.
+"list" returns the current list.
 ```
 
-### `promptGuidelines` 草案（落到 `<rules>`）
+### `promptGuidelines`（4 条 when→then，进 `<rules>`）
 
-```ts
-promptGuidelines: [
-  'Use todo to plan multi-step work: action "set" lists all tasks up front.',
-  'Before starting a task: todo update → in_progress. Exactly one in_progress at a time.',
-  'Immediately after finishing a task: todo update → done. Never batch completions or defer them to the end.',
-  'The todo state is not re-shown to you automatically; call todo action "list" when unsure and keep the list current.',
-],
+```
+Use todo to plan multi-step work: action "set" lists all tasks up front.
+Set a task in_progress before you start it, and keep exactly one in_progress at a time.
+Mark a task done as soon as it passes — never batch completions to the end of the run.
+pi-todo echoes the list as <todo-state> at the start of each run; that echo is extension-generated, not a user message, and it does not refresh mid-run — call action "list" when unsure.
 ```
 
-`promptSnippet` 可微调为：`Track a task list (set/update/list); keep statuses current.`
+`promptSnippet`：`Track a task list (set/update/list); keep statuses current.`
 
 ### 意图说明
 
 | 文案 | 针对的失败模式 |
 |---|---|
-| `BEFORE you start it` / `Exactly one in_progress` | 可校验的硬约束，模型能自查；也避免「全部 pending 直到最后一次性刷 done」 |
-| `IMMEDIATELY` / `Never batch` | 直接对齐 Claude Code 的措辞强度，压制「批量补记」倾向 |
-| `After each tool batch, re-check` | 给出**周期性触发点**，弥补没有 reminder 的空档 |
-| `NOT re-shown to you automatically` | 让模型知道 widget 是给用户的、自己必须主动 `list` |
-| `the user watches a live widget` | 给出更新的**外部动机**（不只是自我记录） |
+| `before you start it` / `exactly one in_progress` | 可校验的硬约束，模型能自查；也避免「全部 pending 直到最后一次性刷 done」 |
+| `as soon as it passes` / `never batch` | 压制「批量补记」倾向；措辞强度是 T1 的全部价值，所以必须留在 guidelines 而不是散在描述里 |
+| `that echo is extension-generated, not a user message` | T3-B 的快照会被宿主投影成 user 角色、且排在用户那句话之后 —— 这条告诉模型它的来源，别当成用户改口 |
+| `does not refresh mid-run — call "list" when unsure` | 一次 run 内几十轮工具调用之间状态会变；给出自纠通道 |
+| description 里的 `The tool owns ids … never pass an id` | 直接消灭病因 3（自编 uuid 抄错），且它是 schema 事实，放 description 才与 `items` 里没有 `id` 字段一致 |
 
 ## T2：反馈闭环 + 降低 update 摩擦
 
@@ -287,9 +279,10 @@ system prompt 位于请求最前，任何改动都会让**整条前缀缓存失�
 
 - T1 / T2 / T3-B 全部实现；三层合并在同一个 `0.2.0`（原计划分 0.2.0 / 0.3.0 以便归因，实际按用户选择一起做，代价是贡献无法单独归因）。
 - 发布前有一次设计回退：**id 收归工具所有，引用只认精确匹配**，§T2.2 的宽松引用与 `blockedBy` 归一化随之作废，详见文末「发布前决策变更」。其中一条教训留下：§T2.2 的 `blockedBy` 归一化先是在 spec→plan 这一跳被漏掉、评审时才发现补上，最后又整块拆掉 —— **spec 的要求如果没进任何测试断言，计划就会丢；而丢了也不一定是损失，得允许自己撤回。**
-- 评审带出的三个规格外缺陷已修：注入的 discipline 行会把当前 `in_progress` 任务再指为下一个（自相矛盾）；单字符 title 引用会静默命中错误任务（英文标题尤其容易，已随上面的回退整块关掉）；`in_progress` 段无上限且不提示「同时只能一个」。
-### 已知代价（评审提出、本轮不修）：**每个 user turn 注入一条快照且永久留在上下文**，N 轮提问就有 N 份 `<todo-state>`，靠 recency 取对的那份。**已量化**：单份 243–272 字符（约 60–90 token），第 3 轮请求里并存 2 份（进度 `1/3 done` 与 `2/3 done`）。彻底修法需要 `turn_end` + `context_edit` 替换上一条（即被否决的 T3-C 家族）；以 20 轮提问的会话估算约多占 1.5k token，是否值得做按真实使用再定。
-- 注入文本第二行是自报身份的框定语（`Automatic status echo …, not a request from the user.`），对齐宿主 compaction/branch-summary 的惯例；「模型会不会把它当用户指令」仍需按 §未解决 #2 实测确认。
+- 发布前把提示词重新分工了一轮（见 §T1）：原先 `description` 长 1105 字符、内含 5 条祈使句，跟 `promptGuidelines` 大量重叠；现在 description 404 字符只讲 API 事实，行为规则全归 guidelines（4 条）。**同时修掉一个自相矛盾**：旧 description 里的 `The list is NOT re-shown to you automatically` 在 T3-B 落地后已经是假话（每个 run 都会回显一份），现在改成「会回显、但一次 run 内不刷新」。
+- 评审带出的三个规格外缺陷已修：注入的 discipline 行会把当前 `in_progress` 任务再指为下一个（自相矛盾，已抽 `pickNext` 共用）；错误信息内联的清单不设上限（已 clip + 限 20 行）；`in_progress` 段无上限且不提示「同时只能一个」（已加 cap 与纠正提示）。另两条——单字符 title 引用静默命中错任务、`blockedBy` 宽松归一化——随「只认精确 id」的回退整块消失。
+- 已知代价（评审提出、本轮不修）：**每个 user turn 注入一条快照且永久留在上下文**，N 轮提问就有 N 份 `<todo-state>`，靠 recency 取对的那份。**已量化**：单份 243–272 字符（约 60–90 token），第 3 轮请求里并存 2 份（进度 `1/3 done` 与 `2/3 done`）。彻底修法需要 `turn_end` + `context_edit` 替换上一条（即被否决的 T3-C 家族）；以 20 轮提问的会话估算约多占 1.5k token，是否值得做按真实使用再定。
+- 注入文本第二行是自报身份的框定语（`Automatic status echo …, not a request from the user.`），对齐宿主 compaction/branch-summary 的惯例；「模型会不会把它当用户指令」已实测否定（见文末「T3-B 端到端验证」）。
 
 ## 评审遗留（deferred minors，未进入 0.2.0 的 fix pass）
 
@@ -326,12 +319,16 @@ fresh reviewer 提的 8 条 Minor，按「minor 不做顺手修」的规矩留�
 
 方法：`pi -ne -e pi-todo/index.ts -e <spy.ts> --session-dir /tmp/pi-todo-verify/sessions` 连续三个 user turn（第 2、3 轮用 `--continue`，是**新起的 pi 进程**）。spy 是临时观察扩展，监听 `before_provider_request`，把每次发给 provider 的请求骨架落盘：消息数、角色序列、`<todo-state>` 出现的下标与份数、每份的进度行、以及 system 文本的 sha256。任务：建 3 步清单并逐步完成。
 
-13 次 provider 请求的实测结果：
+两个测量坑（都已踩过并修正，复现时别再踩）：
+1. **`payload.system` 对某些 provider 是空的**（megcore 把 system 放在 `messages[0]`，role 为 `system`）。第一版 spy 哈希 `payload.system ?? ""`，于是哈希了一个恒定空串，「多次请求 system 全同」这条结论当时**并不成立**，只是看起来成立 —— 已改为 `payload.system ?? messages.find(role === "system")` 并重跑取证。
+2. **`guidelines` 里出现了 `<todo-state>` 字面量**（这是有意的，模型需要知道该块是谁生成的），所以「按文本搜 `<todo-state>` 统计注入份数」会把 system 消息也算进去。统计时必须排除 `role === "system"`，否则会虚报成 2 份。
+
+重跑（新提示词分工后）的实测结果 —— 2 个 user turn、11 次 provider 请求：
 
 | 断言项 | 结果 |
 |---|---|
 | 注入是否真进了发给模型的请求 | ✅ 第 2 轮起每个请求的**最后一条**消息是 `<todo-state>`（`role=user`，下标 11；第 3 轮追加下标 20），session 文件里同时存在 `customType:"pi-todo"` / `display:false` 的 `custom_message` 条目 |
-| 是否破坏 prompt 前缀缓存 | ✅ 13 次请求的 system sha256 **全部相同**（`12ae32cb1ec02d01`）→ 注入不动 system prompt，当初否决 T3-D 的论据成立 |
+| 是否破坏 prompt 前缀缓存 | ✅ 修正 spy 后重测：该 provider 把 system 放在 `messages[0]`（`payload.system` 为空），11 次请求的 system sha256 全为 `e387fb5053dc384b`，**其中 6 次是带注入的请求** → 注入不动 system prompt，当初否决 T3-D 的论据成立 |
 | 跨进程重建后是否仍注入正确状态 | ✅ 第 2、3 轮的快照进度分别是 `1/3 done`、`2/3 done`，与新进程从 `details.todos` 重建的内存状态一致 |
 | 模型是否把它当成用户的新指令 | ❌ 未出现。注入后的第一个动作就是 `todo update → in_progress`；三轮共 7 次 todo 调用，`set→in_progress→done` 逐任务推进，最后一次返回 `✓ all 3 tasks done`，全 done 后不再注入 |
 | 已知代价的实际量级 | ⚠️ 每个 user turn 多一份快照：单份 243–272 字符（约 60–90 token），第 3 轮请求里同时有 2 份（`1/3 done` 与 `2/3 done`）。本次模型按 recency 取对了最新那份，但这只在 n 小时成立；长跑需要 `turn_end` + `context_edit` 方案 |

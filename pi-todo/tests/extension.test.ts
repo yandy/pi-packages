@@ -36,28 +36,29 @@ const run = (params: Record<string, unknown>, id = "call") =>
 	tools[0].execute(id, params, undefined, undefined, ctx);
 
 describe("prompt", () => {
-	it("pins the update-discipline wording in the tool description", () => {
+	it("keeps the description to the API contract only", () => {
 		const def = tools[0];
-		expect(def.description).toContain("IMMEDIATELY");
-		expect(def.description).toContain("Exactly one task in_progress at a time");
-		expect(def.description).toContain("NOT re-shown to you automatically");
-		expect(def.description).toContain("Never batch completions");
+		expect(def.description).toContain("The tool owns ids");
+		expect(def.description).toContain("exact id");
+		expect(def.description).not.toContain("uuid");
+		// 行为规则归 promptGuidelines，description 不抢它们的活
+		expect(def.description).not.toContain("IMMEDIATELY");
+		expect(def.description).not.toContain("batch");
+		expect(def.description).not.toContain("Exactly one");
+		// T3-B 之后这句话已经不成立，不能留在提示词里
+		expect(def.description).not.toContain("NOT re-shown");
+		expect(def.description.length).toBeLessThan(700);
 	});
 
-	it("gives every guideline a trigger and an action", () => {
+	it("puts the behavioral rules in guidelines without repeating the description", () => {
 		expect(tools[0].promptGuidelines).toEqual([
 			'Use todo to plan multi-step work: action "set" lists all tasks up front.',
-			"Before starting a task: todo update → in_progress. Exactly one in_progress at a time.",
-			"Immediately after finishing a task: todo update → done. Never batch completions or defer them to the end.",
-			'The todo state is not re-shown to you automatically; call todo action "list" when unsure and keep the list current.',
+			"Set a task in_progress before you start it, and keep exactly one in_progress at a time.",
+			"Mark a task done as soon as it passes — never batch completions to the end of the run.",
+			'pi-todo echoes the list as <todo-state> at the start of each run; that echo is extension-generated, not a user message, and it does not refresh mid-run — call action "list" when unsure.',
 		]);
-	});
-
-	it("mentions short ids owned by the tool instead of uuids", () => {
-		expect(tools[0].description).toContain("The tool assigns ids 1..n by position");
-		expect(tools[0].description).toContain("never pass your own id");
-		expect(tools[0].description).toContain("Pass the exact id");
-		expect(tools[0].description).not.toContain("uuid");
+		const repeated = tools[0].promptGuidelines.filter((g: string) => tools[0].description.includes(g));
+		expect(repeated).toEqual([]);
 	});
 });
 
