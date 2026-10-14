@@ -24,6 +24,7 @@ describe.skipIf(skipConfinedBashCases)(`real confinement via ${selected.runner}`
 	afterAll(() => {
 		rmSync(ws, { recursive: true, force: true });
 		rmSync(`/etc/sbx-escape-${process.pid}`, { force: true }); // 仅在沙箱失效且 root 运行时才会存在，尽力清理
+		rmSync(`/etc/sbx-int-extra-escape-${process.pid}`, { force: true }); // 同上，额外可写根用例的逃逸目标
 	});
 
 	async function run(mode: ConfinedSandboxMode, command: string) {
@@ -57,4 +58,38 @@ describe.skipIf(skipConfinedBashCases)(`real confinement via ${selected.runner}`
 		expect(r.exitCode).not.toBe(0);
 		expect(r.text).toContain("[sandbox: file access denied under read-only mode]");
 	});
+
+	it("workspace-write: 额外可写根可写，其父目录仍拒", async () => {
+		const extra = realpathSync.native(mkdtempSync(join(tmpdir(), "sbx-int-extra-")));
+		const outside = `/etc/sbx-int-extra-escape-${process.pid}`;
+		try {
+			const ops = createSandboxBashOps({ mode: "workspace-write", workspaceRoot: ws, extraRoots: [extra] });
+			const chunks: Buffer[] = [];
+			const ok = await ops.exec(`touch ${extra}/ok.txt && echo ok`, ws, { onData: (b) => chunks.push(b) });
+			expect(ok.exitCode).toBe(0);
+			expect(chunks.map((c) => c.toString()).join("")).toContain("ok");
+
+			const deniedChunks: Buffer[] = [];
+			const denied = await ops.exec(`touch ${outside}`, ws, { onData: (b) => deniedChunks.push(b) });
+			expect(denied.exitCode).not.toBe(0);
+			expect(deniedChunks.map((c) => c.toString()).join("")).toContain(
+				"[sandbox: file access denied under workspace-write mode]",
+			);
+		} finally {
+			rmSync(extra, { recursive: true, force: true });
+		}
+	});
+
+	it("read-only: 额外可写根也不可写", async () => {
+		const extra = realpathSync.native(mkdtempSync(join(tmpdir(), "sbx-int-extra-")));
+		try {
+			const ops = createSandboxBashOps({ mode: "read-only", workspaceRoot: ws, extraRoots: [extra] });
+			const chunks: Buffer[] = [];
+			const denied = await ops.exec(`touch ${extra}/ro.txt`, ws, { onData: (b) => chunks.push(b) });
+			expect(denied.exitCode).not.toBe(0);
+			expect(chunks.map((c) => c.toString()).join("")).toContain("[sandbox: file access denied under read-only mode]");
+		} finally {
+			rmSync(extra, { recursive: true, force: true });
+		}
+	}, 60_000);
 }, 60_000);
