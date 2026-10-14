@@ -31,64 +31,92 @@ afterEach(() => {
 
 describe("loadSandboxConfig", () => {
 	it("falls back to defaults when no files exist", () => {
-		expect(loadSandboxConfig(projectDir)).toEqual(DEFAULT_SANDBOX_CONFIG);
+		expect(loadSandboxConfig()).toEqual(DEFAULT_SANDBOX_CONFIG);
 	});
-	it("merges fieldwise: project > global > default", () => {
+	it("reads the global file", () => {
 		writeGlobal({ mode: "read-only", probeTimeoutMs: 1000 });
-		writeProject({ mode: "workspace-write" });
-		const cfg = loadSandboxConfig(projectDir);
-		expect(cfg.mode).toBe("workspace-write");
+		const cfg = loadSandboxConfig();
+		expect(cfg.mode).toBe("read-only");
 		expect(cfg.probeTimeoutMs).toBe(1000);
 		expect(cfg.runnerCommand).toBeNull();
 	});
-	it("invalid mode warns and falls back to default", () => {
+	it("project-level sandbox.json is ignored silently: no field merges, no warning", () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		writeProject({ mode: "yolo" });
-		expect(loadSandboxConfig(projectDir).mode).toBe("workspace-write");
+		try {
+			writeGlobal({ probeTimeoutMs: 1000 });
+			// 项目文件刻意写最宽松/最危险的组合：一个字段都不得参与解析，也不得告警。
+			writeProject({ mode: "danger-full-access", runnerCommand: ["r"], runnerFailureSignatures: ["r:"], probeTimeoutMs: 0 });
+			const cfg = loadSandboxConfig();
+			expect(cfg.mode).toBe(DEFAULT_SANDBOX_CONFIG.mode); // 项目 mode 不生效
+			expect(cfg.probeTimeoutMs).toBe(1000); // 全局字段不被项目覆盖
+			expect(cfg.runnerCommand).toBeNull(); // 项目 runnerCommand 完全不进入解析
+			expect(warn).not.toHaveBeenCalled();
+		} finally {
+			warn.mockRestore();
+		}
+	});
+	it("a project file alone (no global file) leaves defaults in place", () => {
+		writeProject({ mode: "read-only", probeTimeoutMs: 1000 });
+		expect(loadSandboxConfig()).toEqual(DEFAULT_SANDBOX_CONFIG);
+	});
+	it("invalid global mode warns and falls back to default", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		writeGlobal({ mode: "yolo" });
+		expect(loadSandboxConfig().mode).toBe("workspace-write");
 		expect(warn).toHaveBeenCalled();
 		warn.mockRestore();
 	});
 	it("legacy 1.x groups are ignored with a warning", () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		writeProject({ image: { name: "x" }, runtime: { engine: "docker" }, host: { commands: [] }, mode: "read-only" });
-		expect(loadSandboxConfig(projectDir).mode).toBe("read-only");
+		writeGlobal({ image: { name: "x" }, runtime: { engine: "docker" }, host: { commands: [] }, mode: "read-only" });
+		expect(loadSandboxConfig().mode).toBe("read-only");
 		expect(warn.mock.calls.flat().join(" ")).toMatch(/legacy/);
 		warn.mockRestore();
 	});
-	it("corrupt JSON is ignored (defaults)", () => {
-		mkdirSync(join(projectDir, ".pi"), { recursive: true });
-		writeFileSync(join(projectDir, ".pi", "sandbox.json"), "{broken");
-		expect(loadSandboxConfig(projectDir)).toEqual(DEFAULT_SANDBOX_CONFIG);
+	it("corrupt global JSON is ignored (defaults)", () => {
+		mkdirSync(agentDir, { recursive: true });
+		writeFileSync(join(agentDir, "sandbox.json"), "{broken");
+		expect(loadSandboxConfig()).toEqual(DEFAULT_SANDBOX_CONFIG);
 	});
 	it("non-object JSON (array/number/string/boolean) counts as corrupt (I2)", () => {
-		mkdirSync(join(projectDir, ".pi"), { recursive: true });
-		const path = join(projectDir, ".pi", "sandbox.json");
+		mkdirSync(agentDir, { recursive: true });
+		const path = join(agentDir, "sandbox.json");
 		for (const content of ["5", "[1,2]", '"workspace-write"', "true", "null"]) {
 			writeFileSync(path, content);
-			expect(loadSandboxConfig(projectDir), content).toEqual(DEFAULT_SANDBOX_CONFIG); // 不抛
+			expect(loadSandboxConfig(), content).toEqual(DEFAULT_SANDBOX_CONFIG); // 不抛
 		}
 	});
 });
 
 describe("getSandboxConfig (fail-safe + cache)", () => {
 	afterEach(() => { resetSandboxConfigCache(); });
-	it("pairing-violation config falls back to DEFAULT with a warn, never throws (I2)", () => {
+	it("pairing-violation global config falls back to DEFAULT with a warn, never throws (I2)", () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		try {
-			writeProject({ runnerCommand: ["myrunner"] }); // 缺 runnerFailureSignatures → validate throw
-			expect(getSandboxConfig(projectDir)).toEqual(DEFAULT_SANDBOX_CONFIG);
+			writeGlobal({ runnerCommand: ["myrunner"] }); // 缺 runnerFailureSignatures → validate throw
+			expect(getSandboxConfig()).toEqual(DEFAULT_SANDBOX_CONFIG);
 			expect(warn.mock.calls.flat().join(" ")).toMatch(/falling back to defaults/u);
 		} finally {
 			warn.mockRestore();
 		}
 	});
-	it("caches per cwd: second call does not re-warn", () => {
+	it("caches: second call does not re-warn", () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		try {
-			writeProject({ probeTimeoutMs: 0 }); // 非法 → throw → fail-safe
-			expect(getSandboxConfig(projectDir)).toEqual(DEFAULT_SANDBOX_CONFIG);
-			expect(getSandboxConfig(projectDir)).toEqual(DEFAULT_SANDBOX_CONFIG);
+			writeGlobal({ probeTimeoutMs: 0 }); // 非法 → throw → fail-safe
+			expect(getSandboxConfig()).toEqual(DEFAULT_SANDBOX_CONFIG);
+			expect(getSandboxConfig()).toEqual(DEFAULT_SANDBOX_CONFIG);
 			expect(warn).toHaveBeenCalledTimes(1);
+		} finally {
+			warn.mockRestore();
+		}
+	});
+	it("a project-level file never enters the fail-safe path", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			writeProject({ runnerCommand: ["myrunner"] }); // 旧行为下这会 throw → fail-safe warn
+			expect(getSandboxConfig()).toEqual(DEFAULT_SANDBOX_CONFIG);
+			expect(warn).not.toHaveBeenCalled();
 		} finally {
 			warn.mockRestore();
 		}

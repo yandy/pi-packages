@@ -81,7 +81,7 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 
 ## 配置
 
-`~/.pi/agent/sandbox.json`（全局）与 `<项目>/.pi/sandbox.json`（项目），逐字段 项目 > 全局 > 默认：
+只读一个文件：`~/.pi/agent/sandbox.json`（全局）。项目级 `<项目>/.pi/sandbox.json` 被**静默忽略**——不解析、不校验、不告警（项目目录对受限模型可写，配置层留在那里等于把改写自己 `mode` / `runnerCommand` 的能力交给模型）。文件缺失/损坏与非法取值的回落行为不变。
 
 ```json
 {
@@ -110,10 +110,10 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 
 ## 从 pi-container-sandbox 1.x 迁移
 
-- 配置文件位置不变（`~/.pi/agent/sandbox.json`、`<project>/.pi/sandbox.json`）；旧 `image`/`runtime`/`host` 段会被忽略并告警，按需改写为上面的新字段
+- 配置只认 `~/.pi/agent/sandbox.json`：项目级 `<项目>/.pi/sandbox.json` 被静默忽略（原本依赖的项目设置请移到全局文件）；旧 `image`/`runtime`/`host` 段会被忽略并告警，按需改写为上面的新字段
 - 容器运行时（docker/podman）、镜像构建、`runtime.mounts`、`/sandbox` 命令、`--container*` flags、外部路径审批流不属于本包
 - 需要容器级强隔离（独立文件系统/网络命名空间）请安装 `@yandy0725/pi-container-sandbox`（保留容器实现）
-- `pi-sandbox` 与 `@yandy0725/pi-container-sandbox` **互斥**：两者都接管 `bash`/`write`/`edit`，且共用同一个 `sandbox.json`（schema 不兼容）——同一时刻只启用一个，切换前先卸载或停用另一个
+- `pi-sandbox` 与 `@yandy0725/pi-container-sandbox` **互斥**：两者都接管 `bash`/`write`/`edit`，且共用同一个全局 `~/.pi/agent/sandbox.json`（schema 不兼容）——同一时刻只启用一个，切换前先卸载或停用另一个。pi-sandbox 忽略项目级文件；pi-container-sandbox 仍读它自己的项目 scope
 
 ## 开发
 

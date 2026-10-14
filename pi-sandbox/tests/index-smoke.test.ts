@@ -119,16 +119,12 @@ describe("extension activate", () => {
 		expect(processPermissionState.override).toBe("danger-full-access");
 	});
 
-	it("corrupt project config: activate does not throw, falls back to defaults, still registers everything (I2)", async () => {
-		// 违规配置（runnerCommand 无配对 signatures → validateSandboxConfig throw）写在临时项目里，
-		// chdir 过去让 activate 的 process.cwd() 命中它；PI_CODING_AGENT_DIR 已被 beforeEach 隔离。
-		const projectDir = join(dir, "project");
-		mkdirSync(join(projectDir, ".pi"), { recursive: true });
-		writeFileSync(join(projectDir, ".pi", "sandbox.json"), JSON.stringify({ runnerCommand: ["myrunner"] }));
+	it("corrupt global config: activate does not throw, falls back to defaults, still registers everything (I2)", async () => {
+		// 违规配置（runnerCommand 无配对 signatures → validateSandboxConfig throw）写在隔离的全局配置里
+		// （beforeEach 的 PI_CODING_AGENT_DIR 已把 getAgentDir() 指向临时目录）。
+		writeFileSync(join(dir, "agent", "sandbox.json"), JSON.stringify({ runnerCommand: ["myrunner"] }));
 		const { fakePi, tools, commands } = makeFakePi();
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		const prevCwd = process.cwd();
-		process.chdir(projectDir);
 		try {
 			const activate = (await import("../index")).default;
 			expect(() => activate(fakePi as never)).not.toThrow();
@@ -136,19 +132,17 @@ describe("extension activate", () => {
 			expect(commands).toEqual(["permission"]);
 			expect(warn.mock.calls.flat().join(" ")).toMatch(/falling back to defaults/u);
 		} finally {
-			process.chdir(prevCwd);
 			warn.mockRestore();
 		}
 	});
 
 	it("status shows bypassed before custom runner when mode is danger-full-access (Ruling 19)", async () => {
-		const proj = mkdtempSync(join(tmpdir(), "proj-"));
-		mkdirSync(join(proj, ".pi"), { recursive: true });
-		writeFileSync(join(proj, ".pi", "sandbox.json"), JSON.stringify({
+		writeFileSync(join(dir, "agent", "sandbox.json"), JSON.stringify({
 			mode: "danger-full-access",
 			runnerCommand: ["myrunner"],
 			runnerFailureSignatures: ["myrunner: "],
 		}));
+		const proj = mkdtempSync(join(tmpdir(), "proj-"));
 		try {
 			const { fakePi, commandHandlers } = makeFakePi();
 			const activate = (await import("../index")).default;

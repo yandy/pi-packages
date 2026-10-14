@@ -114,7 +114,7 @@ export default function (pi: ExtensionAPI) {
 	const cwd = process.cwd();
 	// I2 fail-safe：坏配置在此 warn 并回落 DEFAULT（仍是受约束的 workspace-write），
 	// 绝不 throw——throw 会让 pi 把整个扩展置 null，三个基础工具随即无沙箱裸跑（fail-open）。
-	getSandboxConfig(cwd);
+	getSandboxConfig();
 
 	// C1：/permission 覆盖用进程级模块单例（spec §9）——pi 对每个会话（含 subagent 子会话）
 	// 重新调用本 factory，activate 闭包不跨会话共享；模块单例才能覆盖父/子全部会话。
@@ -136,7 +136,7 @@ export default function (pi: ExtensionAPI) {
 		// C2：pi 从不 chdir，会话 cwd 只经命令 ctx.cwd 可达；空串回落 activate 时 cwd。
 		describeStatus: (statusCwd) => {
 			const effectiveCwd = statusCwd || cwd;
-			const cfg = getSandboxConfig(effectiveCwd);
+			const cfg = getSandboxConfig();
 			const effective = processPermissionState.override ?? cfg.mode;
 			const source = processPermissionState.override !== null ? "/permission override" : "config default";
 			let runnerText: string;

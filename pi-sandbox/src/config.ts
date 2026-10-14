@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
-import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { isSandboxMode, type SandboxMode } from "./policy";
 
 /** sandbox.json schema v2（spec §5）。1.x 的 image/runtime/host 组已删除。 */
@@ -21,10 +21,6 @@ export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
 };
 
 const LEGACY_GROUPS = ["image", "runtime", "host"] as const;
-
-export function getSandboxConfigPath(hostCwd: string): string {
-	return resolvePath(hostCwd, CONFIG_DIR_NAME, "sandbox.json");
-}
 
 function readJsonFile(path: string): Record<string, unknown> | null {
 	try {
@@ -81,44 +77,37 @@ export function validateSandboxConfig(raw: Record<string, unknown>, source: stri
 	};
 }
 
-export function loadSandboxConfig(hostCwd: string): SandboxConfig {
+/**
+ * 只读全局配置 `~/.pi/agent/sandbox.json`（2026-10-14 决策）。项目级 `<cwd>/.pi/sandbox.json`
+ * 被**静默忽略**：项目目录对模型可写，把配置层留在那里等于把 mode / runnerCommand 的改写权
+ * 交给模型；不解析、不校验、不告警（决策与被否方案见 docs/superpowers/specs/2026-10-14-global-only-config-decision.md）。
+ */
+export function loadSandboxConfig(): SandboxConfig {
 	const globalPath = resolvePath(getAgentDir(), "sandbox.json");
-	const projectPath = getSandboxConfigPath(hostCwd);
 	const globalRaw = readJsonFile(globalPath) ?? {};
-	const projectRaw = readJsonFile(projectPath) ?? {};
 
-	for (const [raw, path] of [[globalRaw, globalPath], [projectRaw, projectPath]] as const) {
-		for (const key of LEGACY_GROUPS) {
-			if (key in raw) console.warn(`sandbox: ignoring legacy "${key}" section in ${path} (removed in 2.0; see README migration notes)`);
-		}
+	for (const key of LEGACY_GROUPS) {
+		if (key in globalRaw) console.warn(`sandbox: ignoring legacy "${key}" section in ${globalPath} (removed in 2.0; see README migration notes)`);
 	}
 
-	// 逐字段合并：项目 > 全局 > 默认
-	const merged: Record<string, unknown> = {};
-	for (const key of Object.keys(DEFAULT_SANDBOX_CONFIG)) {
-		const value = projectRaw[key] ?? globalRaw[key];
-		if (value !== undefined) merged[key] = value;
-	}
-	return validateSandboxConfig(merged, "sandbox.json");
+	return validateSandboxConfig(globalRaw, globalPath);
 }
 
-const configCache = new Map<string, SandboxConfig>();
+let cachedConfig: SandboxConfig | undefined;
 
-/** 安全加载（fail-safe，I2）：任何加载/校验错误回落默认配置（仍是受约束的 workspace-write），按 cwd 缓存。 */
-export function getSandboxConfig(hostCwd: string): SandboxConfig {
-	let cached = configCache.get(hostCwd);
-	if (!cached) {
+/** 安全加载（fail-safe，I2）：任何加载/校验错误回落默认配置（仍是受约束的 workspace-write），进程内缓存一次。 */
+export function getSandboxConfig(): SandboxConfig {
+	if (cachedConfig === undefined) {
 		try {
-			cached = loadSandboxConfig(hostCwd);
+			cachedConfig = loadSandboxConfig();
 		} catch (err) {
 			console.warn(`sandbox: failed to load config, falling back to defaults (mode "${DEFAULT_SANDBOX_CONFIG.mode}"): ${err instanceof Error ? err.message : String(err)}`);
-			cached = DEFAULT_SANDBOX_CONFIG;
+			cachedConfig = DEFAULT_SANDBOX_CONFIG;
 		}
-		configCache.set(hostCwd, cached);
 	}
-	return cached;
+	return cachedConfig;
 }
 
 export function resetSandboxConfigCache(): void {
-	configCache.clear();
+	cachedConfig = undefined;
 }
