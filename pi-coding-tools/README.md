@@ -21,7 +21,7 @@ Servers are started with the pi session working directory as their root, so proj
 
 | Language | LSP server | Install |
 |------|-----------|------|
-| TypeScript/JavaScript | typescript-language-server | `npm i -g typescript-language-server typescript@6` |
+| TypeScript/JavaScript | tsc (native, TypeScript ≥ 7) → typescript-language-server | nothing for TypeScript ≥ 7; for ≤ 6: `npm i -g typescript-language-server typescript@6` |
 | Python | pyright | `npm i -g pyright` |
 | Java | jdtls | Eclipse JDT LS (needs Java 21+) |
 | Kotlin | kotlin-language-server | [fwcd/kotlin-language-server](https://github.com/fwcd/kotlin-language-server) (needs JDK 11+) |
@@ -29,12 +29,13 @@ Servers are started with the pi session working directory as their root, so proj
 
 Prerequisites beyond the server binary itself:
 
-- **TypeScript/JavaScript** — the server also needs a TypeScript that ships `lib/tsserver.js`. It looks for
-  one in `<project>/node_modules/typescript/lib` (walking up from the session working directory) and falls
-  back to one installed next to the server itself (i.e. a global `typescript`). `typescript` 7.x is the
-  native port and has no `tsserver.js`, so it cannot be used; install `typescript@6` globally, or in the
-  project (`npm i -D typescript@6`) to pin it per repository. With no usable TypeScript, every `lsp_*` call
-  on a js/ts file fails with `Could not find a valid TypeScript installation`.
+- **TypeScript/JavaScript** — when the nearest `typescript` (walking up from the session working directory) is
+  ≥ 7, the LSP built into it is used: `tsc --lsp --stdio` — no extra install, no `tsserver.js` involved.
+  Force the fallback with `lsp.servers.tsc.disabled`. Older projects (TypeScript ≤ 6) fall back to
+  typescript-language-server, which needs a TypeScript that ships `lib/tsserver.js`: install it globally
+  (`npm i -g typescript-language-server typescript@6`), or in the project (`npm i -D typescript@6`) to pin it
+  per repository. `typescript` 7.x is the native port and has no `tsserver.js`, so it cannot serve as that
+  fallback; with no usable TypeScript the server fails with `Could not find a valid TypeScript installation`.
 - **Python** — none: no interpreter or virtualenv is required to resolve standard-library symbols.
 - **Java** — Java 21+ on `JAVA_HOME` or `PATH`. The `jdtls` wrapper picks its own `-data` directory.
 - **Kotlin** — JDK 11+. The classpath is resolved with Gradle, Maven or a `kls-classpath` script, so a lone
@@ -46,8 +47,8 @@ Prerequisites beyond the server binary itself:
 
 `ast_grep_search` supports ts/tsx/js/python/java/kotlin/c/cpp and needs no LSP. Languages outside this
 list (Rust, Go, Ruby, …) are not covered: `ast_grep_*` rejects unknown `lang` values, and `lsp_*` only knows
-the five servers above — for any other file it returns `No LSP server for <path>`. Configuration can
-override those five servers but cannot register new ones.
+the languages above — for any other file it returns `No LSP server for <path>`. Configuration can override
+the built-in servers but cannot register new ones.
 
 ### ast-grep 二进制
 
@@ -77,6 +78,8 @@ Full shape:
 ```
 
 Per-server overrides also accept `command` (string array, e.g. `["clangd", "--background-index"]`).
+Built-in server ids: `tsc` (native TypeScript ≥ 7), `typescript-language-server`, `pyright`, `jdtls`,
+`kotlin-language-server`, `clangd`.
 
 ### Global config
 
