@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -610,5 +610,48 @@ describe("T15: 平台门控与 pwsh 未激活提示（Ruling 8/9）", () => {
 		} finally {
 			warn.mockRestore();
 		}
+	});
+});
+
+/**
+ * spec 2026-10-14 §9.5：/permission 状态行列出解析后的额外可写根。
+ * `writableRoots` 是 global-only（Ruling 2a），所以夹具写在被 stub 的 agentDir 下，
+ * 而不是项目级 `.pi/sandbox.json`（写在那里会被忽略，那正是 Ruling 2a 要的行为）。
+ */
+describe("/permission status lists extra writable roots", () => {
+	async function statusFor(globalConfig: unknown, cwd: string) {
+		writeFileSync(join(dir, "agent", "sandbox.json"), JSON.stringify(globalConfig));
+		const { fakePi, commandHandlers } = makeFakePi();
+		const activate = (await import("../index")).default;
+		activate(fakePi as never);
+		const notify = vi.fn();
+		await commandHandlers.permission.handler("", { ui: { notify }, cwd });
+		return notify.mock.calls[0][0] as string;
+	}
+
+	it("shows the resolved roots under workspace-write", async () => {
+		const cacheDir = join(dir, "cache");
+		mkdirSync(cacheDir, { recursive: true });
+		const text = await statusFor({ writableRoots: [cacheDir] }, dir);
+		expect(text).toContain("extra writable roots:");
+		expect(text).toContain(realpathSync.native(cacheDir));
+	});
+
+	it("says so when none of the configured entries resolved, instead of staying silent", async () => {
+		const text = await statusFor({ writableRoots: [join(dir, "never-created")] }, dir);
+		expect(text).toContain("extra writable roots: (none of the configured entries resolved)");
+	});
+
+	it("omits the line when nothing is configured", async () => {
+		const text = await statusFor({}, dir);
+		expect(text).not.toContain("extra writable roots");
+	});
+
+	it("omits the line outside workspace-write (the roots would be ignored anyway)", async () => {
+		const cacheDir = join(dir, "cache");
+		mkdirSync(cacheDir, { recursive: true });
+		const text = await statusFor({ mode: "danger-full-access", writableRoots: [cacheDir] }, dir);
+		expect(text).not.toContain("extra writable roots");
+		expect(text).toContain("bypassed (danger-full-access)");
 	});
 });

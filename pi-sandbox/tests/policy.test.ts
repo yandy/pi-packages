@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -32,6 +32,22 @@ describe("writableRoots", () => {
 		// 平台无关：缺省 tmp 根由 defaultTmpRoots(platform) 推导（POSIX 为 "/tmp" + os.tmpdir()，win32 只有 %TEMP%）。
 		for (const tmp of defaultTmpRoots(process.platform)) expect(roots).toContain(canonicalPath(tmp));
 		expect(new Set(roots).size).toBe(roots.length);
+	});
+	// spec 2026-10-14 §5.1：第 4 参是已解析的额外根，只做合并去重，不再校验（规则集中在 config.ts）。
+	it("appends extraRoots and dedupes them against the workspace", () => {
+		const extra = join(dir, "extra");
+		mkdirSync(extra, { recursive: true });
+		const roots = writableRoots("workspace-write", dir, ["/tmp"], [extra, canonicalPath(dir)]);
+		expect(roots).toEqual([canonicalPath(dir), "/tmp", canonicalPath(extra)]);
+	});
+	it("extraRoots are ignored outside workspace-write", () => {
+		const extra = join(dir, "extra");
+		mkdirSync(extra, { recursive: true });
+		expect(writableRoots("read-only", dir, ["/tmp"], [extra])).toEqual([]);
+		expect(writableRoots("danger-full-access", dir, ["/tmp"], [extra])).toEqual([]);
+	});
+	it("defaults to no extra roots, so pre-v3 call sites are byte-identical", () => {
+		expect(writableRoots("workspace-write", dir)).toEqual(writableRoots("workspace-write", dir, defaultTmpRoots(), []));
 	});
 });
 

@@ -37,6 +37,69 @@ describe("bwrapProfileArgs", () => {
 	});
 });
 
+/**
+ * spec 2026-10-14 §5.2：额外根一律**追加在末尾**，`extraRoots` 为空时 argv 与引入它之前逐字节相同
+ * （上面三个旧用例不改即证明）。去重防止用户把 `/tmp` 也写进配置时 bwrap 收到重复的 `--bind /tmp /tmp`。
+ */
+describe("extraRoots across the runners", () => {
+	const extra = { mode: "workspace-write" as const, workspaceRoot: WS, extraRoots: ["/home/u/.cache/uv", "/opt/scratch"] };
+
+	it("bwrap appends one --bind per extra root, after /tmp and the workspace", () => {
+		expect(bwrapProfileArgs(extra)).toEqual([
+			"--ro-bind", "/", "/", "--dev", "/dev", "--unshare-pid", "--proc", "/proc", "--die-with-parent",
+			"--bind", "/tmp", "/tmp", "--bind", WS, WS,
+			"--bind", "/home/u/.cache/uv", "/home/u/.cache/uv",
+			"--bind", "/opt/scratch", "/opt/scratch",
+		]);
+	});
+
+	it("bwrap dedupes an extra root that is already bound (/tmp, the workspace)", () => {
+		const dup = { mode: "workspace-write" as const, workspaceRoot: WS, extraRoots: ["/tmp", WS, "/opt/scratch"] };
+		const args = bwrapProfileArgs(dup);
+		// 三个不同的根 → 三次 --bind（重复的 /tmp 与 workspace 不再绑第二遍；否则 bwrap 会收到重复挂载）。
+		expect(args.filter((a) => a === "--bind")).toHaveLength(3);
+		expect(args).toEqual(bwrapProfileArgs({ mode: "workspace-write", workspaceRoot: WS, extraRoots: ["/opt/scratch"] }));
+	});
+
+	it("landlock appends one --rw per extra root", () => {
+		expect(landlockProfileArgs(extra)).toEqual([
+			"--ro", "/", "--rw", "/dev/null", "--rw", "/tmp", "--rw", WS,
+			"--rw", "/home/u/.cache/uv", "--rw", "/opt/scratch",
+		]);
+	});
+
+	it("seatbelt grants a subpath per extra root via the shared writableRoots derivation", () => {
+		const profile = seatbeltProfileArgs(extra)[1];
+		expect(profile).toContain('(subpath "/home/u/.cache/uv")');
+		expect(profile).toContain('(subpath "/opt/scratch")');
+	});
+
+	it("read-only grants nothing, extra roots included", () => {
+		const roExtra = { mode: "read-only" as const, workspaceRoot: WS, extraRoots: ["/opt/scratch"] };
+		expect(bwrapProfileArgs(roExtra)).not.toContain("--bind");
+		expect(landlockProfileArgs(roExtra)).toEqual(["--ro", "/", "--rw", "/dev/null"]);
+		expect(seatbeltProfileArgs(roExtra)[1]).not.toContain("(subpath");
+	});
+
+	it("an empty extraRoots list is byte-identical to omitting the field", () => {
+		const empty = { mode: "workspace-write" as const, workspaceRoot: WS, extraRoots: [] };
+		expect(bwrapProfileArgs(empty)).toEqual(bwrapProfileArgs(wsWrite));
+		expect(landlockProfileArgs(empty)).toEqual(landlockProfileArgs(wsWrite));
+		expect(seatbeltProfileArgs(empty)).toEqual(seatbeltProfileArgs(wsWrite));
+	});
+
+	// Ruling 5：win32 runner 是写死的两根 argv 契约，本期忽略额外根（不对称由 config 层 warn + README 公告）。
+	it("windows-acl ignores extra roots entirely", () => {
+		const availability = { node: "C:\\node.exe", runner: "C:\\pkg\\src\\win32\\runner.js" };
+		const winExtra = { mode: "workspace-write" as const, workspaceRoot: "C:\\ws", extraRoots: ["C:\\cache\\uv"] };
+		expect(windowsAclRunnerArgv(winExtra, availability)).toEqual(windowsAclRunnerArgv(
+			{ mode: "workspace-write", workspaceRoot: "C:\\ws" },
+			availability,
+		));
+		expect(windowsAclRunnerArgv(winExtra, availability).join(" ")).not.toContain("C:\\cache\\uv");
+	});
+});
+
 describe("landlockProfileArgs", () => {
 	it("read-only: ro / plus rw /dev/null", () => {
 		expect(landlockProfileArgs(ro)).toEqual(["--ro", "/", "--rw", "/dev/null"]);

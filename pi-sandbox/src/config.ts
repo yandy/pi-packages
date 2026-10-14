@@ -1,9 +1,11 @@
-import { readFileSync } from "node:fs";
-import { resolve as resolvePath } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { isAbsolute, join, resolve as resolvePath, sep } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
-import { isSandboxMode, type SandboxMode } from "./policy";
+import { isWithinRoots } from "./fence";
+import { canonicalPath, isSandboxMode, type SandboxMode } from "./policy";
 
-/** sandbox.json schema v2（spec §5）。1.x 的 image/runtime/host 组已删除。 */
+/** sandbox.json schema v3（spec 2026-10-14 §4）。1.x 的 image/runtime/host 组已删除。 */
 export interface SandboxConfig {
 	mode: SandboxMode;
 	/** 运维覆盖：自定义 bwrap 兼容 runner argv；必须与 runnerFailureSignatures 成对。 */
@@ -11,6 +13,13 @@ export interface SandboxConfig {
 	runnerFailureSignatures: string[] | null;
 	/** 每个功能探测的超时；必须为正有限数（0 对 Node 意味着无超时）。 */
 	probeTimeoutMs: number;
+	/**
+	 * 额外可写根（超出 workspace + tmp）；仅 workspace-write 下生效。
+	 * 写的是**原始配置字符串**（可带 `~`），由 resolveConfiguredRoots 解析后才成为授予根。
+	 * Ruling 2a：只认全局配置（~/.pi/agent/sandbox.json），项目级条目被忽略——
+	 * 这是放宽边界的键，不能由被检出的仓库自己提供。
+	 */
+	writableRoots: string[];
 }
 
 export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
@@ -18,7 +27,16 @@ export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
 	runnerCommand: null,
 	runnerFailureSignatures: null,
 	probeTimeoutMs: 5000,
+	writableRoots: [],
 };
+
+/**
+ * 只能从全局配置读的键（Ruling 2a）。与 Claude Code 的立场一致：project settings 不能设
+ * `filesystem.disabled`，admin-required 下 repo 的 `allowWrite` 被忽略。pi 自己的项目信任门
+ * （TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES）只覆盖 pi 的 settings.json/extensions/skills/…，
+ * **不**覆盖第三方扩展自读的 sandbox.json，所以这里自己把关。
+ */
+const GLOBAL_ONLY_KEYS: readonly string[] = ["writableRoots"];
 
 const LEGACY_GROUPS = ["image", "runtime", "host"] as const;
 
@@ -73,11 +91,20 @@ export function validateSandboxConfig(raw: Record<string, unknown>, source: stri
 		throw new Error(`sandbox: ${source}: probeTimeoutMs must be a positive finite number`);
 	}
 
+	// 结构性错误 throw（与 runnerCommand 同口径）：getSandboxConfig 的 fail-safe 会回落整份默认并 warn。
+	// 单条条目的问题（相对路径、危险根、不存在）不在这里 throw，而是 resolveConfiguredRoots 里
+	// warn + 丢弃——一条写错的条目不该把用户整份配置打回默认。
+	const writableRoots = raw.writableRoots ?? DEFAULT_SANDBOX_CONFIG.writableRoots;
+	if (!isStringArray(writableRoots)) {
+		throw new Error(`sandbox: ${source}: writableRoots must be a string array`);
+	}
+
 	return {
 		mode,
 		runnerCommand: runnerCommand as string[] | null,
 		runnerFailureSignatures: runnerFailureSignatures as string[] | null,
 		probeTimeoutMs,
+		writableRoots: [...writableRoots],
 	};
 }
 
@@ -93,11 +120,16 @@ export function loadSandboxConfig(hostCwd: string): SandboxConfig {
 		}
 	}
 
-	// 逐字段合并：项目 > 全局 > 默认
+	// 逐字段合并：项目 > 全局 > 默认；GLOBAL_ONLY_KEYS 例外，只取全局（Ruling 2a）
 	const merged: Record<string, unknown> = {};
 	for (const key of Object.keys(DEFAULT_SANDBOX_CONFIG)) {
-		const value = projectRaw[key] ?? globalRaw[key];
+		const value = GLOBAL_ONLY_KEYS.includes(key) ? globalRaw[key] : (projectRaw[key] ?? globalRaw[key]);
 		if (value !== undefined) merged[key] = value;
+	}
+	if (projectRaw.writableRoots !== undefined) {
+		console.warn(
+			`sandbox: ignoring project-level "writableRoots" in ${projectPath} — keys that widen the sandbox boundary are honored only from the global ${globalPath}`,
+		);
 	}
 	return validateSandboxConfig(merged, "sandbox.json");
 }
@@ -121,4 +153,129 @@ export function getSandboxConfig(hostCwd: string): SandboxConfig {
 
 export function resetSandboxConfigCache(): void {
 	configCache.clear();
+}
+
+/**
+ * 额外可写根的解析告警去重：配置按 cwd 缓存、解析按工具调用发生，
+ * 不去重会每条命令刷一次同样的 warn。
+ */
+const configuredRootWarnings = new Set<string>();
+
+/** 仅供测试复位告警去重集（生产代码不得调用）。 */
+export function resetConfiguredRootsWarningsForTests(): void {
+	configuredRootWarnings.clear();
+}
+
+/** resolveConfiguredRoots 的测试注入点（testing.md「参数注入」）；生产全部不传。 */
+export interface ConfiguredRootsHooks {
+	/** 缺省 os.homedir()。 */
+	homeDir?: string;
+	/** 缺省 getAgentDir()（取不到则跳过该条危险根规则）；显式 null = 模拟取不到。 */
+	agentDir?: string | null;
+	/** 缺省 node:fs existsSync。 */
+	exists?: (path: string) => boolean;
+	/** 缺省 console.warn（经去重集）。 */
+	warn?: (message: string) => void;
+	/** 围栏比较是否大小写敏感；缺省按 process.platform 推导（与 fence 同口径）。 */
+	caseSensitive?: boolean;
+	/** 缺省 process.platform；win32 时额外公告 runner 侧不支持（Ruling 5）。 */
+	platform?: string;
+}
+
+/**
+ * `~` 展开：只认 `~` 与 `~/…`（win32 也认 `~\…`）。
+ * **不**展开 `$HOME` / `%USERPROFILE%`：“谁的环境”会成为隐式输入，而配置是按 cwd 跨会话缓存的。
+ * `~user/…` 也不展开（不查 passwd），会按相对路径被丢弃。
+ */
+function expandHome(entry: string, homeDir: string): string {
+	if (entry === "~") return homeDir;
+	if (entry.startsWith("~/")) return join(homeDir, entry.slice(2));
+	if (sep === "\\" && entry.startsWith("~\\")) return join(homeDir, entry.slice(2));
+	return entry;
+}
+
+function defaultAgentDir(): string | null {
+	try {
+		return getAgentDir();
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * 把配置里的 `writableRoots` 解析成生效的授予根（spec 2026-10-14 §4.3）。
+ *
+ * 每步失败都是 **warn + 丢弃该条**，不 throw：
+ * 1. `~` 展开；
+ * 2. 必须绝对路径（裸盘符 `C:` 与盘符相对路径 `C:work` 在 node:path 下本就不是 absolute，自然被丢）；
+ * 3. 危险根拒绝：等于或包含 homedir（含 `/`、`/home`、`/Users` 这些祖先）或 pi 的 agentDir。
+ *    包含判定用 fence 的 isWithinRoots 口径（分隔符边界 + 平台大小写敏感性 + dev/ino 身份回退），
+ *    避免 `C:\work` 命中 `C:\workshop`；
+ * 4. 存在性过滤：bwrap 的 `--bind <src> <src>` 对不存在的 src 硬失败，landlock 授权与 win32 的 ACL
+ *    授权同理；若只让围栏放行而 runner 跳过，就会出现“write 工具说可以、bash 说 EROFS”的漂移，
+ *    而 pi 的 write 工具会 mkdir -p 父目录——那等于围栏侧真的在 workspace 外创建了目录（fail-open）。
+ *    故**围栏与四个 runner 必须用同一份过滤后的列表**；沙箱也不因为“解析配置”就在文件系统上产生副作用；
+ * 5. canonical + 去重。
+ *
+ * 每次工具调用重新解析（不缓存）：目录可能稍后才被创建，按调用重算能自然拾到。
+ */
+export function resolveConfiguredRoots(raw: readonly string[], hooks: ConfiguredRootsHooks = {}): string[] {
+	const platform = hooks.platform ?? process.platform;
+	if (raw.length === 0) return [];
+	const homeDir = canonicalPath(hooks.homeDir ?? homedir());
+	const agentDir = hooks.agentDir !== undefined ? hooks.agentDir : defaultAgentDir();
+	const exists = hooks.exists ?? existsSync;
+	const caseSensitive = hooks.caseSensitive ?? platform !== "win32";
+	const warn = hooks.warn ?? ((message: string) => console.warn(message));
+	const warnOnce = (key: string, message: string) => {
+		if (configuredRootWarnings.has(key)) return;
+		configuredRootWarnings.add(key);
+		warn(message);
+	};
+
+	const resolved: string[] = [];
+	for (const entry of raw) {
+		const drop = (reason: string) =>
+			warnOnce(
+				`${entry}\u0000${reason}`,
+				`sandbox: writableRoots entry ${JSON.stringify(entry)} ignored: ${reason}`,
+			);
+		const trimmed = entry.trim();
+		if (trimmed.length === 0) {
+			drop("it is empty");
+			continue;
+		}
+		const expanded = expandHome(trimmed, homeDir);
+		if (!isAbsolute(expanded)) {
+			drop("it is not an absolute path (only absolute paths and `~` are accepted)");
+			continue;
+		}
+		const canonical = canonicalPath(expanded);
+		if (homeDir.length > 0 && isWithinRoots(homeDir, [canonical], caseSensitive)) {
+			drop("it is or contains your home directory — that would defeat the sandbox");
+			continue;
+		}
+		if (agentDir !== null && agentDir.length > 0 && isWithinRoots(canonicalPath(agentDir), [canonical], caseSensitive)) {
+			drop("it is or contains pi's agent directory — the sandbox must not be able to rewrite pi's own config");
+			continue;
+		}
+		if (!exists(canonical)) {
+			drop(
+				"it does not exist — the runners cannot grant a missing path (create the directory first, then it takes effect)",
+			);
+			continue;
+		}
+		if (!resolved.includes(canonical)) resolved.push(canonical);
+	}
+
+	// Ruling 5：win32 的 windows-acl runner 是写死的两根 argv 契约（--workspace / --temp），
+	// 本期不支持 N 根。围栏（write/edit）全平台生效，所以这里是不对称的——向 fail-closed 方向（bash 更窄），
+	// 但必须显式公告，不能静默。
+	if (resolved.length > 0 && platform === "win32") {
+		warnOnce(
+			"win32-runner-ignores-extra-roots",
+			`sandbox: writableRoots (${resolved.length} root(s)) apply to the write/edit tools on Windows, but the windows-acl runner still confines powershell to the workspace + %TEMP% only`,
+		);
+	}
+	return resolved;
 }

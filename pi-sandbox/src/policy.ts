@@ -27,17 +27,22 @@ export function canonicalPath(path: string): string {
 
 /**
  * workspace-write = workspace + tmp 根（缺省 defaultTmpRoots()：POSIX 为 "/tmp" + os.tmpdir()，
- * win32 只有 os.tmpdir()，即 %TEMP%）（canonical、去重）；read-only 为空。
+ * win32 只有 os.tmpdir()，即 %TEMP%）+ 配置的额外根（canonical、去重）；read-only 为空。
  * seatbelt profile 与 fs 围栏共用此推导，防止语义漂移（spec §4）——两侧都不传 tmpRoots，
  * 缺省值即生产语义；tmpRoots 仅供测试注入（testing.md「参数注入」）。
+ *
+ * `extraRoots` 是 sandbox.json 的 `writableRoots` 经 config.resolveConfiguredRoots 解析后的产物
+ * （已 ~ 展开、已拒危险根、已按存在性过滤、已 canonical），本函数只做合并去重，不再校验——
+ * 解析规则集中在 config.ts 一处，四个 runner 与围栏消费同一份结果（spec 2026-10-14 §5）。
  */
 export function writableRoots(
 	mode: SandboxMode,
 	workspaceRoot: string,
 	tmpRoots: readonly string[] = defaultTmpRoots(),
+	extraRoots: readonly string[] = [],
 ): string[] {
 	if (mode !== "workspace-write") return [];
-	return [...new Set([workspaceRoot, ...tmpRoots].map(canonicalPath))];
+	return [...new Set([workspaceRoot, ...tmpRoots, ...extraRoots].map(canonicalPath))];
 }
 
 /** win32 没有 POSIX 的 /tmp：tmp 根只有 os.tmpdir()（%TEMP%，spec §5；platform 可注入以便单测）。 */

@@ -113,11 +113,22 @@ export function sandboxDenialMarker(mode: SandboxMode): string {
 }
 
 /**
+ * 拒绝后才下发的自救配方（Ruling 6，spec 2026-10-14 §6）：工具把状态写到围栏外（多是 `~/.cache`
+ * 这类）时，模型往往只会想到“提权”，而从 workspace-write 往上只剩 danger-full-access 一级——
+ * 为一次 cache 写升到完全脱沙箱，还得弹窗打扰用户。把“把工具状态指向可写根”的具体配方放在决策点，
+ * 大多数这类拒绝模型自己就能绕过去。只对 command 下发：write/edit 的拒绝与工具 cache 无关。
+ * 放在按需付费的拒绝提示里而不是工具描述里：后者每条调用都进上下文（提示预算见 tools.ts）。
+ */
+const COMMAND_REMEDY =
+	" before escalating, prefer redirecting the tool's state into a writable root (e.g. UV_CACHE_DIR=/tmp/uv-cache, PIP_CACHE_DIR=/tmp/pip-cache, npm_config_cache=/tmp/npm-cache, GOCACHE=/tmp/go-build, pnpm install --store-dir /tmp/pnpm-store);";
+
+/**
  * 随拒绝下发的同轮提示（按需付费）：先给"不用提权的出路"（可写根），再给提权配方——
  * nudge 放在决策点，不依赖模型回忆工具描述（常态提示预算见 tools.ts 的提示预算说明）。
  */
 export function escalationHintMarker(subject: "command" | "operation"): string {
-	return `[sandbox: escalation available — writable here: the workspace + /tmp; retry this exact ${subject} once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]`;
+	const remedy = subject === "command" ? COMMAND_REMEDY : "";
+	return `[sandbox: escalation available — writable here: the workspace + /tmp;${remedy} retry this exact ${subject} once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]`;
 }
 
 /**

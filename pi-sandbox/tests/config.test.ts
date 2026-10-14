@@ -113,4 +113,55 @@ describe("validateSandboxConfig", () => {
 		expect(() => validateSandboxConfig({ probeTimeoutMs: Number.NaN }, "t")).toThrow(/probeTimeoutMs/);
 		expect(validateSandboxConfig({ probeTimeoutMs: 100 }, "t").probeTimeoutMs).toBe(100);
 	});
+	// schema v3（spec 2026-10-14 §4.1）：结构性错误 throw（与 runnerCommand 同口径，由 getSandboxConfig
+	// 的 fail-safe 回落整份默认）；单条条目的问题不 throw，由 resolveConfiguredRoots warn + 丢弃。
+	it("writableRoots defaults to an empty array and passes a string array through (copied, not aliased)", () => {
+		expect(validateSandboxConfig({}, "t").writableRoots).toEqual([]);
+		const input = ["~/.cache/uv"];
+		const cfg = validateSandboxConfig({ writableRoots: input }, "t");
+		expect(cfg.writableRoots).toEqual(["~/.cache/uv"]);
+		expect(cfg.writableRoots).not.toBe(input);
+	});
+	it("writableRoots must be a string array", () => {
+		for (const bad of ["~/.cache", 42, [1], ["ok", 2], {}]) {
+			expect(() => validateSandboxConfig({ writableRoots: bad }, "t"), JSON.stringify(bad)).toThrow(/writableRoots/);
+		}
+	});
+	it("writableRoots: null means unset (same `??` convention as runnerCommand), not an error", () => {
+		expect(validateSandboxConfig({ writableRoots: null }, "t").writableRoots).toEqual([]);
+	});
+});
+
+describe("writableRoots is global-only (Ruling 2a)", () => {
+	it("takes the value from the global config", () => {
+		writeGlobal({ writableRoots: ["~/.cache/uv"] });
+		expect(loadSandboxConfig(projectDir).writableRoots).toEqual(["~/.cache/uv"]);
+	});
+	it("ignores a project-level value and says so", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			writeProject({ writableRoots: ["/etc"] });
+			expect(loadSandboxConfig(projectDir).writableRoots).toEqual([]);
+			expect(warn.mock.calls.flat().join(" ")).toMatch(/ignoring project-level "writableRoots"/u);
+		} finally {
+			warn.mockRestore();
+		}
+	});
+	it("does not let a project-level value shadow the global one", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			writeGlobal({ writableRoots: ["~/.cache/uv"] });
+			writeProject({ writableRoots: ["/etc"] });
+			expect(loadSandboxConfig(projectDir).writableRoots).toEqual(["~/.cache/uv"]);
+		} finally {
+			warn.mockRestore();
+		}
+	});
+	it("project level still wins for the non-widening keys", () => {
+		writeGlobal({ mode: "read-only", probeTimeoutMs: 1000 });
+		writeProject({ mode: "workspace-write" });
+		const cfg = loadSandboxConfig(projectDir);
+		expect(cfg.mode).toBe("workspace-write");
+		expect(cfg.probeTimeoutMs).toBe(1000);
+	});
 });

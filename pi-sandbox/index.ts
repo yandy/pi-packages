@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getSandboxConfig } from "./src/config";
+import { getSandboxConfig, resolveConfiguredRoots } from "./src/config";
 import { getDenialLedger } from "./src/denial-ledger";
 import { getEscalationBroker } from "./src/escalation-broker";
 import { createPermissionCommand, processPermissionState } from "./src/permission";
@@ -157,6 +157,14 @@ export default function (pi: ExtensionAPI) {
 				`runner: ${runnerText}`,
 				`workspace: ${canonicalPath(effectiveCwd)}`,
 			];
+			// 额外可写根只在 workspace-write 下有意义（read-only 忽略、danger-full-access 不经围栏/runner）。
+			// 只在用户真配了的时候才占一行；解析后的结果为空（全被丢弃）也要说，否则“我配了为什么不生效”无从查起。
+			if (effective === "workspace-write" && cfg.writableRoots.length > 0) {
+				const roots = resolveConfiguredRoots(cfg.writableRoots);
+				// Ruling 5：win32 上围栏（write/edit）生效而 windows-acl runner 忽略，不对称必须说出来。
+				const scope = process.platform === "win32" ? " (write/edit only; the windows-acl runner ignores them)" : "";
+				lines.push(`extra writable roots: ${roots.length > 0 ? roots.join(", ") : "(none of the configured entries resolved)"}${scope}`);
+			}
 			const shellLine = win32ShellStatusLine(pi);
 			if (shellLine !== null) lines.push(shellLine);
 			return lines.join("\n");

@@ -218,3 +218,68 @@ describe("classifyDenial", () => {
 		expect(classifyDenial(1, "command not found", ["read-only file system"])).toBe(false);
 	});
 });
+
+/**
+ * spec 2026-10-14 §5：`extraRoots` 从 ConfineOptions 进 RunnerPolicy，再由各 profile 构造器消费。
+ * confine 只透传（额外根已在 config.resolveConfiguredRoots 里 canonical + 存在性过滤过），
+ * 所以这里断言的是「透传到了哪个后端」，而不是解析规则本身。
+ */
+describe("confine extraRoots", () => {
+	const extraRoots = ["/home/u/.cache/uv"];
+
+	it("bwrap binds each extra root before the '--' separator", () => {
+		const result = confine(["true"], "workspace-write", "/ws", {
+			selected: { runner: "bwrap", enforcement: "full" },
+			extraRoots,
+		});
+		const sep = result.argv.indexOf("--");
+		expect(result.argv.slice(0, sep)).toEqual([
+			"bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--unshare-pid", "--proc", "/proc", "--die-with-parent",
+			"--bind", "/tmp", "/tmp", "--bind", "/ws", "/ws", "--bind", "/home/u/.cache/uv", "/home/u/.cache/uv",
+		]);
+	});
+
+	it("landlock grants each extra root read-write", () => {
+		const result = confine(["true"], "workspace-write", "/ws", {
+			selected: { runner: "landlock", enforcement: "full" },
+			hooks,
+			extraRoots,
+		});
+		expect(result.argv.slice(0, result.argv.indexOf("--"))).toEqual([
+			"/opt/landlock-run", "--ro", "/", "--rw", "/dev/null", "--rw", "/tmp", "--rw", "/ws",
+			"--rw", "/home/u/.cache/uv",
+		]);
+	});
+
+	it("a custom runnerCommand receives the same bwrap-dialect profile, extra roots included (failure mode 9)", () => {
+		const result = confine(["true"], "workspace-write", "/ws", {
+			runnerCommand: ["myrunner"],
+			runnerFailureSignatures: ["myrunner: "],
+			extraRoots,
+		});
+		expect(result.argv).toContain("/home/u/.cache/uv");
+		expect(result.argv[result.argv.indexOf("--bind") + 1]).toBe("/tmp");
+	});
+
+	it("read-only confines everything: extra roots never reach the profile", () => {
+		const result = confine(["true"], "read-only", "/ws", {
+			selected: { runner: "bwrap", enforcement: "full" },
+			extraRoots,
+		});
+		expect(result.argv).not.toContain("--bind");
+		expect(result.argv).not.toContain("/home/u/.cache/uv");
+	});
+
+	// Ruling 5：win32 runner 是写死的两根 argv 契约，confine 透传的额外根在那里被有意丢弃。
+	it("windows-acl drops extra roots (Ruling 5)", () => {
+		const availability = { node: "C:\\node.exe", runner: "C:\\pkg\\src\\win32\\runner.js" };
+		const result = confine(["cmd", "/c", "ver"], "workspace-write", "C:\\ws", {
+			selected: { runner: "windows-acl", enforcement: "partial" },
+			hooks: { windowsAclRung: () => availability },
+			extraRoots: ["C:\\cache\\uv"],
+		});
+		expect(result.argv.join(" ")).not.toContain("C:\\cache\\uv");
+		expect(result.argv).toContain("--workspace");
+		expect(result.argv).toContain("--temp");
+	});
+});

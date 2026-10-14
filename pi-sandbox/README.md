@@ -20,8 +20,8 @@ bash commands are wrapped in a platform sandbox runner and spawned locally (**pa
 
 | Platform | Runner | Mechanism |
 |---|---|---|
-| Linux | `bwrap` (preferred) | `--ro-bind / /` whole filesystem read-only + rw binds of the workspace and the host `/tmp` |
-| Linux | `landlock-run` (fallback, precompiled binary shipped with the package) | Landlock LSM allow list: `/` read-only, workspace + `/tmp` writable |
+| Linux | `bwrap` (preferred) | `--ro-bind / /` whole filesystem read-only + rw binds of the workspace, the host `/tmp`, and any configured `writableRoots` |
+| Linux | `landlock-run` (fallback, precompiled binary shipped with the package) | Landlock LSM allow list: `/` read-only, workspace + `/tmp` + any configured `writableRoots` writable |
 | macOS | `sandbox-exec` (built in) | Seatbelt SBPL: `deny file-write*` + workspace/temp exceptions |
 | Windows | `windows-acl` (built in, `partial` enforcement) | Restricted-token sandbox: `WRITE_RESTRICTED` token + capability-SID ACL grants on the workspace and `%TEMP%` + Low mandatory integrity label; **powershell tool only** (`bash` is refused in confined modes) |
 | Other | none | **fail-closed**: confined commands are always refused, never silently run bare |
@@ -33,6 +33,8 @@ The `windows-acl` runner starts each confined command from a `WRITE_RESTRICTED` 
 - **an NTFS hard link aliases the file object**: a hard link to an authorized file inside the workspace is equally writable from outside it
 - **reads are unconfined**: like every other runner here, a confined process can read everything you can read
 - **files tagged by another AppContainer tool's package SID are unreadable** to the Low-integrity child (remove the foreign ACE or reinstall the tree to recover)
+
+Plus one gap specific to this package: **`writableRoots` does not reach the `windows-acl` runner.** Its argv contract is a fixed two roots (`--workspace` / `--temp`); generalizing it to N roots needs a new capability-SID domain-separation scheme, a decision on which capability newly created objects inherit (today: `temp → workspace → Everyone`), and an N-root nesting check. So on Windows `writableRoots` applies to the `write`/`edit` fence only, and confined `powershell` stays limited to the workspace + `%TEMP%`. A warning is printed once when the list is non-empty. The asymmetry is in the fail-closed direction (the shell is narrower than the fence).
 
 The confined shell is the **`powershell` tool only**. On Windows (pi >= 1.0.0) pi-sandbox registers its confined `bash` with `exposure: "hidden"`, which makes it *registered but unreachable*: the model never sees it, and naming it (`defaultTools`, `--tools`, `setActiveTools()`) does not activate it. Keeping the registration is deliberate — extension tools shadow same-named built-ins, so the `bash` name stays occupied by this definition and no unconfined built-in `bash` can be reached on Windows; should a future host change how `hidden` is honored, that definition still refuses every confined call (fail-closed, never spawned). `bash` is never run unconfined here unless you explicitly switch to `danger-full-access`, the only bypass (where it runs bare, as everywhere else).
 
@@ -59,14 +61,14 @@ The bundled `diagnose-windows-sandbox-acl` skill (diagnoses and repairs cases wh
 | Mode | File effects |
 |---|---|
 | `read-only` | only `/dev/null` writable |
-| `workspace-write` (default) | working directory + `/tmp` + `os.tmpdir()` writable, everything else read-only |
+| `workspace-write` (default) | working directory + `/tmp` + `os.tmpdir()` + any configured [`writableRoots`](#extra-writable-roots-writableroots) writable, everything else read-only |
 | `danger-full-access` | sandbox bypassed entirely (explicit escape hatch) |
 
 Network is always allowed (no network isolation).
 
 ## /permission command
 
-- `/permission` — show the current status (mode and source, selected runner and enforcement, workspace)
+- `/permission` — show the current status (mode and source, selected runner and enforcement, workspace, and the resolved extra writable roots when you configured any)
 - `/permission <read-only|workspace-write|danger-full-access>` — switch mode, **process-wide**: the next tool call in the parent session and in every subagent child session adopts it immediately
 
 ## Escalation approval (model-initiated, denial-first)
@@ -88,7 +90,8 @@ The prompt offers **Allow once / Deny**; after choosing Deny you may type an **o
   "mode": "workspace-write",
   "runnerCommand": null,
   "runnerFailureSignatures": null,
-  "probeTimeoutMs": 5000
+  "probeTimeoutMs": 5000,
+  "writableRoots": []
 }
 ```
 
@@ -98,6 +101,33 @@ The prompt offers **Allow once / Deny**; after choosing Deny you may type an **o
 | `runnerCommand` | `null` | custom bwrap-compatible runner argv (must be paired with the next field) |
 | `runnerFailureSignatures` | `null` | fatal diagnostic signatures for the custom runner (non-empty single lines) |
 | `probeTimeoutMs` | `5000` | runner capability probe timeout (positive) |
+| `writableRoots` | `[]` | extra writable directories beyond the workspace + tmp; **honored from the global config only** — see below |
+
+### Extra writable roots (`writableRoots`)
+
+Tool caches are the most common reason a confined command fails: `uv` writes `~/.cache/uv`, `pip` writes `~/.cache/pip`, `npm` writes `~/.npm`, `pnpm`'s store lives at `~/.local/share/pnpm/store`. Under `workspace-write` all of those are read-only, and the only escalation available from there is `danger-full-access` — a high price for a cache write. Two ways out, in order of preference:
+
+1. **Redirect the tool's state into a root that is already writable.** The denial message names the usual variables (`UV_CACHE_DIR`, `PIP_CACHE_DIR`, `npm_config_cache`, `GOCACHE`, `pnpm install --store-dir`), so the model can normally fix this itself without an approval prompt. Redirecting into `/tmp` costs you a warm cache across reboots and nothing else.
+2. **Grant the specific directory** in `~/.pi/agent/sandbox.json`:
+
+```json
+{
+  "writableRoots": ["~/.cache/uv", "~/.cache/pip", "~/.npm", "~/.local/share/pnpm/store"]
+}
+```
+
+Rules:
+
+- **Add the minimum. Never add your whole home directory** — that makes shell startup files, `~/.ssh` and pi's own config writable and defeats the sandbox. An entry that *is or contains* your home directory, the filesystem root, or pi's agent directory (`~/.pi/agent`) is **rejected with a warning**, not honored.
+- **Global config only.** `writableRoots` in `<project>/.pi/sandbox.json` is ignored (with a warning): a checked-out repository must not be able to widen its own sandbox. Every other field still merges project > global > defaults.
+- `~` and `~/…` are expanded; everything else must be an absolute path. `$HOME/…` and `%USERPROFILE%\…` are **not** expanded (whose environment would that be? the config is cached per working directory).
+- **A root that does not exist is skipped**, with a warning — the runners cannot grant a missing path (bwrap fails hard on `--bind` of a non-existent source), and the write/edit fence skips it too, so both sides agree instead of one allowing what the other denies. `mkdir -p` it and it takes effect on the next tool call. pi-sandbox never creates directories as a side effect of reading config.
+- Only meaningful under `workspace-write`; `read-only` ignores the list.
+- On **Windows** see the `windows-acl` gap above: fence only, not the confined shell.
+
+`/permission` prints the roots that actually resolved, so a typo or a skipped entry is visible instead of silently inert.
+
+**Why `~/.cache` is not granted by default.** On a desktop Linux machine it is not just caches. It holds package-manager build caches that later get installed as root (`~/.cache/paru/clone/*` with `PKGBUILD`s and built `.pkg.tar.zst`), live IPC sockets (`~/.cache/biome/biome-socket-*`), running desktop-session and lock-screen state (`kwin`, `plasmashell`, `kscreenlocker_greet`), browser profiles, binaries that later run unsandboxed (`ms-playwright`, `puppeteer`, `electron`), and `~/.cache/huggingface/token`. Since confined processes can already **read** everything, granting `~/.cache` buys no confidentiality — it only gives up integrity and persistence, the two properties this sandbox still protects. It would not even fix the tools people actually hit: `pnpm`'s store is under `XDG_DATA_HOME`, `npm` uses `~/.npm`, `cargo` uses `~/.cargo`, and Playwright hardcodes `~/.cache/ms-playwright` without honoring `XDG_CACHE_HOME` (on macOS `uv` and Go use `~/Library/Caches`, also not `XDG_CACHE_HOME`). Codex and Claude Code take the same position — both default to cwd + temp and expose a narrow configurable allow-list rather than opening the cache root. Full analysis: `docs/superpowers/specs/2026-10-14-writable-roots-design.md`.
 
 ## Security notes
 
@@ -107,6 +137,7 @@ The prompt offers **Allow once / Deny**; after choosing Deny you may type an **o
 - Confined child processes force `LC_MESSAGES=C` (so denial diagnostics stay classifiable) and do not touch your `LANG`/`LC_CTYPE`
 - Confined bash runs in its own process group (detached): timeout/abort kills the whole group, but if pi itself is hard-killed (e.g. SIGKILL), background grandchildren spawned by the command may survive (pi's internal child-tracking API is not available to extensions)
 - The landlock fallback is partial enforcement on older kernel ABIs (the status output says so)
+- `writableRoots` widens the boundary by design: every resolved entry becomes writable for confined commands **and** for the write/edit fence, and a write there outlives the command (that is the point of a cache). Grant the narrowest directory that works; entries that are or contain your home directory or pi's agent directory are rejected
 
 ## Migrating from pi-container-sandbox 1.x
 

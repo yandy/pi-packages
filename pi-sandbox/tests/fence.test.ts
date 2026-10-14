@@ -263,3 +263,53 @@ describe("identity fallback robustness", () => {
 		}
 	});
 });
+
+/**
+ * spec 2026-10-14 §5：围栏消费与 runner 同一份已解析的额外根。
+ * `_tmpRoots: []` 把缺省的 "/tmp" + os.tmpdir() 拿掉——否则测试夹具本身就在 tmpdir() 下，
+ * 构造不出「围栏外」，额外根的放行也就无从证明（tools.test.ts 用同一手法）。
+ */
+describe("extraRoots", () => {
+	const noTmp = { _tmpRoots: [] as string[] };
+
+	it("allows a write under a configured extra root", () => {
+		expect(() => assertWriteAllowed(join(outside, "cache-file"), { ...wsWrite, ...noTmp, extraRoots: [outside] }))
+			.not.toThrow();
+	});
+
+	it("still denies everything else outside the workspace", () => {
+		mkdirSync(join(dir, "other"), { recursive: true });
+		const other = realpathSync.native(join(dir, "other"));
+		expect(() => assertWriteAllowed(join(other, "x"), { ...wsWrite, ...noTmp, extraRoots: [outside] }))
+			.toThrow(FenceDenialError);
+	});
+
+	it("denies the extra root when it is not configured (no implicit widening)", () => {
+		expect(() => assertWriteAllowed(join(outside, "x"), { ...wsWrite, ...noTmp }))
+			.toThrow(FenceDenialError);
+	});
+
+	it("does not widen a sibling that merely shares the extra root's name prefix", () => {
+		mkdirSync(join(dir, "outside-extra"), { recursive: true });
+		const sibling = realpathSync.native(join(dir, "outside-extra"));
+		expect(() => assertWriteAllowed(join(sibling, "x"), { ...wsWrite, ...noTmp, extraRoots: [outside] }))
+			.toThrow(FenceDenialError);
+	});
+
+	it("grants the symlink target, not the link spelling (extra roots arrive canonicalized)", () => {
+		// 生产路径上 config.resolveConfiguredRoots 已经 canonical 过；这里钉住围栏对 canonical 根的判定。
+		const linked = join(ws, "link-to-outside");
+		if (!isWin32) symlinkSync(outside, linked);
+		const policy = { ...wsWrite, ...noTmp, extraRoots: [outside] };
+		if (isWin32) {
+			expect(() => assertWriteAllowed(join(outside, "x"), policy)).not.toThrow();
+			return;
+		}
+		expect(() => assertWriteAllowed(join(linked, "through-link"), policy)).not.toThrow();
+	});
+
+	it("ignores extra roots under read-only", () => {
+		expect(() => assertWriteAllowed(join(outside, "x"), { mode: "read-only", workspaceRoot: ws, ...noTmp, extraRoots: [outside] }))
+			.toThrow(FenceDenialError);
+	});
+});

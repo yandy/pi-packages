@@ -20,8 +20,8 @@ bash 命令被包装进平台沙箱 runner 后在本地 spawn（**路径透明**
 
 | 平台 | Runner | 机制 |
 |---|---|---|
-| Linux | `bwrap`（首选） | `--ro-bind / /` 全盘只读 + 工作区与宿主 `/tmp` 的 rw bind |
-| Linux | `landlock-run`（回退，随包分发预编译二进制） | Landlock LSM 允许清单：`/` 只读，工作区 + `/tmp` 可写 |
+| Linux | `bwrap`（首选） | `--ro-bind / /` 全盘只读 + 工作区、宿主 `/tmp` 与配置的 `writableRoots` 的 rw bind |
+| Linux | `landlock-run`（回退，随包分发预编译二进制） | Landlock LSM 允许清单：`/` 只读，工作区 + `/tmp` + 配置的 `writableRoots` 可写 |
 | macOS | `sandbox-exec`（系统内置） | Seatbelt SBPL：`deny file-write*` + 工作区/临时区例外 |
 | Windows | `windows-acl`（内置，`partial` 强制） | 受限令牌沙箱：`WRITE_RESTRICTED` 令牌 + 对工作区与 `%TEMP%` 的能力 SID ACL 授权 + Low 强制完整性标签；**仅 powershell 工具**（受限模式下 `bash` 被拒绝） |
 | 其他 | 无 | **fail-closed**：受约束命令一律拒绝执行，绝不静默裸跑 |
@@ -33,6 +33,8 @@ bash 命令被包装进平台沙箱 runner 后在本地 spawn（**路径透明**
 - **NTFS 硬链接是文件对象别名**：工作区内被授权文件的硬链接在外部同样可写
 - **读不受限**：与其他 runner 一致，受约束进程能读调用者可读的一切
 - **被其他 AppContainer 工具以包 SID 打标过的文件对 Low 完整性子进程不可读**（移除外来 ACE 或重装目录树可恢复）
+
+另有一处本包自己的缺口：**`writableRoots` 到不了 `windows-acl` runner**。它的 argv 契约是写死的两根（`--workspace` / `--temp`）；推广到 N 根需要新的能力 SID 域分隔方案、一个关于“新建对象继承哪个能力”的定案（今天是 `temp → workspace → Everyone`），以及 N 根的嵌套检查。所以 Windows 上 `writableRoots` 只对 `write`/`edit` 围栏生效，受限 `powershell` 仍只有工作区 + `%TEMP%`。列表非空时会 warn 一次。这个不对称是 **fail-closed 方向**的（shell 比围栏更窄）。
 
 受限 shell 只有 **`powershell` 工具**。在 Windows（pi >= 1.0.0）上，pi-sandbox 把受限 `bash` 以 `exposure: "hidden"` 注册——pi 的语义是 *registered but unreachable*：模型看不到它，显式点名（`defaultTools`、`--tools`、`setActiveTools()`）也无法激活它。保留这份注册是有意的：扩展工具按名覆盖内建定义，`bash` 这个名字被本包的拒绝壳占据，Windows 上不存在任何通往未受限内建 `bash` 的路径；若未来宿主改变 `hidden` 的兑现方式，该定义仍会拒绝受限模式下的每次调用（绝不 spawn，fail-closed）。除非显式切到 `danger-full-access`（唯一逃生门，与其他平台一样 `bash` 照常裸跑），沙箱绝不在 Windows 上非受限地运行 bash。
 
@@ -59,14 +61,14 @@ PowerShell 语言模式取决于启动约束，不是 ACL 边界的一部分：`
 | 模式 | 文件效果 |
 |---|---|
 | `read-only` | 仅 `/dev/null` 可写 |
-| `workspace-write`（默认） | 工作目录 + `/tmp` + `os.tmpdir()` 可写，其余只读 |
+| `workspace-write`（默认） | 工作目录 + `/tmp` + `os.tmpdir()` + 配置的 `writableRoots`（见「配置」一节）可写，其余只读 |
 | `danger-full-access` | 完全绕过沙箱（显式逃生门） |
 
 网络始终放行（不做网络隔离）。
 
 ## /permission 命令
 
-- `/permission` —— 显示当前状态（模式及来源、选中 runner 与 enforcement、工作区）
+- `/permission` —— 显示当前状态（模式及来源、选中 runner 与 enforcement、工作区，以及你配了额外可写根时解析后的结果）
 - `/permission <read-only|workspace-write|danger-full-access>` —— 切换模式，**进程级**生效：父会话与所有 subagent 子会话的下一次工具调用立即采用
 
 ## 提权审批（模型发起，denial-first）
@@ -88,7 +90,8 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
   "mode": "workspace-write",
   "runnerCommand": null,
   "runnerFailureSignatures": null,
-  "probeTimeoutMs": 5000
+  "probeTimeoutMs": 5000,
+  "writableRoots": []
 }
 ```
 
@@ -98,6 +101,33 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 | `runnerCommand` | `null` | 自定义 bwrap 兼容 runner argv（须与下一项成对） |
 | `runnerFailureSignatures` | `null` | 自定义 runner 的失败诊断签名（非空单行） |
 | `probeTimeoutMs` | `5000` | runner 功能探测超时（正数） |
+| `writableRoots` | `[]` | 工作区 + tmp 之外的额外可写目录；**只认全局配置** —— 见下 |
+
+### 额外可写根（`writableRoots`）
+
+工具 cache 是受限命令失败最常见的原因：`uv` 写 `~/.cache/uv`、`pip` 写 `~/.cache/pip`、`npm` 写 `~/.npm`、`pnpm` 的 store 在 `~/.local/share/pnpm/store`。`workspace-write` 下它们全是只读，而从这一档往上只剩 `danger-full-access` 一级——为一次 cache 写付这个代价太高。两条出路，按优先级：
+
+1. **把工具状态重定向到已经可写的根里。**拒绝消息会列出常用的变量（`UV_CACHE_DIR`、`PIP_CACHE_DIR`、`npm_config_cache`、`GOCACHE`、`pnpm install --store-dir`），所以模型通常自己就能解决，不需弹审批窗。重定向到 `/tmp` 的代价只是重启后没了热 cache。
+2. **把那个具体目录授予出去**，写在 `~/.pi/agent/sandbox.json`：
+
+```json
+{
+  "writableRoots": ["~/.cache/uv", "~/.cache/pip", "~/.npm", "~/.local/share/pnpm/store"]
+}
+```
+
+规则：
+
+- **加最小的。继不要加整个 home 目录**——那会让 shell 启动文件、`~/.ssh` 与 pi 自己的配置变成可写，沙箱就形同虚设。凡是**等于或包含** home 目录、文件系统根、或 pi 的 agentDir（`~/.pi/agent`）的条目，一律 **warn + 拒绝**，不会生效。
+- **只认全局配置。**`<项目>/.pi/sandbox.json` 里的 `writableRoots` 被忽略（并 warn）：被检出的仓库不得能自己放宽自己的沙箱。其余字段仍然是 项目 > 全局 > 默认。
+- `~` 与 `~/…` 会展开；其余必须是绝对路径。`$HOME/…` 与 `%USERPROFILE%\…` **不**展开（那会把“谁的环境”变成隐式输入，而配置是按工作目录缓存的）。
+- **不存在的根会被跳过**并 warn——runner 无法授权一个不存在的路径（bwrap 对不存在的 `--bind` 源直接硬失败），write/edit 围栏也同步跳过，两边一致而不是单侧放行。`mkdir -p` 建好后下一次工具调用即生效。pi-sandbox 绩不会因为“读配置”这个动作就在文件系统上产生副作用。
+- 只在 `workspace-write` 下有意义；`read-only` 忽略整个列表。
+- **Windows** 上见上面 `windows-acl` 的第四条缺口：只对围栏生效，不对受限 shell 生效。
+
+`/permission` 会打印真正解析出来的根，所以写错或被跳过的条目是看得见的，不会静默失效。
+
+**为什么不默认放开 `~/.cache`。**在桌面 Linux 上它不只是 cache。里面有：之后会以 root 安装的包管理器构建缓存（`~/.cache/paru/clone/*` 里的 `PKGBUILD` 与已构建的 `.pkg.tar.zst`）、活的 IPC socket（`~/.cache/biome/biome-socket-*`）、正在运行的桌面会话与锁屏状态（`kwin`、`plasmashell`、`kscreenlocker_greet`）、浏览器 profile、之后会无沙箱执行的二进制（`ms-playwright`、`puppeteer`、`electron`），以及 `~/.cache/huggingface/token`。而受约束进程本来就能**读**一切，所以放开 `~/.cache` 买不到任何机密性收益——它只交出完整性与持久化，而这两样正是本沙箱仅剩的护栏。而且它连大家真碰到的工具也修不好：`pnpm` 的 store 在 `XDG_DATA_HOME` 下，`npm` 用 `~/.npm`，`cargo` 用 `~/.cargo`，Playwright 把 `~/.cache/ms-playwright` 写死在源码里、根本不认 `XDG_CACHE_HOME`（macOS 上 `uv` 与 Go 用 `~/Library/Caches`，同样不认）。Codex 与 Claude Code 采取同一立场：默认只有 cwd + temp，另给一个可配置的窄口子，而不是放开 cache 根。完整论证：`docs/superpowers/specs/2026-10-14-writable-roots-design.md`。
 
 ## 安全说明
 
@@ -107,6 +137,7 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 - 受限子进程强制 `LC_MESSAGES=C`（保证拒绝诊断可分类），不改动你的 `LANG`/`LC_CTYPE`
 - 受限 bash 在独立进程组中运行（detached）：timeout/abort 会杀掉整个进程组；但若 pi 自身被硬杀（如 SIGKILL），命令派生的后台孙进程可能存活（pi 内部的子进程追踪 API 不对扩展开放）
 - landlock 回退在旧内核 ABI 上为 partial enforcement（状态里会标注）
+- `writableRoots` 是有意放宽边界：每个解析成功的条目对受限命令**和** write/edit 围栏都变成可写，且写在那里的东西会活过这条命令（cache 的意义就在此）。授予能跑起来的最窄目录；等于或包含 home 目录与 pi agentDir 的条目会被拒绝
 
 ## 从 pi-container-sandbox 1.x 迁移
 

@@ -834,3 +834,126 @@ describe("windows tool wiring", () => {
 		expect(escalated.content.map((c) => c.text).join("\n")).toContain('one-shot escalation to "danger-full-access"');
 	});
 });
+
+/**
+ * spec 2026-10-14 §5：`sandbox.json` 的 `writableRoots` 端到端接到四条 execute 路径。
+ *
+ * `resolveConfiguredRoots` 在 tools.ts 里是**无注入**调用的（用真实 homedir / getAgentDir / existsSync），
+ * 所以这里把 agentDir 钉进测试目录（testing.md「getAgentDir 隔离」），并只配真实存在的 tmp 夹具目录：
+ * `outsideDir` 既不在 homedir 下也不在 agentDir 下，两条危险根规则都不会误伤它。
+ * `makeDeps` 已把 `_tmpRoots` 钉成 `fakeTmpDir`，因此 `outsideDir` 是**真·围栏外**——
+ * 「配了就能写、没配就被拒」这对断言才真正承重。
+ */
+describe("writableRoots end-to-end wiring", () => {
+	let agentDirRoot: string;
+
+	/** 带额外可写根的配置；writableRoots 写的是原始配置字符串（这里已是绝对路径）。 */
+	function configWith(roots: string[], over: Partial<typeof DEFAULT_SANDBOX_CONFIG> = {}) {
+		return { ...DEFAULT_SANDBOX_CONFIG, writableRoots: roots, ...over };
+	}
+
+	beforeEach(() => {
+		agentDirRoot = join(dir, "agent-dir");
+		mkdirSync(agentDirRoot, { recursive: true });
+		vi.stubEnv("PI_CODING_AGENT_DIR", agentDirRoot);
+	});
+	afterEach(() => { vi.unstubAllEnvs(); });
+
+	it("write reaches a configured root with no escalation", async () => {
+		const { deps } = makeDeps({ getConfig: () => configWith([outsideDir]) });
+		const { write } = createSandboxTools(deps);
+		const target = join(outsideDir, `granted-${process.pid}-${Date.now()}.txt`);
+		const result = await write.execute("wr-1", { path: target, content: "ok" }, undefined, undefined, toolCtx()) as { content: { text: string }[] };
+		expect(result.content[0].text).toContain("Successfully wrote");
+		expect(await (await import("node:fs/promises")).readFile(target, "utf-8")).toBe("ok");
+		// 不是「提权悄悄生效」：结果里绝不能有一次性提权标记。
+		expect(result.content.map((c) => c.text).join("\n")).not.toContain("one-shot escalation");
+	});
+
+	it("write is still denied outside the configured roots (no implicit widening)", async () => {
+		mkdirSync(join(dir, "other"), { recursive: true });
+		const other = realpathSync.native(join(dir, "other"));
+		const { deps } = makeDeps({ getConfig: () => configWith([outsideDir]) });
+		const { write } = createSandboxTools(deps);
+		await expect(write.execute("wr-2", { path: join(other, "x.txt"), content: "x" }, undefined, undefined, toolCtx()))
+			.rejects.toThrow(/file access denied under workspace-write mode/);
+	});
+
+	it("edit reaches a configured root", async () => {
+		const target = join(outsideDir, `edit-granted-${process.pid}-${Date.now()}.txt`);
+		writeFileSync(target, "hello");
+		const { deps } = makeDeps({ getConfig: () => configWith([outsideDir]) });
+		const { edit } = createSandboxTools(deps);
+		await edit.execute("ed-1", { path: target, edits: [{ oldText: "hello", newText: "bye" }] }, undefined, undefined, toolCtx());
+		expect(await (await import("node:fs/promises")).readFile(target, "utf-8")).toBe("bye");
+	});
+
+	it("bash binds the configured root in the runner argv", async () => {
+		const { deps, child, spawnFn } = makeDeps({ getConfig: () => configWith([outsideDir]) });
+		const { bash } = createSandboxTools(deps);
+		const p = bash.execute("bs-1", { command: "true" }, undefined, undefined, toolCtx());
+		await vi.waitFor(() => { expect(spawnFn).toHaveBeenCalled(); });
+		child.emit("close", 0, undefined);
+		await p;
+		const argv = (spawnFn as unknown as { mock: { calls: [string, string[]][] } }).mock.calls[0][1];
+		const idx = argv.indexOf(outsideDir);
+		expect(idx).toBeGreaterThan(-1);
+		expect(argv[idx - 1]).toBe("--bind");
+		expect(argv[idx + 1]).toBe(outsideDir); // 源=目标，原路径透明
+	});
+
+	it("powershell passes extraRoots to the confined ops factory (win32)", async () => {
+		createSandboxPowerShellOpsMock.mockClear();
+		const calls: { cwd: string; opts?: unknown }[] = [];
+		const { deps } = makeDeps({
+			platform: "win32",
+			_hostCreatePowerShellToolDefinition: fakePowerShellBuilderForWiring(calls),
+			getConfig: () => configWith([outsideDir]),
+		});
+		const { powershell } = createSandboxTools(deps);
+		await powershell!.execute("pw-1", { command: "Get-ChildItem" }, undefined, undefined, toolCtx());
+		expect(createSandboxPowerShellOpsMock).toHaveBeenCalledWith(
+			expect.objectContaining({ extraRoots: [outsideDir] }),
+		);
+	});
+
+	it("read-only ignores the configured roots entirely", async () => {
+		const { deps } = makeDeps({ getConfig: () => configWith([outsideDir], { mode: "read-only" }) });
+		const { write } = createSandboxTools(deps);
+		await expect(write.execute("wr-3", { path: join(outsideDir, "ro.txt"), content: "x" }, undefined, undefined, toolCtx()))
+			.rejects.toThrow(/file access denied under read-only mode/);
+	});
+
+	it("a configured root that does not exist grants nothing (failure mode 4)", async () => {
+		const missing = join(dir, "never-created");
+		const { deps } = makeDeps({ getConfig: () => configWith([missing]) });
+		const { write } = createSandboxTools(deps);
+		await expect(write.execute("wr-4", { path: join(missing, "x.txt"), content: "x" }, undefined, undefined, toolCtx()))
+			.rejects.toThrow(/file access denied under workspace-write mode/);
+		// 解析配置这个动作本身不该在围栏外 mkdir。
+		expect(existsSync(missing)).toBe(false);
+	});
+
+	it("a configured root that is the home directory grants nothing (failure mode 3)", async () => {
+		const { deps } = makeDeps({ getConfig: () => configWith([homedir()]) });
+		const { write } = createSandboxTools(deps);
+		await expect(write.execute("wr-5", { path: join(outsideDir, "home-grant.txt"), content: "x" }, undefined, undefined, toolCtx()))
+			.rejects.toThrow(/file access denied under workspace-write mode/);
+	});
+});
+
+/** 与 "windows tool wiring" 里的 fakePowerShellBuilder 同构；单独一份避免跨 describe 借用局部函数。 */
+function fakePowerShellBuilderForWiring(calls: { cwd: string; opts?: unknown }[] = []) {
+	return vi.fn((cwd: string, opts?: unknown) => {
+		calls.push({ cwd, opts });
+		return {
+			name: "powershell",
+			label: "PowerShell",
+			description: "Run PowerShell commands",
+			parameters: { type: "object", properties: { command: { type: "string" } } },
+			async execute(_id: string, params: { command?: string }) {
+				return { content: [{ type: "text" as const, text: `ran ${String(params.command ?? "")}` }] };
+			},
+		};
+	});
+}

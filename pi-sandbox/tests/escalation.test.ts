@@ -166,8 +166,16 @@ describe("markers", () => {
 	});
 	it("hint marker names the subject verbatim and offers the writable roots before escalation", () => {
 		expect(escalationHintMarker("command")).toBe(
-			"[sandbox: escalation available — writable here: the workspace + /tmp; retry this exact command once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]",
+			"[sandbox: escalation available — writable here: the workspace + /tmp; before escalating, prefer redirecting the tool's state into a writable root (e.g. UV_CACHE_DIR=/tmp/uv-cache, PIP_CACHE_DIR=/tmp/pip-cache, npm_config_cache=/tmp/npm-cache, GOCACHE=/tmp/go-build, pnpm install --store-dir /tmp/pnpm-store); retry this exact command once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]",
 		);
+	});
+	// Ruling 6（spec 2026-10-14 §6）：cache 重定向配方只对 command 下发——write/edit 的拒绝与工具 cache 无关，
+	// 白白占上下文；operation 分支必须逐字保持旧文案。
+	it("hint marker keeps the operation branch free of the cache-redirect recipe", () => {
+		expect(escalationHintMarker("operation")).toBe(
+			"[sandbox: escalation available — writable here: the workspace + /tmp; retry this exact operation once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]",
+		);
+		expect(escalationHintMarker("operation")).not.toContain("UV_CACHE_DIR");
 	});
 	it("applied marker says the approval covered this call only", () => {
 		expect(escalationAppliedMarker("danger-full-access")).toBe(

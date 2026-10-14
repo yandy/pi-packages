@@ -11,7 +11,7 @@ import {
 	launcherPath,
 	probe as probeLandlockLauncher,
 } from "@deepseek-ai/node-addon-system/landlock-run";
-import { canonicalPath, writableRoots, type ConfinedSandboxMode } from "./policy";
+import { canonicalPath, defaultTmpRoots, writableRoots, type ConfinedSandboxMode } from "./policy";
 
 export { LAUNCHER_BIN, LAUNCHER_FAILURE_EXIT };
 
@@ -22,6 +22,23 @@ export type SelectedRunner = { runner: RunnerKind; enforcement: SandboxEnforceme
 export interface RunnerPolicy {
 	mode: ConfinedSandboxMode;
 	workspaceRoot: string;
+	/**
+	 * sandbox.json 的 `writableRoots` 经 config.resolveConfiguredRoots 解析后的额外可写根
+	 * （已展开/已拒危险根/已按存在性过滤/已 canonical）。
+	 * bwrap / landlock / seatbelt 三者都消费它；**windows-acl 忽略**（Ruling 5：runner 是写死的
+	 * --workspace/--temp 两根 argv 契约，N 根需要新的 SID 域分隔与默认 DACL 语义，本期不做）。
+	 */
+	extraRoots?: readonly string[];
+}
+
+/**
+ * bwrap / landlock 共用的可写根序列：/tmp → workspace → 额外根，去重。
+ * 顺序是刻意保留的：额外根一律**追加在末尾**，`extraRoots` 为空时产出的 argv 与引入它之前
+ * 逐字节相同（tests/runners.test.ts 逐字钉住了完整数组）。去重防止用户把 `/tmp` 也写进配置时
+ * bwrap 收到重复的 `--bind /tmp /tmp`。
+ */
+function confinedWriteRoots(policy: RunnerPolicy): string[] {
+	return [...new Set(["/tmp", policy.workspaceRoot, ...(policy.extraRoots ?? [])])];
 }
 
 /** 测试钩子：注入平台/probe/launcher 路径，单测不依赖真实 bwrap/landlock（deepseek 同款）。 */
@@ -43,23 +60,25 @@ export interface RunnerHooks {
 
 /**
  * bwrap mount profile（deepseek profiles.ts 语义，/tmp 一处为 2026-10-01 的有意偏离，见 spec §4）：
- * 宿主 / 全盘 ro-bind（一切可读），workspace-write 追加宿主 /tmp 与工作区的 rw bind——
- * 两者都原路径透明：沙箱内的 /tmp 就是宿主 /tmp（跨命令、跨 read/write 工具语义一致）。
+ * 宿主 / 全盘 ro-bind（一切可读），workspace-write 追加宿主 /tmp、工作区与配置的额外根的 rw bind——
+ * 全部原路径透明：沙箱内的 /tmp 就是宿主 /tmp（跨命令、跨 read/write 工具语义一致）。
+ *
+ * 额外根已在 config.resolveConfiguredRoots 里按存在性过滤过：`--bind <src> <src>` 对不存在的 src
+ * 会硬失败（`bwrap: Can't bind …`），那会被 classifyRunnerFailure 归为 SANDBOX_UNAVAILABLE 而不是拒绝。
  */
 export function bwrapProfileArgs(policy: RunnerPolicy): string[] {
 	const args = ["--ro-bind", "/", "/", "--dev", "/dev", "--unshare-pid", "--proc", "/proc", "--die-with-parent"];
 	if (policy.mode === "workspace-write") {
-		args.push("--bind", "/tmp", "/tmp");
-		args.push("--bind", policy.workspaceRoot, policy.workspaceRoot);
+		for (const root of confinedWriteRoots(policy)) args.push("--bind", root, root);
 	}
 	return args;
 }
 
-/** Landlock 允许清单：readOnly / + readWrite /dev/null（workspace-write 追加 /tmp 与工作区）。 */
+/** Landlock 允许清单：readOnly / + readWrite /dev/null（workspace-write 追加 /tmp、工作区与额外根）。 */
 export function landlockProfileArgs(policy: RunnerPolicy): string[] {
 	const readWrite = ["/dev/null"];
 	if (policy.mode === "workspace-write") {
-		readWrite.push("/tmp", policy.workspaceRoot);
+		readWrite.push(...confinedWriteRoots(policy));
 	}
 	return grantArgs({ readOnly: ["/"], readWrite });
 }
@@ -80,7 +99,7 @@ export function seatbeltProfileArgs(policy: RunnerPolicy): string[] {
 		"(deny file-write*)",
 		`(allow file-write* (literal ${sbplString("/dev/null")}))`,
 	];
-	const roots = writableRoots(policy.mode, policy.workspaceRoot);
+	const roots = writableRoots(policy.mode, policy.workspaceRoot, defaultTmpRoots(), policy.extraRoots ?? []);
 	if (roots.length > 0) {
 		forms.push(`(allow file-write* ${roots.map((root) => `(subpath ${sbplString(root)})`).join(" ")})`);
 	}
@@ -205,7 +224,12 @@ function probeRunner(kind: RunnerKind, probeTimeoutMs: number, hooks: RunnerHook
 }
 
 /** win32 runner 的前缀：node + 包内 runner.js + 授权根/模式；'--' 与命令 argv 由 confine 拼接。
- * `--temp` 用与 fs 围栏同一个根（canonicalPath(tmpdir())，win32 的 defaultTmpRoots）。 */
+ * `--temp` 用与 fs 围栏同一个根（canonicalPath(tmpdir())，win32 的 defaultTmpRoots）。
+ * **Ruling 5：`policy.extraRoots` 在这里被有意忽略**——runner 的 argv 契约是写死的两根
+ * （src/win32/cli.js:8-13），推广到 N 根需要新的 SID 域分隔方案、N 根下的默认 DACL 语义
+ * 与 assertGrantRootsDisjoint 的推广（spec 2026-10-14 §5.3）。忽略是 fail-closed 方向的：
+ * win32 上围栏（write/edit）生效而受限 powershell 不生效，不对称已在 config.resolveConfiguredRoots
+ * 里 warn 一次并记在 README。 */
 export function windowsAclRunnerArgv(policy: RunnerPolicy, availability: { node: string; runner: string }): string[] {
 	return [
 		availability.node,

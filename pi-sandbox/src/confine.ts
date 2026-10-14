@@ -102,11 +102,16 @@ export interface ConfineOptions {
 	runnerFailureSignatures?: string[] | null;
 	probeTimeoutMs?: number;
 	hooks?: RunnerHooks;
+	/**
+	 * 已解析的额外可写根（config.resolveConfiguredRoots 的产物），进 RunnerPolicy。
+	 * bwrap / landlock / seatbelt 消费它；windows-acl 忽略（Ruling 5，见 runners.ts）。
+	 */
+	extraRoots?: readonly string[];
 }
 
 /**
  * 把 argv 包装进选中 runner 的策略调用（spec §2）。workspaceRoot 在此统一
- * canonical 化一次，profile 构造器保持纯净。
+ * canonical 化一次，profile 构造器保持纯净。extraRoots 已经在解析期 canonical 过，直接透传。
  */
 export function confine(
 	argv: readonly string[],
@@ -114,7 +119,11 @@ export function confine(
 	workspaceRoot: string,
 	opts: ConfineOptions = {},
 ): ConfinedArgv {
-	const policy: RunnerPolicy = { mode, workspaceRoot: canonicalPath(workspaceRoot) };
+	const policy: RunnerPolicy = {
+		mode,
+		workspaceRoot: canonicalPath(workspaceRoot),
+		extraRoots: opts.extraRoots,
+	};
 
 	if (opts.runnerCommand && opts.runnerCommand.length > 0) {
 		return {

@@ -15,7 +15,7 @@ import {
 // pi 是 ESM，静态具名导入一个老宿主不存在的导出会在**链接期**硬失败，属性读取最坏只是 undefined。
 import * as piHost from "@earendil-works/pi-coding-agent";
 import { createSandboxBashOps, type SpawnFn } from "./bash-ops";
-import { getSandboxConfig, type SandboxConfig } from "./config";
+import { getSandboxConfig, resolveConfiguredRoots, type SandboxConfig } from "./config";
 import { getDenialLedger } from "./denial-ledger";
 import {
 	approveEscalation,
@@ -115,6 +115,15 @@ function workspaceRootFor(rawCwd: string): string {
 /** 逐调用配置（C2）：测试注入优先，否则按会话 cwd 惰性加载（getSandboxConfig 自带缓存）。 */
 function configForCall(deps: SandboxToolDeps, sessionCwd: string): SandboxConfig {
 	return deps.getConfig?.() ?? getSandboxConfig(sessionCwd);
+}
+
+/**
+ * 额外可写根只在 workspace-write 下有意义：read-only 下 profile 构造器与 writableRoots() 本就返回空，
+ * danger-full-access 不经围栏也不经 runner。其余档位不解析，避开无谓的 stat 与 warn 噪声。
+ * 每次调用重新解析（不缓存）：配置本身按 cwd 缓存，而目录可能在会话中途才被创建。
+ */
+function extraRootsFor(mode: SandboxMode, config: SandboxConfig): string[] {
+	return mode === "workspace-write" ? resolveConfiguredRoots(config.writableRoots) : [];
 }
 
 /** 提权参数对（三个工具共用）。
@@ -413,6 +422,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 				operations: buildBashOps({
 					mode,
 					workspaceRoot,
+					extraRoots: extraRootsFor(mode, config),
 					selected,
 					platform,
 					runnerCommand: config.runnerCommand,
@@ -444,9 +454,10 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 			const { mode, escalated, ignoredEscalation } = await resolveCall(params as EscalationParams, ctx, deps, "operation", () => String(params.path ?? ""), signal);
 			// fence 拒绝不捕获：FenceDenialError 从 ops 抛出、经 pi execute 原样上抛
 			//（withFileMutationQueue 不吞错）——pi 的 agent 循环会转成 error result。
+			const config = configForCall(deps, sessionCwd);
 			const tool = createWriteToolDefinition(sessionCwd, {
 				operations: createFencedWriteOps(
-					{ mode, workspaceRoot, _tmpRoots: deps._tmpRoots },
+					{ mode, workspaceRoot, extraRoots: extraRootsFor(mode, config), _tmpRoots: deps._tmpRoots },
 					sessionId === null ? undefined : () => getDenialLedger().record(sessionId, "operation"),
 				),
 			});
@@ -468,9 +479,10 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 			const workspaceRoot = workspaceRootFor(sessionCwd);
 			const sessionId = readSessionId(ctx);
 			const { mode, escalated, ignoredEscalation } = await resolveCall(params as EscalationParams, ctx, deps, "operation", () => String(params.path ?? ""), signal);
+			const config = configForCall(deps, sessionCwd);
 			const tool = createEditToolDefinition(sessionCwd, {
 				operations: createFencedEditOps(
-					{ mode, workspaceRoot, _tmpRoots: deps._tmpRoots },
+					{ mode, workspaceRoot, extraRoots: extraRootsFor(mode, config), _tmpRoots: deps._tmpRoots },
 					sessionId === null ? undefined : () => getDenialLedger().record(sessionId, "operation"),
 				),
 			});
@@ -503,6 +515,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 				operations: createSandboxPowerShellOps({
 					mode,
 					workspaceRoot,
+					extraRoots: extraRootsFor(mode, config),
 					selected,
 					platform,
 					runnerCommand: config.runnerCommand,
