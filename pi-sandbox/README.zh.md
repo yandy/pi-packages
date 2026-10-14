@@ -44,7 +44,7 @@ PowerShell 语言模式取决于启动约束，不是 ACL 边界的一部分：`
 
 **`NUL` 在两种模式下都可写**——这是**设备自身的环境属性**（设备 DACL 授予 Everyone 读/写/执行），不是沙箱的能力授予，因此与令牌拿到哪些授权根无关。它只能通过设备拼法到达：`cmd` 的 `> NUL`，以及 Node 的 `\\.\NUL`。**相对路径** `NUL` 不是设备：libuv 构造 NT 路径时不做 Win32 设备名映射，因此 `writeFileSync('NUL', …)` 是子进程 cwd 下一个名为 `NUL` 的**普通文件**——在工作区内允许、在工作区外被拒，与其他文件名完全同等。
 
-**常驻的安全描述符改动。** 授权幂等但**不回收**：pi 退出后，工作区与 `%TEMP%` 上的 ACE、world `FILE_DELETE_CHILD` 拒绝项与 Low 强制标签仍然保留。这会向**任何**以同一用户身份运行在 Low 完整性的进程放宽该目录树；事后再清除可继承标签也不会回退已传播到子对象的标签。切回 `read-only` 会让能力 ACE 失效（该令牌不携带能力 SID），但不会移除它们。首次授权会在整棵 `%TEMP%` 树上做急切传播（大树可能耗时数秒），之后每次调用命中精确匹配的快路径。`%TEMP%` 与 `TMP` 本身**不**被重写——沙箱的可写临时根就是宿主 `%TEMP%`。
+**常驻的安全描述符改动。** 授权幂等但**不回收**：pi 退出后，工作区与 `%TEMP%` 上的 ACE、world `FILE_DELETE_CHILD` 拒绝项与 Low 强制标签仍然保留。`workspace-write` 下每个获得授权的 `extraWritableDirs` 目录同样留下常驻改动（按目录派生的 capability ACE、world `FILE_DELETE_CHILD` 拒绝项与 Low 标签）；若目录不可授予（非属主/无法改 ACL），受限命令 **fail-closed**，绝不降级裸跑。这会向**任何**以同一用户身份运行在 Low 完整性的进程放宽该目录树；事后再清除可继承标签也不会回退已传播到子对象的标签。切回 `read-only` 会让能力 ACE 失效（该令牌不携带能力 SID），但不会移除它们。首次授权会在整棵 `%TEMP%` 树上做急切传播（大树可能耗时数秒），之后每次调用命中精确匹配的快路径。`%TEMP%` 与 `TMP` 本身**不**被重写——沙箱的可写临时根就是宿主 `%TEMP%`。
 
 **`%TEMP%` 的代价。** `%TEMP%` 是用户共享树：其子目录会继承拒绝项，因此第三方程序用 `GENERIC_ALL`/`FullControl` 打开自己的 temp 子目录会被拒。基于 DELETE 的删除、`MAXIMUM_ALLOWED` 与常规读写打开不受影响。
 
@@ -59,7 +59,7 @@ PowerShell 语言模式取决于启动约束，不是 ACL 边界的一部分：`
 | 模式 | 文件效果 |
 |---|---|
 | `read-only` | 仅 `/dev/null` 可写 |
-| `workspace-write`（默认） | 工作目录 + `/tmp` + `os.tmpdir()` 可写，其余只读 |
+| `workspace-write`（默认） | 工作目录 + `/tmp` + `os.tmpdir()` + `extraWritableDirs` 可写，其余只读 |
 | `danger-full-access` | 完全绕过沙箱（显式逃生门） |
 
 网络始终放行（不做网络隔离）。
@@ -79,7 +79,7 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 
 弹窗提供 **Allow once / Deny**；选 Deny 后可再填一句**可选理由**（回车跳过），理由会随拒绝错误回传给模型，让它明白为什么被拒、不要换写法反复试探。subagent 子会话（前台与后台都算）的提权会转发到父会话弹窗（同进程 pi-subagents，且父会话需有 UI）；无父通道时（headless、跨进程子代理）提权一律拒绝（fail-closed），此时用 `/permission` 放宽进程档位解救。
 
-**缓存/数据目录搬迁属于越界行为。** 工具的常驻规则要求模型不得为了绕开沙箱把全局缓存/数据目录搬进 workspace——无论是环境变量覆盖（`XDG_CACHE_HOME`、`HOME`、`UV_CACHE_DIR`、`npm_config_cache`、`PNPM_HOME` 等）、改缓存的 flag（`--cache-dir`、`--store-dir` 等）还是配置文件——正确做法是原样运行工具，包括提权重试也不得夹带搬迁：搬迁是无声的，它会消掉本可上膛提权的那次拒绝。这条政策目前仅停留在提示词层：pi-sandbox 不检测、也不拒绝这类命令，用户显式要求搬迁时仍然成立。
+**缓存/数据目录搬迁属于越界行为。** 工具的常驻规则要求模型不得为了绕开沙箱把全局缓存/数据目录搬进 workspace——无论是环境变量覆盖（`XDG_CACHE_HOME`、`HOME`、`UV_CACHE_DIR`、`npm_config_cache`、`PNPM_HOME` 等）、改缓存的 flag（`--cache-dir`、`--store-dir` 等）还是配置文件——正确做法是原样运行工具，包括提权重试也不得夹带搬迁：搬迁是无声的，它会消掉本可上膛提权的那次拒绝。这条政策目前仅停留在提示词层：pi-sandbox 不检测、也不拒绝这类命令，用户显式要求搬迁时仍然成立。让工具在工作区外写入的合法途径是**用户**把该目录加入 `extraWritableDirs`；模型仍不得自行迁移缓存/数据目录。
 
 ## 配置
 
@@ -90,7 +90,8 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
   "mode": "workspace-write",
   "runnerCommand": null,
   "runnerFailureSignatures": null,
-  "probeTimeoutMs": 5000
+  "probeTimeoutMs": 5000,
+  "extraWritableDirs": []
 }
 ```
 
@@ -100,6 +101,7 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 | `runnerCommand` | `null` | 自定义 bwrap 兼容 runner argv（须与下一项成对） |
 | `runnerFailureSignatures` | `null` | 自定义 runner 的失败诊断签名（非空单行） |
 | `probeTimeoutMs` | `5000` | runner 功能探测超时（正数） |
+| `extraWritableDirs` | `[]` | 仅 `workspace-write` 下、工作区与 tmp 之外追加的可写根；仅接受绝对路径，`~` / `~/`（Win32 `~\`）展开到家目录，不支持 `~user`；非绝对路径或不存在（非目录）的条目在加载时告警并忽略；取值不是字符串数组时整份配置回落默认值 |
 
 ## 安全说明
 

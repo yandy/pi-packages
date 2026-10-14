@@ -44,7 +44,7 @@ PowerShell language mode follows startup constraints, not the ACL boundary: unde
 
 **`NUL` is writable in both modes** — an environment property of the device (its DACL grants Everyone read/write/execute), not a capability grant, so it holds regardless of which roots the token was granted. It is reachable only through the device spellings: `cmd`'s `> NUL` and Node's `\\.\NUL`. A *relative* `NUL` is not the device: libuv builds NT paths and does not apply the Win32 device-name mapping, so `writeFileSync('NUL', …)` is an ordinary file named `NUL` in the child's cwd — allowed inside the workspace, denied outside it, exactly like any other name.
 
-**Standing security-descriptor changes.** Granting is idempotent but never revoked: after pi exits, the ACEs, the world `FILE_DELETE_CHILD` deny and the Low mandatory label on the workspace and `%TEMP%` remain. This relaxes those trees for **any** Low-integrity process running as the same user, and clearing an inheritable label later does not walk back what already propagated to child objects. Switching back to `read-only` makes the capability ACEs inert (that token carries no capability SID) but does not remove them. The first grant eagerly propagates across the whole `%TEMP%` tree (seconds on a large tree); later calls hit the exact-match fast path. `%TEMP%` and `TMP` themselves are **not** rewritten — the sandbox's writable temp root is the host `%TEMP%`.
+**Standing security-descriptor changes.** Granting is idempotent but never revoked: after pi exits, the ACEs, the world `FILE_DELETE_CHILD` deny and the Low mandatory label on the workspace and `%TEMP%` remain. Each granted `extraWritableDirs` directory gets the same standing changes in `workspace-write` (a per-directory capability ACE, the world `FILE_DELETE_CHILD` deny and a Low label); a directory that cannot be granted (not the owner / cannot change its ACL) makes the confined command **fail closed** — it is never run unconfined. This relaxes those trees for **any** Low-integrity process running as the same user, and clearing an inheritable label later does not walk back what already propagated to child objects. Switching back to `read-only` makes the capability ACEs inert (that token carries no capability SID) but does not remove them. The first grant eagerly propagates across the whole `%TEMP%` tree (seconds on a large tree); later calls hit the exact-match fast path. `%TEMP%` and `TMP` themselves are **not** rewritten — the sandbox's writable temp root is the host `%TEMP%`.
 
 **The `%TEMP%` cost.** `%TEMP%` is a shared user tree: its subdirectories inherit the deny ACE, so a third party that opens its own temp subdirectory with `GENERIC_ALL`/`FullControl` is refused. DELETE-based deletes, `MAXIMUM_ALLOWED` and ordinary read/write opens are unaffected.
 
@@ -59,7 +59,7 @@ The bundled `diagnose-windows-sandbox-acl` skill (diagnoses and repairs cases wh
 | Mode | File effects |
 |---|---|
 | `read-only` | only `/dev/null` writable |
-| `workspace-write` (default) | working directory + `/tmp` + `os.tmpdir()` writable, everything else read-only |
+| `workspace-write` (default) | working directory + `/tmp` + `os.tmpdir()` + `extraWritableDirs` writable, everything else read-only |
 | `danger-full-access` | sandbox bypassed entirely (explicit escape hatch) |
 
 Network is always allowed (no network isolation).
@@ -79,7 +79,7 @@ bash/write/edit take two optional parameters: `sandbox_permissions` (`workspace-
 
 The prompt offers **Allow once / Deny**; after choosing Deny you may type an **optional reason** (press Enter to skip) that is passed back to the model with the rejection, so it understands why instead of retrying a rewritten command. A subagent child session's escalation (foreground or background) is forwarded to the parent session's prompt (in-process pi-subagents, and the parent must have UI); with no parent channel available (headless, cross-process subagents) escalation is always refused (fail-closed) — widen the process mode with `/permission` to unblock it.
 
-**Cache/data relocation is out of policy.** The tools' rules instruct the model never to work around the sandbox by relocating global cache/data directories into the workspace — via environment-variable overrides (`XDG_CACHE_HOME`, `HOME`, `UV_CACHE_DIR`, `npm_config_cache`, `PNPM_HOME`, …), cache-relocating flags (`--cache-dir`, `--store-dir`, …), or config files — and to run tools unmodified instead, including on the escalated retry: a relocation is silent, it suppresses the denial that would have armed escalation. This is a prompt-level policy only: pi-sandbox does not detect or refuse such commands, and an explicit user request to relocate stays legitimate.
+**Cache/data relocation is out of policy.** The tools' rules instruct the model never to work around the sandbox by relocating global cache/data directories into the workspace — via environment-variable overrides (`XDG_CACHE_HOME`, `HOME`, `UV_CACHE_DIR`, `npm_config_cache`, `PNPM_HOME`, …), cache-relocating flags (`--cache-dir`, `--store-dir`, …), or config files — and to run tools unmodified instead, including on the escalated retry: a relocation is silent, it suppresses the denial that would have armed escalation. This is a prompt-level policy only: pi-sandbox does not detect or refuse such commands, and an explicit user request to relocate stays legitimate. The legitimate way to let a tool write outside the workspace is for the **user** to add that directory to `extraWritableDirs`; the model still must not relocate cache/data directories itself.
 
 ## Configuration
 
@@ -90,7 +90,8 @@ One file is read: `~/.pi/agent/sandbox.json` (global). A project-level `<project
   "mode": "workspace-write",
   "runnerCommand": null,
   "runnerFailureSignatures": null,
-  "probeTimeoutMs": 5000
+  "probeTimeoutMs": 5000,
+  "extraWritableDirs": []
 }
 ```
 
@@ -100,6 +101,7 @@ One file is read: `~/.pi/agent/sandbox.json` (global). A project-level `<project
 | `runnerCommand` | `null` | custom bwrap-compatible runner argv (must be paired with the next field) |
 | `runnerFailureSignatures` | `null` | fatal diagnostic signatures for the custom runner (non-empty single lines) |
 | `probeTimeoutMs` | `5000` | runner capability probe timeout (positive) |
+| `extraWritableDirs` | `[]` | extra writable roots in `workspace-write` mode, beyond the workspace and tmp; absolute paths only, `~` / `~/` (win32 `~\`) expand to your home, `~user` unsupported; non-absolute or non-existing-directory entries are warned about at load and ignored; a value that is not a string array falls the whole config back to defaults |
 
 ## Security notes
 
