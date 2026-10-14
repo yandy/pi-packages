@@ -162,9 +162,10 @@ export interface ConfiguredRootsHooks {
 	exists?: (path: string) => boolean;
 	/** 缺省 console.warn（经去重集）。 */
 	warn?: (message: string) => void;
-	/** 围栏比较是否大小写敏感；缺省按 process.platform 推导（与 fence 同口径）。 */
+	/** 围栏比较是否大小写敏感；缺省按（可注入的）platform 推导，与 fence 同口径。 */
 	caseSensitive?: boolean;
-	/** 缺省 process.platform；win32 时额外公告 runner 侧不支持（Ruling 5）。 */
+	/** 缺省 process.platform。**路径语义跟着它走**（isAbsolute / join / sep 取 path.win32 或 path.posix），
+	 *  否则注入 platform 的测试在 POSIX 宿主上走不到 win32 分支；win32 时额外公告 runner 侧不支持。 */
 	platform?: string;
 }
 
@@ -200,15 +201,17 @@ function defaultAgentDir(): string | null {
  *
  * 每步失败都是 **warn + 丢弃该条**，不 throw：
  * 1. `~` 展开；
- * 2. 必须绝对路径（裸盘符 `C:` 与盘符相对路径 `C:work` 在 node:path 下本就不是 absolute，自然被丢）；
- * 3. 危险根拒绝：等于或包含 homedir（含 `/`、`/home`、`/Users` 这些祖先）或 pi 的 agentDir。
+ * 2. 必须绝对路径（裸盘符 `C:` 与盘符相对路径 `C:work` 在 path.win32 下本就不是 absolute，自然被丢）；
+ * 3. win32 额外要求盘符或 UNC 前缀：`/foo` 与裸 `/` 的 isAbsolute 为 true 但含义随进程 cwd 所在盘
+ *    漂移（同 fence.ts 对 DRIVE_RELATIVE_PATH 的口径）；
+ * 4. 危险根拒绝：等于或包含 homedir（含 `/`、`/home`、`/Users` 这些祖先）或 pi 的 agentDir。
  *    包含判定用 fence 的 isWithinRoots 口径（分隔符边界 + 平台大小写敏感性 + dev/ino 身份回退），
  *    避免 `C:\work` 命中 `C:\workshop`；
- * 4. 存在性过滤：bwrap 的 `--bind <src> <src>` 对不存在的 src 硬失败，landlock 授权与 win32 的 ACL
+ * 5. 存在性过滤：bwrap 的 `--bind <src> <src>` 对不存在的 src 硬失败，landlock 授权与 win32 的 ACL
  *    授权同理；若只让围栏放行而 runner 跳过，就会出现“write 工具说可以、bash 说 EROFS”的漂移，
  *    而 pi 的 write 工具会 mkdir -p 父目录——那等于围栏侧真的在 workspace 外创建了目录（fail-open）。
  *    故**围栏与四个 runner 必须用同一份过滤后的列表**；沙箱也不因为“解析配置”就在文件系统上产生副作用；
- * 5. canonical + 去重。
+ * 6. canonical + 去重。
  *
  * 每次工具调用重新解析（不缓存）：目录可能稍后才被创建，按调用重算能自然拾到。
  */

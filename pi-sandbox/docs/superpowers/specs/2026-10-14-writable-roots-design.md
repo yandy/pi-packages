@@ -118,16 +118,18 @@
 按顺序，每步失败都是 **warn + 丢弃该条**（不 throw）——一条写错的条目不该把用户整份配置打回默认（与 `mode` 非法时「warn + 回落」同风格）：
 
 1. **`~` 展开**：`~` 或 `~/…` → `homedir()`。其余形式（`$HOME/…`、`%USERPROFILE%\…`）**不**展开，按第 2 步判为相对路径丢弃——环境变量展开会把「谁的环境」变成一个隐式输入，且配置是跨会话缓存的；
-2. **必须绝对**：展开后不是绝对路径 → 丢弃（POSIX `/…`；win32 盘符或 UNC）。裸盘符 `C:` 与盘符相对路径 `C:work` 按 `fence.ts` 既有口径视为歧义 → 丢弃；
-3. **危险根拒绝**：解析出的根若**等于或包含**下列任一项 → 丢弃。
+2. **必须绝对**：展开后不是绝对路径 → 丢弃。裸盘符 `C:` 与盘符相对路径 `C:work` 在 `path.win32.isAbsolute` 下本就不是 absolute，自然被丢；
+3. **win32 额外要求盘符或 UNC 前缀**（`/^(?:[A-Za-z]:[\\/]|\\\\)/`）：`/foo` 与裸 `/` 的 `isAbsolute` 在 win32 上为 **true**，但两者都是**盘符相对**路径（含义 =「当前盘的根下」），`realpathSync.native("/")` 按进程 cwd 所在盘解析。不拒的后果是 fail-open：`"/"` 在 cwd 位于 `D:` 时解析成 `D:\`，而第 4 步的危险根检查因为 homedir 在 `C:` 根本命中不了，**整个 D: 盘被授予可写**（CI windows-latest 实测捕获）。`fence.ts` 对同类歧义拼写早有纪律（`DRIVE_RELATIVE_PATH` / `DRIVE_LETTER_PREFIX`：结果随进程 cwd 漂移，一律视为不在任何授予根内），此处同口径。
+   连带修正：路径语义（`isAbsolute` / `join` / `sep`）必须跟着**注入的 platform** 走而不是跟着宿主走，否则注入 `platform:"win32"` 的测试在 POSIX 宿主上连 win32 分支都进不去（`C:\cache\uv` 过不了 `path.posix.isAbsolute`），win32 规则成了死区；
+4. **危险根拒绝**：解析出的根若**等于或包含**下列任一项 → 丢弃。
    - `homedir()`（Codex 的「永远不要加整个 home」；含 `/`、`/home`、`/Users` 这些祖先）
    - `getAgentDir()`（pi 自己的配置树 = `~/.pi/agent`；写它等于改 pi 的行为）
    - `workspaceRoot` 本身不是危险根（冗余但无害，去重即可）
 
    「包含」的判定用 `fence.ts` 的 `isWithinRoots` 口径（分隔符边界 + 平台大小写敏感性），避免 `C:\work` 命中 `C:\workshop`；
-4. **存在性过滤**：`existsSync` 为假 → 丢弃 + warn「does not exist, skipped」。
+5. **存在性过滤**：`existsSync` 为假 → 丢弃 + warn「does not exist, skipped」。
    为什么是丢弃而不是自动 `mkdir`：① bwrap 的 `--bind <src> <src>` 对不存在的 src **硬失败**（`bwrap: Can't bind ...`），landlock 授权与 win32 的 ACL 授权同理，所以 runner 侧本来就不能传不存在的路径；② 若只让围栏放行而 runner 跳过，就会出现「`write` 工具说可以、bash 说 EROFS」的语义漂移，而 pi 的 write 工具会 `mkdir -p` 父目录——那等于**围栏侧真的在 workspace 外创建了目录**，是 fail-open；③ 沙箱不该因为「解析配置」这个动作就在文件系统上产生副作用。**围栏与四个 runner 必须使用同一份过滤后的列表**；
-5. **canonical + 去重**：`canonicalPath()`（symlink 已解），与 `workspaceRoot` / tmp 根一起去重。
+6. **canonical + 去重**：`canonicalPath()`（symlink 已解），与 `workspaceRoot` / tmp 根一起去重。
 
 warn 去重：模块级 `Set<string>`，同一进程内同一条目只 warn 一次（配置按 cwd 缓存、解析按调用发生，不去重会每条命令刷一次）。提供 `resetConfiguredRootsWarningsForTests()`。
 
@@ -232,7 +234,8 @@ win32 行为：
 |---|---|---|
 | 1 | `writableRoots` 不是数组 / 含非字符串 | `validateSandboxConfig` throw → `getSandboxConfig` fail-safe 回落**整份**默认 + warn（既有 I2 语义） |
 | 2 | 条目是相对路径（`cache/uv`） | warn + 丢弃该条，其余条目照常 |
-| 3 | 条目是 `~` / `/home` / `/` / `getAgentDir()` 或其祖先 | warn + 丢弃（Ruling 3） |
+| 3 | 条目是 `~` / `/home` / `/` / `getAgentDir()` 或其祖先 | warn + 丢弃 |
+| 3b | win32 上条目是 `/`、`/foo`、`C:`、`C:work`（盘符相对，含义随 cwd 漂移） | warn + 丢弃；必须带盘符或 UNC 前缀 |
 | 4 | 条目不存在 | warn「does not exist, skipped」+ 丢弃；**围栏与四个 runner 一致**，不出现单侧放行 |
 | 5 | 条目是 symlink 指向别处 | `canonicalPath` 解析后授予**真身**；围栏的身份回退（dev/ino）已覆盖拼写不一致 |
 | 6 | 项目级 `.pi/sandbox.json` 带 `writableRoots` | 正常生效（项目 > 全局 > 默认）；项目可用空列表关掉全局授予 |
@@ -274,7 +277,7 @@ win32 行为：
 单测（Linux 本机可跑）：
 
 1. `config.test.ts`：`writableRoots` 缺省 `[]`；非数组/非字符串元素 throw；全局有、项目有 → 只取全局 + warn；逐字段合并不被新字段破坏；
-2. `policy.test.ts`（或新增 `configured-roots.test.ts`）：`~` 展开；相对路径丢弃；`~` / `/home` / `/` / agentDir 及其祖先被拒；不存在的根被丢弃 + warn；symlink 解析成真身；去重；`writableRoots()` 第 4 参进结果、`read-only` 下仍为 `[]`；warn 只发一次；
+2. `policy.test.ts`（或新增 `configured-roots.test.ts`）：`~` 展开；相对路径丢弃；`~` / home 的各级祖先 / 文件系统根（用 `parse(root).root` 取，不能写字面 `/`——它在 win32 是盘符相对路径）/ agentDir 及其祖先被拒；win32 盘符相对拼写被拒、显式盘符与 UNC 被收；不存在的根被丢弃 + warn；symlink 解析成真身；去重；`writableRoots()` 第 4 参进结果、`read-only` 下仍为 `[]`；warn 只发一次；
 3. `runners.test.ts`：bwrap / landlock / seatbelt 在 `extraRoots` 下追加于末尾；`extraRoots` 为空时 argv 与既有断言逐字节相同（既有测试不改即证明）；`windowsAclRunnerArgv` **不含**额外根；
 4. `fence.test.ts`：额外根内的写放行、根外仍拒；额外根不存在时（注入 `exists`）不放行；
 5. `escalation.test.ts`：command 分支含新配方且旧片段仍在；operation 分支逐字不变；

@@ -33,7 +33,7 @@ export interface RunnerPolicy {
 	 * 可写根**内部**的只读挖洞（deny-within-allow，spec 2026-10-14-protected-project-config）。
 	 * 缺省由 confine 自动探测（`carveOutRoots`：**仅已存在的**受保护根）；显式传 `[]` 可关闭。
 	 * bwrap / seatbelt 能表达挖洞；**landlock 不能**（规则是并集，无 deny），**windows-acl 本期不能**
-	 * （需 deny ACE / 断继承，是 argv 契约改动）——两者靠围栏侧兼底，缺口已写进 README。
+	 * （需 deny ACE / 断继承，是 argv 契约改动）——两者靠围栏侧兜底，缺口已写进 README。
 	 */
 	protectedRoots?: readonly string[];
 }
