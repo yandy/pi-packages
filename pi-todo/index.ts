@@ -14,7 +14,7 @@ import {
 	updateTodo,
 } from "./src/todo-store.js";
 import { TodoView } from "./src/todo-view.js";
-import { formatProgress, TodoWidget } from "./src/widget.js";
+import { formatProgress, renderWidgetLines, TodoWidget } from "./src/widget.js";
 
 // 编辑器上方 widget 的 slot id（值就是本包的标识）。
 const PACKAGE_ID = "pi-todo";
@@ -35,8 +35,13 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui.setWidget(PACKAGE_ID, undefined);
 			return;
 		}
-		// 组件形式而非字符串数组：只有组件能拿到 render(width)，才能按宽度裁行
-		ctx.ui.setWidget(PACKAGE_ID, (_tui, theme) => new TodoWidget(todos, theme));
+		// TUI 用组件形式：只有组件能拿到 render(width)，才能按显示宽度裁行。
+		// 其它模式（RPC）忽略工厂函数，退回字符串数组；那里由客户端自己排版，不需要我们截断。
+		if (ctx.mode === "tui") {
+			ctx.ui.setWidget(PACKAGE_ID, (_tui, theme) => new TodoWidget(todos, theme));
+			return;
+		}
+		ctx.ui.setWidget(PACKAGE_ID, renderWidgetLines(todos, ctx.ui.theme, {}) ?? undefined);
 	};
 
 	// Reconstruct branch-safe state from tool-result details on (re)start / tree navigation.

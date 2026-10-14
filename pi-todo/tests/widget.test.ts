@@ -125,6 +125,25 @@ describe("renderWidgetLines", () => {
 		expect(lines?.join("\n")).toMatch(/↓ \d+/);
 	});
 
+	it("reports only the upper marker when every hidden todo is behind the anchor", () => {
+		const items = board(12, { 12: { status: "in_progress" } });
+		for (let i = 0; i < 11; i++) items[i].status = "done";
+
+		const rendered = renderWidgetLines(items, theme, { width: 80 })?.join("\n");
+		expect(rendered).toMatch(/↑ 6/);
+		expect(rendered).not.toMatch(/↓ \d+/);
+	});
+
+	it("keeps the budget below the host's 10-line cap", () => {
+		// 宿主对字符串数组 widget 硬裁 10 行；预算必须留在这条线以下。
+		expect(WIDGET_MAX_ROWS).toBeLessThan(10);
+	});
+
+	it("falls back to a usable window when maxRows is smaller than the overhead", () => {
+		const lines = renderWidgetLines(board(20, { 10: { status: "in_progress" } }), theme, { width: 80, maxRows: 1 });
+		expect(lines?.length).toBeLessThanOrEqual(4);
+	});
+
 	it("truncates long titles to the available width", () => {
 		const longTitle = "修复".repeat(30);
 		const lines = renderWidgetLines([todo("1", longTitle, "in_progress")], theme, { width: 20 });

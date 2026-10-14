@@ -23,7 +23,7 @@
 | 逐行截断 | 每项一行 + `truncateToWidth(line, width, "…")` | 行数 = 项数，预算精确；不会因折行把预算吃穿 |
 | 全量视图 | **`/todos` 命令 + overlay**（`width 92%` / `maxHeight 85%` / `margin 1`） | 长清单不挤 dock；overlay 由用户主动开关；命令不占键位 |
 | 视图交互 | 只读；`↑↓`/`j k` 移动、`g`/`G` 首尾、`Esc`/`q` 关闭；表头带 `(当前/总数)` | 视图只负责看；改动看板仍只有 `todo` 工具一条路径 |
-| 非 TUI 模式 | `ctx.mode !== "tui"` → `notify` 完整清单 | 不静默失败（RPC 无终端组件） |
+| 非 TUI 模式 | TUI 走组件形式；其它模式退回字符串数组（RPC 忽略工厂函数）；`/todos` 降级为 `notify` | 不静默失败（RPC 转发通知；print/json 无 UI，不产生输出） |
 | 不做滚动 | **否决**，见下 | 三个硬伤 |
 | 版本 | `0.2.0 → 0.3.0` | 用户可见行为变化，0.x 用 minor 承载 |
 
@@ -85,6 +85,17 @@
 - 长 CJK 标题在 `width ∈ {20,24,30}` 下每行 `visibleWidth(line) ≤ width`，且长标题不整段出现。
 - 窗口：锚点在首/中/尾、`maxRows = 1`、锚点越界、空列表、`align: "center"` 的两端夹紧。
 - `/todos`：`rows ∈ {6,8,12}` 时渲染行数 ≤ `rows`；`maxHeight` 断言为 `"85%"`；`↑↓`/`g`/`G`/`Esc`/`q` 行为。
+
+## 评审修正（2026-10-15）
+
+首版实现接受独立代码评审后做了四处修正：
+
+1. **RPC 会静默丢掉 widget（行为回退）**：宿主 RPC 模式的 `setWidget` 只接受字符串数组，注释写明 “Component factories are not supported in RPC mode”（`dist/modes/rpc/rpc-mode.js`）。因此 `refreshWidget` 改为按 `ctx.mode` 分支：`tui` 用组件形式，其余模式退回数组形式（客户端自己排版，不需要我们按宽度截断）。`ctx.hasUI` 不足以判断这一点。
+2. **print/json 的 `/todos` 是死路径**：这两个模式下 `ctx.ui` 是 no-op 实现、`hasUI === false`，`notify` 被丢弃。文档从 “RPC、print” 收窄为只有 RPC 会转发，并说明 print/json 无输出。
+3. **overlay 高度上限公式**：宿主把 overlay 可用高度夹到 `min(85% 终端高, 终端高 - margin)`。`TodoView.viewportRows()` 改用同一公式，保证 `rows >= 8` 时组件不会被硬裁；更矮的终端只剩一个最小可用尺寸的退化行为（已在注释里说明）。
+4. **状态渲染去重**：`statusIcon` / `statusLabel` 从 widget 与 `/todos` 视图各自的副本改为 `widget.ts` 导出、两处共用，消除 done 标题样式漂移。
+
+另外补了四条约束测试：只有上方标记的窗口（`hiddenAbove` 分支）、`maxRows` 低于开销时的下界、`WIDGET_MAX_ROWS < 10`（宿主上限）、以及 overlay `maxHeight` 公式的逐尺寸断言。
 
 ## 未被采纳的备选
 

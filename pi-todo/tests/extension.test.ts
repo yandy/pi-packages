@@ -187,9 +187,9 @@ describe("todo tool renderResult", () => {
 });
 
 describe("widget wiring", () => {
-	const widgetCtx = (setWidget: any) => ({
+	const widgetCtx = (setWidget: any, mode = "tui") => ({
 		hasUI: true,
-		mode: "tui",
+		mode,
 		sessionManager: { getBranch: () => [] },
 		ui: { setWidget, theme },
 	});
@@ -203,6 +203,16 @@ describe("widget wiring", () => {
 		expect(typeof content).toBe("function");
 		const lines = content({ terminal: { rows: 24, columns: 80 } }, theme).render(40);
 		expect(lines.join("\n")).toContain("Ship it");
+	});
+
+	it("falls back to plain lines outside the TUI, where component factories are ignored", async () => {
+		const setWidget = vi.fn();
+		await run({ action: "set", items: [{ title: "Ship it", status: "pending" }] }, "c3", widgetCtx(setWidget, "rpc"));
+
+		const [key, content] = setWidget.mock.calls.at(-1) ?? [];
+		expect(key).toBe("pi-todo");
+		expect(Array.isArray(content)).toBe(true);
+		expect(content.join("\n")).toContain("Ship it");
 	});
 
 	it("hides the widget once every todo is done", async () => {
@@ -240,11 +250,11 @@ describe("command /todos", () => {
 
 	it("opens an overlay with the full list in the TUI", async () => {
 		await run({ action: "set", items: [{ title: "Ship it", status: "pending" }] });
-		const custom = vi.fn(async () => undefined);
+		const custom = vi.fn((_factory: any, _options: any) => Promise.resolve(undefined));
 		await commands.todos.handler("", { mode: "tui", hasUI: true, ui: { notify: vi.fn(), custom, theme } });
 
 		expect(custom).toHaveBeenCalledTimes(1);
-		const [factory, options] = custom.mock.calls[0];
+		const [factory, options] = custom.mock.calls[0] as [any, any];
 		expect(options.overlay).toBe(true);
 		expect(options.overlayOptions?.maxHeight).toBe("85%");
 		const component = factory({ terminal: { rows: 24, columns: 80 } }, theme, undefined, () => {});

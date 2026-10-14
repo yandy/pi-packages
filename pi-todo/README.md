@@ -59,11 +59,11 @@ The widget hides automatically when every task is done.
 
 The **widget** above the editor is a compact summary capped at 8 lines. When the board is longer than that budget it renders a window instead of getting truncated:
 
-- the window anchors on the first `in_progress` task, fills forward, and spends any leftover rows on earlier tasks;
+- the window anchors on the first `in_progress` task (or the first unfinished one when nothing is in flight), fills forward, and spends any leftover rows on earlier tasks;
 - `↑ n` / `↓ n` mark how many tasks are hidden on each side;
 - the last line is always the overall progress (`✓ 6/18 · ○ 11 · 🔒 1`);
 - every line is clipped to the terminal width with an ellipsis, so nothing wraps and no host-side `widget truncated` ever appears.
 
-The widget hides when the list is empty or every task is done.
+The widget hides when the list is empty or every task is done. RPC clients get the same window as plain lines (component widgets are TUI-only), so titles are not width-clipped there.
 
-The **full view** is a command: `/todos` opens the complete list in an overlay (`↑`/`↓` or `j`/`k` to move, `g`/`G` for the ends, `Esc` or `q` to close) with a `(current/total)` position marker. It is read-only — nothing in it changes the board. Outside the TUI (RPC, print) the command degrades to a notification carrying the full list.
+The **full view** is a command: `/todos` opens the complete list in an overlay (`↑`/`↓` or `j`/`k` to move, `g`/`G` for the ends, `Esc` or `q` to close); the header carries the progress plus a `(current/total)` position marker whenever the list is longer than the window. It is read-only — nothing in it changes the board. Outside the TUI the command falls back to a notification carrying the full list: RPC forwards it, while print and JSON modes have no UI and produce no output.

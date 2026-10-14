@@ -6,15 +6,16 @@ import {
 	matchesKey,
 	truncateToWidth,
 } from "@earendil-works/pi-tui";
-import { isBlocked, type TodoItem } from "./todo-store.js";
-import { formatProgress, selectWindow } from "./widget.js";
+import type { TodoItem } from "./todo-store.js";
+import { formatProgress, selectWindow, statusIcon, statusLabel } from "./widget.js";
 
 const RULE = "─";
 /** 非内容行：上下分隔线 + 表头 + 键位提示。 */
 const CHROME_ROWS = 4;
-/** overlay 高度占终端行数的比例，与 maxHeight 保持一致，避免内容被硬裁。 */
+/** overlay 高度占终端行数的比例，与 overlayOptions.maxHeight 保持一致。 */
 const OVERLAY_HEIGHT_RATIO = 0.85;
-const MIN_VIEW_ROWS = 6;
+/** 视图最小高度：4 行 chrome + 至少 1 行内容。更矮的终端里宿主会裁掉底部装饰行——那个尺寸下视图本来就不可用。 */
+const MIN_VIEW_ROWS = CHROME_ROWS + 1;
 
 export interface TodoViewRenderOptions {
 	width: number;
@@ -41,7 +42,7 @@ export function renderTodoViewLines(items: TodoItem[], theme: Theme, options: To
 	let index = window.hiddenAbove;
 	for (const item of window.visible) {
 		const pointer = index === selectedIndex ? theme.fg("accent", "→") : " ";
-		const row = `${pointer} ${icon(items, item)} #${item.id} ${label(theme, item)}`;
+		const row = `${pointer} ${statusIcon(items, item)} #${item.id} ${statusLabel(theme, item)}`;
 		lines.push(index === selectedIndex ? theme.fg("accent", row) : row);
 		index += 1;
 	}
@@ -50,16 +51,6 @@ export function renderTodoViewLines(items: TodoItem[], theme: Theme, options: To
 	lines.push(RULE.repeat(width));
 
 	return lines.map((line) => truncateToWidth(line, width, "…"));
-}
-
-function icon(items: TodoItem[], item: TodoItem): string {
-	if (isBlocked(items, item)) return "🔒";
-	return item.status === "done" ? "✓" : item.status === "in_progress" ? "◉" : "○";
-}
-
-function label(theme: Theme, item: TodoItem): string {
-	if (item.status !== "done") return item.title;
-	return theme.fg("dim", theme.strikethrough(item.title));
 }
 
 /**
@@ -128,8 +119,11 @@ export class TodoView implements Component {
 		return this.keybindings?.matches(data, keybinding) ?? false;
 	}
 
+	/** overlay 的可用高度：宿主取 min(85% 终端高, 终端高 - margin)，再留出 chrome。 */
 	private viewportRows(): number {
-		return Math.max(MIN_VIEW_ROWS, Math.floor(this.tui.terminal.rows * OVERLAY_HEIGHT_RATIO));
+		const rows = this.tui.terminal.rows;
+		const maxHeight = Math.min(Math.floor(rows * OVERLAY_HEIGHT_RATIO), Math.max(1, rows - 2));
+		return Math.max(MIN_VIEW_ROWS, maxHeight);
 	}
 
 	private move(delta: number): void {

@@ -75,6 +75,13 @@ describe("renderTodoViewLines", () => {
 		const header = renderTodoViewLines(items, theme, { width: 60, rows: 20, selectedIndex: 0 })[1];
 		expect(header).toContain("✓ 1/3");
 	});
+
+	it("strikes through done titles like the widget does", () => {
+		const strikethrough = vi.fn((text: string) => text);
+		const tracking = { ...theme, strikethrough } as any;
+		renderTodoViewLines([todo("1", "Shipped", "done")], tracking, { width: 40, rows: 20, selectedIndex: 0 });
+		expect(strikethrough).toHaveBeenCalledWith("Shipped");
+	});
 });
 
 describe("TodoView", () => {
@@ -119,5 +126,14 @@ describe("TodoView", () => {
 	it("stays within the terminal height budget", () => {
 		const view = new TodoView(board(40), theme, tui, undefined, () => {});
 		expect(view.render(60).length).toBeLessThanOrEqual(Math.floor(24 * 0.85));
+	});
+
+	it("stays within the overlay maxHeight the host will enforce", () => {
+		// 宿主把 overlay 的可用高度夹到 min(85% 终端高, 终端高 - 2)（margin: 1）。
+		for (const rows of [7, 8, 10, 24, 60]) {
+			const view = new TodoView(board(40), theme, { terminal: { rows } } as any, undefined, () => {});
+			const maxHeight = Math.min(Math.floor(rows * 0.85), Math.max(1, rows - 2));
+			expect(view.render(60).length).toBeLessThanOrEqual(maxHeight);
+		}
 	});
 });

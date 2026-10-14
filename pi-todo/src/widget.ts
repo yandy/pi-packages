@@ -71,17 +71,20 @@ function anchorIndex(items: TodoItem[]): number {
 	return unfinished === -1 ? 0 : unfinished;
 }
 
-function icon(items: TodoItem[], item: TodoItem): string {
+/** 状态图标：blocked 优先于状态本身。 */
+export function statusIcon(items: TodoItem[], item: TodoItem): string {
 	return isBlocked(items, item) ? "🔒" : STATUS_ICON[item.status];
 }
 
-function label(theme: Theme, item: TodoItem): string {
+/** 状态文本：done 走删除线，其余原样。widget 与 /todos 视图共用，避免两处风格漂移。 */
+export function statusLabel(theme: Theme, item: TodoItem): string {
 	return item.status === "done" ? theme.strikethrough(item.title) : item.title;
 }
 
 export interface WidgetRenderOptions {
-	width: number;
-	/** 总行数预算（含标记与汇总行）。默认 WIDGET_MAX_ROWS。 */
+	/** 终端宽度；省略时不做截断（RPC 等交给客户端渲染的场景）。 */
+	width?: number;
+	/** 总行数预算（含标记与汇总行）；最小 4，默认 WIDGET_MAX_ROWS。 */
 	maxRows?: number;
 }
 
@@ -111,12 +114,14 @@ export function renderWidgetLines(items: TodoItem[], theme: Theme, options: Widg
 	const lines: string[] = [];
 	if (window.hiddenAbove > 0) lines.push(theme.fg("dim", `↑ ${window.hiddenAbove}`));
 	for (const item of window.visible) {
-		lines.push(theme.fg("muted", `${icon(items, item)} #${item.id} ${label(theme, item)}`));
+		lines.push(theme.fg("muted", `${statusIcon(items, item)} #${item.id} ${statusLabel(theme, item)}`));
 	}
 	if (window.hiddenBelow > 0) lines.push(theme.fg("dim", `↓ ${window.hiddenBelow}`));
 	lines.push(theme.fg("dim", formatProgress(items)));
 
-	return lines.map((line) => truncateToWidth(line, Math.max(1, options.width), "…"));
+	const width = options.width;
+	if (width === undefined) return lines;
+	return lines.map((line) => truncateToWidth(line, Math.max(1, width), "…"));
 }
 
 /** 编辑器上方的常驻 widget：字符串数组形式拿不到宽度，所以用组件形式自己裁行。 */
