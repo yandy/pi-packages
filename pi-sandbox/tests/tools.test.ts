@@ -865,3 +865,31 @@ describe("windows tool wiring", () => {
 		expect(escalated.content.map((c) => c.text).join("\n")).toContain('one-shot escalation to "danger-full-access"');
 	});
 });
+
+describe("extraWritableDirs 接线", () => {
+	it("write 工具：配置的额外根可写", async () => {
+		const extra = realpathSync.native(mkdtempSync(join(tmpdir(), "tools-extra-")));
+		try {
+			const { deps } = makeDeps({ getConfig: () => ({ ...DEFAULT_SANDBOX_CONFIG, extraWritableDirs: [extra] }) });
+			const { write } = createSandboxTools(deps);
+			const target = join(extra, "ok.txt");
+			await write.execute("w-extra", { path: target, content: "ok" }, undefined, undefined, toolCtx() as never);
+			const { readFile } = await import("node:fs/promises");
+			expect(await readFile(target, "utf-8")).toBe("ok");
+		} finally { rmSync(extra, { recursive: true, force: true }); }
+	});
+	it("bash：额外根进入 bwrap argv（含 default tools 路径）", async () => {
+		const extra = realpathSync.native(mkdtempSync(join(tmpdir(), "tools-extra-")));
+		try {
+			const { deps, child, spawnFn } = makeDeps({ _extraRoots: [extra] });
+			const { bash } = createSandboxTools(deps);
+			// 仿文件内既有 spawn 判例（"spawns the confined argv through injected spawnFn"）：等 spawn 后
+			// 手动关流，让 execute 正常结束。
+			const p = bash.execute("b-extra", { command: "true" }, undefined, undefined, toolCtx() as never);
+			await vi.waitFor(() => { expect(spawnFn).toHaveBeenCalled(); });
+			child.emit("close", 0, undefined);
+			await p;
+			expect(spawnFn).toHaveBeenCalledWith("bwrap", expect.arrayContaining(["--bind", extra, extra]), expect.objectContaining({ cwd: ws }));
+		} finally { rmSync(extra, { recursive: true, force: true }); }
+	});
+});

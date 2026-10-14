@@ -97,6 +97,8 @@ export interface SandboxToolDeps {
 	_hostCreatePowerShellToolDefinition?: unknown;
 	/** 测试注入（testing.md「参数注入」）：替换缺省的 "/tmp" + os.tmpdir() tmp 根；生产不传。 */
 	_tmpRoots?: readonly string[];
+	/** 测试注入：替换配置的 extraWritableDirs（额外可写根）；生产缺省用配置值。 */
+	_extraRoots?: readonly string[];
 }
 
 const workspaceRootCache = new Map<string, string>();
@@ -430,6 +432,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 				operations: buildBashOps({
 					mode,
 					workspaceRoot,
+					extraRoots: deps._extraRoots ?? config.extraWritableDirs,
 					selected,
 					platform,
 					runnerCommand: config.runnerCommand,
@@ -458,12 +461,13 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;
 			const workspaceRoot = workspaceRootFor(sessionCwd);
 			const sessionId = readSessionId(ctx);
+			const config = configForCall(deps);
 			const { mode, escalated, ignoredEscalation } = await resolveCall(params as EscalationParams, ctx, deps, "operation", () => String(params.path ?? ""), signal);
 			// fence 拒绝不捕获：FenceDenialError 从 ops 抛出、经 pi execute 原样上抛
 			//（withFileMutationQueue 不吞错）——pi 的 agent 循环会转成 error result。
 			const tool = createWriteToolDefinition(sessionCwd, {
 				operations: createFencedWriteOps(
-					{ mode, workspaceRoot, _tmpRoots: deps._tmpRoots },
+					{ mode, workspaceRoot, _tmpRoots: deps._tmpRoots, extraRoots: deps._extraRoots ?? config.extraWritableDirs },
 					sessionId === null ? undefined : () => getDenialLedger().record(sessionId, "operation"),
 				),
 			});
@@ -484,10 +488,11 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;
 			const workspaceRoot = workspaceRootFor(sessionCwd);
 			const sessionId = readSessionId(ctx);
+			const config = configForCall(deps);
 			const { mode, escalated, ignoredEscalation } = await resolveCall(params as EscalationParams, ctx, deps, "operation", () => String(params.path ?? ""), signal);
 			const tool = createEditToolDefinition(sessionCwd, {
 				operations: createFencedEditOps(
-					{ mode, workspaceRoot, _tmpRoots: deps._tmpRoots },
+					{ mode, workspaceRoot, _tmpRoots: deps._tmpRoots, extraRoots: deps._extraRoots ?? config.extraWritableDirs },
 					sessionId === null ? undefined : () => getDenialLedger().record(sessionId, "operation"),
 				),
 			});
@@ -520,6 +525,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 				operations: createSandboxPowerShellOps({
 					mode,
 					workspaceRoot,
+					extraRoots: deps._extraRoots ?? config.extraWritableDirs,
 					selected,
 					platform,
 					runnerCommand: config.runnerCommand,
