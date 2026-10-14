@@ -7,7 +7,7 @@
  *
  * Stable argv contract (the TS seam builds it):
  *   [node, cli.js, '--workspace', <dir>, '--temp', <dir>,
- *    '--mode', <read-only|workspace-write>, '--', <argv...>]
+ *    ('--writable', <dir>)..., '--mode', <read-only|workspace-write>, '--', <argv...>]
  *
  * Deltas from the deepseek-harness reference (`runner.ts`): the `--write-sid`
  * and `--temp-write-sid` seam-managed-SID flags are gone — this package's
@@ -44,13 +44,15 @@ function fail(detail) {
 /**
  * Parse the runner argv (without the `node` + script prefix). Parsing stops
  * at the first `--`; every token after it is the wrapped command's argv and
- * is kept verbatim.
+ * is kept verbatim. `--writable` may repeat; the values are collected in
+ * declaration order.
  * @param {string[]} raw - `process.argv.slice(2)`.
- * @returns {{ workspace: string, temp: string, mode: string, command: string, args: string[] }}
+ * @returns {{ workspace: string, temp: string, writables: string[], mode: string, command: string, args: string[] }}
  */
 export function parseArgs(raw) {
 	let workspace;
 	let temp;
+	let writables = [];
 	let mode;
 	let index = 0;
 	for (; index < raw.length; index++) {
@@ -69,6 +71,9 @@ export function parseArgs(raw) {
 			case "--temp":
 				temp = value;
 				break;
+			case "--writable":
+				writables.push(value);
+				break;
 			case "--mode":
 				mode = value;
 				break;
@@ -82,14 +87,14 @@ export function parseArgs(raw) {
 	const argv = raw.slice(index);
 	const command = argv[0];
 	if (command === undefined) fail("missing command after --");
-	return { workspace, temp, mode, command, args: argv.slice(1) };
+	return { workspace, temp, writables, mode, command, args: argv.slice(1) };
 }
 
 /**
  * Fail unless `path` exists and is a directory. Both roots are validated in
  * both modes: a provider bug that passes a bogus root must fail loudly at the
  * runner boundary, never mid-child.
- * @param {string} label - `--workspace` or `--temp`, for the message.
+ * @param {string} label - `--workspace`, `--temp`, or `--writable`, for the message.
  * @param {string} path - directory that must already exist.
  * @returns {void}
  */

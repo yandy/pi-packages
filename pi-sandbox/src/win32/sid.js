@@ -8,10 +8,14 @@
  * per workspace per machine. The temp write identity (`S-1-4-x-y-1`) is the
  * deterministic identity of the granted temp root — the host `%TEMP%`, never a
  * random private directory — whose fixed third sub-authority domain-separates
- * it from every two-sub-authority workspace SID, so the two capabilities can
- * never be confused. Neither identity carries session state: the runner
- * replays both grants idempotently across sessions and restarts, and both ACEs
- * are standing (never revoked).
+ * it from every two-sub-authority workspace SID, so the two can never be
+ * confused. Each granted extra writable root gets its own capability SID
+ * (`S-1-4-x-y-2`) derived from its canonical path under the hash domain label
+ * `"extra\0"`; the label and the fixed third sub-authority (`-2`)
+ * domain-separate it from both the workspace SID (no third sub-authority) and
+ * the temp SID (`-1`). No identity carries session state: the runner replays
+ * every grant idempotently across sessions and restarts, and all ACEs are
+ * standing (never revoked).
  *
  * The callers pass canonical paths (`realpathSync.native`) — these functions
  * are pure and never touch the filesystem. `canonicalSidInput` only folds
@@ -124,6 +128,26 @@ export function tempWriteSid(tempDir) {
 	const first = (digest.readUInt32LE(0) % SUB_AUTHORITY_MODULUS) + 1;
 	const second = (digest.readUInt32LE(4) % SUB_AUTHORITY_MODULUS) + 1;
 	return `${CAPABILITY_SID_PREFIX}${first}-${second}-1`;
+}
+
+/**
+ * Derive an extra writable directory's write SID. The canonical path of the
+ * extra root (canonicalized by the caller) is the capability identity; unlike
+ * `workspaceWriteSid`/`tempWriteSid`, this function is called once per extra
+ * writable root, so every extra root carries its own capability SID. The fixed
+ * third sub-authority (`-2`) is a SID-level domain separator from the workspace
+ * SID (no third sub-authority) and the temp SID (`-1`), and the hash domain
+ * label (`"extra\0"`) separates the derivation itself, so the three
+ * derivations can never produce the same SID for one path.
+ * @param dir - the extra writable root's canonical absolute path (canonicalized
+ * by the caller).
+ * @returns the SDDL string form.
+ */
+export function extraWriteSid(dir) {
+	const digest = createHash("sha256").update("extra\0", "utf8").update(dir, "utf8").digest();
+	const first = (digest.readUInt32LE(0) % SUB_AUTHORITY_MODULUS) + 1;
+	const second = (digest.readUInt32LE(4) % SUB_AUTHORITY_MODULUS) + 1;
+	return `${CAPABILITY_SID_PREFIX}${first}-${second}-2`;
 }
 
 /**

@@ -77,6 +77,13 @@ interface RunOverrides {
 	/** Defaults to `canonicalPath(fixture granted temp)`; the `%TEMP%` case passes the real tmpdir. */
 	temp?: string;
 	/**
+	 * Extra standing grants emitted as `--writable <dir>` after the `--temp`
+	 * value (production order). The runner grants them only in
+	 * `workspace-write`; omitting a previously granted dir proves its standing
+	 * ACE stays inert without the restricting SID (config narrowing).
+	 */
+	writables?: readonly string[];
+	/**
 	 * Defaults to the test process's cwd. The runner inherits its own cwd into
 	 * the child (`runner.js` never chdirs: the workspace is an authorization
 	 * root, not a chdir target), so moving the child's cwd means moving the
@@ -105,6 +112,7 @@ function runConfined(mode: "read-only" | "workspace-write", args: readonly strin
 		overrides.workspace ?? canonicalPath(workspace),
 		"--temp",
 		overrides.temp ?? canonicalPath(grantedTemp),
+		...(overrides.writables ?? []).flatMap((dir) => ["--writable", dir]),
 		"--mode",
 		mode,
 		"--",
@@ -322,6 +330,37 @@ describe.skipIf(process.platform !== "win32")("windows-acl end-to-end (real runn
 		expectDenied(result);
 		expectDenialDialect(result);
 		expectHostFileNotCreated(target);
+	});
+
+	it("extra writable dirs: granted dir accepts a write, dropping it from the config denies", { timeout: E2E_TIMEOUT }, () => {
+		const extra = mkdtempSync(join(homedir(), "sbx-e2e-extra-"));
+		try {
+			const seam = windowsAclRunnerArgv(
+				{ mode: "workspace-write", workspaceRoot: canonicalPath(workspace), extraRoots: [canonicalPath(extra)] },
+				{ node: process.execPath, runner: RUNNER },
+			);
+			expect(seam.slice(seam.indexOf("--writable"))).toEqual(["--writable", canonicalPath(extra), "--mode", "workspace-write"]);
+
+			const grantedTarget = join(extra, "extra-written.txt");
+			const granted = runConfined(
+				"workspace-write",
+				nodeScript("require('node:fs').writeFileSync(process.argv[1], 'ok')", [grantedTarget]),
+				{ writables: [canonicalPath(extra)] },
+			);
+			expect(granted.status, granted.stderr).toBe(0);
+			expect(readFileSync(grantedTarget, "utf8")).toBe("ok");
+
+			// 同一目录、不带 --writable：常驻 ACE 必须保持惰性（配置收窄立即生效）。
+			const afterTarget = join(extra, "extra-after.txt");
+			const denied = runConfined("workspace-write", nodeScript("require('node:fs').writeFileSync(process.argv[1], 'x')", [afterTarget]), {});
+			expectDenied(denied);
+			expectHostFileNotCreated(afterTarget);
+		} finally {
+			// Grants rewrote this dir's ACL (Low label + capability ACE); recursive
+			// deletes there hit transient Windows sharing/handle races, so retry like
+			// the suite's afterEach does for `root`.
+			rmSync(extra, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+		}
 	});
 
 	/** `dialect: "localized"` cases carry OS/CLR message text; only `node` text is English on every locale. */

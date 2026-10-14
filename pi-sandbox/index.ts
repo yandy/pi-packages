@@ -157,6 +157,10 @@ export default function (pi: ExtensionAPI) {
 				`runner: ${runnerText}`,
 				`workspace: ${canonicalPath(effectiveCwd)}`,
 			];
+			if (cfg.extraWritableDirs.length > 0) {
+				const suffix = effective === "workspace-write" ? "" : ` (inactive: ${effective})`;
+				lines.push(`extra writable: ${cfg.extraWritableDirs.join(", ")}${suffix}`);
+			}
 			const shellLine = win32ShellStatusLine(pi);
 			if (shellLine !== null) lines.push(shellLine);
 			return lines.join("\n");

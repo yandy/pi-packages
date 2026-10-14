@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -155,6 +155,29 @@ describe("extension activate", () => {
 		} finally {
 			rmSync(proj, { recursive: true, force: true });
 		}
+	});
+
+	it("/permission 显示额外可写目录，非 workspace-write 时标注 inactive", async () => {
+		const extra = mkdtempSync(join(tmpdir(), "permission-extra-"));
+		try {
+			const globalPath = join(dir, "agent", "sandbox.json");
+			writeFileSync(globalPath, JSON.stringify({ mode: "workspace-write", extraWritableDirs: [extra] }));
+			const { fakePi, commandHandlers } = makeFakePi();
+			const activate = (await import("../index")).default;
+			activate(fakePi as never);
+			const notify = vi.fn();
+			await commandHandlers.permission.handler("", { ui: { notify } });
+			let text = String(notify.mock.calls[0]?.[0]);
+			expect(text).toContain(`extra writable: ${realpathSync.native(extra)}`);
+			expect(text).not.toContain("(inactive");
+
+			// describeStatus 每次现读 getSandboxConfig()：清缓存 + 改写配置即可切到 read-only。
+			resetSandboxConfigCache();
+			writeFileSync(globalPath, JSON.stringify({ mode: "read-only", extraWritableDirs: [extra] }));
+			await commandHandlers.permission.handler("", { ui: { notify } });
+			text = String(notify.mock.calls[1]?.[0]);
+			expect(text).toContain(`extra writable: ${realpathSync.native(extra)} (inactive: read-only)`);
+		} finally { rmSync(extra, { recursive: true, force: true }); }
 	});
 });
 

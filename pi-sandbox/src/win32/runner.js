@@ -5,9 +5,10 @@
  * spawns the wrapped argv under it inside a kill-on-close Job with the
  * caller's stdio inherited, and mirrors the child's exit code.
  *
- * Stable argv contract (Task 9 builds it):
+ * Stable argv contract (the TS seam builds it):
  *   [node, runner.js, '--workspace', <dir>, '--temp', <dir>,
- *    '--mode', <read-only|workspace-write>, '--', <argv...>]
+ *    ('--writable', <dir>)..., '--mode', <read-only|workspace-write>,
+ *    '--', <argv...>]
  *
  * Deltas from the deepseek-harness reference (`sandbox-windows-acl/src/runner.ts`)
  * by design:
@@ -54,7 +55,7 @@ import { grantWrite } from "./acl.js";
 import { parseArgs, requireDirectory, RUNNER_FAILURE_EXIT, RUNNER_SIGNATURE, RunnerFailure } from "./cli.js";
 import { allocPtrSlot, decodePtr, throwLastError, win32 } from "./ffi.js";
 import { spawnInheritedJobProcess, waitForProcessExit } from "./proc.js";
-import { assertGrantRootsDisjoint, canonicalSidInput, tempWriteSid, workspaceWriteSid } from "./sid.js";
+import { assertGrantRootsDisjoint, canonicalSidInput, extraWriteSid, tempWriteSid, workspaceWriteSid } from "./sid.js";
 import {
 	createRestrictedToken,
 	findLogonSid,
@@ -103,10 +104,11 @@ function parseSid(api, sidString) {
  */
 export async function main(rawArgs, deps = {}) {
 	const parsed = parseArgs(rawArgs);
-	// Both directories are validated in both modes: a provider bug that passes
+	// All roots are validated in both modes: a provider bug that passes
 	// a bogus root must fail loudly at the runner boundary, never mid-child.
 	requireDirectory("--workspace", parsed.workspace);
 	requireDirectory("--temp", parsed.temp);
+	for (const dir of parsed.writables) requireDirectory("--writable", dir);
 	if (parsed.mode === "workspace-write") assertGrantRootsDisjoint(parsed.workspace, parsed.temp);
 
 	const api = deps.api ?? (await win32());
@@ -123,6 +125,9 @@ export async function main(rawArgs, deps = {}) {
 	const tempRoot = canonicalSidInput(parsed.temp);
 	const workspaceSid = parsed.mode === "workspace-write" ? workspaceWriteSid(workspaceRoot) : undefined;
 	const tempSid = parsed.mode === "workspace-write" ? tempWriteSid(tempRoot) : undefined;
+	const extraRoots = parsed.mode === "workspace-write"
+		? [...new Set(parsed.writables.map(canonicalSidInput))]
+		: [];
 
 	const currentToken = openCurrentProcessToken(api);
 	const lowLabelSid = makeWellKnownSid(api, abi.WinLowLabelSid);
@@ -134,6 +139,11 @@ export async function main(rawArgs, deps = {}) {
 		grantWrite(api, parsed.workspace, workspaceSidPtr, lowLabelSid, worldSid);
 		grantWrite(api, parsed.temp, tempSidPtr, lowLabelSid, worldSid);
 		writeSids.push(workspaceSidPtr, tempSidPtr);
+		for (const extraRoot of extraRoots) {
+			const extraSidPtr = parseSid(api, extraWriteSid(extraRoot));
+			grantWrite(api, extraRoot, extraSidPtr, lowLabelSid, worldSid);
+			writeSids.push(extraSidPtr);
+		}
 	}
 	const logonSid = findLogonSid(api, currentToken);
 	const token = createRestrictedToken(api, currentToken, logonSid, writeSids, { world: worldSid }, parsed.mode);

@@ -864,4 +864,63 @@ describe("windows tool wiring", () => {
 		expect(ctx.ui.select.mock.calls[0][0]).toContain("this command");
 		expect(escalated.content.map((c) => c.text).join("\n")).toContain('one-shot escalation to "danger-full-access"');
 	});
+
+	it("powershell carries the injected extra roots into the sandbox ops factory", async () => {
+		const extra = realpathSync.native(mkdtempSync(join(tmpdir(), "tools-extra-")));
+		try {
+			const { deps } = makeDeps({
+				platform: "win32",
+				_hostCreatePowerShellToolDefinition: fakePowerShellBuilder(),
+				_extraRoots: [extra],
+			});
+			const { powershell } = createSandboxTools(deps);
+			await powershell!.execute("pwsh-extra", { command: "Get-ChildItem" }, undefined, undefined, toolCtx());
+			// 与 bash 同一条接线：配置/注入的额外根必须原样到达受限 ops 工厂的 options
+			//（platform 注入与既有用例同口径），否则 pwsh 在额外根上是 fail-closed 的哑拒。
+			expect(createSandboxPowerShellOpsMock).toHaveBeenLastCalledWith(expect.objectContaining({
+				platform: "win32",
+				extraRoots: [extra],
+			}));
+		} finally { rmSync(extra, { recursive: true, force: true }); }
+	});
+});
+
+describe("extraWritableDirs 接线", () => {
+	it("write 工具：配置的额外根可写", async () => {
+		const extra = realpathSync.native(mkdtempSync(join(tmpdir(), "tools-extra-")));
+		try {
+			const { deps } = makeDeps({ getConfig: () => ({ ...DEFAULT_SANDBOX_CONFIG, extraWritableDirs: [extra] }) });
+			const { write } = createSandboxTools(deps);
+			const target = join(extra, "ok.txt");
+			await write.execute("w-extra", { path: target, content: "ok" }, undefined, undefined, toolCtx() as never);
+			const { readFile } = await import("node:fs/promises");
+			expect(await readFile(target, "utf-8")).toBe("ok");
+		} finally { rmSync(extra, { recursive: true, force: true }); }
+	});
+	it("bash：额外根进入 bwrap argv（含 default tools 路径）", async () => {
+		const extra = realpathSync.native(mkdtempSync(join(tmpdir(), "tools-extra-")));
+		try {
+			const { deps, child, spawnFn } = makeDeps({ _extraRoots: [extra] });
+			const { bash } = createSandboxTools(deps);
+			// 仿文件内既有 spawn 判例（"spawns the confined argv through injected spawnFn"）：等 spawn 后
+			// 手动关流，让 execute 正常结束。
+			const p = bash.execute("b-extra", { command: "true" }, undefined, undefined, toolCtx() as never);
+			await vi.waitFor(() => { expect(spawnFn).toHaveBeenCalled(); });
+			child.emit("close", 0, undefined);
+			await p;
+			expect(spawnFn).toHaveBeenCalledWith("bwrap", expect.arrayContaining(["--bind", extra, extra]), expect.objectContaining({ cwd: ws }));
+		} finally { rmSync(extra, { recursive: true, force: true }); }
+	});
+	it("edit 工具：配置的额外根可写", async () => {
+		const extra = realpathSync.native(mkdtempSync(join(tmpdir(), "tools-extra-")));
+		try {
+			const { deps } = makeDeps({ getConfig: () => ({ ...DEFAULT_SANDBOX_CONFIG, extraWritableDirs: [extra] }) });
+			const { edit } = createSandboxTools(deps);
+			const target = join(extra, "edit.txt");
+			writeFileSync(target, "hello world");
+			await edit.execute("e-extra", { path: target, edits: [{ oldText: "hello", newText: "goodbye" }] }, undefined, undefined, toolCtx() as never);
+			const { readFile } = await import("node:fs/promises");
+			expect(await readFile(target, "utf-8")).toBe("goodbye world");
+		} finally { rmSync(extra, { recursive: true, force: true }); }
+	});
 });

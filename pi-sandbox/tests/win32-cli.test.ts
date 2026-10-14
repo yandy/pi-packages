@@ -17,6 +17,7 @@ describe("win32 runner cli", () => {
 			workspace: "C:\\ws",
 			temp: "C:\\tmp",
 			mode: "workspace-write",
+			writables: [],
 			command: "pwsh.exe",
 			args: ["-Command", "echo hi"],
 		});
@@ -25,6 +26,19 @@ describe("win32 runner cli", () => {
 	it("keeps the command argv verbatim after the separator", () => {
 		const parsed = parseArgs([...base.slice(0, 6), "--", "pwsh.exe", "-Command", "echo --workspace x"]);
 		expect(parsed.args).toEqual(["-Command", "echo --workspace x"]);
+	});
+
+	it("collects repeated --writable dirs in declaration order", () => {
+		const parsed = parseArgs([...base.slice(0, 6), "--writable", "C:\\x", "--writable", "C:\\y", "--", "pwsh.exe", "-Command", "echo hi"]);
+		expect(parsed.writables).toEqual(["C:\\x", "C:\\y"]);
+	});
+	it("rejects a missing --writable value", () => {
+		expect(() => parseArgs(["--workspace", "C:\\ws", "--temp", "C:\\tmp", "--writable"])).toThrowError(/missing value after --writable/);
+	});
+	it("validates writable roots as existing directories", () => {
+		dir = mkdtempSync(join(tmpdir(), "sbx-cli-"));
+		expect(() => requireDirectory("--writable", join(dir, "nope"))).toThrowError(/--writable is not an existing directory/);
+		expect(() => requireDirectory("--writable", dir)).not.toThrow();
 	});
 
 	it("rejects missing, unknown, and duplicated args", () => {

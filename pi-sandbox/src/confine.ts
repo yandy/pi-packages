@@ -1,4 +1,4 @@
-import { canonicalPath, type ConfinedSandboxMode, type SandboxMode } from "./policy";
+import { canonicalPath, canonicalRoots, type ConfinedSandboxMode, type SandboxMode } from "./policy";
 import {
 	bwrapProfileArgs,
 	LAUNCHER_BIN,
@@ -102,6 +102,8 @@ export interface ConfineOptions {
 	runnerFailureSignatures?: string[] | null;
 	probeTimeoutMs?: number;
 	hooks?: RunnerHooks;
+	/** workspace-write 下追加的可写根（生产来自 extraWritableDirs 配置）；此处统一 canonical 化并去重。 */
+	extraRoots?: readonly string[];
 }
 
 /**
@@ -114,7 +116,11 @@ export function confine(
 	workspaceRoot: string,
 	opts: ConfineOptions = {},
 ): ConfinedArgv {
-	const policy: RunnerPolicy = { mode, workspaceRoot: canonicalPath(workspaceRoot) };
+	const policy: RunnerPolicy = {
+		mode,
+		workspaceRoot: canonicalPath(workspaceRoot),
+		extraRoots: canonicalRoots(opts.extraRoots ?? []),
+	};
 
 	if (opts.runnerCommand && opts.runnerCommand.length > 0) {
 		return {
