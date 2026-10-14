@@ -103,6 +103,52 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 | `probeTimeoutMs` | `5000` | runner 功能探测超时（正数） |
 | `extraWritableDirs` | `[]` | 仅 `workspace-write` 下、工作区与 tmp 之外追加的可写根；仅接受绝对路径，`~` / `~/`（Win32 `~\`）展开到家目录，不支持 `~user`；非绝对路径或不存在（非目录）的条目在加载时告警并忽略；取值不是字符串数组时整份配置回落默认值 |
 
+### 示例：为常见工具开放缓存目录
+
+把全局缓存/包存储放在工作区外的工具，在 `workspace-write` 下会失败或反复重新下载。把这些目录列进 `extraWritableDirs` 正是为此准备的：用户一次性授权存储目录，模型随后原样运行工具——不需要 `UV_CACHE_DIR` / `PNPM_HOME` / `npm_config_cache` 之类的搬迁（见上文「缓存/数据目录搬迁属于越界行为」）。
+
+条目必须是已存在目录（缺失目录会在加载时告警并忽略），先创建：
+
+```bash
+mkdir -p ~/.cache/uv ~/.local/share/pnpm/store ~/.cache/pnpm ~/.npm ~/.cache/pip ~/.cache/huggingface
+```
+
+```json
+{
+  "mode": "workspace-write",
+  "extraWritableDirs": [
+    "~/.cache/uv",
+    "~/.local/share/pnpm/store",
+    "~/.cache/pnpm",
+    "~/.npm",
+    "~/.cache/pip",
+    "~/.cache/huggingface"
+  ]
+}
+```
+
+| 工具 | 目录（Linux 默认） | 覆盖变量 | 查询本机真实路径 |
+|---|---|---|---|
+| uv 缓存（`uv sync`、`uv pip install`） | `~/.cache/uv` | `UV_CACHE_DIR` | `uv cache dir` |
+| pnpm store——包内容实体；安装会写它 | `~/.local/share/pnpm/store` | `storeDir` | `pnpm store path` |
+| pnpm 元数据 / `pnpm dlx` 缓存 | `~/.cache/pnpm` | `cacheDir` | `pnpm cache path` |
+| npm 缓存 | `~/.npm` | `npm_config_cache` | `npm config get cache` |
+| pip 缓存 | `~/.cache/pip` | `PIP_CACHE_DIR` | `pip cache dir` |
+| Hugging Face 缓存 | `~/.cache/huggingface` | `HF_HOME` | — |
+
+**pnpm store 与 cache 的区别。** *store* 存放 `pnpm install` 下载的包内容实体——项目从它 hard link，因此安装必须能写它（上面的授权是父目录 `store/`；`pnpm store path` 打印的是它内部的版本子目录，如 `store/v11`）；*cache* 存放 registry 元数据与 `pnpm dlx` 缓存，只影响速度。二者都不包含全局安装的包或可执行文件——那些在 `~/.local/share/pnpm/global` 与 `~/.local/share/pnpm/bin`，不在上面的授权范围内。
+
+**全局安装仍会被拦截。** 只授予存储/缓存目录后，`uv tool install`（写 `~/.local/share/uv/tools` 与 `~/.local/bin`）与 `pnpm add -g`（写 `~/.local/share/pnpm/global` 与 `bin`）依旧会被沙箱拒绝，只能走显式提权。**不要**授予安装前缀或 `PATH` 上的 bin 目录（`~/.local/bin`、`~/.cargo/bin`、`~/go/bin` 等）：那等于让受限模型留下持久可执行文件，供未来不受限运行使用。
+
+平台差异：表中是 Linux 默认值。macOS：pnpm store `~/Library/pnpm/store`、pnpm cache `~/Library/Caches/pnpm`、pip `~/Library/Caches/pip`。Windows：uv cache `%LOCALAPPDATA%\uv\cache`、pnpm store `%LOCALAPPDATA%\pnpm\store`、pnpm cache `%LOCALAPPDATA%\pnpm-cache`、npm cache `%LocalAppData%\npm-cache`、pip `%LocalAppData%\pip\Cache`。精确路径请用各工具的查询命令。
+
+可选授权及权衡：
+
+- **Go**：授予 `~/go/pkg` 与 `~/.cache/go-build`（macOS `~/Library/Caches/go-build`、Windows `%LocalAppData%\go-build`），`go build` 可跑，而 `go install`（写 `~/go/bin`）仍被拒。
+- **Cargo**：`cargo build` 会写 `~/.cargo/.package-cache` 与 registry/git 缓存，因此必须整个授予 `~/.cargo`；代价是 `cargo install`（写 `PATH` 上的 `~/.cargo/bin`）也会放行。接受这一点才授予，否则不给 Cargo 授权、按需提权。
+- **uv 管理的解释器**：项目指定的 Python 未安装时，`uv sync` 会下载到 `~/.local/share/uv/python`（并可能在 `~/.local/bin` 建可执行链接）。建议先在沙箱外 `uv python install <版本>` 装好；若确需在沙箱内下载，可单独授予 `~/.local/share/uv/python`（`uv tool install` 仍被拦）。
+- **pnpm 机器级状态**：`~/.local/state/pnpm` 不在上面的授予集内；若遇到来自它的拒绝并确认是状态写入，可单独加入——它不含任何全局安装内容。
+
 ## 安全说明
 
 - 受约束进程可**读取**宿主上你有权读的一切（包括 `~/.ssh` 等）——这是本沙箱的设计语义（与 deepseek harness 一致）；root 专属文件受文件权限保护
