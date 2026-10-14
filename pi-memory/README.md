@@ -4,38 +4,6 @@ File-system driven persistent memory layer for pi coding agent. Stores project k
 
 Aligned with Claude Code's auto memory mechanism: **one memory = one file**, a `MEMORY.md` index with exactly one line per memory, relevance-based auto-surfacing, per-turn memory extraction, and typed memory categories.
 
-> ## ⚠️ Breaking changes
->
-> **In 2.5.0:**
->
-> - **Windows directory names changed shape.** `local/<project>` keys now split on `\` as well as `/`, so a Windows project directory is one readable component (`C_3a__Users__you__proj`) instead of a nested tree (`C_3a/Users/you/proj`). Memories stored under the old nested layout are orphaned: run `/memory` inside the project to read the new `Dir:` path, then create that directory if it does not exist and move the old project directory's contents into it (in PowerShell: `New-Item -ItemType Directory -Force "<new dir>"` then `Move-Item "<old project dir>\*" "<new dir>"`); the empty intermediate directories left behind can be ignored. `git/<host>__<owner>__<repo>` names are unchanged on POSIX; on Windows they are unchanged too unless the key's first `.`-delimited label is a reserved device name, or the key contains a backslash, or it ends in a dot or a space — those few names are sanitised now (see [Windows](#windows)). POSIX output is byte-identical to before.
-> - **Entry files whose stem is a Windows reserved device name now get a `_` prefix** (`name: "CON"` → `_CON.md`) on every platform, so the name is safe in a shared `git/` directory. Only newly created files are affected — existing entries keep their file names.
->
-> **In 2.4.0:**
->
-> - **The package-level `enabled` switch is gone.** `memory.json` has no top-level `enabled` any more: a leftover key is ignored, and `{"enabled": false}` no longer disables anything — it used to skip model validation too, so a disabled config often had no model configured. Disable the extension the way you disable any pi package — by not loading it — see [Disabling the extension](#disabling-the-extension). `dream` is now a required task in every session.
-> - **`/memory` no longer prints a `Memory: enabled|disabled` line.** The healthy status block is 7 lines starting with `Dir:`, and the old disabled state no longer exists — only *healthy* and *misconfigured* remain. Module switches (`autoSurfacing.enabled`, `extractMemories.enabled`) are unchanged.
->
-> **In 2.3.0:**
->
-> - **The injected index window is now the newest 50 lines / 16 KiB.** `memIndexInjectMaxLines` 200 → 50 and `memIndexInjectMaxBytes` 25600 → 16384. The write capacity is unchanged (200 lines / 25600 bytes), so memories older than the newest 50 index lines no longer reach the system prompt — they stay reachable through auto-surfacing and the `memory` tool. Configs that already set `memIndexInjectMax*` are unaffected.
->
-> **In 2.2.0:**
->
-> - **`extractMemories.enabled` now defaults to `false`.** Per-turn extraction is opt-in: once enabled, every turn ends with a headless model call. Configs that already set `"extractMemories": { "enabled": true }` are unaffected.
->
-> **In 2.1.0:**
->
-> - **Models must be configured explicitly.** There is no shipped default and no parent-model fallback: `defaults.model` (or a per-task `model`) must exist and be resolvable, or `session_start` reports a config error and initialises **nothing**. See [Model configuration](#model-configuration).
-> - **`/memory on` and `/memory off` are gone.** `enabled` is a `memory.json` switch read once at session start — changing it needs a session restart. **That key has since been removed** — it is ignored if present; see [Disabling the extension](#disabling-the-extension).
-> - **Automatic 1.x → 2.0 migration has been removed.** Legacy topic files stay on disk untouched but are **invisible** to the memory system (they fail `parseEntryFile`'s five-field v2 frontmatter check). See [1.x data](#1x-data).
->
-> **In 2.0.0:**
->
-> - The index is now **one line per memory** (1.x had one line per *topic file*, with many `## entries` inside it).
-> - Each memory lives in **its own file** with five frontmatter fields: `name`, `description`, `type`, `created`, `modified` (1.x used `updated`).
-> - The index is injected as a **system-prompt section** (`memory_index`) that is frozen for the whole session, instead of being appended to the system prompt string.
-
 ## Features
 
 - **One `memory` tool, five actions** for the main agent: `add`, `replace`, `remove`, `list`, `search`. Two more — `rename` and `rebuild_index` — exist **only inside `/dream`'s own headless session** and never appear in the main agent's or the extractor's schema.

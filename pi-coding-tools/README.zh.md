@@ -2,14 +2,6 @@
 
 提供 AST/LSP 代码智能工具的 Pi 扩展包。
 
-> ## ⚠️ 破坏性变更
->
-> **0.6.0：**
->
-> - **不再激活内置的 `ls`/`find`/`grep` 工具。** 本包现在只提供下面这 5 个 AST/LSP 工具；pi 自身的默认工具集只有 `read`/`bash`/`edit`/`write`，所以升级后 `ls`/`find`/`grep` 会静默消失。
-> - **需要自行恢复**：在用户配置（`~/.pi/agent/settings.json`）或项目配置（`.pi/settings.json`）中写入 `{ "defaultTools": ["+ls", "+find", "+grep"] }`。`+name` 形式是在继承的默认工具集上追加，而不是替换。
-> - **`coding-tools.json` 里遗留的 `ls`/`find`/`grep` 字段现在被静默忽略**——不报错，也不生效。
-
 ## AST/LSP 代码理解工具
 
 新增 5 个 token-efficient 工具，让 LLM 用最少 token 理解代码库：

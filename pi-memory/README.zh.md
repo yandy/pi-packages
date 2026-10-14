@@ -4,38 +4,6 @@ pi coding agent 的文件系统持久记忆层。把项目知识（事实、偏�
 
 对齐 Claude Code 的自动记忆机制：**一条记忆 = 一个文件**、`MEMORY.md` 索引一行一条记忆、按相关性自动浮现、每轮自动提取、记忆分类。
 
-> ## ⚠️ 破坏性变更
->
-> **2.5.0：**
->
-> - **Windows 上的目录名形态变了。** `local/<项目>` 的 key 现在按 `\` 与 `/` 一起分段，因此 Windows 项目目录是一个可读的单分量名（`C_3a__Users__you__proj`），而不是嵌套的一棵树（`C_3a/Users/you/proj`）。旧嵌套布局下的记忆会变成孤儿目录：在项目里跑一次 `/memory` 读出新的 `Dir:` 路径，再建好那个目录并把旧项目目录里的内容搬过去（PowerShell 里先 `New-Item -ItemType Directory -Force "<新目录>"`，再 `Move-Item "<旧项目目录>\*" "<新目录>"`）；留下的空中间目录可以不管。`git/<host>__<owner>__<repo>` 在 POSIX 上形态不变；Windows 上同样不变，除非 key 的首段是保留设备名、或 key 含反斜杠、或以点或空格结尾 —— 这类少数名字现在会被收尾（见 [Windows](#windows)）。POSIX 输出与之前逐字节一致。
-> - **stem 是 Windows 保留设备名的 entry 文件现在会加 `_` 前缀**（`name: "CON"` → `_CON.md`），**所有平台**都这样，这样名字在共享的 `git/` 目录里两边都安全。只影响**新建**文件 —— 既有 entry 保留原名。
->
-> **2.4.0：**
->
-> - **包级开关 `enabled` 已删除。** `memory.json` 不再有顶层 `enabled`：残留的键会被忽略，`{"enabled": false}` 不再能禁用任何东西 —— 它以前还会跳过模型校验，所以被禁用的配置往往也没配模型。要禁用整个扩展，请像禁用其他 pi package 一样「不加载它」，见[禁用本扩展](#禁用本扩展)。`dream` 现在是每个会话的必需任务。
-> - **`/memory` 不再输出 `Memory: enabled|disabled` 行。** 健康态状态块为 7 行、以 `Dir:` 起头；旧的「禁用」态已不存在，只剩**健康**与**配置错误**两态。模块级开关（`autoSurfacing.enabled` / `extractMemories.enabled`）不变。
->
-> **2.3.0：**
->
-> - **注入的索引窗口改为「最新的 50 行 / 16 KiB」。** `memIndexInjectMaxLines` 200 → 50、`memIndexInjectMaxBytes` 25600 → 16384。写入口径不变（200 行 / 25600 字节），因此比「最新 50 行」更旧的记忆不再进 system prompt —— 它们仍可由 auto-surfacing 与 `memory` 工具检索。已经显式配置 `memIndexInjectMax*` 的用户不受影响。
->
-> **2.2.0：**
->
-> - **`extractMemories.enabled` 默认改为 `false`。** 每轮自动提取现在是 opt-in：开启后每轮结束都会跑一次 headless 模型调用。已经显式写了 `"extractMemories": { "enabled": true }` 的配置不受影响。
->
-> **2.1.0：**
->
-> - **模型必须显式配置。** 没有内置默认值，也没有父会话模型回退：`defaults.model`（或 per-task `model`）必须存在且可解析，否则 `session_start` 会报配置错误并且**什么都不初始化**。详见[模型配置](#模型配置)。
-> - **`/memory on` / `/memory off` 已删除。** `enabled` 只是 `memory.json` 里的开关，启动时读一次，改动需要重启会话。**该键现已移除** —— 写了也会被忽略，见[禁用本扩展](#禁用本扩展)。
-> - **1.x → 2.0 的自动迁移已删除。** legacy topic 文件原样留在磁盘上，但对记忆系统**不可见**（过不了 `parseEntryFile` 的 v2 五字段校验）。详见 [1.x 数据](#1x-数据)。
->
-> **2.0.0 已包含：**
->
-> - 索引现在**一行一条记忆**（1.x 是一行一个 topic 文件，文件里塞很多 `## entry`）。
-> - 每条记忆**独占一个文件**，frontmatter 五个字段：`name`、`description`、`type`、`created`、`modified`（1.x 用的是 `updated`）。
-> - 索引改为以 **system prompt section**（`memory_index`）注入，并在整个会话内冻结，而不是拼到 system prompt 字符串末尾。
-
 ## 功能
 
 - **一个 `memory` 工具，主 agent 五个 action**：`add`、`replace`、`remove`、`list`、`search`。另外两个 —— `rename` 与 `rebuild_index` —— **只存在于 `/dream` 自己的 headless 会话里**，绝不出现在主 agent 或 extract 的 schema 中。
