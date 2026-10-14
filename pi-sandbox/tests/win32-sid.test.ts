@@ -1,6 +1,6 @@
 // pi-sandbox/tests/win32-sid.test.ts
 import { describe, expect, it } from "vitest";
-import { assertGrantRootsDisjoint, canonicalSidInput, tempWriteSid, workspaceWriteSid } from "../src/win32/sid.js";
+import { assertGrantRootsDisjoint, canonicalSidInput, extraWriteSid, tempWriteSid, workspaceWriteSid } from "../src/win32/sid.js";
 
 describe("win32 capability SIDs", () => {
 	it("derives the documented workspace SID (golden vectors)", () => {
@@ -37,5 +37,19 @@ describe("win32 capability SIDs", () => {
 		// workspace 在 temp 之下是允许的（授权冗余，不是错误）
 		expect(() => assertGrantRootsDisjoint("C:\\Temp\\proj", "C:\\Temp")).not.toThrow();
 		expect(() => assertGrantRootsDisjoint("C:\\work", "C:\\work")).not.toThrow();
+	});
+
+	it("derives the documented extra-dir SID (golden vectors)", () => {
+		expect(extraWriteSid("C:\\work\\demo")).toBe("S-1-4-1034392863-581739003-2");
+		expect(extraWriteSid("C:\\Users\\alice\\AppData\\Local\\Temp")).toBe("S-1-4-2118618-381418540-2");
+	});
+	it("domain-separates extra SIDs from workspace and temp SIDs", () => {
+		expect(extraWriteSid("C:\\work\\demo")).not.toBe(workspaceWriteSid("C:\\work\\demo"));
+		expect(extraWriteSid("C:\\work\\demo")).not.toBe(tempWriteSid("C:\\work\\demo"));
+		expect(extraWriteSid("C:\\ws")).toMatch(/^S-1-4-\d{1,10}-\d{1,10}-2$/);
+	});
+	it("derives one SID per canonical directory path", () => {
+		expect(extraWriteSid("C:\\a")).not.toBe(extraWriteSid("C:\\b"));
+		expect(extraWriteSid(canonicalSidInput("C:/a/"))).toBe(extraWriteSid("C:\\a"));
 	});
 });

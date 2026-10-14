@@ -127,6 +127,26 @@ export function tempWriteSid(tempDir) {
 }
 
 /**
+ * Derive an extra writable directory's write SID. The canonical path of the
+ * extra root (canonicalized by the caller) is the capability identity; unlike
+ * `workspaceWriteSid`/`tempWriteSid`, this function is called once per extra
+ * writable root, so every extra root carries its own capability SID. The fixed
+ * third sub-authority (`-2`) is a SID-level domain separator from the workspace
+ * SID (no third sub-authority) and the temp SID (`-1`), and the hash domain
+ * label (`"extra\0"`) separates the derivation itself, so the same path can
+ * never derive the workspace, temp, and extra SID of one another.
+ * @param dir - the extra writable root's canonical absolute path (canonicalized
+ * by the caller).
+ * @returns the SDDL string form.
+ */
+export function extraWriteSid(dir) {
+	const digest = createHash("sha256").update("extra\0", "utf8").update(dir, "utf8").digest();
+	const first = (digest.readUInt32LE(0) % SUB_AUTHORITY_MODULUS) + 1;
+	const second = (digest.readUInt32LE(4) % SUB_AUTHORITY_MODULUS) + 1;
+	return `${CAPABILITY_SID_PREFIX}${first}-${second}-2`;
+}
+
+/**
  * Reject a temp root nested strictly inside the workspace. The temp grant's
  * inheritable ACE would cover directories below the temp root that also sit
  * inside the workspace, blurring the two capabilities' semantics. The reverse
