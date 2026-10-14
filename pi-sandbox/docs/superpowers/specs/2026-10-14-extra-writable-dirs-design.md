@@ -174,6 +174,7 @@ ACE 常驻不撤销；放行与否取决于令牌携带哪些 restricting SID。
 | `tests/win32-sid.test.ts` | `extraWriteSid` golden vectors、与 workspace/temp 的域分隔 |
 | `tests/win32-cli.test.ts` | 多个 `--writable`、缺值、未知参数、两模式校验 |
 | `tests/win32-runner.test.ts` | fake api 断言逐目录 `grantWrite`、restricting 列表含全部 SID、read-only 不授予 |
+| `tests/win32/e2e.test.ts` | 真机（Windows CI）：额外目录可写；同一目录移出配置后写入被拒（钉住"配置收窄立即生效"） |
 | `tests/integration.test.ts` | 真机（沿用既有 `skipIf`，runner 可用时；本机有 bwrap）：extras 内可写、extras 外仍拒、read-only 下 extras 也拒 |
 
 命令链验证：`npm test -w pi-sandbox`、`npm run typecheck -w pi-sandbox`、`npm run lint -w pi-sandbox` 全绿。
