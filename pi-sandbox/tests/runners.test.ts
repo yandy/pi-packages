@@ -250,3 +250,69 @@ describe("windows-acl rung", () => {
 		expect(() => runnerInvocation(selected, ro, { windowsAclRung: () => undefined })).toThrowError(/windows-acl is unavailable/);
 	});
 });
+
+/**
+ * spec 2026-10-14-protected-project-config：runner 侧的挖洞能力矩阵。
+ * bwrap 与 seatbelt 能表达「可写根里挖只读洞」；landlock 不能（规则是并集，无 deny）；
+ * windows-acl 本期不能（需 deny ACE / 断继承，是 argv 契约改动）。后两者靠围栏侧兜底。
+ */
+describe("protectedRoots across the runners", () => {
+	const PI = "/home/u/project/.pi";
+	const prot = { mode: "workspace-write" as const, workspaceRoot: WS, protectedRoots: [PI] };
+
+	it("bwrap appends --ro-bind AFTER the rw binds, so the later mount shadows the earlier one", () => {
+		const args = bwrapProfileArgs(prot);
+		const rwIdx = args.indexOf(WS);
+		const roIdx = args.indexOf("--ro-bind", args.lastIndexOf("--bind"));
+		expect(rwIdx).toBeGreaterThan(-1);
+		expect(roIdx).toBeGreaterThan(-1);
+		expect(args.slice(-3)).toEqual(["--ro-bind", PI, PI]);
+		// 顺序是承重的：bwrap 按序挂载，ro-bind 排在 --bind 之前会被后者覆盖掉。
+		expect(roIdx).toBeGreaterThan(rwIdx);
+	});
+
+	it("bwrap carves out extra roots too, and keeps them after the rw binds", () => {
+		const args = bwrapProfileArgs({ ...prot, extraRoots: ["/home/u/.cache/uv"] });
+		expect(args.slice(-6)).toEqual([
+			"--bind", "/home/u/.cache/uv", "/home/u/.cache/uv",
+			"--ro-bind", PI, PI,
+		]);
+	});
+
+	it("bwrap adds no carve-out under read-only (nothing is writable there anyway)", () => {
+		const args = bwrapProfileArgs({ mode: "read-only", workspaceRoot: WS, protectedRoots: [PI] });
+		expect(args).not.toContain("--bind");
+		expect(args.filter((a) => a === "--ro-bind")).toHaveLength(1); // 只有全盘那条
+	});
+
+	it("seatbelt appends a deny after the allow forms", () => {
+		const profile = seatbeltProfileArgs(prot)[1];
+		const allowIdx = profile.indexOf("(allow file-write* (subpath");
+		const denyIdx = profile.indexOf(`(deny file-write* (subpath "${PI}"))`);
+		expect(allowIdx).toBeGreaterThan(-1);
+		expect(denyIdx).toBeGreaterThan(allowIdx);
+	});
+
+	it("seatbelt SBPL-escapes the protected root", () => {
+		const weird = { mode: "workspace-write" as const, workspaceRoot: WS, protectedRoots: [`/a"b\\c/.pi`] };
+		expect(seatbeltProfileArgs(weird)[1]).toContain(`(deny file-write* (subpath "/a\\"b\\\\c/.pi"))`);
+	});
+
+	it("landlock cannot express a carve-out: argv is unchanged by protectedRoots", () => {
+		expect(landlockProfileArgs(prot)).toEqual(landlockProfileArgs(wsWrite));
+		expect(landlockProfileArgs(prot).join(" ")).not.toContain(PI);
+	});
+
+	it("windows-acl cannot express a carve-out either: argv is unchanged", () => {
+		const availability = { node: "C:\\node.exe", runner: "C:\\pkg\\src\\win32\\runner.js" };
+		const winProt = { mode: "workspace-write" as const, workspaceRoot: "C:\\ws", protectedRoots: ["C:\\ws\\.pi"] };
+		expect(windowsAclRunnerArgv(winProt, availability))
+			.toEqual(windowsAclRunnerArgv({ mode: "workspace-write", workspaceRoot: "C:\\ws" }, availability));
+	});
+
+	it("an empty protectedRoots list is byte-identical to omitting the field", () => {
+		const empty = { mode: "workspace-write" as const, workspaceRoot: WS, protectedRoots: [] };
+		expect(bwrapProfileArgs(empty)).toEqual(bwrapProfileArgs(wsWrite));
+		expect(seatbeltProfileArgs(empty)).toEqual(seatbeltProfileArgs(wsWrite));
+	});
+});

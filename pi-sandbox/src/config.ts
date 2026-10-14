@@ -16,8 +16,7 @@ export interface SandboxConfig {
 	/**
 	 * 额外可写根（超出 workspace + tmp）；仅 workspace-write 下生效。
 	 * 写的是**原始配置字符串**（可带 `~`），由 resolveConfiguredRoots 解析后才成为授予根。
-	 * Ruling 2a：只认全局配置（~/.pi/agent/sandbox.json），项目级条目被忽略——
-	 * 这是放宽边界的键，不能由被检出的仓库自己提供。
+	 * 合并语义与其他字段完全一致（项目 > 全局 > 默认），见 README 的风险说明。
 	 */
 	writableRoots: string[];
 }
@@ -29,14 +28,6 @@ export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
 	probeTimeoutMs: 5000,
 	writableRoots: [],
 };
-
-/**
- * 只能从全局配置读的键（Ruling 2a）。与 Claude Code 的立场一致：project settings 不能设
- * `filesystem.disabled`，admin-required 下 repo 的 `allowWrite` 被忽略。pi 自己的项目信任门
- * （TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES）只覆盖 pi 的 settings.json/extensions/skills/…，
- * **不**覆盖第三方扩展自读的 sandbox.json，所以这里自己把关。
- */
-const GLOBAL_ONLY_KEYS: readonly string[] = ["writableRoots"];
 
 const LEGACY_GROUPS = ["image", "runtime", "host"] as const;
 
@@ -120,16 +111,11 @@ export function loadSandboxConfig(hostCwd: string): SandboxConfig {
 		}
 	}
 
-	// 逐字段合并：项目 > 全局 > 默认；GLOBAL_ONLY_KEYS 例外，只取全局（Ruling 2a）
+	// 逐字段合并：项目 > 全局 > 默认（所有字段一致，writableRoots 不做例外）
 	const merged: Record<string, unknown> = {};
 	for (const key of Object.keys(DEFAULT_SANDBOX_CONFIG)) {
-		const value = GLOBAL_ONLY_KEYS.includes(key) ? globalRaw[key] : (projectRaw[key] ?? globalRaw[key]);
+		const value = projectRaw[key] ?? globalRaw[key];
 		if (value !== undefined) merged[key] = value;
-	}
-	if (projectRaw.writableRoots !== undefined) {
-		console.warn(
-			`sandbox: ignoring project-level "writableRoots" in ${projectPath} — keys that widen the sandbox boundary are honored only from the global ${globalPath}`,
-		);
 	}
 	return validateSandboxConfig(merged, "sandbox.json");
 }

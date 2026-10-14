@@ -101,7 +101,7 @@ The prompt offers **Allow once / Deny**; after choosing Deny you may type an **o
 | `runnerCommand` | `null` | custom bwrap-compatible runner argv (must be paired with the next field) |
 | `runnerFailureSignatures` | `null` | fatal diagnostic signatures for the custom runner (non-empty single lines) |
 | `probeTimeoutMs` | `5000` | runner capability probe timeout (positive) |
-| `writableRoots` | `[]` | extra writable directories beyond the workspace + tmp; **honored from the global config only** — see below |
+| `writableRoots` | `[]` | extra writable directories beyond the workspace + tmp; merges like every other field (project > global > defaults) |
 
 ### Extra writable roots (`writableRoots`)
 
@@ -118,16 +118,37 @@ Tool caches are the most common reason a confined command fails: `uv` writes `~/
 
 Rules:
 
-- **Add the minimum. Never add your whole home directory** — that makes shell startup files, `~/.ssh` and pi's own config writable and defeats the sandbox. An entry that *is or contains* your home directory, the filesystem root, or pi's agent directory (`~/.pi/agent`) is **rejected with a warning**, not honored.
-- **Global config only.** `writableRoots` in `<project>/.pi/sandbox.json` is ignored (with a warning): a checked-out repository must not be able to widen its own sandbox. Every other field still merges project > global > defaults.
-- `~` and `~/…` are expanded; everything else must be an absolute path. `$HOME/…` and `%USERPROFILE%\…` are **not** expanded (whose environment would that be? the config is cached per working directory).
-- **A root that does not exist is skipped**, with a warning — the runners cannot grant a missing path (bwrap fails hard on `--bind` of a non-existent source), and the write/edit fence skips it too, so both sides agree instead of one allowing what the other denies. `mkdir -p` it and it takes effect on the next tool call. pi-sandbox never creates directories as a side effect of reading config.
+- **Add the minimum. Never add your whole home directory.** An entry that *is or contains* your home directory, the filesystem root, or pi's agent directory (`~/.pi/agent`) is **rejected with a warning**, not honored.
+- `<ws>/.pi` is **not** grantable: pi's own project config directory stays read-only no matter what you list here (see [Protected paths](#protected-paths)).
+- `~` and `~/…` are expanded; everything else must be an absolute path. `$HOME/…` and `%USERPROFILE%\…` are not expanded.
+- **A root that does not exist is skipped**, with a warning — the runners cannot grant a missing path (bwrap fails hard on `--bind` of a non-existent source), and the write/edit fence skips it too, so both sides agree instead of one allowing what the other denies. `mkdir -p` it and it takes effect on the next tool call.
 - Only meaningful under `workspace-write`; `read-only` ignores the list.
 - On **Windows** see the `windows-acl` gap above: fence only, not the confined shell.
 
 `/permission` prints the roots that actually resolved, so a typo or a skipped entry is visible instead of silently inert.
 
-**Why `~/.cache` is not granted by default.** On a desktop Linux machine it is not just caches. It holds package-manager build caches that later get installed as root (`~/.cache/paru/clone/*` with `PKGBUILD`s and built `.pkg.tar.zst`), live IPC sockets (`~/.cache/biome/biome-socket-*`), running desktop-session and lock-screen state (`kwin`, `plasmashell`, `kscreenlocker_greet`), browser profiles, binaries that later run unsandboxed (`ms-playwright`, `puppeteer`, `electron`), and `~/.cache/huggingface/token`. Since confined processes can already **read** everything, granting `~/.cache` buys no confidentiality — it only gives up integrity and persistence, the two properties this sandbox still protects. It would not even fix the tools people actually hit: `pnpm`'s store is under `XDG_DATA_HOME`, `npm` uses `~/.npm`, `cargo` uses `~/.cargo`, and Playwright hardcodes `~/.cache/ms-playwright` without honoring `XDG_CACHE_HOME` (on macOS `uv` and Go use `~/Library/Caches`, also not `XDG_CACHE_HOME`). Codex and Claude Code take the same position — both default to cwd + temp and expose a narrow configurable allow-list rather than opening the cache root. Full analysis: `docs/superpowers/specs/2026-10-14-writable-roots-design.md`.
+`~/.cache` is deliberately **not** granted by default: on a desktop machine it is not just caches — it holds package-manager build caches that later get installed as root (`~/.cache/paru/clone/*`), live IPC sockets, running desktop-session and lock-screen state, browser profiles, and binaries that later run unsandboxed (`ms-playwright`, `puppeteer`, `electron`). Since confined processes can already **read** everything, granting it buys no confidentiality — it only gives up integrity and persistence. It would not even fix the tools people actually hit (`pnpm`'s store is under `XDG_DATA_HOME`, `npm` uses `~/.npm`, Playwright hardcodes `~/.cache/ms-playwright` and ignores `XDG_CACHE_HOME`). Full analysis: `docs/superpowers/specs/2026-10-14-writable-roots-design.md` §3.
+
+## Protected paths
+
+`<workspace>/.pi` stays **read-only** even though it sits inside the writable workspace. pi loads project-level extensions, agents, skills, prompts and themes from there, and every subagent child session re-discovers them — so a confined write to `.pi/agents/x.md` would run with your full privileges on the next subagent call, with no `/reload` and no restart.
+
+- Enforced for the `write`/`edit` tools on **every** platform, and whether or not the directory exists yet — creating it *is* the attack, so "it does not exist" is not a reason to allow it.
+- Listing it in `writableRoots` does **not** lift the protection.
+- `danger-full-access` does lift it: that is what the escalation approval is for. The denial message names the reason and the retry recipe, so the model asks instead of retrying rewritten commands.
+
+Confined-shell coverage depends on the backend, and `/permission` reports it explicitly rather than implying full coverage:
+
+| Backend | `.pi` from a confined shell |
+|---|---|
+| `bwrap` | protected when `.pi` exists (a read-only bind nested inside the workspace bind) |
+| `sandbox-exec` | protected, including creating it from scratch |
+| `landlock-run` | **not** protected — Landlock rules are a union and cannot express deny-within-allow; install `bwrap` to close this |
+| `windows-acl` | **not** protected — the runner has no carve-out yet |
+
+Known gap: under `bwrap`, bash can still create `.pi` when it does not exist yet. `--ro-bind` fails hard on a missing source (which would surface as `SANDBOX_UNAVAILABLE`, not a denial), and the alternative — binding an empty read-only directory from elsewhere — makes bwrap create a real `<workspace>/.pi` in your project. `write`/`edit` block that path on every platform regardless.
+
+Same class, **not** covered: `.git/hooks`, `.git/config`, and the project's `AGENTS.md`. `.git` needs a narrower rule than `.pi` (`git commit` writes `.git`), so it is a separate design.
 
 ## Security notes
 
@@ -137,7 +158,8 @@ Rules:
 - Confined child processes force `LC_MESSAGES=C` (so denial diagnostics stay classifiable) and do not touch your `LANG`/`LC_CTYPE`
 - Confined bash runs in its own process group (detached): timeout/abort kills the whole group, but if pi itself is hard-killed (e.g. SIGKILL), background grandchildren spawned by the command may survive (pi's internal child-tracking API is not available to extensions)
 - The landlock fallback is partial enforcement on older kernel ABIs (the status output says so)
-- `writableRoots` widens the boundary by design: every resolved entry becomes writable for confined commands **and** for the write/edit fence, and a write there outlives the command (that is the point of a cache). Grant the narrowest directory that works; entries that are or contain your home directory or pi's agent directory are rejected
+- `writableRoots` widens the boundary by design: every resolved entry becomes writable for confined commands **and** for the write/edit fence, and a write there outlives the command (that is the point of a cache). Grant the narrowest directory that works
+- Project config participates in the merge like every other field, so `<project>/.pi/sandbox.json` can grant extra writable roots — including credential directories *under* your home (`~/.ssh`, `~/.aws`), which the rejection rule does not cover (it only rejects your home directory itself and its ancestors). Review that file when you trust a folder. A project can pass `"writableRoots": []` to switch the global grants off
 
 ## Migrating from pi-container-sandbox 1.x
 

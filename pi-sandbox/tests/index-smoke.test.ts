@@ -615,8 +615,8 @@ describe("T15: 平台门控与 pwsh 未激活提示（Ruling 8/9）", () => {
 
 /**
  * spec 2026-10-14 §9.5：/permission 状态行列出解析后的额外可写根。
- * `writableRoots` 是 global-only（Ruling 2a），所以夹具写在被 stub 的 agentDir 下，
- * 而不是项目级 `.pi/sandbox.json`（写在那里会被忽略，那正是 Ruling 2a 要的行为）。
+ * 夹具写在被 stub 的 agentDir（全局配置）下；项目级 `.pi/sandbox.json` 的合并语义
+ * 由 config.test.ts 覆盖，这里只测状态行。
  */
 describe("/permission status lists extra writable roots", () => {
 	async function statusFor(globalConfig: unknown, cwd: string) {
@@ -652,6 +652,52 @@ describe("/permission status lists extra writable roots", () => {
 		mkdirSync(cacheDir, { recursive: true });
 		const text = await statusFor({ mode: "danger-full-access", writableRoots: [cacheDir] }, dir);
 		expect(text).not.toContain("extra writable roots");
+		expect(text).toContain("bypassed (danger-full-access)");
+	});
+});
+
+/**
+ * spec 2026-10-14-protected-project-config：/permission 状态行必须如实报告**两侧**覆盖情况。
+ * 围栏侧（write/edit）无条件生效；shell 侧能不能挖洞按后端与存在性分叉——只说 "protected"
+ * 会让用户以为 bash 也挡住了，那是假信号。
+ */
+describe("/permission status reports protected paths", () => {
+	async function statusFor(globalConfig: unknown, cwd: string) {
+		writeFileSync(join(dir, "agent", "sandbox.json"), JSON.stringify(globalConfig));
+		const { fakePi, commandHandlers } = makeFakePi();
+		const activate = (await import("../index")).default;
+		activate(fakePi as never);
+		const notify = vi.fn();
+		await commandHandlers.permission.handler("", { ui: { notify }, cwd });
+		return notify.mock.calls[0][0] as string;
+	}
+
+	it("names the protected root and the always-on write/edit side", async () => {
+		const text = await statusFor({}, dir);
+		// 受保护根与存在性无关（围栏对「从零创建」也要拒），所以这里不能 realpath 一个不存在的 .pi。
+		expect(text).toContain(`protected read-only: ${join(realpathSync.native(dir), ".pi")}`);
+		expect(text).toContain("write/edit: always denied");
+	});
+
+	it("says so when the confined shell is NOT covered because the dir does not exist yet", async () => {
+		// 本机上 runner 是 bwrap；.pi 不存在 → 挖不了洞，必须明说 bash 仍能创建它。
+		const text = await statusFor({}, dir);
+		if (process.platform === "win32") return; // win32 恒为 NOT protected，由下一条覆盖
+		expect(text).toMatch(/confined shell: (protected|NOT protected)/u);
+		if (text.includes("NOT protected yet")) expect(text).toContain("does not exist");
+	});
+
+	it("reports the shell side as protected once the dir exists (bwrap carve-out)", async () => {
+		mkdirSync(join(dir, ".pi"), { recursive: true });
+		const text = await statusFor({}, dir);
+		if (process.platform !== "linux") return; // 只有 bwrap 链上这条断言才成立
+		expect(text).toContain("confined shell: protected (read-only bind)");
+	});
+
+	it("omits the whole line under danger-full-access (nothing is protected there)", async () => {
+		mkdirSync(join(dir, ".pi"), { recursive: true });
+		const text = await statusFor({ mode: "danger-full-access" }, dir);
+		expect(text).not.toContain("protected read-only");
 		expect(text).toContain("bypassed (danger-full-access)");
 	});
 });

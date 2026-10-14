@@ -957,3 +957,98 @@ function fakePowerShellBuilderForWiring(calls: { cwd: string; opts?: unknown }[]
 		};
 	});
 }
+
+/**
+ * spec 2026-10-14-protected-project-config：`.pi` 的端到端行为。
+ * 三件事必须同时成立，少一条这条防护就是装饰：
+ * ① 默认拒绝（即使目标在工作区内）；② 拒绝**记进 denial 账本**，于是 denial-first 门禁放行提权；
+ * ③ 提权获批后真的能改（用户要求的就是「更改需要提权」，不是「永远不能改」）。
+ */
+describe("protected .pi end-to-end", () => {
+	const piAgents = () => join(ws, ".pi", "agents");
+
+	it("write into <ws>/.pi is denied even though it is inside the workspace", async () => {
+		mkdirSync(piAgents(), { recursive: true });
+		const { deps } = makeDeps();
+		const { write } = createSandboxTools(deps);
+		await expect(write.execute("pi-1", { path: join(piAgents(), "evil.md"), content: "x" }, undefined, undefined, toolCtx()))
+			.rejects.toThrow(/is inside .*\.pi, which pi loads project-level extensions/s);
+		expect(existsSync(join(piAgents(), "evil.md"))).toBe(false);
+	});
+
+	it("the denial is ledgered, so an escalated retry with approval really writes it", async () => {
+		mkdirSync(piAgents(), { recursive: true });
+		const { deps } = makeDeps();
+		const { write } = createSandboxTools(deps);
+		const target = join(piAgents(), "reviewer.md");
+		// 自证断言对：不带提权必须先被拒（同时把拒绝记进账本）。
+		await expect(write.execute("pi-2-pre", { path: target, content: "no" }, undefined, undefined, toolCtx()))
+			.rejects.toThrow(/file access denied under workspace-write mode/);
+		// 账本有记录 → 门禁放行 → 弹窗 → Allow once → 真落盘。
+		const result = await write.execute("pi-2", {
+			path: target, content: "ok",
+			sandbox_permissions: "danger-full-access", justification: "user asked to add a project subagent",
+		}, undefined, undefined, toolCtx(true, "Allow once")) as { content: { text: string }[] };
+		expect(await (await import("node:fs/promises")).readFile(target, "utf-8")).toBe("ok");
+		expect(result.content.map((c) => c.text).join("\n")).toContain('one-shot escalation to "danger-full-access"');
+	});
+
+	it("without the prior denial the escalation is ignored and the write stays denied (denial-first still holds)", async () => {
+		mkdirSync(piAgents(), { recursive: true });
+		const { deps } = makeDeps();
+		const { write } = createSandboxTools(deps);
+		const target = join(piAgents(), "sneaky.md");
+		// 先发制人的提权被忽略 → 调用按 workspace-write 执行 → 围栏抛错。
+		// 注意 withIgnoredEscalationNote 那行因此**不会**执行到（抛错先发生），这是既有的通用行为
+		// （任何被拒的 write 都一样），不是本改动引入的：模型仍从拒绝文案里拿到提权配方，
+		// 而这一笔拒绝已把账本记上，下一次重试就能过门禁。
+		await expect(write.execute("pi-3", {
+			path: target, content: "x",
+			sandbox_permissions: "danger-full-access", justification: "pre-emptive",
+		}, undefined, undefined, toolCtx(true, "Allow once")))
+			.rejects.toThrow(/does not lift the protection/);
+		expect(existsSync(target)).toBe(false);
+		// 门禁确实没被绕过：审批弹窗一次都不该弹。
+		expect((deps.permission.override)).toBeNull();
+	});
+
+	it("edit into <ws>/.pi is denied too", async () => {
+		mkdirSync(piAgents(), { recursive: true });
+		const target = join(piAgents(), "existing.md");
+		writeFileSync(target, "hello");
+		const { deps } = makeDeps();
+		const { edit } = createSandboxTools(deps);
+		await expect(edit.execute("pi-4", { path: target, edits: [{ oldText: "hello", newText: "pwned" }] }, undefined, undefined, toolCtx()))
+			.rejects.toThrow(/does not lift the protection/);
+		expect(await (await import("node:fs/promises")).readFile(target, "utf-8")).toBe("hello");
+	});
+
+	it("ordinary workspace writes are unaffected", async () => {
+		mkdirSync(piAgents(), { recursive: true });
+		const { deps } = makeDeps();
+		const { write } = createSandboxTools(deps);
+		const target = join(ws, "src", "fine.ts");
+		mkdirSync(join(ws, "src"), { recursive: true });
+		await write.execute("pi-5", { path: target, content: "export {}" }, undefined, undefined, toolCtx());
+		expect(existsSync(target)).toBe(true);
+	});
+
+	it("bash gets the carve-out in the runner argv when .pi exists", async () => {
+		mkdirSync(piAgents(), { recursive: true });
+		const { deps, child, spawnFn } = makeDeps();
+		const { bash } = createSandboxTools(deps);
+		const p = bash.execute("pi-6", { command: "true" }, undefined, undefined, toolCtx());
+		await vi.waitFor(() => { expect(spawnFn).toHaveBeenCalled(); });
+		child.emit("close", 0, undefined);
+		await p;
+		const argv = (spawnFn as unknown as { mock: { calls: [string, string[]][] } }).mock.calls[0][1];
+		const pi = join(ws, ".pi");
+		// `--ro-bind <src> <dst>`：lastIndexOf 命中的是 dst，flag 在它前两位。
+		const idx = argv.lastIndexOf(pi);
+		expect(idx).toBeGreaterThan(-1);
+		expect(argv[idx - 1]).toBe(pi);
+		expect(argv[idx - 2]).toBe("--ro-bind");
+		// 顺序承重：挖洞必须在工作区的 rw bind 之后。
+		expect(idx).toBeGreaterThan(argv.indexOf(ws));
+	});
+});

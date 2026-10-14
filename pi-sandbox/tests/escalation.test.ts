@@ -4,6 +4,8 @@ import {
 	DENIAL_REASON_PROMPT,
 	escalationAppliedMarker,
 	escalationHintMarker,
+	protectedPathEscalationHint,
+	protectedPathMarker,
 	escalationIgnoredMarker,
 	isStrictlyWider,
 	normalizeEscalationValue,
@@ -233,5 +235,49 @@ describe("approveEscalation", () => {
 		await expect(approveEscalation({ ...base, requestedMode: "danger-full-access" }, u))
 			.rejects.toThrow(/no approval channel is available.*nothing was executed.*\/permission danger-full-access/s);
 		expect(u.ask).not.toHaveBeenCalled();
+	});
+});
+
+/**
+ * spec 2026-10-14-protected-project-config：受保护路径的专用文案。
+ * 三件事必须同时成立，否则模型会被引向无效尝试：
+ * ① 首行与 sandboxDenialMarker 逐字一致（下游识别链路不变）；
+ * ② 说清「为什么工作区内也被拒」与「配 writableRoots 抬不动」；
+ * ③ **不含** cache 重定向配方、**不声称**「可写根是 workspace + /tmp」——对这个路径两者都是假的。
+ */
+describe("protected-path markers", () => {
+	it("reuses the denial marker verbatim as its first line", () => {
+		const text = protectedPathMarker("workspace-write", "/ws/.pi/agents/x.md", "/ws/.pi");
+		expect(text.startsWith(sandboxDenialMarker("workspace-write"))).toBe(true);
+	});
+
+	it("names the path, the protected root, and the reason", () => {
+		const text = protectedPathMarker("workspace-write", "/ws/.pi/agents/x.md", "/ws/.pi");
+		expect(text).toContain("/ws/.pi/agents/x.md is inside /ws/.pi");
+		expect(text).toContain("every subagent child session re-discovers them");
+		expect(text).toContain("would later run with your full privileges");
+	});
+
+	it("says writableRoots cannot lift it, so the model does not send the user editing config", () => {
+		expect(protectedPathMarker("workspace-write", "/ws/.pi/x", "/ws/.pi"))
+			.toContain('adding it to "writableRoots" does not lift the protection');
+	});
+
+	it("carries no cache-redirect recipe and no false 'writable here' claim", () => {
+		const text = protectedPathMarker("workspace-write", "/ws/.pi/x", "/ws/.pi");
+		expect(text).not.toContain("UV_CACHE_DIR");
+		expect(text).not.toContain("writable here: the workspace + /tmp");
+	});
+
+	it("names the mode, so a read-only denial does not read as a workspace-write one", () => {
+		expect(protectedPathMarker("read-only", "/ws/.pi/x", "/ws/.pi"))
+			.toContain("[sandbox: file access denied under read-only mode]");
+	});
+
+	it("the escalation hint keeps the same retry grammar as the generic hint", () => {
+		expect(protectedPathEscalationHint("operation")).toBe(
+			'[sandbox: escalation available — to change it, retry this exact operation once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]',
+		);
+		expect(protectedPathEscalationHint("command")).toContain("retry this exact command once");
 	});
 });

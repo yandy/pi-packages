@@ -1,4 +1,5 @@
 import { canonicalPath, type ConfinedSandboxMode, type SandboxMode } from "./policy";
+import { carveOutRoots, protectedRoots } from "./protected";
 import {
 	bwrapProfileArgs,
 	LAUNCHER_BIN,
@@ -107,11 +108,51 @@ export interface ConfineOptions {
 	 * bwrap / landlock / seatbelt 消费它；windows-acl 忽略（Ruling 5，见 runners.ts）。
 	 */
 	extraRoots?: readonly string[];
+	/**
+	 * 可写根内部的只读挖洞（deny-within-allow）。**缺省即安全**：undefined 时 confine 自行探测
+	 * `carveOutRoots(canonicalWorkspaceRoot)`（仅已存在的受保护根），所以直接调 createSandboxBashOps
+	 * 的调用方也自带保护，不需记得传。显式传 `[]` 可关闭（仅供测试与逃责）。
+	 */
+	protectedRoots?: readonly string[];
+}
+
+/**
+ * 该后端能不能表达「可写根里挖只读洞」，以及挖洞根要不要按存在性门控
+ *（spec 2026-10-14-protected-project-config 的能力矩阵）。
+ *
+ * 这个分派放在 confine 而不是 profile 构造器：只有这里同时知道选中的后端与工作区根，
+ * profile 构造器保持纯函数（只读 policy）。
+ */
+function protectedRootsFor(
+	kind: "bwrap" | "landlock" | "seatbelt" | "windows-acl" | "runnerCommand",
+	workspaceRoot: string,
+): string[] {
+	switch (kind) {
+		// bwrap 的 `--ro-bind <src> <src>` 对不存在的 src **硬失败**（实测 `bwrap: Can't find source path …`），
+		// 那会被 classifyRunnerFailure 归为 SANDBOX_UNAVAILABLE——整条命令跑不起来，而不是被拒。
+		// 所以必须按存在性门控：不存在就不挖洞，换取零宿主副作用。
+		// runnerCommand 声明为 bwrap 兼容，同口径。
+		case "bwrap":
+		case "runnerCommand":
+			return carveOutRoots(workspaceRoot);
+		// seatbelt 的 `(deny file-write* (subpath X))` 对不存在的 X 同样有效——它拒的就是“创建”
+		// 这个动作本身。所以 macOS 上连“从零创建 .pi/”也挡得住，无需存在性门控。
+		case "seatbelt":
+			return protectedRoots(workspaceRoot);
+		// landlock 的规则是权限**并集**，没有 deny，表达不了减法；windows-acl 需要 deny ACE 或断继承，
+		// 是 argv 契约改动（本期不做）。两者只有围栏侧（write/edit）保护，缺口写在 README。
+		case "landlock":
+		case "windows-acl":
+			return [];
+	}
 }
 
 /**
  * 把 argv 包装进选中 runner 的策略调用（spec §2）。workspaceRoot 在此统一
  * canonical 化一次，profile 构造器保持纯净。extraRoots 已经在解析期 canonical 过，直接透传。
+ *
+ * protectedRoots 缺省时在这里按选中后端探测（与 canonicalPath 同一层：这是唯一允许碰 fs
+ * 的地方，profile 构造器仍是纯函数）；显式传值（含 `[]`）即权威，供测试与逃责使用。
  */
 export function confine(
 	argv: readonly string[],
@@ -119,13 +160,18 @@ export function confine(
 	workspaceRoot: string,
 	opts: ConfineOptions = {},
 ): ConfinedArgv {
-	const policy: RunnerPolicy = {
+	const canonicalWorkspace = canonicalPath(workspaceRoot);
+	const base: RunnerPolicy = {
 		mode,
-		workspaceRoot: canonicalPath(workspaceRoot),
+		workspaceRoot: canonicalWorkspace,
 		extraRoots: opts.extraRoots,
 	};
 
 	if (opts.runnerCommand && opts.runnerCommand.length > 0) {
+		const policy: RunnerPolicy = {
+			...base,
+			protectedRoots: opts.protectedRoots ?? protectedRootsFor("runnerCommand", canonicalWorkspace),
+		};
 		return {
 			argv: [...opts.runnerCommand, ...bwrapProfileArgs(policy), "--", ...argv],
 			enforcement: "full",
@@ -136,6 +182,10 @@ export function confine(
 
 	const selected = opts.selected ?? selectRunner(opts.probeTimeoutMs ?? 5000, opts.hooks);
 	if (selected.runner === "unavailable") throw new SandboxUnavailableError(mode);
+	const policy: RunnerPolicy = {
+		...base,
+		protectedRoots: opts.protectedRoots ?? protectedRootsFor(selected.runner, canonicalWorkspace),
+	};
 
 	// win32 的可用性只解析一次并透传给 runnerInvocation（Task 9 约定）；
 	// 注入即权威：hook 存在时其返回值就是结论（含显式 undefined），绝不回退真实探测。

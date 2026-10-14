@@ -1,7 +1,7 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	assertShellAllowed,
 	classifyDenial,
@@ -281,5 +281,106 @@ describe("confine extraRoots", () => {
 		expect(result.argv.join(" ")).not.toContain("C:\\cache\\uv");
 		expect(result.argv).toContain("--workspace");
 		expect(result.argv).toContain("--temp");
+	});
+});
+
+/**
+ * spec 2026-10-14-protected-project-config：挖洞根**缺省即安全**——undefined 时 confine 自行
+ * 探测，所以直接调 createSandboxBashOps 的调用方也自带保护，不需要记得传。
+ */
+describe("confine protectedRoots", () => {
+	let ws: string;
+	beforeEach(() => { ws = realpathSync.native(mkdtempSync(join(tmpdir(), "confine-prot-"))); });
+	afterEach(() => { rmSync(ws, { recursive: true, force: true }); });
+
+	const bwrap = { selected: { runner: "bwrap" as const, enforcement: "full" as const } };
+	/** confine 会在末尾追加 `"--", ...argv`，断言 profile 时先切掉。 */
+	const profileOf = (argv: string[]) => argv.slice(0, argv.indexOf("--"));
+
+	it("auto-detects nothing while the config dir does not exist (bwrap cannot ro-bind a missing source)", () => {
+		const argv = confine(["true"], "workspace-write", ws, bwrap).argv;
+		expect(argv.filter((a) => a === "--ro-bind")).toHaveLength(1); // 只有全盘那条
+	});
+
+	it("auto-detects the config dir once it exists, and puts the carve-out last", () => {
+		mkdirSync(join(ws, ".pi", "agents"), { recursive: true });
+		const argv = profileOf(confine(["true"], "workspace-write", ws, bwrap).argv);
+		const pi = join(ws, ".pi");
+		expect(argv.slice(-3)).toEqual(["--ro-bind", pi, pi]);
+		// 顺序承重：必须在 workspace 的 rw bind 之后，否则被后者覆盖。
+		expect(argv.lastIndexOf(pi)).toBeGreaterThan(argv.indexOf(ws));
+	});
+
+	it("an explicit protectedRoots override wins over auto-detection", () => {
+		mkdirSync(join(ws, ".pi"), { recursive: true });
+		const argv = confine(["true"], "workspace-write", ws, { ...bwrap, protectedRoots: [] }).argv;
+		expect(argv.filter((a) => a === "--ro-bind")).toHaveLength(1);
+	});
+
+	it("auto-detects nothing under read-only (the carve-out would be a no-op)", () => {
+		mkdirSync(join(ws, ".pi"), { recursive: true });
+		const argv = confine(["true"], "read-only", ws, bwrap).argv;
+		expect(argv.filter((a) => a === "--ro-bind")).toHaveLength(1);
+	});
+
+	it("canonicalizes the workspace before detecting, so a symlinked workspace still carves out", () => {
+		if (process.platform === "win32") return; // 建 symlink 需特权，与本文件其余用例同口径
+		mkdirSync(join(ws, "real", ".pi"), { recursive: true });
+		symlinkSync(join(ws, "real"), join(ws, "link"));
+		const argv = profileOf(confine(["true"], "workspace-write", join(ws, "link"), bwrap).argv);
+		const real = realpathSync.native(join(ws, "real"));
+		// 挖洞根必须跟着 canonical 化后的工作区走，symlink 拼写不得残留在 argv 里。
+		expect(argv.slice(-3)).toEqual(["--ro-bind", join(real, ".pi"), join(real, ".pi")]);
+		expect(argv).not.toContain(join(ws, "link"));
+	});
+});
+
+/**
+ * 后端能力矩阵（spec 2026-10-14-protected-project-config）：挖洞根**按后端**分派，不是一刀切。
+ * seatbelt 的 deny 对不存在的路径同样有效（拒的是「创建」这个动作），所以 macOS 上没有
+ * 「.pi 不存在就不挡」的缺口；bwrap 必须按存在性门控（--ro-bind 对缺失源硬失败）。
+ */
+describe("confine protectedRoots per backend", () => {
+	let ws: string;
+	beforeEach(() => { ws = realpathSync.native(mkdtempSync(join(tmpdir(), "confine-mat-"))); });
+	afterEach(() => { rmSync(ws, { recursive: true, force: true }); });
+	const pi = () => join(ws, ".pi");
+	const profileOf = (argv: string[]) => argv.slice(0, argv.indexOf("--")).join(" ");
+
+	it("seatbelt denies the config dir even when it does not exist", () => {
+		expect(existsSync(pi())).toBe(false);
+		const argv = confine(["true"], "workspace-write", ws, {
+			selected: { runner: "seatbelt", enforcement: "full" },
+			hooks: { seatbeltExec: "/usr/bin/sbx" },
+		}).argv;
+		expect(profileOf(argv)).toContain(`(deny file-write* (subpath "${pi()}"))`);
+	});
+
+	it("landlock cannot express a carve-out: no trace of the config dir even when it exists", () => {
+		mkdirSync(pi(), { recursive: true });
+		const argv = confine(["true"], "workspace-write", ws, {
+			selected: { runner: "landlock", enforcement: "full" },
+			hooks,
+		}).argv;
+		expect(profileOf(argv)).not.toContain(".pi");
+	});
+
+	it("windows-acl cannot express a carve-out either", () => {
+		mkdirSync(pi(), { recursive: true });
+		const availability = { node: "C:\\node.exe", runner: "C:\\pkg\\src\\win32\\runner.js" };
+		const argv = confine(["cmd", "/c", "ver"], "workspace-write", "C:\\ws", {
+			selected: { runner: "windows-acl", enforcement: "partial" },
+			hooks: { windowsAclRung: () => availability },
+		}).argv;
+		expect(argv.join(" ")).not.toContain(".pi");
+	});
+
+	it("a custom runnerCommand is treated as bwrap-compatible and gets the existence-gated carve-out", () => {
+		mkdirSync(pi(), { recursive: true });
+		const argv = confine(["true"], "workspace-write", ws, {
+			runnerCommand: ["myrunner"],
+			runnerFailureSignatures: ["myrunner: "],
+		}).argv;
+		expect(profileOf(argv)).toContain(`--ro-bind ${pi()} ${pi()}`);
 	});
 });

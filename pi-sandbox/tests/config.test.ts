@@ -132,36 +132,35 @@ describe("validateSandboxConfig", () => {
 	});
 });
 
-describe("writableRoots is global-only (Ruling 2a)", () => {
-	it("takes the value from the global config", () => {
+describe("writableRoots merges like every other field", () => {
+	// 与 mode / runnerCommand / probeTimeoutMs 同一条合并规则：项目 > 全局 > 默认。
+	// 放宽边界的风险由**与来源无关**的两层承担：危险根拒绝（configured-roots.test.ts）
+	// 与 <ws>/.pi 的恒只读挖洞（fence.test.ts）。
+	it("takes the value from the global config when the project sets none", () => {
 		writeGlobal({ writableRoots: ["~/.cache/uv"] });
 		expect(loadSandboxConfig(projectDir).writableRoots).toEqual(["~/.cache/uv"]);
 	});
-	it("ignores a project-level value and says so", () => {
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		try {
-			writeProject({ writableRoots: ["/etc"] });
-			expect(loadSandboxConfig(projectDir).writableRoots).toEqual([]);
-			expect(warn.mock.calls.flat().join(" ")).toMatch(/ignoring project-level "writableRoots"/u);
-		} finally {
-			warn.mockRestore();
-		}
-	});
-	it("does not let a project-level value shadow the global one", () => {
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		try {
-			writeGlobal({ writableRoots: ["~/.cache/uv"] });
-			writeProject({ writableRoots: ["/etc"] });
-			expect(loadSandboxConfig(projectDir).writableRoots).toEqual(["~/.cache/uv"]);
-		} finally {
-			warn.mockRestore();
-		}
-	});
-	it("project level still wins for the non-widening keys", () => {
-		writeGlobal({ mode: "read-only", probeTimeoutMs: 1000 });
-		writeProject({ mode: "workspace-write" });
+	it("project level wins over global, same as mode/probeTimeoutMs", () => {
+		writeGlobal({ writableRoots: ["~/.cache/uv"], probeTimeoutMs: 1000 });
+		writeProject({ writableRoots: ["/opt/scratch"] });
 		const cfg = loadSandboxConfig(projectDir);
-		expect(cfg.mode).toBe("workspace-write");
+		expect(cfg.writableRoots).toEqual(["/opt/scratch"]);
 		expect(cfg.probeTimeoutMs).toBe(1000);
+	});
+	it("does not warn about project-level entries (they are ordinary config now)", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			writeProject({ writableRoots: ["/opt/scratch"] });
+			expect(loadSandboxConfig(projectDir).writableRoots).toEqual(["/opt/scratch"]);
+			expect(warn).not.toHaveBeenCalled();
+		} finally {
+			warn.mockRestore();
+		}
+	});
+	it("an explicitly empty project list overrides a non-empty global one", () => {
+		// `[] ?? x` 是 `[]`（空数组不是 nullish），所以项目可以用空列表关掉全局授予——收窄方向必须可用。
+		writeGlobal({ writableRoots: ["~/.cache/uv"] });
+		writeProject({ writableRoots: [] });
+		expect(loadSandboxConfig(projectDir).writableRoots).toEqual([]);
 	});
 });

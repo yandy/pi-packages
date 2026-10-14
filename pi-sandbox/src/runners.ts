@@ -29,6 +29,13 @@ export interface RunnerPolicy {
 	 * --workspace/--temp 两根 argv 契约，N 根需要新的 SID 域分隔与默认 DACL 语义，本期不做）。
 	 */
 	extraRoots?: readonly string[];
+	/**
+	 * 可写根**内部**的只读挖洞（deny-within-allow，spec 2026-10-14-protected-project-config）。
+	 * 缺省由 confine 自动探测（`carveOutRoots`：**仅已存在的**受保护根）；显式传 `[]` 可关闭。
+	 * bwrap / seatbelt 能表达挖洞；**landlock 不能**（规则是并集，无 deny），**windows-acl 本期不能**
+	 * （需 deny ACE / 断继承，是 argv 契约改动）——两者靠围栏侧兼底，缺口已写进 README。
+	 */
+	protectedRoots?: readonly string[];
 }
 
 /**
@@ -70,11 +77,23 @@ export function bwrapProfileArgs(policy: RunnerPolicy): string[] {
 	const args = ["--ro-bind", "/", "/", "--dev", "/dev", "--unshare-pid", "--proc", "/proc", "--die-with-parent"];
 	if (policy.mode === "workspace-write") {
 		for (const root of confinedWriteRoots(policy)) args.push("--bind", root, root);
+		// 挖洞必须排在所有 rw bind **之后**：bwrap 按序挂载，后来的挂载遮蔽先前的。
+		// 真机实测（2026-10-14）：`--bind <ws> <ws> --ro-bind <ws>/.pi <ws>/.pi` 下
+		// `touch <ws>/ok` 成功而 `touch <ws>/.pi/x` 报 `Read-only file system`——后者正是
+		// DENIAL_SIGNATURES.bwrap 的方言，所以 denial 记账与提权链路零改动即可用。
+		for (const root of policy.protectedRoots ?? []) args.push("--ro-bind", root, root);
 	}
 	return args;
 }
 
-/** Landlock 允许清单：readOnly / + readWrite /dev/null（workspace-write 追加 /tmp、工作区与额外根）。 */
+/**
+ * Landlock 允许清单：readOnly / + readWrite /dev/null（workspace-write 追加 /tmp、工作区与额外根）。
+ *
+ * **无法表达挖洞**：Landlock 的规则是权限的**并集**，没有 deny，也不能从已授予的父目录里减去
+ * 一个子目录（按“逐个列出 `.pi` 的兄弟目录”绕也不行：兄弟集是动态的、新建文件覆盖不到）。
+ * 所以 landlock 回退下 `.pi` 的保护只有围栏侧（write/edit）生效，bash 侧不生效——
+ * 记在 README 的已知缺口里。bwrap 在链上优先，只有它不可用时才回退到 landlock。
+ */
 export function landlockProfileArgs(policy: RunnerPolicy): string[] {
 	const readWrite = ["/dev/null"];
 	if (policy.mode === "workspace-write") {
@@ -90,7 +109,11 @@ function sbplString(path: string): string {
 
 /**
  * Seatbelt SBPL：默认允许、拒绝一切文件写，放行 /dev/null 与 writableRoots
- * （与 fs 围栏共用 policy.writableRoots 推导，防止语义漂移）。
+ * （与 fs 围栏共用 policy.writableRoots 推导，防止语义漂移），最后把受保护根挖回只读。
+ *
+ * deny 追加在**最后**：本 profile 本来就依赖“后者覆盖前者”（`(deny file-write*)` 之后再
+ * `(allow file-write* …)`），且 `.pi` 的 subpath 比工作区的更具体，两种常见的 SBPL 求值口径
+ *（顺序优先 / 最具体优先）下结果一致。无 macOS 宿主与 CI 可验，已在 spec 里记为待真机确认。
  */
 export function seatbeltProfileArgs(policy: RunnerPolicy): string[] {
 	const forms = [
@@ -102,6 +125,9 @@ export function seatbeltProfileArgs(policy: RunnerPolicy): string[] {
 	const roots = writableRoots(policy.mode, policy.workspaceRoot, defaultTmpRoots(), policy.extraRoots ?? []);
 	if (roots.length > 0) {
 		forms.push(`(allow file-write* ${roots.map((root) => `(subpath ${sbplString(root)})`).join(" ")})`);
+	}
+	for (const root of policy.protectedRoots ?? []) {
+		forms.push(`(deny file-write* (subpath ${sbplString(root)}))`);
 	}
 	return ["-p", forms.join(" ")];
 }
@@ -229,7 +255,8 @@ function probeRunner(kind: RunnerKind, probeTimeoutMs: number, hooks: RunnerHook
  * （src/win32/cli.js:8-13），推广到 N 根需要新的 SID 域分隔方案、N 根下的默认 DACL 语义
  * 与 assertGrantRootsDisjoint 的推广（spec 2026-10-14 §5.3）。忽略是 fail-closed 方向的：
  * win32 上围栏（write/edit）生效而受限 powershell 不生效，不对称已在 config.resolveConfiguredRoots
- * 里 warn 一次并记在 README。 */
+ * 里 warn 一次并记在 README。`policy.protectedRoots` 同样被忽略：在已授权根上挖只读洞需要
+ * deny ACE 或断继承，也是 argv 契约改动（spec 2026-10-14-protected-project-config）。 */
 export function windowsAclRunnerArgv(policy: RunnerPolicy, availability: { node: string; runner: string }): string[] {
 	return [
 		availability.node,

@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { assertWriteAllowed, canonicalizeTarget, FenceDenialError, isWithinRoots } from "../src/fence";
+import { assertWriteAllowed, canonicalizeTarget, FenceDenialError, isWithinRoots, ProtectedPathDenialError } from "../src/fence";
 import { escalationHintMarker } from "../src/escalation";
 import { defaultTmpRoots } from "../src/policy";
 
@@ -311,5 +311,75 @@ describe("extraRoots", () => {
 	it("ignores extra roots under read-only", () => {
 		expect(() => assertWriteAllowed(join(outside, "x"), { mode: "read-only", workspaceRoot: ws, ...noTmp, extraRoots: [outside] }))
 			.toThrow(FenceDenialError);
+	});
+});
+
+/**
+ * spec 2026-10-14-protected-project-config：围栏侧的 deny-within-allow。
+ * 与 carveOutRoots 不同，围栏**无条件**保护——`.pi` 不存在时也要拒，否则「从零创建
+ * `.pi/agents/x.md」这条最主要的攻击形状就漏了。
+ */
+describe("protected paths (deny-within-allow)", () => {
+	const piDir = () => join(ws, ".pi");
+
+	it("denies a write inside <ws>/.pi even though it is inside the workspace", () => {
+		let err: unknown;
+		try { assertWriteAllowed(join(piDir(), "agents", "evil.md"), wsWrite); } catch (e) { err = e; }
+		expect(err).toBeInstanceOf(ProtectedPathDenialError);
+		// 继承关系是承重的：tools.ts 用 `instanceof FenceDenialError` 记 denial 账本，
+		// 账本没记上 → denial-first 门禁不放行 → 「更改 .pi 需要提权」直接失效。
+		expect(err).toBeInstanceOf(FenceDenialError);
+	});
+
+	it("denies creating .pi itself when it does not exist yet", () => {
+		expect(existsSync(piDir())).toBe(false);
+		expect(() => assertWriteAllowed(join(piDir(), "settings.json"), wsWrite)).toThrow(ProtectedPathDenialError);
+	});
+
+	it("still allows ordinary workspace writes", () => {
+		expect(() => assertWriteAllowed(join(ws, "src", "ok.ts"), wsWrite)).not.toThrow();
+		// 名字前缀相同不算命中：`.pignore` / `.pix` 不是 `.pi`（分隔符边界）。
+		expect(() => assertWriteAllowed(join(ws, ".pignore"), wsWrite)).not.toThrow();
+		expect(() => assertWriteAllowed(join(ws, ".pix", "x"), wsWrite)).not.toThrow();
+	});
+
+	it("beats an explicitly configured writableRoot under .pi (protection cannot be opted out)", () => {
+		const policy = { ...wsWrite, extraRoots: [join(piDir(), "agents")] };
+		expect(() => assertWriteAllowed(join(piDir(), "agents", "evil.md"), policy)).toThrow(ProtectedPathDenialError);
+	});
+
+	it("follows a symlink that points into .pi", () => {
+		if (isWin32) return; // 建 symlink 需特权，与本文件其余 symlink 用例同口径
+		mkdirSync(piDir(), { recursive: true });
+		symlinkSync(piDir(), join(ws, "sneaky"));
+		expect(() => assertWriteAllowed(join(ws, "sneaky", "agents", "evil.md"), wsWrite))
+			.toThrow(ProtectedPathDenialError);
+	});
+
+	it("is lifted by danger-full-access (that is what escalation is for)", () => {
+		expect(() => assertWriteAllowed(join(piDir(), "agents", "x.md"), { mode: "danger-full-access", workspaceRoot: ws }))
+			.not.toThrow();
+	});
+
+	it("under read-only the generic denial wins (nothing is writable anyway)", () => {
+		let err: unknown;
+		try { assertWriteAllowed(join(piDir(), "x"), { mode: "read-only", workspaceRoot: ws }); } catch (e) { err = e; }
+		expect(err).toBeInstanceOf(FenceDenialError);
+		expect(err).not.toBeInstanceOf(ProtectedPathDenialError);
+	});
+
+	it("the message explains why and points at escalation, without the cache-redirect recipe", () => {
+		let err: unknown;
+		try { assertWriteAllowed(join(piDir(), "agents", "evil.md"), wsWrite); } catch (e) { err = e; }
+		const msg = (err as Error).message;
+		// 首行与既有拒绝标记逐字一致，任何按该标记识别拒绝的下游照旧生效。
+		expect(msg).toContain("[sandbox: file access denied under workspace-write mode]");
+		expect(msg).toContain("subagent child session re-discovers them");
+		expect(msg).toContain('adding it to "writableRoots" does not lift the protection');
+		expect(msg).toContain("retry this exact operation once with sandbox_permissions");
+		// 不能带 cache 重定向配方：对这个路径那是无效建议，只会把模型引向反复试探。
+		expect(msg).not.toContain("UV_CACHE_DIR");
+		// 也不能声称「可写根是 workspace + /tmp」：目标就在 workspace 内，那句话在这里是假的。
+		expect(msg).not.toContain("writable here: the workspace + /tmp");
 	});
 });

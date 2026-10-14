@@ -101,7 +101,7 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 | `runnerCommand` | `null` | 自定义 bwrap 兼容 runner argv（须与下一项成对） |
 | `runnerFailureSignatures` | `null` | 自定义 runner 的失败诊断签名（非空单行） |
 | `probeTimeoutMs` | `5000` | runner 功能探测超时（正数） |
-| `writableRoots` | `[]` | 工作区 + tmp 之外的额外可写目录；**只认全局配置** —— 见下 |
+| `writableRoots` | `[]` | 工作区 + tmp 之外的额外可写目录；与其他字段一样参与合并（项目 > 全局 > 默认） |
 
 ### 额外可写根（`writableRoots`）
 
@@ -118,16 +118,37 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 
 规则：
 
-- **加最小的。继不要加整个 home 目录**——那会让 shell 启动文件、`~/.ssh` 与 pi 自己的配置变成可写，沙箱就形同虚设。凡是**等于或包含** home 目录、文件系统根、或 pi 的 agentDir（`~/.pi/agent`）的条目，一律 **warn + 拒绝**，不会生效。
-- **只认全局配置。**`<项目>/.pi/sandbox.json` 里的 `writableRoots` 被忽略（并 warn）：被检出的仓库不得能自己放宽自己的沙箱。其余字段仍然是 项目 > 全局 > 默认。
-- `~` 与 `~/…` 会展开；其余必须是绝对路径。`$HOME/…` 与 `%USERPROFILE%\…` **不**展开（那会把“谁的环境”变成隐式输入，而配置是按工作目录缓存的）。
-- **不存在的根会被跳过**并 warn——runner 无法授权一个不存在的路径（bwrap 对不存在的 `--bind` 源直接硬失败），write/edit 围栏也同步跳过，两边一致而不是单侧放行。`mkdir -p` 建好后下一次工具调用即生效。pi-sandbox 绩不会因为“读配置”这个动作就在文件系统上产生副作用。
+- **加最小的。绝不要加整个 home 目录。**凡是**等于或包含** home 目录、文件系统根、或 pi 的 agentDir（`~/.pi/agent`）的条目，一律 **warn + 拒绝**，不会生效。
+- `<ws>/.pi` **授予不了**：pi 自己的项目配置目录无论你怎么列都恒为只读（见「受保护路径」）。
+- `~` 与 `~/…` 会展开；其余必须是绝对路径。`$HOME/…` 与 `%USERPROFILE%\…` 不展开。
+- **不存在的根会被跳过**并 warn——runner 无法授权一个不存在的路径（bwrap 对不存在的 `--bind` 源直接硬失败），write/edit 围栏也同步跳过，两边一致而不是单侧放行。`mkdir -p` 建好后下一次工具调用即生效。
 - 只在 `workspace-write` 下有意义；`read-only` 忽略整个列表。
 - **Windows** 上见上面 `windows-acl` 的第四条缺口：只对围栏生效，不对受限 shell 生效。
 
 `/permission` 会打印真正解析出来的根，所以写错或被跳过的条目是看得见的，不会静默失效。
 
-**为什么不默认放开 `~/.cache`。**在桌面 Linux 上它不只是 cache。里面有：之后会以 root 安装的包管理器构建缓存（`~/.cache/paru/clone/*` 里的 `PKGBUILD` 与已构建的 `.pkg.tar.zst`）、活的 IPC socket（`~/.cache/biome/biome-socket-*`）、正在运行的桌面会话与锁屏状态（`kwin`、`plasmashell`、`kscreenlocker_greet`）、浏览器 profile、之后会无沙箱执行的二进制（`ms-playwright`、`puppeteer`、`electron`），以及 `~/.cache/huggingface/token`。而受约束进程本来就能**读**一切，所以放开 `~/.cache` 买不到任何机密性收益——它只交出完整性与持久化，而这两样正是本沙箱仅剩的护栏。而且它连大家真碰到的工具也修不好：`pnpm` 的 store 在 `XDG_DATA_HOME` 下，`npm` 用 `~/.npm`，`cargo` 用 `~/.cargo`，Playwright 把 `~/.cache/ms-playwright` 写死在源码里、根本不认 `XDG_CACHE_HOME`（macOS 上 `uv` 与 Go 用 `~/Library/Caches`，同样不认）。Codex 与 Claude Code 采取同一立场：默认只有 cwd + temp，另给一个可配置的窄口子，而不是放开 cache 根。完整论证：`docs/superpowers/specs/2026-10-14-writable-roots-design.md`。
+`~/.cache` 有意**不**在默认授予之列：桌面机器上它不只是 cache——里面有之后会以 root 安装的包管理器构建缓存（`~/.cache/paru/clone/*`）、活的 IPC socket、正在运行的桌面会话与锁屏状态、浏览器 profile，以及之后会无沙箱执行的二进制（`ms-playwright`、`puppeteer`、`electron`）。而受约束进程本来就能**读**一切，所以放开它买不到机密性收益，只交出完整性与持久化。它连大家真碰到的工具也修不好（`pnpm` 的 store 在 `XDG_DATA_HOME` 下，`npm` 用 `~/.npm`，Playwright 把 `~/.cache/ms-playwright` 写死、不认 `XDG_CACHE_HOME`）。完整论证：`docs/superpowers/specs/2026-10-14-writable-roots-design.md` §3。
+
+## 受保护路径
+
+`<工作区>/.pi` 恒为**只读**，即使它就在工作区里面。pi 从那里加载项目级 extensions / agents / skills / prompts / themes，而每个 subagent 子会话都会重新发现它们——所以沙箱内写一次 `.pi/agents/x.md`，下一次 subagent 调用就会以你的完全权限运行它，不需要 `/reload`，也不需要重启。
+
+- 对 `write`/`edit` 工具在**所有平台**生效，且与目录是否存在无关——「从零创建它」正是攻击本身，所以「它还不存在」不能成为放行的理由。
+- 把它列进 `writableRoots` **抬不动**这层保护。
+- `danger-full-access` 能解除：提权审批就是为这个准备的。拒绝文案会说清原因与重试配方，模型于是去请求批准，而不是换写法反复试探。
+
+受限 shell 侧的覆盖情况取决于后端，`/permission` 会如实报告而不是暗示全覆盖：
+
+| 后端 | 受限 shell 里的 `.pi` |
+|---|---|
+| `bwrap` | `.pi` 存在时受保护（嵌套在工作区 bind 内的只读 bind） |
+| `sandbox-exec` | 受保护，含「从零创建」 |
+| `landlock-run` | **不受保护** —— Landlock 规则是并集，表达不了 deny-within-allow；装上 `bwrap` 可闭合 |
+| `windows-acl` | **不受保护** —— runner 尚无挖洞实现 |
+
+已知缺口：bwrap 下，`.pi` 还不存在时 bash 仍能创建它。`--ro-bind` 对缺失的源硬失败（那会表现为 `SANDBOX_UNAVAILABLE` 而不是拒绝），而另一种做法——从别处 bind 一个空的只读目录过来——会让 bwrap 在你项目里真创建一个 `<工作区>/.pi`。无论如何 `write`/`edit` 在所有平台都拦住这条路。
+
+同一类但**未**覆盖：`.git/hooks`、`.git/config`、项目根的 `AGENTS.md`。`.git` 需要比 `.pi` 更细的规则（`git commit` 要写 `.git`），是单独一次设计。
 
 ## 安全说明
 
@@ -137,7 +158,8 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 - 受限子进程强制 `LC_MESSAGES=C`（保证拒绝诊断可分类），不改动你的 `LANG`/`LC_CTYPE`
 - 受限 bash 在独立进程组中运行（detached）：timeout/abort 会杀掉整个进程组；但若 pi 自身被硬杀（如 SIGKILL），命令派生的后台孙进程可能存活（pi 内部的子进程追踪 API 不对扩展开放）
 - landlock 回退在旧内核 ABI 上为 partial enforcement（状态里会标注）
-- `writableRoots` 是有意放宽边界：每个解析成功的条目对受限命令**和** write/edit 围栏都变成可写，且写在那里的东西会活过这条命令（cache 的意义就在此）。授予能跑起来的最窄目录；等于或包含 home 目录与 pi agentDir 的条目会被拒绝
+- `writableRoots` 是有意放宽边界：每个解析成功的条目对受限命令**和** write/edit 围栏都变成可写，且写在那里的东西会活过这条命令（cache 的意义就在此）。授予能跑起来的最窄目录
+- 项目级配置与其他字段一样参与合并，所以 `<项目>/.pi/sandbox.json` 能给自己授予额外可写根——**包括 home 底下的凭据目录**（`~/.ssh`、`~/.aws`），拒绝规则不覆盖它们（它只拒 home 目录本身及其祖先）。信任一个文件夹时请顺手看一眼那个文件；项目也可以传 `"writableRoots": []` 把全局授予关掉
 
 ## 从 pi-container-sandbox 1.x 迁移
 

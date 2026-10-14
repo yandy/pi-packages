@@ -121,3 +121,65 @@ describe.skipIf(skipConfinedBashCases)(`real confinement via ${selected.runner}`
 		expect(r.text).toContain("[sandbox: file access denied under read-only mode]");
 	});
 }, 60_000);
+
+/**
+ * 受保护路径的真机验证（spec 2026-10-14-protected-project-config）。
+ * 只有 bwrap 链上「挖洞」才成立，所以按 runner 门控；landlock 表达不了 deny-within-allow，
+ * 那一条缺口由下面的「residual gap」用例如实钉住，而不是假装它被挡住了。
+ */
+describe.skipIf(skipConfinedBashCases)(`protected config dir via ${selected.runner}`, () => {
+	let ws: string;
+	let pi: string;
+	const isBwrap = selected.runner === "bwrap";
+
+	beforeAll(() => {
+		ws = realpathSync.native(mkdtempSync(join(tmpdir(), "sbx-prot-")));
+		pi = join(ws, ".pi");
+	});
+	afterAll(() => { rmSync(ws, { recursive: true, force: true }); });
+
+	async function run(command: string) {
+		const ops = createSandboxBashOps({ mode: "workspace-write", workspaceRoot: ws });
+		const chunks: Buffer[] = [];
+		const result = await ops.exec(command, ws, { onData: (b) => chunks.push(b) });
+		return { ...result, text: chunks.map((c) => c.toString()).join("") };
+	}
+
+	it("denies a write into <ws>/.pi and carries the marker + escalation hint", async () => {
+		if (!isBwrap) return; // landlock 挖不了洞，见下一条
+		mkdirSync(join(pi, "agents"), { recursive: true });
+		const r = await run(`touch '${pi}/agents/evil.md'`);
+		expect(r.exitCode).not.toBe(0);
+		expect(r.text).toContain("[sandbox: file access denied under workspace-write mode]");
+		expect(r.text).toContain("[sandbox: escalation available");
+	});
+
+	it("keeps ordinary workspace writes working next to the carve-out", async () => {
+		if (!isBwrap) return;
+		mkdirSync(join(pi, "agents"), { recursive: true });
+		const r = await run("touch normal.txt && echo ok");
+		expect(r.exitCode).toBe(0);
+		expect(r.text).toContain("ok");
+	});
+
+	/**
+	 * A 方案的残余缺口，如实钉住：`.pi` 不存在时 bwrap 挖不了洞（`--ro-bind` 对缺失源硬失败），
+	 * 于是 bash 仍能从零创建它。围栏侧（write/edit）全平台拦住这条路，覆盖见 tools.test.ts。
+	 * 这条用例是**缺口存在的证据**，不是期望行为——将来若闭合了缺口，它应当被改成断言拒绝。
+	 */
+	it("residual gap: bash can still create .pi from scratch when it does not exist", async () => {
+		if (!isBwrap) return;
+		const fresh = realpathSync.native(mkdtempSync(join(tmpdir(), "sbx-prot-fresh-")));
+		try {
+			const ops = createSandboxBashOps({ mode: "workspace-write", workspaceRoot: fresh });
+			const chunks: Buffer[] = [];
+			const r = await ops.exec(`mkdir -p '${fresh}/.pi/agents' && touch '${fresh}/.pi/agents/x.md' && echo created`, fresh, {
+				onData: (b) => chunks.push(b),
+			});
+			expect(r.exitCode).toBe(0);
+			expect(chunks.map((c) => c.toString()).join("")).toContain("created");
+		} finally {
+			rmSync(fresh, { recursive: true, force: true });
+		}
+	});
+}, 60_000);

@@ -1,13 +1,34 @@
 import { basename, dirname, join, resolve as resolvePath, sep } from "node:path";
 import { lstatSync, readlinkSync, realpathSync, statSync, type Stats } from "node:fs";
-import { escalationHintMarker, sandboxDenialMarker } from "./escalation";
-import { writableRoots, type SandboxMode } from "./policy";
+import { escalationHintMarker, protectedPathEscalationHint, protectedPathMarker, sandboxDenialMarker } from "./escalation";
+import { canonicalPath, writableRoots, type SandboxMode } from "./policy";
+import { protectedRoots } from "./protected";
 
 /** fs 写围栏拒绝：message 携带模型可见的双行标记（spec §7）。 */
 export class FenceDenialError extends Error {
 	constructor(path: string, mode: SandboxMode) {
 		super(`${sandboxDenialMarker(mode)}\n${escalationHintMarker("operation")}\npath: ${path}`);
 		this.name = "FenceDenialError";
+	}
+}
+
+/**
+ * 受保护路径拒绝（deny-within-allow，spec 2026-10-14-protected-project-config）。
+ *
+ * **继承 FenceDenialError 而不是做兄弟类**：tools.ts 的两个围栏 ops 用
+ * `if (error instanceof FenceDenialError) onDenial?.()` 记 denial 账本，而 denial-first 门禁
+ * 靠这笔记录才放行提权重试——用户要求的「更改 `.pi` 需要提权」全靠这一笔。
+ * 做成兄弟类会静默断掉提权链路（拒绝文案看着对，但模型永远提不了权）。
+ *
+ * 文案与 FenceDenialError 分开：目标**在**可写根内，所以“可写根是 workspace + /tmp”与
+ * cache 重定向配方都是误导（见 protectedPathMarker 的说明）。首行仍是逐字不变的
+ * `sandboxDenialMarker(mode)`，所以任何按该标记识别拒绝的下游（含既有测试断言）照旧生效。
+ */
+export class ProtectedPathDenialError extends FenceDenialError {
+	constructor(path: string, mode: SandboxMode, protectedRoot: string) {
+		super(path, mode);
+		this.message = `${protectedPathMarker(mode, path, protectedRoot)}\n${protectedPathEscalationHint("operation")}\npath: ${path}`;
+		this.name = "ProtectedPathDenialError";
 	}
 }
 
@@ -183,8 +204,31 @@ export interface FencePolicy {
 }
 
 /**
+ * 受保护根判定：在**允许判定之后**跑，所以它也压过 `writableRoots` 里显式配到 `.pi` 下的条目
+ * （与 Claude Code 同口径：allowWrite 抬不动 protected paths）。
+ *
+ * 与存在性无关：`.pi` 还不存在时同样要拒，否则“从零创建 `.pi/agents/x.md`”这条最主要的
+ * 攻击形状就漏了（runner 侧的存在性门控是另一回事，见 protected.carveOutRoots）。
+ *
+ * 比较用 canonical 化后的 target，所以 `<ws>/link -> <ws>/.pi` 式的 symlink 绕不过：
+ * canonicalizeTarget 已把它解到真身。受保护根自身也 canonical 一次，容忍工作区根是 symlink 的情形。
+ * 返回命中的受保护根（用于拒绝文案），未命中返回 undefined。
+ */
+export function matchProtectedRoot(
+	target: string,
+	workspaceRoot: string,
+	caseSensitive: boolean = process.platform !== "win32",
+): string | undefined {
+	for (const root of protectedRoots(workspaceRoot)) {
+		if (isWithinRoots(target, [canonicalPath(root)], caseSensitive)) return root;
+	}
+	return undefined;
+}
+
+/**
  * 校验一个写路径。danger-full-access 放行；read-only 全拒；workspace-write
- * 要求 canonicalizeTarget 后落在 writableRoots 内。违规抛 FenceDenialError。
+ * 要求 canonicalizeTarget 后落在 writableRoots 内，且**不**在受保护根内。
+ * 违规抛 FenceDenialError（围栏外）或 ProtectedPathDenialError（围栏内但被挖洞）。
  * 调用方（tools.ts）传入的是已对 cwd 解析的路径；此处 resolvePath 兜底相对路径。
  */
 export function assertWriteAllowed(absPath: string, policy: FencePolicy): void {
@@ -193,4 +237,6 @@ export function assertWriteAllowed(absPath: string, policy: FencePolicy): void {
 	const target = canonicalizeTarget(absPath);
 	const caseSensitive = policy.caseSensitive ?? process.platform !== "win32";
 	if (!isWithinRoots(target, roots, caseSensitive)) throw new FenceDenialError(resolvePath(absPath), policy.mode);
+	const protectedRoot = matchProtectedRoot(target, policy.workspaceRoot, caseSensitive);
+	if (protectedRoot !== undefined) throw new ProtectedPathDenialError(resolvePath(absPath), policy.mode, protectedRoot);
 }

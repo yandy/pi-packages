@@ -4,6 +4,7 @@ import { getDenialLedger } from "./src/denial-ledger";
 import { getEscalationBroker } from "./src/escalation-broker";
 import { createPermissionCommand, processPermissionState } from "./src/permission";
 import { canonicalPath } from "./src/policy";
+import { protectedRoots, shellProtectionNote } from "./src/protected";
 import { selectRunner } from "./src/runners";
 import { createSandboxTools } from "./src/tools";
 import { aclSkillPaths } from "./src/win32/skill-paths";
@@ -140,14 +141,18 @@ export default function (pi: ExtensionAPI) {
 			const effective = processPermissionState.override ?? cfg.mode;
 			const source = processPermissionState.override !== null ? "/permission override" : "config default";
 			let runnerText: string;
+			// 受保护路径的状态行需要知道后端能不能挖洞，所以把 runner 种类从分支里提出来。
+			let runnerKind: string | null = null;
+			const customRunner = cfg.runnerCommand !== null && cfg.runnerCommand.length > 0;
 			// Ruling 19：danger-full-access 首判——自定义 runner 已配置但模式为全放行时，
 			// runner 行必须显示 bypassed（runner 不参与该模式的执行）。
 			if (effective === "danger-full-access") {
 				runnerText = "bypassed (danger-full-access)";
-			} else if (cfg.runnerCommand !== null && cfg.runnerCommand.length > 0) {
-				runnerText = `custom command (${cfg.runnerCommand.join(" ")})`;
+			} else if (customRunner) {
+				runnerText = `custom command (${(cfg.runnerCommand ?? []).join(" ")})`;
 			} else {
 				const selected = selectRunner(cfg.probeTimeoutMs);
+				runnerKind = selected.runner === "unavailable" ? null : selected.runner;
 				runnerText = selected.runner === "unavailable"
 					? "unavailable (fail-closed: confined commands will be refused)"
 					: `${selected.runner} (${selected.enforcement} enforcement)`;
@@ -167,6 +172,16 @@ export default function (pi: ExtensionAPI) {
 			}
 			const shellLine = win32ShellStatusLine(pi);
 			if (shellLine !== null) lines.push(shellLine);
+			// 受保护路径（spec 2026-10-14-protected-project-config）。danger-full-access 下什么都不受保护，
+			// 列出来反而是假信号，所以整个跳过。围栏侧无条件生效；shell 侧能不能挖洞按后端与存在性分叉，
+			// 必须如实说——否则用户看到 "protected" 会以为 bash 也挡住了。
+			if (effective !== "danger-full-access") {
+				const workspaceRoot = canonicalPath(effectiveCwd);
+				const roots = protectedRoots(workspaceRoot);
+				if (roots.length > 0) {
+					lines.push(`protected read-only: ${roots.join(", ")} (write/edit: always denied; ${shellProtectionNote(runnerKind, customRunner, workspaceRoot)})`);
+				}
+			}
 			return lines.join("\n");
 		},
 	}));

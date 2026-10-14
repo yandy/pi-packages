@@ -33,7 +33,7 @@
 | # | 决策 |
 |---|---|
 | D1 | **不**把 `$XDG_CACHE_HOME` 加进默认可写根 |
-| D2 | 改为提供可配置的额外可写根 `writableRoots` |
+| D2 | 提供可配置的额外可写根 `writableRoots`，合并语义与其他字段一致 |
 | D3 | 本期 win32 的 `windows-acl` runner **不**支持额外根；write/edit 围栏全平台生效；win32 配置非空时 warn 一次 + README 记为第四条已知限制 |
 
 ## 3. Ruling 1：为什么不默认放开 `$XDG_CACHE_HOME`
@@ -102,13 +102,16 @@
 - 类型：`string[]`；非数组 / 含非字符串元素 → `validateSandboxConfig` **throw**（结构性错误，与 `runnerCommand` 同口径；`getSandboxConfig` 的 fail-safe 会回落默认并 warn）；
 - 默认 `[]`，加入 `DEFAULT_SANDBOX_CONFIG` 即自动进入既有的逐字段合并循环（`config.ts` 按 `Object.keys(DEFAULT_SANDBOX_CONFIG)` 遍历）。
 
-### 4.2 Ruling 2a：只认**全局**配置，项目级条目被忽略（有意偏离既有合并语义）
+### 4.2 合并语义：与其他字段完全一致
 
-README 现在写的是「merged field by field: project > global > defaults」，`mode` 等四个字段确实如此。`writableRoots` **例外**：只从 `~/.pi/agent/sandbox.json` 取，`<project>/.pi/sandbox.json` 里的该字段被忽略 + warn。
+`writableRoots` 走同一条合并规则（项目 > 全局 > 默认），不做例外。项目可以用空列表关掉全局授予——`[] ?? x` 是 `[]`，空数组不是 nullish，收窄方向必须可用。
 
-理由：`writableRoots` 是**放宽**边界的键。项目级配置来自被检出的仓库内容，让仓库自己放宽沙箱等于让被约束方定义约束。Claude Code 对同类键采取同样立场（project settings 不能设 `filesystem.disabled`；admin-required 下 repo 的 `allowWrite` 被忽略）。cache 目录本身就是用户级资源，「按项目配 cache 根」的需求很弱，不值得为它开这个口。
+放宽边界的风险由**与来源无关**的两层承担，对全局与项目级一视同仁：
 
-> **顺带发现的既存问题（本次不修，已单独记录）**：`loadSandboxConfig` 让项目级 `.pi/sandbox.json` 覆盖 `mode`，因此一个仓库今天就能自带 `{"mode":"danger-full-access"}` 把沙箱整个关掉；pi 自己的项目信任门（`TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES`）只覆盖 pi 的 `settings.json`/`extensions`/`skills`/…，**不覆盖第三方扩展自读的 `sandbox.json`**。这不在本次交付范围内，见 §9。
+- 危险根拒绝（§4.3 第 3 步）：等于或包含 homedir / 文件系统根 / `getAgentDir()` 的条目一律丢弃；
+- 受保护路径挖洞（spec `2026-10-14-protected-project-config-design.md`）：`<ws>/.pi` 恒只读，配 `writableRoots` 也抬不动。
+
+残留风险（知情接受，不加新规则）：危险根规则只拒「等于或**包含** homedir」，所以 homedir *底下*的凭据目录（`~/.ssh`、`~/.aws`、`~/.gnupg`、`~/.config/gh` 等）是放行的，项目级配置因此能精确授予它们。这与 §9.1 的既存问题同源（项目级本来就能设 `mode`），不是新类别，但更安静——`/permission` 状态行看上去正常。若以后要收紧，规则必须与来源无关，否则会重现「锁了小门、大门开着」的装饰性防护。
 
 ### 4.3 条目解析规则（`resolveConfiguredRoots`，放在 `config.ts`）
 
@@ -232,7 +235,7 @@ win32 行为：
 | 3 | 条目是 `~` / `/home` / `/` / `getAgentDir()` 或其祖先 | warn + 丢弃（Ruling 3） |
 | 4 | 条目不存在 | warn「does not exist, skipped」+ 丢弃；**围栏与四个 runner 一致**，不出现单侧放行 |
 | 5 | 条目是 symlink 指向别处 | `canonicalPath` 解析后授予**真身**；围栏的身份回退（dev/ino）已覆盖拼写不一致 |
-| 6 | 项目级 `.pi/sandbox.json` 带 `writableRoots` | 忽略 + warn 一次（Ruling 2a） |
+| 6 | 项目级 `.pi/sandbox.json` 带 `writableRoots` | 正常生效（项目 > 全局 > 默认）；项目可用空列表关掉全局授予 |
 | 7 | 配了根但 `mode` 是 `read-only` | `writableRoots()` 返回 `[]`，额外根自然被忽略（与 Codex 的 `writable_roots` 只在 workspace-write 下有意义一致）；不额外 warn |
 | 8 | win32 + 非空 `writableRoots` | 围栏生效、runner 忽略、warn 一次（Ruling 5） |
 | 9 | 自定义 `runnerCommand` | 额外根经 `bwrapProfileArgs` 拼进 argv（`confine.ts:120-127` 复用它），所以自定义 runner 也会收到 `--bind r r`；不兼容的 runner 会自己报错，由既有 `runnerFailureSignatures` 分类 |
@@ -241,7 +244,7 @@ win32 行为：
 ## 8. 安全与信任边界
 
 - **默认零变化**：`writableRoots` 缺省 `[]`，所有 profile argv 与围栏判定与 1.4.1 逐字节相同；
-- **放宽键不来自被检出的仓库**（Ruling 2a）；
+- **放宽的风险由与来源无关的规则承担**：危险根拒绝 + `<ws>/.pi` 恒只读挖洞（§4.2）；
 - **危险根在解析期就被拒绝**，不是「文档里叫用户别加」；
 - **不存在的根一律丢弃**，杜绝「围栏放行 + runner 跳过」的漂移；
 - 用户显式配置的根就是用户的选择：本包不评判「你为什么要让 agent 能写 `~/.cache/uv`」，只拒绝会摧毁边界本身的那几类（home / 文件系统根 / pi 自己的配置树）。README 要照 Codex 的口径写清「加最小的、绝不加整个 home」。

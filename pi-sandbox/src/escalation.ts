@@ -113,6 +113,31 @@ export function sandboxDenialMarker(mode: SandboxMode): string {
 }
 
 /**
+ * 受保护路径的解释行（spec 2026-10-14-protected-project-config）。
+ *
+ * 与 `escalationHintMarker` 的区别是承重的：受保护目标**在**可写根内，所以
+ * ① 不能说 "writable here: the workspace + /tmp"——对这个路径那是假的；
+ * ② 不能给 cache 重定向配方——与此无关，只会把模型引向无效尝试；
+ * ③ 必须说清「配 writableRoots 也抬不动它」，否则模型会叫用户去改配置（那是无效的）。
+ * 三句都给“为什么”：pi 从项目 `.pi/` 加载扩展，而子会话每次重新发现——不说原因，
+ * 模型只会把“工作区内却被拒”当成 bug 反复换写法试探。
+ */
+export function protectedPathMarker(mode: SandboxMode, path: string, protectedRoot: string): string {
+	return (
+		`${sandboxDenialMarker(mode)}\n`
+		+ `[sandbox: ${path} is inside ${protectedRoot}, which pi loads project-level extensions, agents, skills, prompts and themes from — and every subagent child session re-discovers them, so a confined write there would later run with your full privileges. It stays read-only even though it is inside the workspace, and adding it to "writableRoots" does not lift the protection.]`
+	);
+}
+
+/**
+ * 受保护路径的提权配方：只给提权这一条出路（没有“不提权的替代写法”可给）。
+ * 尾部措词与 `escalationHintMarker` 一致，保证模型看到的提权语法只有一种形状。
+ */
+export function protectedPathEscalationHint(subject: "command" | "operation"): string {
+	return `[sandbox: escalation available — to change it, retry this exact ${subject} once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]`;
+}
+
+/**
  * 拒绝后才下发的自救配方（Ruling 6，spec 2026-10-14 §6）：工具把状态写到围栏外（多是 `~/.cache`
  * 这类）时，模型往往只会想到“提权”，而从 workspace-write 往上只剩 danger-full-access 一级——
  * 为一次 cache 写升到完全脱沙箱，还得弹窗打扰用户。把“把工具状态指向可写根”的具体配方放在决策点，
