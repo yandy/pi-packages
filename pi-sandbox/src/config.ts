@@ -1,5 +1,6 @@
-import { readFileSync } from "node:fs";
-import { resolve as resolvePath } from "node:path";
+import { readFileSync, realpathSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { isAbsolute, join, resolve as resolvePath } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { isSandboxMode, type SandboxMode } from "./policy";
 
@@ -11,6 +12,8 @@ export interface SandboxConfig {
 	runnerFailureSignatures: string[] | null;
 	/** 每个功能探测的超时；必须为正有限数（0 对 Node 意味着无超时）。 */
 	probeTimeoutMs: number;
+	/** workspace-write 下额外可写目录（已 ~ 展开 + realpath 规范化 + 去重）。 */
+	extraWritableDirs: string[];
 }
 
 export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
@@ -18,6 +21,7 @@ export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
 	runnerCommand: null,
 	runnerFailureSignatures: null,
 	probeTimeoutMs: 5000,
+	extraWritableDirs: [],
 };
 
 const LEGACY_GROUPS = ["image", "runtime", "host"] as const;
@@ -69,12 +73,51 @@ export function validateSandboxConfig(raw: Record<string, unknown>, source: stri
 		throw new Error(`sandbox: ${source}: probeTimeoutMs must be a positive finite number`);
 	}
 
+	const extraWritableDirs = raw.extraWritableDirs ?? [];
+	if (!isStringArray(extraWritableDirs)) {
+		throw new Error(`sandbox: ${source}: extraWritableDirs must be a string array`);
+	}
+
 	return {
 		mode,
 		runnerCommand: runnerCommand as string[] | null,
 		runnerFailureSignatures: runnerFailureSignatures as string[] | null,
 		probeTimeoutMs,
+		extraWritableDirs: [...extraWritableDirs],
 	};
+}
+
+/** `~` / `~/…` / win32 `~\…` → 家目录；不支持 `~user`，其余原样返回。 */
+function expandHome(entry: string): string {
+	if (entry === "~") return homedir();
+	if (entry.startsWith("~/") || entry.startsWith("~\\")) return join(homedir(), entry.slice(2));
+	return entry;
+}
+
+/** 逐条语义解析：展开 → 绝对性 → 必须是已存在目录 → realpath → 去重；无效条目告警并丢弃。 */
+export function resolveExtraWritableDirs(entries: readonly string[], source: string): string[] {
+	const resolved: string[] = [];
+	const seen = new Set<string>();
+	for (const raw of entries) {
+		const expanded = expandHome(raw);
+		if (!isAbsolute(expanded)) {
+			console.warn(`sandbox: extraWritableDirs entry is not an absolute path: ${JSON.stringify(raw)} in ${source}, ignoring it`);
+			continue;
+		}
+		let canonical: string;
+		try {
+			if (!statSync(expanded).isDirectory()) throw new Error("not a directory");
+			canonical = realpathSync.native(expanded);
+		} catch {
+			console.warn(`sandbox: extraWritableDirs entry is not an existing directory: ${JSON.stringify(expanded)} in ${source}, ignoring it`);
+			continue;
+		}
+		if (!seen.has(canonical)) {
+			seen.add(canonical);
+			resolved.push(canonical);
+		}
+	}
+	return resolved;
 }
 
 /**
@@ -90,7 +133,8 @@ export function loadSandboxConfig(): SandboxConfig {
 		if (key in globalRaw) console.warn(`sandbox: ignoring legacy "${key}" section in ${globalPath} (removed in 2.0; see README migration notes)`);
 	}
 
-	return validateSandboxConfig(globalRaw, globalPath);
+	const validated = validateSandboxConfig(globalRaw, globalPath);
+	return { ...validated, extraWritableDirs: resolveExtraWritableDirs(validated.extraWritableDirs, globalPath) };
 }
 
 let cachedConfig: SandboxConfig | undefined;
