@@ -56,7 +56,7 @@ export class LspManager {
 		config?: CodingToolsConfig,
 	): Promise<{ client: LspClient; server: ServerDef }> {
 		if (this.disposed) throw new Error("LspManager disposed");
-		const resolved = resolveServerForFile(path, config);
+		const resolved = resolveServerForFile(path, root, config);
 		if (!resolved) throw new Error(`No LSP server for ${path}`);
 		const { server, installed } = resolved;
 		if (!installed) {
