@@ -334,12 +334,13 @@ describe.skipIf(process.platform !== "win32")("windows-acl end-to-end (real runn
 
 	it("extra writable dirs: granted dir accepts a write, dropping it from the config denies", { timeout: E2E_TIMEOUT }, () => {
 		const extra = mkdtempSync(join(homedir(), "sbx-e2e-extra-"));
-		const seam = windowsAclRunnerArgv(
-			{ mode: "workspace-write", workspaceRoot: canonicalPath(workspace), extraRoots: [canonicalPath(extra)] },
-			{ node: process.execPath, runner: RUNNER },
-		);
-		expect(seam.slice(seam.indexOf("--writable"))).toEqual(["--writable", canonicalPath(extra), "--mode", "workspace-write"]);
 		try {
+			const seam = windowsAclRunnerArgv(
+				{ mode: "workspace-write", workspaceRoot: canonicalPath(workspace), extraRoots: [canonicalPath(extra)] },
+				{ node: process.execPath, runner: RUNNER },
+			);
+			expect(seam.slice(seam.indexOf("--writable"))).toEqual(["--writable", canonicalPath(extra), "--mode", "workspace-write"]);
+
 			const grantedTarget = join(extra, "extra-written.txt");
 			const granted = runConfined(
 				"workspace-write",
@@ -354,7 +355,12 @@ describe.skipIf(process.platform !== "win32")("windows-acl end-to-end (real runn
 			const denied = runConfined("workspace-write", nodeScript("require('node:fs').writeFileSync(process.argv[1], 'x')", [afterTarget]), {});
 			expectDenied(denied);
 			expectHostFileNotCreated(afterTarget);
-		} finally { rmSync(extra, { recursive: true, force: true }); }
+		} finally {
+			// Grants rewrote this dir's ACL (Low label + capability ACE); recursive
+			// deletes there hit transient Windows sharing/handle races, so retry like
+			// the suite's afterEach does for `root`.
+			rmSync(extra, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+		}
 	});
 
 	/** `dialect: "localized"` cases carry OS/CLR message text; only `node` text is English on every locale. */
