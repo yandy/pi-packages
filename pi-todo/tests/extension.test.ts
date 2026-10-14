@@ -3,7 +3,7 @@ import extension from "../index.js";
 import type { TodoItem } from "../src/todo-store.js";
 
 // 与 tests/widget.test.ts 同形的最小 Theme stub。
-const theme = { fg: (_n: string, t: string) => t, strikethrough: (t: string) => t } as any;
+const theme = { fg: (_n: string, t: string) => t, bold: (t: string) => t, strikethrough: (t: string) => t } as any;
 
 /**
  * 捕获扩展注册的工具与事件处理器。index.ts 的默认导出把 todos 关在闭包里，
@@ -12,8 +12,12 @@ const theme = { fg: (_n: string, t: string) => t, strikethrough: (t: string) => 
 function createHarness(getBranch: () => unknown[] = () => []) {
 	const tools: any[] = [];
 	const handlers: Record<string, Array<(event: any, ctx: any) => any>> = {};
+	const commands: Record<string, any> = {};
 	const pi = {
 		registerTool: (def: any) => tools.push(def),
+		registerCommand: (name: string, def: any) => {
+			commands[name] = def;
+		},
 		on: (event: string, handler: any) => {
 			(handlers[event] ??= []).push(handler);
 			return () => {};
@@ -22,18 +26,19 @@ function createHarness(getBranch: () => unknown[] = () => []) {
 	// hasUI=false 时 refreshWidget 直接返回，无需 stub 更多 UI。
 	const ctx = { hasUI: false, sessionManager: { getBranch }, ui: { setWidget: vi.fn(), theme } };
 	extension(pi as any);
-	return { tools, handlers, ctx };
+	return { tools, handlers, commands, ctx };
 }
 
 let tools: any[];
 let handlers: Record<string, Array<(event: any, ctx: any) => any>>;
+let commands: Record<string, any>;
 let ctx: any;
 beforeEach(() => {
-	({ tools, handlers, ctx } = createHarness());
+	({ tools, handlers, commands, ctx } = createHarness());
 });
 
-const run = (params: Record<string, unknown>, id = "call") =>
-	tools[0].execute(id, params, undefined, undefined, ctx);
+const run = (params: Record<string, unknown>, id = "call", uiCtx: any = ctx) =>
+	tools[0].execute(id, params, undefined, undefined, uiCtx);
 
 describe("prompt", () => {
 	it("keeps the description to the API contract only", () => {
@@ -178,5 +183,81 @@ describe("todo tool renderResult", () => {
 		const rendered = tools[0].renderResult(result, { expanded: false }, theme, {}).render(200).join("\n");
 		expect(rendered.match(/✓/g)?.length).toBe(1);
 		expect(rendered).toContain("#2 修 CI done");
+	});
+});
+
+describe("widget wiring", () => {
+	const widgetCtx = (setWidget: any, mode = "tui") => ({
+		hasUI: true,
+		mode,
+		sessionManager: { getBranch: () => [] },
+		ui: { setWidget, theme },
+	});
+
+	it("hands pi a component so the widget truncates to the terminal width itself", async () => {
+		const setWidget = vi.fn();
+		await run({ action: "set", items: [{ title: "Ship it", status: "pending" }] }, "c1", widgetCtx(setWidget));
+
+		const [key, content] = setWidget.mock.calls.at(-1) ?? [];
+		expect(key).toBe("pi-todo");
+		expect(typeof content).toBe("function");
+		const lines = content({ terminal: { rows: 24, columns: 80 } }, theme).render(40);
+		expect(lines.join("\n")).toContain("Ship it");
+	});
+
+	it("falls back to plain lines outside the TUI, where component factories are ignored", async () => {
+		const setWidget = vi.fn();
+		await run({ action: "set", items: [{ title: "Ship it", status: "pending" }] }, "c3", widgetCtx(setWidget, "rpc"));
+
+		const [key, content] = setWidget.mock.calls.at(-1) ?? [];
+		expect(key).toBe("pi-todo");
+		expect(Array.isArray(content)).toBe(true);
+		expect(content.join("\n")).toContain("Ship it");
+	});
+
+	it("hides the widget once every todo is done", async () => {
+		const setWidget = vi.fn();
+		await run(
+			{ action: "set", items: [{ title: "Ship it", status: "done" }] },
+			"c2",
+			widgetCtx(setWidget),
+		);
+		expect(setWidget).toHaveBeenLastCalledWith("pi-todo", undefined);
+	});
+});
+
+describe("command /todos", () => {
+	it("is registered with a description", () => {
+		expect(commands.todos?.description).toBeTruthy();
+	});
+
+	it("tells the user when the board is empty", async () => {
+		const notify = vi.fn();
+		const custom = vi.fn();
+		await commands.todos.handler("", { mode: "tui", hasUI: true, ui: { notify, custom, theme } });
+		expect(notify).toHaveBeenCalledWith("No todos", "info");
+		expect(custom).not.toHaveBeenCalled();
+	});
+
+	it("falls back to a notification outside the TUI", async () => {
+		await run({ action: "set", items: [{ title: "Ship it", status: "pending" }] });
+		const notify = vi.fn();
+		const custom = vi.fn();
+		await commands.todos.handler("", { mode: "rpc", hasUI: true, ui: { notify, custom, theme } });
+		expect(notify.mock.calls.at(-1)?.[0]).toContain("Ship it");
+		expect(custom).not.toHaveBeenCalled();
+	});
+
+	it("opens an overlay with the full list in the TUI", async () => {
+		await run({ action: "set", items: [{ title: "Ship it", status: "pending" }] });
+		const custom = vi.fn((_factory: any, _options: any) => Promise.resolve(undefined));
+		await commands.todos.handler("", { mode: "tui", hasUI: true, ui: { notify: vi.fn(), custom, theme } });
+
+		expect(custom).toHaveBeenCalledTimes(1);
+		const [factory, options] = custom.mock.calls[0] as [any, any];
+		expect(options.overlay).toBe(true);
+		expect(options.overlayOptions?.maxHeight).toBe("85%");
+		const component = factory({ terminal: { rows: 24, columns: 80 } }, theme, undefined, () => {});
+		expect(component.render(60).join("\n")).toContain("Ship it");
 	});
 });
