@@ -263,3 +263,38 @@ describe("identity fallback robustness", () => {
 		}
 	});
 });
+
+describe("extraRoots", () => {
+	// 偏差（计划原稿用例未传 _tmpRoots）：extra/outside 都建在 os.tmpdir() 下，而 tmpdir()
+	// 是 workspace-write 的默认可写根——不注入空 _tmpRoots 时“根外仍拒”与 symlink 逃逸断言
+	// 必失败（tmp 根会替 extraRoots 放行）。注入空 tmp 根使判定只依赖 ws + extraRoots，
+	// 与本文件既有围栏用例（honours the injected case sensitivity）同款（testing.md「参数注入」）。
+	it("workspace-write: 额外根内可写，根外仍拒", () => {
+		const extra = mkdtempSync(join(tmpdir(), "fence-extra-"));
+		const outside = mkdtempSync(join(tmpdir(), "fence-outside-"));
+		try {
+			const policy = { mode: "workspace-write" as const, workspaceRoot: ws, _tmpRoots: [] as readonly string[], extraRoots: [extra] };
+			expect(() => assertWriteAllowed(join(extra, "ok.txt"), policy)).not.toThrow();
+			expect(() => assertWriteAllowed(join(outside, "no.txt"), policy)).toThrow(FenceDenialError);
+		} finally {
+			rmSync(extra, { recursive: true, force: true });
+			rmSync(outside, { recursive: true, force: true });
+		}
+	});
+	it("read-only 忽略额外根", () => {
+		expect(() => assertWriteAllowed(join(ws, "f"), { mode: "read-only", workspaceRoot: ws, extraRoots: [ws] }))
+			.toThrow(FenceDenialError);
+	});
+	it.skipIf(process.platform === "win32")("额外根内的 symlink 指向根外时被拒", () => {
+		const extra = mkdtempSync(join(tmpdir(), "fence-extra-"));
+		const outside = mkdtempSync(join(tmpdir(), "fence-outside-"));
+		try {
+			symlinkSync(outside, join(extra, "escape"));
+			expect(() => assertWriteAllowed(join(extra, "escape", "x.txt"), { mode: "workspace-write", workspaceRoot: ws, _tmpRoots: [], extraRoots: [extra] }))
+				.toThrow(FenceDenialError);
+		} finally {
+			rmSync(extra, { recursive: true, force: true });
+			rmSync(outside, { recursive: true, force: true });
+		}
+	});
+});

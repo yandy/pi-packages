@@ -174,6 +174,8 @@ export interface FencePolicy {
 	caseSensitive?: boolean;
 	/** 测试注入（testing.md「参数注入」）：替换缺省 tmp 根（`defaultTmpRoots()`：win32 仅 `os.tmpdir()`，其余 `"/tmp"` + `os.tmpdir()`）；生产不传。 */
 	_tmpRoots?: readonly string[];
+	/** workspace-write 下追加的可写根（生产来自 extraWritableDirs 配置）。 */
+	extraRoots?: readonly string[];
 }
 
 /**
@@ -183,7 +185,7 @@ export interface FencePolicy {
  */
 export function assertWriteAllowed(absPath: string, policy: FencePolicy): void {
 	if (policy.mode === "danger-full-access") return;
-	const roots = writableRoots(policy.mode, policy.workspaceRoot, policy._tmpRoots);
+	const roots = writableRoots(policy.mode, policy.workspaceRoot, policy._tmpRoots, policy.extraRoots);
 	const target = canonicalizeTarget(absPath);
 	const caseSensitive = policy.caseSensitive ?? process.platform !== "win32";
 	if (!isWithinRoots(target, roots, caseSensitive)) throw new FenceDenialError(resolvePath(absPath), policy.mode);
