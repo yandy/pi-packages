@@ -79,6 +79,8 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 
 弹窗提供 **Allow once / Deny**；选 Deny 后可再填一句**可选理由**（回车跳过），理由会随拒绝错误回传给模型，让它明白为什么被拒、不要换写法反复试探。subagent 子会话（前台与后台都算）的提权会转发到父会话弹窗（同进程 pi-subagents，且父会话需有 UI）；无父通道时（headless、跨进程子代理）提权一律拒绝（fail-closed），此时用 `/permission` 放宽进程档位解救。
 
+**缓存/数据目录搬迁属于越界行为。** 工具的常驻规则要求模型不得为了绕开沙箱把全局缓存/数据目录搬进 workspace——无论是环境变量覆盖（`XDG_CACHE_HOME`、`HOME`、`UV_CACHE_DIR`、`npm_config_cache`、`PNPM_HOME` 等）、改缓存的 flag（`--cache-dir`、`--store-dir` 等）还是配置文件——正确做法是原样运行工具，包括提权重试也不得夹带搬迁：搬迁是无声的，它会消掉本可上膛提权的那次拒绝。这条政策目前仅停留在提示词层：pi-sandbox 不检测、也不拒绝这类命令，用户显式要求搬迁时仍然成立。
+
 ## 配置
 
 只读一个文件：`~/.pi/agent/sandbox.json`（全局）。项目级 `<项目>/.pi/sandbox.json` 被**静默忽略**——不解析、不校验、不告警（项目目录对受限模型可写，配置层留在那里等于把改写自己 `mode` / `runnerCommand` 的能力交给模型）。文件缺失/损坏与非法取值的回落行为不变。
