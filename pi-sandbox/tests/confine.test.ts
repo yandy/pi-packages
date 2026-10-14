@@ -346,6 +346,8 @@ describe("confine protectedRoots per backend", () => {
 	afterEach(() => { rmSync(ws, { recursive: true, force: true }); });
 	const pi = () => join(ws, ".pi");
 	const profileOf = (argv: string[]) => argv.slice(0, argv.indexOf("--")).join(" ");
+	/** 复刻 runners.sbplString 的转义（\ → \\ ，" → \"），以便断言 seatbelt profile 的字面量。 */
+	const sbpl = (s: string) => s.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 
 	it("seatbelt denies the config dir even when it does not exist", () => {
 		expect(existsSync(pi())).toBe(false);
@@ -353,7 +355,9 @@ describe("confine protectedRoots per backend", () => {
 			selected: { runner: "seatbelt", enforcement: "full" },
 			hooks: { seatbeltExec: "/usr/bin/sbx" },
 		}).argv;
-		expect(profileOf(argv)).toContain(`(deny file-write* (subpath "${pi()}"))`);
+		// SBPL 字面量会把 `\` 转义成 `\\`（runners.sbplString），所以 win32 路径在 profile 里是双反斜杠。
+		// 用原始路径直接比会在 Windows 上假红——CI windows-latest 实测捕获。
+		expect(profileOf(argv)).toContain(`(deny file-write* (subpath "${sbpl(pi())}"))`);
 	});
 
 	it("landlock cannot express a carve-out: no trace of the config dir even when it exists", () => {
