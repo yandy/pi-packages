@@ -14,17 +14,40 @@ Pi package providing AST/LSP code-intelligence tools for pi.
 | `lsp_hover` | 查符号类型/文档（唯一能答"这表达式什么类型"） | LSP hover |
 | `lsp_navigate` | 语义跳转：定义在哪 / 谁在用（operation: definition\|references） | LSP definition/references |
 
-### 支持语言
+### Supported languages
 
-| 语言 | LSP 服务器 | 安装 |
+Servers are started with the pi session working directory as their root, so project-scoped files
+(`node_modules`, `compile_commands.json`, Gradle/Maven metadata) are resolved relative to it.
+
+| Language | LSP server | Install |
 |------|-----------|------|
-| TypeScript/JavaScript | typescript-language-server | `npm i -g typescript-language-server` |
+| TypeScript/JavaScript | typescript-language-server | `npm i -g typescript-language-server typescript@6` |
 | Python | pyright | `npm i -g pyright` |
-| Java | jdtls | Eclipse JDT LS（需 JDK 17+） |
-| Kotlin | kotlin-language-server | [fwcd/kotlin-language-server](https://github.com/fwcd/kotlin-language-server) |
-| C/C++ | clangd | `apt install clangd` / `brew install llvm`（需 compile_commands.json） |
+| Java | jdtls | Eclipse JDT LS (needs Java 21+) |
+| Kotlin | kotlin-language-server | [fwcd/kotlin-language-server](https://github.com/fwcd/kotlin-language-server) (needs JDK 11+) |
+| C/C++ | clangd | `apt install clangd` / `brew install llvm` |
 
-`ast_grep_search` 支持 ts/tsx/js/python/java/kotlin/c/cpp，无需 LSP。
+Prerequisites beyond the server binary itself:
+
+- **TypeScript/JavaScript** — the server also needs a TypeScript that ships `lib/tsserver.js`. It looks for
+  one in `<project>/node_modules/typescript/lib` (walking up from the session working directory) and falls
+  back to one installed next to the server itself (i.e. a global `typescript`). `typescript` 7.x is the
+  native port and has no `tsserver.js`, so it cannot be used; install `typescript@6` globally, or in the
+  project (`npm i -D typescript@6`) to pin it per repository. With no usable TypeScript, every `lsp_*` call
+  on a js/ts file fails with `Could not find a valid TypeScript installation`.
+- **Python** — none: no interpreter or virtualenv is required to resolve standard-library symbols.
+- **Java** — Java 21+ on `JAVA_HOME` or `PATH`. The `jdtls` wrapper picks its own `-data` directory.
+- **Kotlin** — JDK 11+. The classpath is resolved with Gradle, Maven or a `kls-classpath` script, so a lone
+  `.kt` file only gets partial results. fwcd's server is deprecated in favour of the official
+  [kotlin-lsp](https://github.com/Kotlin/kotlin-lsp) (alpha); to use it, override the command:
+  `"lsp": { "servers": { "kotlin-language-server": { "command": ["kotlin-lsp.sh", "--stdio"] } } }`.
+- **C/C++** — `compile_commands.json` is only needed for project-specific include paths and defines;
+  without it clangd falls back to a default compile command and basic hover/navigation still work.
+
+`ast_grep_search` supports ts/tsx/js/python/java/kotlin/c/cpp and needs no LSP. Languages outside this
+list (Rust, Go, Ruby, …) are not covered: `ast_grep_*` rejects unknown `lang` values, and `lsp_*` only knows
+the five servers above — for any other file it returns `No LSP server for <path>`. Configuration can
+override those five servers but cannot register new ones.
 
 ### ast-grep 二进制
 

@@ -16,15 +16,35 @@
 
 ### 支持语言
 
+服务器以 pi 会话的工作目录为根启动，所以项目内的文件（`node_modules`、`compile_commands.json`、
+Gradle/Maven 元数据）都相对它解析。
+
 | 语言 | LSP 服务器 | 安装 |
 |------|-----------|------|
-| TypeScript/JavaScript | typescript-language-server | `npm i -g typescript-language-server` |
+| TypeScript/JavaScript | typescript-language-server | `npm i -g typescript-language-server typescript@6` |
 | Python | pyright | `npm i -g pyright` |
-| Java | jdtls | Eclipse JDT LS（需 JDK 17+） |
-| Kotlin | kotlin-language-server | [fwcd/kotlin-language-server](https://github.com/fwcd/kotlin-language-server) |
-| C/C++ | clangd | `apt install clangd` / `brew install llvm`（需 compile_commands.json） |
+| Java | jdtls | Eclipse JDT LS（需 Java 21+） |
+| Kotlin | kotlin-language-server | [fwcd/kotlin-language-server](https://github.com/fwcd/kotlin-language-server)（需 JDK 11+） |
+| C/C++ | clangd | `apt install clangd` / `brew install llvm` |
 
-`ast_grep_search` 支持 ts/tsx/js/python/java/kotlin/c/cpp，无需 LSP。
+除服务器二进制本身外的前置依赖：
+
+- **TypeScript/JavaScript** —— 服务器还需要一个带 `lib/tsserver.js` 的 TypeScript：先按会话工作目录逐级向上找
+  `<项目>/node_modules/typescript/lib`，找不到就退回装在服务器自己旁边的（即全局）`typescript`。`typescript`
+  7.x 是 native 移植版、没有 `tsserver.js`，不能用；请装 `typescript@6`——全局装，或装进项目
+  （`npm i -D typescript@6`）按仓库固定版本。没有任何可用的 TypeScript 时，对 js/ts 文件的每次 `lsp_*`
+  调用都会报 `Could not find a valid TypeScript installation`。
+- **Python** —— 无额外依赖：解析标准库符号不需要解释器或 virtualenv。
+- **Java** —— 需要 Java 21+（`JAVA_HOME` 或 `PATH`）；`jdtls` 包装脚本会自己挑 `-data` 目录。
+- **Kotlin** —— 需 JDK 11+；classpath 由 Gradle、Maven 或 `kls-classpath` 脚本解析，所以单独的 `.kt`
+  文件只有有限结果。fwcd 版已废弃，官方 [kotlin-lsp](https://github.com/Kotlin/kotlin-lsp)（alpha）可用：
+  把命令覆盖为 `"lsp": { "servers": { "kotlin-language-server": { "command": ["kotlin-lsp.sh", "--stdio"] } } }`。
+- **C/C++** —— `compile_commands.json` 只在需要项目专属 include 路径与宏时才必需；没有它 clangd 会退回
+  默认编译命令，基本 hover/跳转仍可用。
+
+`ast_grep_search` 支持 ts/tsx/js/python/java/kotlin/c/cpp，无需 LSP。上表之外的语言（Rust、Go、Ruby……）不在
+覆盖范围内：`ast_grep_*` 会拒绝未知的 `lang`，`lsp_*` 也只认上面这 5 个服务器——其它文件返回
+`No LSP server for <path>`。配置只能覆盖这 5 个服务器，不能新注册。
 
 ### ast-grep 二进制
 
