@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, sep } from "node:path";
+import { join, parse, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetConfiguredRootsWarningsForTests, resolveConfiguredRoots } from "../src/config";
 import { canonicalPath } from "../src/policy";
@@ -104,8 +104,12 @@ describe("resolveConfiguredRoots: dropped entries (warn, never throw)", () => {
 		expect(warnings.join(" ")).toMatch(/home directory/u);
 	});
 
-	it("drops the home directory and every ancestor of it", () => {
-		expect(resolve([homeDir, join(root, "home"), root, "/"])).toEqual([]);
+	it("drops the home directory and every ancestor of it, up to the filesystem root", () => {
+		// 文件系统根用 parse().root 取：POSIX 是 "/"，win32 是 "C:\"。
+		// 不能写字面 "/"——它在 win32 是**盘符相对**路径，按进程 cwd 所在盘解析，
+		// CI 上 tmpdir() 在 C: 而 cwd 在 D: 时 "/" → "D:\"，根本不是 homeDir 的祖先。
+		const fsRoot = parse(root).root;
+		expect(resolve([homeDir, join(root, "home"), root, fsRoot])).toEqual([]);
 		expect(warnings.filter((w) => /home directory/u.test(w)).length).toBe(4);
 	});
 
@@ -168,10 +172,15 @@ describe("resolveConfiguredRoots: warn de-duplication", () => {
 });
 
 describe("resolveConfiguredRoots: win32 runner asymmetry (Ruling 5)", () => {
+	// 注入 platform:"win32" 时夹具必须用 win32 形状的路径：POSIX 拼写在 win32 口径下会被
+	// 盘符规则拒掉（见下面「drive-relative」那组用例），测不到本组要测的东西。
+	// canonicalPath 对不存在的路径保留原拼写，所以配合注入的 exists 即可，不需要真文件系统。
+	const winCache = "C:\\Users\\u\\.cache\\uv";
+	const win = { platform: "win32", caseSensitive: false, exists: () => true } as const;
+
 	it("announces that the windows-acl runner ignores the extra roots, once", () => {
-		const cache = realDir("cache");
-		resolve([cache], { platform: "win32", caseSensitive: false });
-		resolve([cache], { platform: "win32", caseSensitive: false });
+		resolve([winCache], win);
+		resolve([winCache], win);
 		const notes = warnings.filter((w) => /windows-acl runner/u.test(w));
 		expect(notes).toHaveLength(1);
 		expect(notes[0]).toMatch(/write\/edit/u);
@@ -184,8 +193,40 @@ describe("resolveConfiguredRoots: win32 runner asymmetry (Ruling 5)", () => {
 	});
 
 	it("stays quiet when nothing resolved (no roots, nothing to be asymmetric about)", () => {
-		resolve([join(root, "nope")], { platform: "win32", caseSensitive: false });
+		resolve(["C:\\nope"], { ...win, exists: () => false });
 		expect(warnings.filter((w) => /windows-acl/u.test(w))).toHaveLength(0);
+	});
+});
+
+/**
+ * win32 的盘符相对路径：`isAbsolute("/foo")` 在 win32 为 true，但 `/foo` 与裸 `/` 的含义是
+ * 「当前盘的根下」，随进程 cwd 所在盘漂移。不拒的后果是 fail-open：一条 `"/"` 在 cwd 位于 D:
+ * 时解析成 `D:\`，而危险根检查因为 homeDir 在 C: 根本命中不了，整个 D: 盘就被授予可写
+ * （CI windows-latest 实测捕获）。fence.ts 对同类歧义拼写一律「视为不在任何授予根内」，此处同口径。
+ */
+describe("resolveConfiguredRoots: win32 drive-relative spellings are rejected", () => {
+	const win = { platform: "win32", caseSensitive: false, exists: () => true } as const;
+
+	it("rejects a bare / and any /-rooted path", () => {
+		expect(resolve(["/"], win)).toEqual([]);
+		expect(resolve(["/tmp/cache"], win)).toEqual([]);
+		expect(warnings.join(" ")).toMatch(/drive letter or a UNC prefix/u);
+	});
+
+	it("rejects a bare drive letter and a drive-relative path", () => {
+		expect(resolve(["C:"], win)).toEqual([]);
+		expect(resolve(["C:work"], win)).toEqual([]);
+	});
+
+	it("accepts an explicit drive-letter path and a UNC share", () => {
+		expect(resolve(["C:\\cache\\uv"], win)).toEqual(["C:\\cache\\uv"]);
+		expect(resolve(["C:/cache/uv"], win)).toEqual(["C:/cache/uv"]);
+		expect(resolve(["\\\\server\\share\\cache"], win)).toEqual(["\\\\server\\share\\cache"]);
+	});
+
+	it("the drive-relative rule is win32-only: POSIX keeps / and /-rooted paths", () => {
+		const posix = { platform: "linux", exists: () => true } as const;
+		expect(resolve(["/opt/scratch"], posix)).toEqual(["/opt/scratch"]);
 	});
 });
 

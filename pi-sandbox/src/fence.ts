@@ -1,6 +1,11 @@
 import { basename, dirname, join, resolve as resolvePath, sep } from "node:path";
 import { lstatSync, readlinkSync, realpathSync, statSync, type Stats } from "node:fs";
-import { escalationHintMarker, protectedPathEscalationHint, protectedPathMarker, sandboxDenialMarker } from "./escalation";
+import {
+	escalationHintMarker,
+	protectedPathEscalationHint,
+	protectedPathMarker,
+	sandboxDenialMarker,
+} from "./escalation";
 import { canonicalPath, writableRoots, type SandboxMode } from "./policy";
 import { protectedRoots } from "./protected";
 

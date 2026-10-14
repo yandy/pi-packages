@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve as resolvePath, sep } from "node:path";
+import { posix as posixPath, resolve as resolvePath, win32 as win32Path } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { isWithinRoots } from "./fence";
 import { canonicalPath, isSandboxMode, type SandboxMode } from "./policy";
@@ -169,14 +169,21 @@ export interface ConfiguredRootsHooks {
 }
 
 /**
+ * win32 上“真正固定”的绝对路径：带盘符（`C:\…` / `C:/…`）或 UNC 前缀（`\\server\share`）。
+ * 光靠 `path.isAbsolute` 不够：它在 win32 上对 `/foo` 与裸 `/` 也返回 true，而两者都是
+ * **盘符相对**的（含义 = “当前盘”），`realpathSync.native("/")` 按进程 cwd 所在盘解析。
+ */
+const WINDOWS_EXPLICIT_ROOT = /^(?:[A-Za-z]:[\\/]|\\\\)/u;
+
+/**
  * `~` 展开：只认 `~` 与 `~/…`（win32 也认 `~\…`）。
  * **不**展开 `$HOME` / `%USERPROFILE%`：“谁的环境”会成为隐式输入，而配置是按 cwd 跨会话缓存的。
  * `~user/…` 也不展开（不查 passwd），会按相对路径被丢弃。
  */
-function expandHome(entry: string, homeDir: string): string {
+function expandHome(entry: string, homeDir: string, pathImpl: typeof posixPath): string {
 	if (entry === "~") return homeDir;
-	if (entry.startsWith("~/")) return join(homeDir, entry.slice(2));
-	if (sep === "\\" && entry.startsWith("~\\")) return join(homeDir, entry.slice(2));
+	if (entry.startsWith("~/")) return pathImpl.join(homeDir, entry.slice(2));
+	if (pathImpl.sep === "\\" && entry.startsWith("~\\")) return pathImpl.join(homeDir, entry.slice(2));
 	return entry;
 }
 
@@ -208,6 +215,10 @@ function defaultAgentDir(): string | null {
 export function resolveConfiguredRoots(raw: readonly string[], hooks: ConfiguredRootsHooks = {}): string[] {
 	const platform = hooks.platform ?? process.platform;
 	if (raw.length === 0) return [];
+	// 路径语义跟着 platform 走，而不是跟着宿主走：否则注入 platform 的测试（与任何跨平台推导）
+	// 会拿到宿主的 isAbsolute/join/sep，win32 的盘符拼写在 POSIX 宿主上根本走不到 win32 分支。
+	// 生产不传 platform，此处即 process.platform，行为与直接用 node:path 的默认导出一致。
+	const pathImpl = platform === "win32" ? win32Path : posixPath;
 	const homeDir = canonicalPath(hooks.homeDir ?? homedir());
 	const agentDir = hooks.agentDir !== undefined ? hooks.agentDir : defaultAgentDir();
 	const exists = hooks.exists ?? existsSync;
@@ -231,9 +242,19 @@ export function resolveConfiguredRoots(raw: readonly string[], hooks: Configured
 			drop("it is empty");
 			continue;
 		}
-		const expanded = expandHome(trimmed, homeDir);
-		if (!isAbsolute(expanded)) {
+		const expanded = expandHome(trimmed, homeDir, pathImpl);
+		if (!pathImpl.isAbsolute(expanded)) {
 			drop("it is not an absolute path (only absolute paths and `~` are accepted)");
+			continue;
+		}
+		// win32：`/foo` 与裸 `/` 是盘符相对路径，isAbsolute 为 true 但含义随进程 cwd 所在盘漂移。
+		// fence.ts 对同类歧义拼写一律“视为不在任何授予根内”，这里同口径拒绝。不拒的后果是
+		// fail-open：一条 `"/"` 在 cwd 位于 D: 时解析成 `D:\`，而危险根检查因为 homeDir 在 C:
+		// 根本命中不了，整个 D: 盘就被授予可写（CI windows-latest 实测捕获）。
+		if (platform === "win32" && !WINDOWS_EXPLICIT_ROOT.test(expanded)) {
+			drop(
+				"on Windows it must carry a drive letter or a UNC prefix — a bare \"/…\" is drive-relative and drifts with the process working directory",
+			);
 			continue;
 		}
 		const canonical = canonicalPath(expanded);

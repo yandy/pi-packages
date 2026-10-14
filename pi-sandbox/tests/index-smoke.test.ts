@@ -679,19 +679,34 @@ describe("/permission status reports protected paths", () => {
 		expect(text).toContain("write/edit: always denied");
 	});
 
-	it("says so when the confined shell is NOT covered because the dir does not exist yet", async () => {
-		// 本机上 runner 是 bwrap；.pi 不存在 → 挖不了洞，必须明说 bash 仍能创建它。
-		const text = await statusFor({}, dir);
-		if (process.platform === "win32") return; // win32 恒为 NOT protected，由下一条覆盖
-		expect(text).toMatch(/confined shell: (protected|NOT protected)/u);
-		if (text.includes("NOT protected yet")) expect(text).toContain("does not exist");
-	});
+	/**
+	 * shell 侧覆盖情况必须与**同一份输出里报告的 runner** 一致。
+	 * 不能按宿主平台硬编码期望：CI 的 ubuntu-latest 上 bwrap 不可用、选中的是 landlock
+	 *（它表达不了 deny-within-allow），按「linux ⇒ protected」断言会在那里假红。
+	 */
+	const runnerKindOf = (text: string) => /^runner: (\S+)/mu.exec(text)?.[1] ?? "";
 
-	it("reports the shell side as protected once the dir exists (bwrap carve-out)", async () => {
+	it("reports shell coverage consistent with the selected runner (.pi exists)", async () => {
 		mkdirSync(join(dir, ".pi"), { recursive: true });
 		const text = await statusFor({}, dir);
-		if (process.platform !== "linux") return; // 只有 bwrap 链上这条断言才成立
-		expect(text).toContain("confined shell: protected (read-only bind)");
+		const runner = runnerKindOf(text);
+		const expected: Record<string, string> = {
+			bwrap: "confined shell: protected (read-only bind)",
+			seatbelt: "confined shell: protected (seatbelt deny)",
+			landlock: "confined shell: NOT protected — landlock rules are a union",
+			"windows-acl": "confined shell: NOT protected — the windows-acl runner",
+			unavailable: "confined shell: not applicable",
+		};
+		const want = expected[runner];
+		expect(want, `no expectation pinned for runner "${runner}"`).toBeDefined();
+		expect(text).toContain(want as string);
+	});
+
+	it("bwrap without .pi says NOT protected *yet* and names the reason, instead of implying coverage", async () => {
+		const text = await statusFor({}, dir);
+		if (runnerKindOf(text) !== "bwrap") return; // 只有 bwrap 有「不存在就挖不了洞」这条缺口
+		expect(text).toContain("confined shell: NOT protected yet");
+		expect(text).toContain("does not exist");
 	});
 
 	it("omits the whole line under danger-full-access (nothing is protected there)", async () => {
