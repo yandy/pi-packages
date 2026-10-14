@@ -1,6 +1,6 @@
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve as resolvePath } from "node:path";
+import { isAbsolute, join, resolve as resolvePath, sep } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { isSandboxMode, type SandboxMode } from "./policy";
 
@@ -94,10 +94,28 @@ function expandHome(entry: string): string {
 	return entry;
 }
 
+/** 路径前缀判定（分隔符边界）：child 与 root 相同，或位于 root 之下。 */
+function isSameOrUnder(child: string, root: string): boolean {
+	if (child === root) return true;
+	const boundary = root.endsWith(sep) ? root : `${root}${sep}`;
+	return child.startsWith(boundary);
+}
+
+/** agent 目录的 canonical 形态；目录尚不存在时退回 resolvePath 的绝对形态。 */
+function canonicalAgentDir(): string {
+	const agentDir = resolvePath(getAgentDir());
+	try {
+		return realpathSync.native(agentDir);
+	} catch {
+		return agentDir;
+	}
+}
+
 /** 逐条语义解析：展开 → 绝对性 → 必须是已存在目录 → realpath → 去重；无效条目告警并丢弃。 */
 export function resolveExtraWritableDirs(entries: readonly string[], source: string): string[] {
 	const resolved: string[] = [];
 	const seen = new Set<string>();
+	const agentDir = canonicalAgentDir();
 	for (const raw of entries) {
 		const expanded = expandHome(raw);
 		if (!isAbsolute(expanded)) {
@@ -111,6 +129,12 @@ export function resolveExtraWritableDirs(entries: readonly string[], source: str
 		} catch {
 			console.warn(`sandbox: extraWritableDirs entry is not an existing directory: ${JSON.stringify(expanded)} in ${source}, ignoring it`);
 			continue;
+		}
+		// 保护 pi 自己的 agent 目录：条目等于/包含/被包含于它时，受限模型可能改写
+		// sandbox.json（下次启动即 danger-full-access）、AGENTS.md 或扩展。按仓库的
+		// warn-don't-guess 风格只告警、保留该条目，绝不擅自丢弃。
+		if (isSameOrUnder(canonical, agentDir) || isSameOrUnder(agentDir, canonical)) {
+			console.warn(`sandbox: extraWritableDirs entry ${canonical} covers pi's agent dir (${agentDir}); a confined model could rewrite the sandbox config with it`);
 		}
 		if (!seen.has(canonical)) {
 			seen.add(canonical);

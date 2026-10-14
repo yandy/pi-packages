@@ -187,4 +187,12 @@ describe("extraWritableDirs", () => {
 		expect(warn).not.toHaveBeenCalled();
 		warn.mockRestore();
 	});
+	it("条目等于 pi 的 agent 目录：告警但仍保留该条（warn-only，不丢弃）", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		writeGlobal({ extraWritableDirs: [agentDir] });
+		const cfg = loadSandboxConfig();
+		expect(cfg.extraWritableDirs).toEqual([realpathSync.native(agentDir)]);
+		expect(warn.mock.calls.flat().join(" ")).toMatch(/agent dir/);
+		warn.mockRestore();
+	});
 });

@@ -210,7 +210,14 @@ function probeRunner(kind: RunnerKind, probeTimeoutMs: number, hooks: RunnerHook
 /** win32 runner 的前缀：node + 包内 runner.js + 授权根/模式；'--' 与命令 argv 由 confine 拼接。
  * `--temp` 用与 fs 围栏同一个根（canonicalPath(tmpdir())，win32 的 defaultTmpRoots）。 */
 export function windowsAclRunnerArgv(policy: RunnerPolicy, availability: { node: string; runner: string }): string[] {
-	const args = [availability.node, availability.runner, "--workspace", policy.workspaceRoot, "--temp", canonicalPath(tmpdir())];
+	const args = [
+		availability.node,
+		availability.runner,
+		"--workspace",
+		policy.workspaceRoot,
+		"--temp",
+		canonicalPath(tmpdir()),
+	];
 	if (policy.mode === "workspace-write") {
 		for (const dir of policy.extraRoots ?? []) args.push("--writable", dir);
 	}

@@ -5,9 +5,10 @@
  * spawns the wrapped argv under it inside a kill-on-close Job with the
  * caller's stdio inherited, and mirrors the child's exit code.
  *
- * Stable argv contract (Task 9 builds it):
+ * Stable argv contract (the TS seam builds it):
  *   [node, runner.js, '--workspace', <dir>, '--temp', <dir>,
- *    '--mode', <read-only|workspace-write>, '--', <argv...>]
+ *    ('--writable', <dir>)..., '--mode', <read-only|workspace-write>,
+ *    '--', <argv...>]
  *
  * Deltas from the deepseek-harness reference (`sandbox-windows-acl/src/runner.ts`)
  * by design:
@@ -103,7 +104,7 @@ function parseSid(api, sidString) {
  */
 export async function main(rawArgs, deps = {}) {
 	const parsed = parseArgs(rawArgs);
-	// Both directories are validated in both modes: a provider bug that passes
+	// All roots are validated in both modes: a provider bug that passes
 	// a bogus root must fail loudly at the runner boundary, never mid-child.
 	requireDirectory("--workspace", parsed.workspace);
 	requireDirectory("--temp", parsed.temp);

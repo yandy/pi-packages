@@ -864,6 +864,25 @@ describe("windows tool wiring", () => {
 		expect(ctx.ui.select.mock.calls[0][0]).toContain("this command");
 		expect(escalated.content.map((c) => c.text).join("\n")).toContain('one-shot escalation to "danger-full-access"');
 	});
+
+	it("powershell carries the injected extra roots into the sandbox ops factory", async () => {
+		const extra = realpathSync.native(mkdtempSync(join(tmpdir(), "tools-extra-")));
+		try {
+			const { deps } = makeDeps({
+				platform: "win32",
+				_hostCreatePowerShellToolDefinition: fakePowerShellBuilder(),
+				_extraRoots: [extra],
+			});
+			const { powershell } = createSandboxTools(deps);
+			await powershell!.execute("pwsh-extra", { command: "Get-ChildItem" }, undefined, undefined, toolCtx());
+			// 与 bash 同一条接线：配置/注入的额外根必须原样到达受限 ops 工厂的 options
+			//（platform 注入与既有用例同口径），否则 pwsh 在额外根上是 fail-closed 的哑拒。
+			expect(createSandboxPowerShellOpsMock).toHaveBeenLastCalledWith(expect.objectContaining({
+				platform: "win32",
+				extraRoots: [extra],
+			}));
+		} finally { rmSync(extra, { recursive: true, force: true }); }
+	});
 });
 
 describe("extraWritableDirs 接线", () => {
@@ -890,6 +909,18 @@ describe("extraWritableDirs 接线", () => {
 			child.emit("close", 0, undefined);
 			await p;
 			expect(spawnFn).toHaveBeenCalledWith("bwrap", expect.arrayContaining(["--bind", extra, extra]), expect.objectContaining({ cwd: ws }));
+		} finally { rmSync(extra, { recursive: true, force: true }); }
+	});
+	it("edit 工具：配置的额外根可写", async () => {
+		const extra = realpathSync.native(mkdtempSync(join(tmpdir(), "tools-extra-")));
+		try {
+			const { deps } = makeDeps({ getConfig: () => ({ ...DEFAULT_SANDBOX_CONFIG, extraWritableDirs: [extra] }) });
+			const { edit } = createSandboxTools(deps);
+			const target = join(extra, "edit.txt");
+			writeFileSync(target, "hello world");
+			await edit.execute("e-extra", { path: target, edits: [{ oldText: "hello", newText: "goodbye" }] }, undefined, undefined, toolCtx() as never);
+			const { readFile } = await import("node:fs/promises");
+			expect(await readFile(target, "utf-8")).toBe("goodbye world");
 		} finally { rmSync(extra, { recursive: true, force: true }); }
 	});
 });
