@@ -262,4 +262,41 @@ describe("windows-acl runner main", () => {
 		expect(result.status).toBe(RUNNER_FAILURE_EXIT);
 		expect(result.stderr).toContain(`${RUNNER_SIGNATURE}: `);
 	});
+
+	it("grants each --writable root with its own SID and puts all in the restricting list", async () => {
+		const a = mkdtempSync(join(root, "extra-a-")); const b = mkdtempSync(join(root, "extra-b-"));
+		const deps = makeDeps();
+		await main(["--workspace", WS, "--temp", TMP, "--writable", a, "--writable", b, "--mode", "workspace-write", "--", "pwsh.exe"], deps as never);
+		const sids = deps.calls.filter((c) => c.name === "convertStringSidToSidW").map((c) => String(c.args[0]));
+		expect(sids).toHaveLength(4); // workspace + temp + 两条 extras
+		const extras = sids.filter((sid) => sid.endsWith("-2"));
+		expect(new Set(extras).size).toBe(2);
+		expect(deps.calls.filter((c) => c.name === "setNamedSecurityInfoW").length).toBeGreaterThanOrEqual(4);
+		const restrictedCount = deps.calls.find((c) => c.name === "createRestrictedToken")?.args[6];
+		expect(restrictedCount).toBe(6); // logon + Everyone + 4 条写 SID
+	});
+	it("collapses duplicate --writable spellings to one SID and one grant", async () => {
+		const a = mkdtempSync(join(root, "extra-dup-"));
+		const deps = makeDeps();
+		await main(["--workspace", WS, "--temp", TMP, "--writable", a, "--writable", a, "--mode", "workspace-write", "--", "pwsh.exe"], deps as never);
+		const sids = deps.calls.filter((c) => c.name === "convertStringSidToSidW").map((c) => String(c.args[0]));
+		expect(sids).toHaveLength(3); // workspace + temp + 1 条 extra
+	});
+	it("read-only: --writable dirs are validated but nothing is granted", async () => {
+		const deps = makeDeps();
+		await expect(main(["--workspace", WS, "--temp", TMP, "--writable", join(root, "missing-extra"), "--mode", "read-only", "--", "pwsh.exe"], deps as never))
+			.rejects.toThrowError(/--writable is not an existing directory/);
+		const c2 = makeDeps();
+		await main(["--workspace", WS, "--temp", TMP, "--writable", mkdtempSync(join(root, "extra-ro-")), "--mode", "read-only", "--", "pwsh.exe"], c2 as never);
+		expect(c2.calls.some((c) => c.name === "setNamedSecurityInfoW")).toBe(false);
+		expect(c2.calls.some((c) => c.name === "convertStringSidToSidW")).toBe(false);
+	});
+	it("names the temp SID in the default DACL even when extras exist", async () => {
+		const a = mkdtempSync(join(root, "extra-dacl-"));
+		const deps = makeDeps();
+		await main(["--workspace", WS, "--temp", TMP, "--writable", a, "--mode", "workspace-write", "--", "pwsh.exe"], deps as never);
+		const sids = deps.calls.filter((c) => c.name === "convertStringSidToSidW").map((c) => String(c.args[0]));
+		const tempSid = sids.find((sid) => sid.endsWith("-1"));
+		expect(defaultDaclTrustee(deps.calls)).toBe(deps.sidPointers.get(tempSid as string));
+	});
 });
