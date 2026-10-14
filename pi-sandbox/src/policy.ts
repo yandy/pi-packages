@@ -25,9 +25,15 @@ export function canonicalPath(path: string): string {
 	}
 }
 
+/** canonicalPath + 去重（保序）；调用方（confine）用它把注入根规范一次。 */
+export function canonicalRoots(paths: readonly string[]): string[] {
+	return [...new Set(paths.map(canonicalPath))];
+}
+
 /**
  * workspace-write = workspace + tmp 根（缺省 defaultTmpRoots()：POSIX 为 "/tmp" + os.tmpdir()，
- * win32 只有 os.tmpdir()，即 %TEMP%）（canonical、去重）；read-only 为空。
+ * win32 只有 os.tmpdir()，即 %TEMP%）+ extraRoots（配置来源：extraWritableDirs）（canonical、去重）；
+ * read-only / danger-full-access 为空（extraRoots 不适用于它们）。
  * seatbelt profile 与 fs 围栏共用此推导，防止语义漂移（spec §4）——两侧都不传 tmpRoots，
  * 缺省值即生产语义；tmpRoots 仅供测试注入（testing.md「参数注入」）。
  */
@@ -35,9 +41,10 @@ export function writableRoots(
 	mode: SandboxMode,
 	workspaceRoot: string,
 	tmpRoots: readonly string[] = defaultTmpRoots(),
+	extraRoots: readonly string[] = [],
 ): string[] {
 	if (mode !== "workspace-write") return [];
-	return [...new Set([workspaceRoot, ...tmpRoots].map(canonicalPath))];
+	return [...new Set([workspaceRoot, ...tmpRoots, ...extraRoots].map(canonicalPath))];
 }
 
 /** win32 没有 POSIX 的 /tmp：tmp 根只有 os.tmpdir()（%TEMP%，spec §5；platform 可注入以便单测）。 */

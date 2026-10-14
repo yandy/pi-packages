@@ -1,8 +1,8 @@
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { canonicalPath, defaultTmpRoots, isSandboxMode, resolveEffectiveMode, SANDBOX_MODES, writableRoots } from "../src/policy";
+import { canonicalPath, canonicalRoots, defaultTmpRoots, isSandboxMode, resolveEffectiveMode, SANDBOX_MODES, writableRoots } from "../src/policy";
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "policy-")); });
@@ -32,6 +32,29 @@ describe("writableRoots", () => {
 		// 平台无关：缺省 tmp 根由 defaultTmpRoots(platform) 推导（POSIX 为 "/tmp" + os.tmpdir()，win32 只有 %TEMP%）。
 		for (const tmp of defaultTmpRoots(process.platform)) expect(roots).toContain(canonicalPath(tmp));
 		expect(new Set(roots).size).toBe(roots.length);
+	});
+	it("workspace-write appends extra roots, canonical and deduped", () => {
+		const extra = mkdtempSync(join(tmpdir(), "policy-extra-"));
+		try {
+			const roots = writableRoots("workspace-write", dir, defaultTmpRoots(), [extra, extra, dir]);
+			expect(roots).toContain(canonicalPath(extra));
+			expect(new Set(roots).size).toBe(roots.length);
+		} finally { rmSync(extra, { recursive: true, force: true }); }
+	});
+	it("read-only and danger-full-access ignore extra roots", () => {
+		expect(writableRoots("read-only", dir, defaultTmpRoots(), [dir])).toEqual([]);
+		expect(writableRoots("danger-full-access", dir, defaultTmpRoots(), [dir])).toEqual([]);
+	});
+	describe("canonicalRoots", () => {
+		it("canonicalizes, dedupes, preserves order, keeps missing paths as spelled", () => {
+			expect(canonicalRoots([join(dir, "a"), join(dir, "a"), join(dir, "missing")]))
+				.toEqual([canonicalPath(join(dir, "a")), join(dir, "missing")]);
+		});
+		it.skipIf(process.platform === "win32")("folds a symlink onto its target", () => {
+			mkdirSync(join(dir, "real"));
+			symlinkSync(join(dir, "real"), join(dir, "link"));
+			expect(canonicalRoots([join(dir, "link")])).toEqual([canonicalPath(join(dir, "real"))]);
+		});
 	});
 });
 
