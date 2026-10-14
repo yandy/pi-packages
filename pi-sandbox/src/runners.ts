@@ -22,6 +22,8 @@ export type SelectedRunner = { runner: RunnerKind; enforcement: SandboxEnforceme
 export interface RunnerPolicy {
 	mode: ConfinedSandboxMode;
 	workspaceRoot: string;
+	/** workspace-write 下额外授予写权限的根（confine 从配置注入）；其余模式忽略。 */
+	extraRoots?: readonly string[];
 }
 
 /** 测试钩子：注入平台/probe/launcher 路径，单测不依赖真实 bwrap/landlock（deepseek 同款）。 */
@@ -51,6 +53,7 @@ export function bwrapProfileArgs(policy: RunnerPolicy): string[] {
 	if (policy.mode === "workspace-write") {
 		args.push("--bind", "/tmp", "/tmp");
 		args.push("--bind", policy.workspaceRoot, policy.workspaceRoot);
+		for (const root of policy.extraRoots ?? []) args.push("--bind", root, root);
 	}
 	return args;
 }
@@ -59,7 +62,7 @@ export function bwrapProfileArgs(policy: RunnerPolicy): string[] {
 export function landlockProfileArgs(policy: RunnerPolicy): string[] {
 	const readWrite = ["/dev/null"];
 	if (policy.mode === "workspace-write") {
-		readWrite.push("/tmp", policy.workspaceRoot);
+		readWrite.push("/tmp", policy.workspaceRoot, ...(policy.extraRoots ?? []));
 	}
 	return grantArgs({ readOnly: ["/"], readWrite });
 }
@@ -80,7 +83,7 @@ export function seatbeltProfileArgs(policy: RunnerPolicy): string[] {
 		"(deny file-write*)",
 		`(allow file-write* (literal ${sbplString("/dev/null")}))`,
 	];
-	const roots = writableRoots(policy.mode, policy.workspaceRoot);
+	const roots = writableRoots(policy.mode, policy.workspaceRoot, undefined, policy.extraRoots);
 	if (roots.length > 0) {
 		forms.push(`(allow file-write* ${roots.map((root) => `(subpath ${sbplString(root)})`).join(" ")})`);
 	}
@@ -207,16 +210,12 @@ function probeRunner(kind: RunnerKind, probeTimeoutMs: number, hooks: RunnerHook
 /** win32 runner 的前缀：node + 包内 runner.js + 授权根/模式；'--' 与命令 argv 由 confine 拼接。
  * `--temp` 用与 fs 围栏同一个根（canonicalPath(tmpdir())，win32 的 defaultTmpRoots）。 */
 export function windowsAclRunnerArgv(policy: RunnerPolicy, availability: { node: string; runner: string }): string[] {
-	return [
-		availability.node,
-		availability.runner,
-		"--workspace",
-		policy.workspaceRoot,
-		"--temp",
-		canonicalPath(tmpdir()),
-		"--mode",
-		policy.mode,
-	];
+	const args = [availability.node, availability.runner, "--workspace", policy.workspaceRoot, "--temp", canonicalPath(tmpdir())];
+	if (policy.mode === "workspace-write") {
+		for (const dir of policy.extraRoots ?? []) args.push("--writable", dir);
+	}
+	args.push("--mode", policy.mode);
+	return args;
 }
 
 /**

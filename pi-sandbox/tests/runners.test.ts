@@ -187,3 +187,30 @@ describe("windows-acl rung", () => {
 		expect(() => runnerInvocation(selected, ro, { windowsAclRung: () => undefined })).toThrowError(/windows-acl is unavailable/);
 	});
 });
+
+describe("extra writable roots", () => {
+	const extras = { ...wsWrite, extraRoots: ["/srv/a", "/srv/b"] };
+	it("bwrap: 每个额外根一条 rw bind，仅 workspace-write", () => {
+		expect(bwrapProfileArgs(extras)).toEqual([
+			"--ro-bind", "/", "/", "--dev", "/dev", "--unshare-pid", "--proc", "/proc", "--die-with-parent",
+			"--bind", "/tmp", "/tmp", "--bind", WS, WS,
+			"--bind", "/srv/a", "/srv/a", "--bind", "/srv/b", "/srv/b",
+		]);
+		expect(bwrapProfileArgs({ ...ro, extraRoots: ["/srv/a"] })).toEqual(bwrapProfileArgs(ro));
+	});
+	it("landlock: 额外根追加到 rw 列表，仅 workspace-write", () => {
+		expect(landlockProfileArgs(extras)).toEqual([
+			"--ro", "/", "--rw", "/dev/null", "--rw", "/tmp", "--rw", WS, "--rw", "/srv/a", "--rw", "/srv/b",
+		]);
+		expect(landlockProfileArgs({ ...ro, extraRoots: ["/srv/a"] })).toEqual(landlockProfileArgs(ro));
+	});
+	it("seatbelt: 每个额外根一条 subpath 授予", () => {
+		const profile = seatbeltProfileArgs({ ...wsWrite, extraRoots: ["/srv/x"] })[1];
+		expect(profile).toContain('(subpath "/srv/x")');
+	});
+	it("windows-acl: 可重复 --writable，仅 workspace-write", () => {
+		const argv = windowsAclRunnerArgv(extras, { node: "node", runner: "runner.js" });
+		expect(argv.slice(6)).toEqual(["--writable", "/srv/a", "--writable", "/srv/b", "--mode", "workspace-write"]);
+		expect(windowsAclRunnerArgv({ ...ro, extraRoots: ["/srv/a"] }, { node: "node", runner: "runner.js" })).not.toContain("--writable");
+	});
+});
