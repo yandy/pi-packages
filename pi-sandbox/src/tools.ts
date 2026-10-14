@@ -285,7 +285,7 @@ function withPlaceholderStripping<T>(base: ((args: unknown) => T) | undefined): 
  * 提示预算（β′，每请求成本受控）：
  * - `tool.description` 与参数 schema 是**按工具**进请求的 → 同一句话写进 bash/write/edit 就付 3 份；
  * - `promptGuidelines` 进 system prompt 的 rules，pi 按字符串去重（`buildRules` 的 seen 集）→ 只付 1 份。
- * 所以：跨工具规则只留一句（ESCALATION_GUIDELINE + 这一句 SANDBOX_NOTE），协议细节一律放按需面
+ * 所以：跨工具规则只留一句（ENV_REDIRECT_GUIDELINE + ESCALATION_GUIDELINE + 这一句 SANDBOX_NOTE），协议细节一律放按需面
  * （denial hint / 校验错误 / 批准后标记）。
  */
 const SANDBOX_NOTE =
@@ -309,6 +309,23 @@ function withIgnoredEscalationNote<T>(result: AgentToolResult<T>, mode: SandboxM
 
 const ESCALATION_GUIDELINE =
 	"When a sandbox denial marker appears, you may retry the exact same call once with sandbox_permissions (the narrowest wider mode that suffices) plus justification; the user is asked to approve and may attach a reason when denying. Never send escalation fields before a denial — such requests are ignored and the call runs confined. If denied or unavailable, stop and explain instead of working around it.";
+
+/**
+ * 常态规则：禁止把"重定向全局缓存/数据目录"当作沙箱绕行（2026-10-14 A-only 决策，spec 见
+ * docs/superpowers/specs/2026-10-14-env-redirect-guideline-design.md）。
+ *
+ * 为什么是纯提示词而非检测/拒绝：workspace-write 下 uv/pnpm 等写 ~/.cache 会被沙箱拒、本可走
+ * denial-first 提权；模型却常先手 `XDG_CACHE_HOME=<ws>/.cache ...`，写入落到 workspace 后
+ * **不再产生拒绝**，提权门的"上膛"条件永远不满足——静默绕行、污染 workspace、破坏全局缓存复用。
+ * 本规则在模型决策点把这条路线定性为违规，并把正确路径（原样运行 → 真被拒 → 提权）写出来。
+ * 取舍：A-only 是软约束，模型仍可能不遵守；措辞里不再声称"会被拒绝"（那是 B 方案的行为，
+ * 说了就是假话），只做规范性声明 + 解释为什么。若观察期仍频繁绕行，再补检测/拒绝（两处文案可复用）。
+ *
+ * 放置：预算上必须进 promptGuidelines（pi 按字符串去重，system rules 只多 1 条）；插在
+ * ESCALATION_GUIDELINE **之前**，保持协议行（含 sandbox_permissions 参数名）是最后一条。
+ */
+const ENV_REDIRECT_GUIDELINE =
+	"Never work around the sandbox by relocating global cache/data directories into the workspace — no environment-variable overrides (XDG_CACHE_HOME, XDG_DATA_HOME, HOME, UV_CACHE_DIR, PIP_CACHE_DIR, npm_config_cache, PNPM_HOME, YARN_CACHE_FOLDER, CARGO_HOME, GOPATH, ...), no cache-relocating tool flags (--cache-dir, --store-dir, --cache), and no config files that do the same — unless the user explicitly asked for exactly that relocation. Run tools unmodified — including on the escalated retry: when their real global write is denied, retry that same call with escalation rather than adding a relocation.";
 
 function stripEscalation(params: Record<string, unknown>) {
 	const { sandbox_permissions: _sp, justification: _just, ...rest } = params;
@@ -396,7 +413,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 		...(platform === "win32" ? { exposure: "hidden" as const } : {}),
 		label: `${baseBash.label} (sandboxed)`,
 		description: escalationDescription(baseBash.description),
-		promptGuidelines: [...(baseBash.promptGuidelines ?? []), ESCALATION_GUIDELINE],
+		promptGuidelines: [...(baseBash.promptGuidelines ?? []), ENV_REDIRECT_GUIDELINE, ESCALATION_GUIDELINE],
 		parameters: extendParams(baseBash.parameters),
 		prepareArguments: withPlaceholderStripping(baseBash.prepareArguments),
 		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
@@ -434,7 +451,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 		...baseWrite,
 		label: `${baseWrite.label} (sandboxed)`,
 		description: escalationDescription(baseWrite.description),
-		promptGuidelines: [...(baseWrite.promptGuidelines ?? []), ESCALATION_GUIDELINE],
+		promptGuidelines: [...(baseWrite.promptGuidelines ?? []), ENV_REDIRECT_GUIDELINE, ESCALATION_GUIDELINE],
 		parameters: extendParams(baseWrite.parameters),
 		prepareArguments: withPlaceholderStripping(baseWrite.prepareArguments),
 		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
@@ -460,7 +477,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 		...baseEdit,
 		label: `${baseEdit.label} (sandboxed)`,
 		description: escalationDescription(baseEdit.description),
-		promptGuidelines: [...(baseEdit.promptGuidelines ?? []), ESCALATION_GUIDELINE],
+		promptGuidelines: [...(baseEdit.promptGuidelines ?? []), ENV_REDIRECT_GUIDELINE, ESCALATION_GUIDELINE],
 		parameters: extendParams(baseEdit.parameters),
 		prepareArguments: withPlaceholderStripping(baseEdit.prepareArguments),
 		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
@@ -485,7 +502,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 		...basePowerShell,
 		label: `${basePowerShell.label} (sandboxed)`,
 		description: escalationDescription(basePowerShell.description),
-		promptGuidelines: [...(basePowerShell.promptGuidelines ?? []), ESCALATION_GUIDELINE],
+		promptGuidelines: [...(basePowerShell.promptGuidelines ?? []), ENV_REDIRECT_GUIDELINE, ESCALATION_GUIDELINE],
 		parameters: extendParams(basePowerShell.parameters),
 		prepareArguments: withPlaceholderStripping(basePowerShell.prepareArguments),
 		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {

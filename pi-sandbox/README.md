@@ -79,6 +79,8 @@ bash/write/edit take two optional parameters: `sandbox_permissions` (`workspace-
 
 The prompt offers **Allow once / Deny**; after choosing Deny you may type an **optional reason** (press Enter to skip) that is passed back to the model with the rejection, so it understands why instead of retrying a rewritten command. A subagent child session's escalation (foreground or background) is forwarded to the parent session's prompt (in-process pi-subagents, and the parent must have UI); with no parent channel available (headless, cross-process subagents) escalation is always refused (fail-closed) — widen the process mode with `/permission` to unblock it.
 
+**Cache/data relocation is out of policy.** The tools' rules instruct the model never to work around the sandbox by relocating global cache/data directories into the workspace — via environment-variable overrides (`XDG_CACHE_HOME`, `HOME`, `UV_CACHE_DIR`, `npm_config_cache`, `PNPM_HOME`, …), cache-relocating flags (`--cache-dir`, `--store-dir`, …), or config files — and to run tools unmodified instead, including on the escalated retry: a relocation is silent, it suppresses the denial that would have armed escalation. This is a prompt-level policy only: pi-sandbox does not detect or refuse such commands, and an explicit user request to relocate stays legitimate.
+
 ## Configuration
 
 One file is read: `~/.pi/agent/sandbox.json` (global). A project-level `<project>/.pi/sandbox.json` is **ignored silently** — not parsed, not validated, not warned about. (The project directory is writable by the confined model, so a config layer there would hand the model the ability to rewrite its own `mode` / `runnerCommand`.) Missing or corrupt file, and invalid values, fall back the same way as before.

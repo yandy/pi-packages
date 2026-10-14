@@ -149,6 +149,30 @@ describe("createSandboxTools schemas", () => {
 		expect((write.parameters as { additionalProperties?: boolean }).additionalProperties).toBeUndefined();
 		expect((edit.parameters as { additionalProperties?: boolean }).additionalProperties).toBe(false);
 	});
+	it("常驻规则禁止把全局缓存/数据目录搬进 workspace 作为沙箱绕行，且排在提权协议之前（β′）", () => {
+		const { deps } = makeDeps();
+		const { bash, write, edit } = createSandboxTools(deps);
+		for (const tool of [bash, write, edit]) {
+			const guidelines = tool.promptGuidelines ?? [];
+			const envAt = guidelines.findIndex((g) => g.includes("relocating global cache/data directories into the workspace"));
+			const escalationAt = guidelines.findIndex((g) => g.includes("retry the exact same call once with sandbox_permissions"));
+			expect(envAt).toBeGreaterThanOrEqual(0);
+			// 注入点在提权协议之前：protocol 行保持最后一条（`sandbox_permissions` 是模型最需要的参数名）。
+			expect(escalationAt).toBeGreaterThan(envAt);
+			const rule = guidelines[envAt];
+			// A-only（无检测/拒绝兜底）：三类绕行路线必须在措辞里点名，否则规则管不住 flag 与配置文件路线。
+			expect(rule).toContain("XDG_CACHE_HOME");
+			expect(rule).toContain("npm_config_cache");
+			expect(rule).toContain("--cache-dir");
+			expect(rule).toContain("config files");
+			// 被拒后"改 env 再重试"是主要失败模式：提权重试同样不得夹带 relocation。
+			expect(rule).toContain("including on the escalated retry");
+			// 用户显式要求的 relocation 不应被规则逼成抗命。
+			expect(rule).toContain("unless the user explicitly asked");
+			// 预算回归闸：跨工具去重后 system rules 只多这一条，长度与既有 ESCALATION_GUIDELINE 同量级。
+			expect(rule.length).toBeLessThanOrEqual(700);
+		}
+	});
 });
 
 describe("prepareArguments（pi 校验前的占位符剥离；edit 必须串联 base 钩子）", () => {
@@ -795,6 +819,13 @@ describe("windows tool wiring", () => {
 			onDenial: expect.any(Function),
 		}));
 		expect((result.content[0] as { text: string }).text).toBe("ran Get-ChildItem");
+	});
+
+	it("powershell 与 bash/write/edit 共用同一条缓存重定向禁令（同常量、同去重）", () => {
+		const { deps } = makeDeps({ platform: "win32", _hostCreatePowerShellToolDefinition: fakePowerShellBuilder() });
+		const { powershell } = createSandboxTools(deps);
+		const guidelines = powershell?.promptGuidelines ?? [];
+		expect(guidelines.some((g) => g.includes("relocating global cache/data directories into the workspace"))).toBe(true);
 	});
 
 	it("a throwing host pwsh builder degrades to no powershell tool without breaking bash/write/edit", () => {
