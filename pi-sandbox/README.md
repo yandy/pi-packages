@@ -103,6 +103,52 @@ One file is read: `~/.pi/agent/sandbox.json` (global); it is read once per pi pr
 | `probeTimeoutMs` | `5000` | runner capability probe timeout (positive) |
 | `extraWritableDirs` | `[]` | extra writable roots in `workspace-write` mode, beyond the workspace and tmp; absolute paths only, `~` / `~/` (Win32 `~\`) expand to your home, `~user` unsupported; non-absolute or non-existing-directory entries are warned about at load and ignored; a value that is not a string array falls the whole config back to defaults |
 
+### Example: writable cache directories for common tools
+
+Tools that keep a global cache or store outside the workspace fail (or re-download every time) in `workspace-write` mode. Listing those directories in `extraWritableDirs` is the intended fix: the user authorizes the storage directories once, and the model then runs the tools unmodified — no `UV_CACHE_DIR` / `PNPM_HOME` / `npm_config_cache` relocation (see "Cache/data relocation is out of policy" above).
+
+Entries must already exist (missing directories are warned about and ignored), so create them first:
+
+```bash
+mkdir -p ~/.cache/uv ~/.local/share/pnpm/store ~/.cache/pnpm ~/.npm ~/.cache/pip ~/.cache/huggingface
+```
+
+```json
+{
+  "mode": "workspace-write",
+  "extraWritableDirs": [
+    "~/.cache/uv",
+    "~/.local/share/pnpm/store",
+    "~/.cache/pnpm",
+    "~/.npm",
+    "~/.cache/pip",
+    "~/.cache/huggingface"
+  ]
+}
+```
+
+| Tool | Directory (Linux defaults) | Override | Query the path on your machine |
+|---|---|---|---|
+| uv cache (`uv sync`, `uv pip install`) | `~/.cache/uv` | `UV_CACHE_DIR` | `uv cache dir` |
+| pnpm store — package contents; installs write it | `~/.local/share/pnpm/store` | `storeDir` | `pnpm store path` |
+| pnpm metadata / `pnpm dlx` cache | `~/.cache/pnpm` | `cacheDir` | `pnpm cache path` |
+| npm cache | `~/.npm` | `npm_config_cache` | `npm config get cache` |
+| pip cache | `~/.cache/pip` | `PIP_CACHE_DIR` | `pip cache dir` |
+| Hugging Face cache | `~/.cache/huggingface` | `HF_HOME` | — |
+
+**pnpm store vs cache.** The *store* holds the package contents that `pnpm install` downloads — projects hard-link from it, so it must be writable for installs to work (the grant above is the parent `store/`; `pnpm store path` prints the versioned subdirectory inside it, e.g. `store/v11`). The *cache* holds registry metadata and the `pnpm dlx` cache and only speeds things up. Neither contains globally installed packages or executables: those live in `~/.local/share/pnpm/global` and `~/.local/share/pnpm/bin`, outside the grants above.
+
+**Global installs stay blocked.** With only storage/cache directories granted, `uv tool install` (writes `~/.local/share/uv/tools` and `~/.local/bin`) and `pnpm add -g` (writes `~/.local/share/pnpm/global` and `bin`) still hit a denial and can only proceed through an explicit escalation. Do **not** grant installation prefixes or `bin` directories that are on `PATH` (`~/.local/bin`, `~/.cargo/bin`, `~/go/bin`, …): that would let the confined model leave persistent executables behind for unconfined runs.
+
+Platform notes: the table lists Linux defaults. macOS: pnpm store `~/Library/pnpm/store`, pnpm cache `~/Library/Caches/pnpm`, pip `~/Library/Caches/pip`. Windows: uv cache `%LOCALAPPDATA%\uv\cache`, pnpm store `%LOCALAPPDATA%\pnpm\store`, pnpm cache `%LOCALAPPDATA%\pnpm-cache`, npm cache `%LocalAppData%\npm-cache`, pip `%LocalAppData%\pip\Cache`. Use each tool's query command for the exact path.
+
+Optional grants and their trade-offs:
+
+- **Go**: grant `~/go/pkg` plus `~/.cache/go-build` (macOS `~/Library/Caches/go-build`, Windows `%LocalAppData%\go-build`) to keep `go build` working while `go install` (writes `~/go/bin`) stays denied.
+- **Cargo**: `cargo build` writes `~/.cargo/.package-cache` and the registry/git caches, so the whole `~/.cargo` must be granted; that also unblocks `cargo install` into `~/.cargo/bin` (on `PATH`). Grant it only if you accept that, or leave Cargo un-granted and escalate per use.
+- **uv managed interpreters**: if the project's Python is not installed yet, `uv sync` downloads it into `~/.local/share/uv/python` (and may link executables into `~/.local/bin`). Prefer installing interpreters once outside the sandbox (`uv python install <version>`); granting `~/.local/share/uv/python` alone allows the download in-sandbox while `uv tool install` stays blocked.
+- **pnpm machine state**: `~/.local/state/pnpm` is not granted above; if you hit a denial from it and confirm it is state writing, add it — it contains no global installations.
+
 ## Security notes
 
 - Confined processes can **read** everything you can read on the host (including `~/.ssh` and the like) — that is this sandbox's design semantics (same as the deepseek harness); root-only files stay protected by file permissions
