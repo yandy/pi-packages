@@ -81,7 +81,7 @@ The prompt offers **Allow once / Deny**; after choosing Deny you may type an **o
 
 ## Configuration
 
-`~/.pi/agent/sandbox.json` (global) and `<project>/.pi/sandbox.json` (project), merged field by field: project > global > defaults:
+One file is read: `~/.pi/agent/sandbox.json` (global). A project-level `<project>/.pi/sandbox.json` is **ignored silently** — not parsed, not validated, not warned about. (The project directory is writable by the confined model, so a config layer there would hand the model the ability to rewrite its own `mode` / `runnerCommand`.) Missing or corrupt file, and invalid values, fall back the same way as before.
 
 ```json
 {
@@ -110,10 +110,10 @@ The prompt offers **Allow once / Deny**; after choosing Deny you may type an **o
 
 ## Migrating from pi-container-sandbox 1.x
 
-- Config files stay where they are (`~/.pi/agent/sandbox.json`, `<project>/.pi/sandbox.json`); legacy `image`/`runtime`/`host` sections are ignored with a warning — rewrite them as the new fields above as needed
+- Config lives in `~/.pi/agent/sandbox.json` only: project-level `<project>/.pi/sandbox.json` is ignored silently (move any settings you rely on to the global file). Legacy `image`/`runtime`/`host` sections are ignored with a warning — rewrite them as the new fields above as needed
 - The container runtime (docker/podman), image builds, `runtime.mounts`, the `/sandbox` command, `--container*` flags, and the external-path approval flow are not part of this package
 - Need container-grade isolation (separate filesystem/network namespaces)? Install `@yandy0725/pi-container-sandbox` — it keeps the container implementation
-- `pi-sandbox` and `@yandy0725/pi-container-sandbox` are **mutually exclusive**: both take over `bash`/`write`/`edit` and both read the same `sandbox.json` (with incompatible schemas) — enable only one at a time, and uninstall or disable the other before switching
+- `pi-sandbox` and `@yandy0725/pi-container-sandbox` are **mutually exclusive**: both take over `bash`/`write`/`edit` and both read the same global `~/.pi/agent/sandbox.json` (with incompatible schemas) — enable only one at a time, and uninstall or disable the other before switching. pi-sandbox ignores project-level files; pi-container-sandbox still reads its own project scope
 
 ## Development
 

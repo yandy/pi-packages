@@ -77,7 +77,7 @@ function buildHostPowerShellBase(
 
 export interface SandboxToolDeps {
 	cwd: string;
-	/** 测试注入用；生产缺省逐调用 getSandboxConfig(ctx.cwd)（C2）。 */
+	/** 测试注入用；生产缺省用 getSandboxConfig()（全局配置，进程内缓存一次）。 */
 	getConfig?(): SandboxConfig;
 	permission: PermissionState;
 	hooks?: RunnerHooks;
@@ -112,9 +112,9 @@ function workspaceRootFor(rawCwd: string): string {
 	return root;
 }
 
-/** 逐调用配置（C2）：测试注入优先，否则按会话 cwd 惰性加载（getSandboxConfig 自带缓存）。 */
-function configForCall(deps: SandboxToolDeps, sessionCwd: string): SandboxConfig {
-	return deps.getConfig?.() ?? getSandboxConfig(sessionCwd);
+/** 配置解析（2026-10-14 起只有全局层）：测试注入优先，否则 getSandboxConfig（进程内缓存）。 */
+function configForCall(deps: SandboxToolDeps): SandboxConfig {
+	return deps.getConfig?.() ?? getSandboxConfig();
 }
 
 /** 提权参数对（三个工具共用）。
@@ -227,7 +227,7 @@ export async function resolveCall(
 	const requested = normalizeEscalationValue(params.sandbox_permissions);
 	const justification = normalizeEscalationValue(params.justification);
 	validateEscalationArgs(requested, justification);
-	const config = configForCall(deps, ctx.cwd ?? deps.cwd);
+	const config = configForCall(deps);
 	const effective = resolveEffectiveMode(deps.permission.override, config.mode);
 	if (requested === undefined) return { mode: effective, escalated: false, ignoredEscalation: false };
 	// denial-first 硬门禁（spec 2026-10-02 §4.3）：严格更宽的请求必须有本会话、同工具类的未消费拒绝记录，
@@ -402,7 +402,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
 			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;
 			const workspaceRoot = workspaceRootFor(sessionCwd);
-			const config = configForCall(deps, sessionCwd);
+			const config = configForCall(deps);
 			const sessionId = readSessionId(ctx);
 			const { mode, escalated, ignoredEscalation } = await resolveCall(params as EscalationParams, ctx, deps, "command", () => String(params.command ?? ""), signal);
 			// M3：配置了自定义 runnerCommand 时跳过链探测（confine 直接用 runnerCommand）。
@@ -493,7 +493,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 			// 同一 prepareArguments/剥参与同档提权标记。
 			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;
 			const workspaceRoot = workspaceRootFor(sessionCwd);
-			const config = configForCall(deps, sessionCwd);
+			const config = configForCall(deps);
 			const sessionId = readSessionId(ctx);
 			const { mode, escalated, ignoredEscalation } = await resolveCall(params as EscalationParams, ctx, deps, "command", () => String(params.command ?? ""), signal);
 			const selected = mode === "danger-full-access" || (config.runnerCommand?.length ?? 0) > 0

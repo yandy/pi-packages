@@ -124,6 +124,8 @@ type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
 
 路径不变：全局 `~/.pi/agent/sandbox.json`（`getAgentDir()`）+ 项目 `<cwd>/.pi/sandbox.json`（`CONFIG_DIR_NAME`）。
 
+> **2026-10-14 修订**：项目级层已移除——配置只读全局文件，项目文件被静默忽略；理由、备选与残留见 `2026-10-14-global-only-config-decision.md`。以下合并顺序描述保留为历史记录。
+
 ```json
 {
   "mode": "workspace-write",
