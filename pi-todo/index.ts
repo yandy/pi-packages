@@ -13,7 +13,8 @@ import {
 	type TodoResult,
 	updateTodo,
 } from "./src/todo-store.js";
-import { renderWidget } from "./src/widget.js";
+import { TodoView } from "./src/todo-view.js";
+import { formatProgress, TodoWidget } from "./src/widget.js";
 
 // 编辑器上方 widget 的 slot id（值就是本包的标识）。
 const PACKAGE_ID = "pi-todo";
@@ -29,8 +30,13 @@ export default function (pi: ExtensionAPI) {
 
 	const refreshWidget = (ctx: ExtensionContext) => {
 		if (!ctx.hasUI) return;
-		const lines = renderWidget(todos, ctx.ui.theme);
-		ctx.ui.setWidget(PACKAGE_ID, lines ?? undefined);
+		// 隐藏规则：无任务或全部完成
+		if (todos.length === 0 || todos.every((t) => t.status === "done")) {
+			ctx.ui.setWidget(PACKAGE_ID, undefined);
+			return;
+		}
+		// 组件形式而非字符串数组：只有组件能拿到 render(width)，才能按宽度裁行
+		ctx.ui.setWidget(PACKAGE_ID, (_tui, theme) => new TodoWidget(todos, theme));
 	};
 
 	// Reconstruct branch-safe state from tool-result details on (re)start / tree navigation.
@@ -171,6 +177,29 @@ export default function (pi: ExtensionAPI) {
 				content: [{ type: "text", text: text + warning }],
 				details: { action: params.action, todos: [...todos], error: result.error } as TodoDetails,
 			};
+		},
+	});
+
+	// 常驻 widget 只做摘要；全量清单按需打开（overlay 由用户主动关闭）。
+	pi.registerCommand("todos", {
+		description: "Show the full todo list",
+		handler: async (_args, ctx) => {
+			if (todos.length === 0) {
+				ctx.ui.notify("No todos", "info");
+				return;
+			}
+			// RPC/print 模式没有终端组件：降级为一条通知，而不是静默失败。
+			if (ctx.mode !== "tui") {
+				ctx.ui.notify(`${formatProgress(todos)}\n${listTodos(todos)}`, "info");
+				return;
+			}
+			await ctx.ui.custom<void>(
+				(tui, theme, keybindings, done) => new TodoView(todos, theme, tui, keybindings, () => done()),
+				{
+					overlay: true,
+					overlayOptions: { anchor: "center", width: "92%", minWidth: 40, maxHeight: "85%", margin: 1 },
+				},
+			);
 		},
 	});
 }

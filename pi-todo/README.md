@@ -9,7 +9,7 @@ A minimal pi package that adds a single `todo` tool with an editor-overhead widg
 - **Feedback on every update**: `update` returns progress plus the next task (`✓ #2 写单测 done (2/5 done) · next: #3 修 CI`), not a bare `OK`
 - **3 states**: `pending` → `in_progress` → `done`
 - **Dependencies**: optional `blockedBy` array, with self-dependency and cycle detection
-- **Compact widget** above the editor: `○` pending · `◉` in_progress · `✓` done · `🔒` blocked
+- **Compact widget** above the editor: `○` pending · `◉` in_progress · `✓` done · `🔒` blocked — windowed around the in-flight task when the board grows, with an always-visible progress line
 - **Branch-safe persistence**: state is reconstructed from the session branch, so `/fork` and `/resume` keep the right todos
 
 ## Install
@@ -54,3 +54,16 @@ Parallel dispatch is supported:
 - `set` replaces the board and renumbers ids; if items were in flight it appends a `⚠ ids renumbered` line naming them, because your in-hand references just broke
 
 The widget hides automatically when every task is done.
+
+## Widget and full view
+
+The **widget** above the editor is a compact summary capped at 8 lines. When the board is longer than that budget it renders a window instead of getting truncated:
+
+- the window anchors on the first `in_progress` task, fills forward, and spends any leftover rows on earlier tasks;
+- `↑ n` / `↓ n` mark how many tasks are hidden on each side;
+- the last line is always the overall progress (`✓ 6/18 · ○ 11 · 🔒 1`);
+- every line is clipped to the terminal width with an ellipsis, so nothing wraps and no host-side `widget truncated` ever appears.
+
+The widget hides when the list is empty or every task is done.
+
+The **full view** is a command: `/todos` opens the complete list in an overlay (`↑`/`↓` or `j`/`k` to move, `g`/`G` for the ends, `Esc` or `q` to close) with a `(current/total)` position marker. It is read-only — nothing in it changes the board. Outside the TUI (RPC, print) the command degrades to a notification carrying the full list.
