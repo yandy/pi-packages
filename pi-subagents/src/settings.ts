@@ -4,6 +4,7 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { MODEL_TIERS, type ModelTierMap } from "./config/model-tiers";
 import { type LayeredSettingsSource, loadLayeredSettings } from "./layered-settings";
 export interface SubagentsSettings {
 	maxConcurrent?: number;
@@ -14,6 +15,13 @@ export interface SubagentsSettings {
 	 */
 	defaultMaxTurns?: number;
 	graceTurns?: number;
+	/**
+	 * Capability/cost tier → real model mapping for the `subagent` tool's
+	 * `model_tier` param. Tier names are fixed (`fast` | `standard` | `advanced`);
+	 * values accept anything `resolveModel` understands (e.g. "provider/modelId"
+	 * or a fuzzy name like "haiku").
+	 */
+	modelTiers?: ModelTierMap;
 }
 
 /** Emit callback — a subset of `pi.events.emit` to keep helpers testable. */
@@ -30,6 +38,7 @@ export class SettingsManager {
 	private _defaultMaxTurns: number | undefined = undefined;
 	private _graceTurns: number = DEFAULT_GRACE_TURNS;
 	private _maxConcurrent: number = DEFAULT_MAX_CONCURRENT;
+	private _modelTiers: ModelTierMap = {};
 
 	private readonly emit: SettingsEmit;
 	private readonly cwd: string;
@@ -77,6 +86,12 @@ export class SettingsManager {
 		this._maxConcurrent = Math.max(1, n);
 	}
 
+	// ── modelTiers: tier → model map for the subagent tool's model_tier param ──
+
+	get modelTiers(): ModelTierMap {
+		return this._modelTiers;
+	}
+
 	// ── Lifecycle methods ──
 
 	/**
@@ -89,6 +104,7 @@ export class SettingsManager {
 		if (typeof settings.maxConcurrent === "number") this.maxConcurrent = settings.maxConcurrent;
 		if (typeof settings.defaultMaxTurns === "number") this.defaultMaxTurns = settings.defaultMaxTurns;
 		if (typeof settings.graceTurns === "number") this.graceTurns = settings.graceTurns;
+		this._modelTiers = settings.modelTiers ? { ...settings.modelTiers } : {};
 		this.emit("subagents:settings_loaded", { settings });
 		return settings;
 	}
@@ -96,12 +112,15 @@ export class SettingsManager {
 	/**
 	 * Snapshot current in-memory values for persistence.
 	 * `defaultMaxTurns` uses 0 as the on-disk marker for unlimited (undefined).
+	 * `modelTiers` is omitted when empty so hand-edited tier maps are only
+	 * rewritten (not replaced with an empty object) when they exist.
 	 */
-	snapshot(): { maxConcurrent: number; defaultMaxTurns: number; graceTurns: number } {
+	snapshot(): { maxConcurrent: number; defaultMaxTurns: number; graceTurns: number; modelTiers?: ModelTierMap } {
 		return {
 			maxConcurrent: this._maxConcurrent,
 			defaultMaxTurns: this._defaultMaxTurns ?? 0,
 			graceTurns: this._graceTurns,
+			...(Object.keys(this._modelTiers).length > 0 ? { modelTiers: { ...this._modelTiers } } : {}),
 		};
 	}
 
@@ -178,7 +197,25 @@ function sanitize(raw: unknown): SubagentsSettings {
 	) {
 		out.graceTurns = r.graceTurns as number;
 	}
+	const modelTiers = sanitizeModelTiers(r.modelTiers);
+	if (modelTiers) out.modelTiers = modelTiers;
 	return out;
+}
+
+/**
+ * Keep only known tier names with non-empty string values (trimmed).
+ * Returns `undefined` when nothing survives — an empty map is the same as
+ * "not configured" everywhere else.
+ */
+function sanitizeModelTiers(raw: unknown): ModelTierMap | undefined {
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+	const source = raw as Record<string, unknown>;
+	const out: ModelTierMap = {};
+	for (const tier of MODEL_TIERS) {
+		const value = source[tier];
+		if (typeof value === "string" && value.trim()) out[tier] = value.trim();
+	}
+	return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function projectPath(cwd: string): string {
@@ -193,7 +230,21 @@ export function loadSettings(agentDir: string, cwd: string): SubagentsSettings {
 		filename: "subagents.json",
 		sanitize,
 		warnLabel: "pi-subagents",
+		merge: mergeSettings,
 	} satisfies LayeredSettingsSource<SubagentsSettings>);
+}
+
+/**
+ * Shallow-merge scalars (project wins), but merge `modelTiers` per tier so a
+ * project can override one tier without restating the global map.
+ */
+function mergeSettings(global: SubagentsSettings, project: SubagentsSettings): SubagentsSettings {
+	const modelTiers: ModelTierMap = { ...global.modelTiers, ...project.modelTiers };
+	return {
+		...global,
+		...project,
+		...(Object.keys(modelTiers).length > 0 ? { modelTiers } : {}),
+	};
 }
 
 /**

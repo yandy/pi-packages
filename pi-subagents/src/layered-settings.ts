@@ -67,6 +67,12 @@ export interface LayeredSettingsSource<T> {
 	 * e.g. `"pi-subagents"` → `"[pi-subagents] Ignoring malformed settings at …"`.
 	 */
 	warnLabel: string;
+	/**
+	 * Optional merge of the two layers (global first, project second).
+	 * Defaults to a shallow spread with project keys winning. Supply this to
+	 * merge nested objects field-by-field instead of replacing them wholesale.
+	 */
+	merge?: (global: Partial<T>, project: Partial<T>) => Partial<T>;
 }
 
 /**
@@ -75,17 +81,18 @@ export interface LayeredSettingsSource<T> {
  * - A missing file is silent — returns `{}` for that layer.
  * - A file that exists but cannot be parsed warns to stderr and returns `{}` for
  *   that layer, so startup proceeds normally.
- * - The two layers are merged with a shallow spread; project keys win.
+ * - The two layers are merged with a shallow spread; project keys win. Pass
+ *   `merge` to override that (e.g. to merge nested objects per field).
  *
  * Throws nothing. All error conditions produce a warning and fall back to `{}`.
  *
  * @public
  */
 export function loadLayeredSettings<T>(source: LayeredSettingsSource<T>): Partial<T> {
-	const { agentDir, cwd, filename, sanitize, warnLabel } = source;
+	const { agentDir, cwd, filename, sanitize, warnLabel, merge } = source;
 	const global = readLayer(join(agentDir, filename), sanitize, warnLabel);
 	const project = readLayer(join(cwd, ".pi", filename), sanitize, warnLabel);
-	return { ...global, ...project };
+	return merge ? merge(global, project) : { ...global, ...project };
 }
 
 // ── Private helpers ──────────────────────────────────────────────────────────

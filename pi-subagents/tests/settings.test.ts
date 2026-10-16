@@ -157,6 +157,59 @@ describe("settings persistence", () => {
 
 	});
 
+	describe("modelTiers", () => {
+		it("loads the tier map from the project file", () => {
+			writeProject({ modelTiers: { fast: "deepseek-flash", advanced: "qwen3.8-max" } });
+			expect(loadSettings(globalDir, projectDir).modelTiers).toEqual({
+				fast: "deepseek-flash",
+				advanced: "qwen3.8-max",
+			});
+		});
+
+		it("merges tiers per tier — project overrides only the tiers it defines", () => {
+			writeGlobal({ modelTiers: { fast: "g-flash", standard: "g-sonnet", advanced: "g-opus" } });
+			writeProject({ modelTiers: { advanced: "p-opus" } });
+			expect(loadSettings(globalDir, projectDir).modelTiers).toEqual({
+				fast: "g-flash",
+				standard: "g-sonnet",
+				advanced: "p-opus",
+			});
+		});
+
+		it("keeps global tiers when the project file does not define any", () => {
+			writeGlobal({ modelTiers: { fast: "g-flash" }, maxConcurrent: 9 });
+			writeProject({ maxConcurrent: 2 });
+			expect(loadSettings(globalDir, projectDir).modelTiers).toEqual({ fast: "g-flash" });
+		});
+
+		it("ignores unknown tier names", () => {
+			writeProject({ modelTiers: { fast: "deepseek-flash", turbo: "nonexistent" } });
+			expect(loadSettings(globalDir, projectDir).modelTiers).toEqual({ fast: "deepseek-flash" });
+		});
+
+		it("drops non-string and blank model values", () => {
+			writeProject({ modelTiers: { fast: 42, standard: "   ", advanced: "ok-model" } });
+			expect(loadSettings(globalDir, projectDir).modelTiers).toEqual({ advanced: "ok-model" });
+		});
+
+		it("trims configured model values", () => {
+			writeProject({ modelTiers: { fast: "  deepseek-flash  " } });
+			expect(loadSettings(globalDir, projectDir).modelTiers).toEqual({ fast: "deepseek-flash" });
+		});
+
+		it("drops modelTiers that is not a plain object", () => {
+			writeProject({ modelTiers: ["fast"] });
+			expect(loadSettings(globalDir, projectDir).modelTiers).toBeUndefined();
+			writeProject({ modelTiers: "fast" });
+			expect(loadSettings(globalDir, projectDir).modelTiers).toBeUndefined();
+		});
+
+		it("omits an empty tier map", () => {
+			writeProject({ modelTiers: {} });
+			expect(loadSettings(globalDir, projectDir).modelTiers).toBeUndefined();
+		});
+	});
+
 	describe("save result + corrupt-file warning", () => {
 		it("saveSettings returns true on success", () => {
 			expect(saveSettings({ maxConcurrent: 2 }, projectDir)).toBe(true);
@@ -334,6 +387,58 @@ describe("SettingsManager", () => {
 			const sm = new SettingsManager({ emit, cwd: projectDir, agentDir: globalDir });
 			sm.load();
 			expect(emit).toHaveBeenCalledWith("subagents:settings_loaded", { settings: {} });
+		});
+	});
+
+	describe("modelTiers", () => {
+		let dirs: SettingsDirs;
+
+		beforeEach(() => {
+			dirs = createSettingsDirs("subagents.json");
+		});
+
+		afterEach(() => {
+			dirs.dispose();
+		});
+
+		it("defaults to an empty map", () => {
+			const sm = new SettingsManager({ emit: vi.fn(), cwd: "/tmp", agentDir: "/nonexistent" });
+			expect(sm.modelTiers).toEqual({});
+		});
+
+		it("applies the merged tier map on load()", () => {
+			dirs.writeGlobal({ modelTiers: { fast: "g-flash", advanced: "g-opus" } });
+			dirs.writeProject({ modelTiers: { advanced: "p-opus" } });
+			const sm = new SettingsManager({ emit: vi.fn(), cwd: dirs.projectDir, agentDir: dirs.globalDir });
+			sm.load();
+			expect(sm.modelTiers).toEqual({ fast: "g-flash", advanced: "p-opus" });
+		});
+
+		it("omits modelTiers from snapshot() when none are configured", () => {
+			const sm = new SettingsManager({ emit: vi.fn(), cwd: "/tmp", agentDir: "/nonexistent" });
+			expect(sm.snapshot()).toEqual({ maxConcurrent: 4, defaultMaxTurns: 0, graceTurns: 5 });
+		});
+
+		it("includes configured modelTiers in snapshot()", () => {
+			dirs.writeProject({ modelTiers: { fast: "deepseek-flash" }, maxConcurrent: 3 });
+			const sm = new SettingsManager({ emit: vi.fn(), cwd: dirs.projectDir, agentDir: dirs.globalDir });
+			sm.load();
+			expect(sm.snapshot()).toEqual({
+				maxConcurrent: 3,
+				defaultMaxTurns: 0,
+				graceTurns: 5,
+				modelTiers: { fast: "deepseek-flash" },
+			});
+		});
+
+		it("preserves hand-edited modelTiers when saving other settings", () => {
+			dirs.writeProject({ modelTiers: { fast: "deepseek-flash", advanced: "qwen3.8-max" }, maxConcurrent: 3 });
+			const sm = new SettingsManager({ emit: vi.fn(), cwd: dirs.projectDir, agentDir: dirs.globalDir });
+			sm.load();
+			sm.applyDefaultMaxTurns(10);
+			const written = JSON.parse(readFileSync(dirs.projectFile(), "utf-8"));
+			expect(written.modelTiers).toEqual({ fast: "deepseek-flash", advanced: "qwen3.8-max" });
+			expect(written.defaultMaxTurns).toBe(10);
 		});
 	});
 

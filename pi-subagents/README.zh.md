@@ -13,6 +13,7 @@
 - **优雅轮次限制** — 代理在硬中止前收到"收尾"警告
 - **大小写不敏感** — `"explore"`、`"Explore"`、`"EXPLORE"` 均可
 - **模糊模型选择** — 按名称（`"haiku"`、`"sonnet"`）而非完整 ID 指定模型
+- **模型分层** — 用 `fast` / `standard` / `advanced` 档位代替逐次点名模型，每档对应的真实模型写在配置里
 - **上下文继承** — 可选择将父对话分叉给子代理
 - **风格化通知** — 后台结果渲染为主题化通知框
 - **事件总线** — 通过 `pi.events` 发出生命周期事件（`subagents:created`、`started`、`completed`、`failed`、`steered`、`compacted`）
@@ -74,7 +75,8 @@ max_turns: 30
 | `prompt` | string | 是 | 代理要执行的任务 |
 | `description` | string | 是 | 3-5 词简短描述（UI 中显示） |
 | `subagent_type` | string | 是 | 代理类型（内置或自定义） |
-| `model` | string | 否 | 模型覆盖（`provider/modelId` 或模糊名称） |
+| `model` | string | 否 | 模型覆盖（`provider/modelId` 或模糊名称；与 `model_tier` 互斥） |
+| `model_tier` | string | 否 | 能力档位：`fast` / `standard` / `advanced`（与 `model` 互斥） |
 | `thinking` | string | 否 | off / minimal / low / medium / high / xhigh |
 | `max_turns` | number | 否 | 最大代理轮次（默认无限制） |
 | `run_in_background` | boolean | 否 | 后台运行不阻塞 |
@@ -100,6 +102,34 @@ max_turns: 30
 | `agent_id` | string | 是 | 要转向的代理 ID |
 | `message` | string | 是 | 注入代理对话的消息 |
 
+## 模型分层
+
+`subagent` 工具除 `model` 外还接受 `model_tier`：调用方只表达"要什么档位的模型"，
+由使用者在配置里决定每档对应哪个真实模型。
+
+| 档位 | 定位 |
+|------|------|
+| `fast` | 最便宜、最快，能力最弱（flash / mini / haiku 级） |
+| `standard` | 均衡的默认档（sonnet 级） |
+| `advanced` | 能力最强、最贵（opus 级） |
+
+映射写在 `subagents.json`：全局 `~/.pi/agent/subagents.json`，项目 `<cwd>/.pi/subagents.json`。
+两层**按档位合并**，项目只改一档时无需重复其余档位：
+
+```json
+{
+  "modelTiers": {
+    "fast": "deepseek-flash",
+    "standard": "deepseek-flash",
+    "advanced": "qwen3.8-max"
+  }
+}
+```
+
+档位取值与 `model` 走同一套解析，`provider/modelId` 和模糊名称（如 `"haiku"`）都可以。
+`model` 与 `model_tier` 互斥；调用未配置的档位会直接报错并指出该改哪个文件——不会静默
+降级为父模型。若代理类型的 frontmatter 固定了 `model`，该模型优先于两个参数。
+
 ## 命令
 
 | 命令 | 描述 |
@@ -123,7 +153,7 @@ max_turns: 30
 
 ## 持久化设置
 
-通过 `/subagents:settings` 设置的参数持久化到 `<cwd>/.pi/subagents.json`（项目级），也可在 `~/.pi/agent/subagents.json` 中设置全局默认值。
+通过 `/subagents:settings` 设置的参数持久化到 `<cwd>/.pi/subagents.json`（项目级），也可在 `~/.pi/agent/subagents.json` 中设置全局默认值。同一批文件也保存 [`modelTiers`](#模型分层) 映射；保存其他设置时会保留它。
 
 ## 事件
 

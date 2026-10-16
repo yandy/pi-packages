@@ -13,6 +13,7 @@ A [pi](https://pi.dev) extension providing a focused, in-process sub-agent core 
 - **Graceful turn limits** — agents get a "wrap up" warning before hard abort
 - **Case-insensitive types** — `"explore"`, `"Explore"`, `"EXPLORE"` all work
 - **Fuzzy model selection** — specify models by name (`"haiku"`, `"sonnet"`) instead of full IDs
+- **Model tiers** — pick `fast` / `standard` / `advanced` and map each tier to a real model in config, instead of naming a model per call
 - **Context inheritance** — optionally fork the parent conversation into a sub-agent
 - **Styled notifications** — background results render as themed notification boxes
 - **Event bus** — lifecycle events (`subagents:created`, `started`, `completed`, `failed`, `steered`, `compacted`) via `pi.events`
@@ -74,7 +75,8 @@ Launch a sub-agent.
 | `prompt` | string | yes | The task for the agent |
 | `description` | string | yes | Short 3-5 word summary (shown in UI) |
 | `subagent_type` | string | yes | Agent type (built-in or custom) |
-| `model` | string | no | Model override (`provider/modelId` or fuzzy name) |
+| `model` | string | no | Model override (`provider/modelId` or fuzzy name). Mutually exclusive with `model_tier` |
+| `model_tier` | string | no | Capability tier: `fast` / `standard` / `advanced`. Mutually exclusive with `model` |
 | `thinking` | string | no | off / minimal / low / medium / high / xhigh |
 | `max_turns` | number | no | Max agentic turns (unlimited by default) |
 | `run_in_background` | boolean | no | Run without blocking |
@@ -99,6 +101,37 @@ Send a steering message to a running agent.
 |-----------|------|----------|-------------|
 | `agent_id` | string | yes | Agent ID to steer |
 | `message` | string | yes | Message to inject into agent conversation |
+
+## Model Tiers
+
+The `subagent` tool accepts `model_tier` as an alternative to `model`: the caller asks for a
+capability class and each user decides which real model sits behind it.
+
+| Tier | Intent |
+|------|--------|
+| `fast` | Cheapest and fastest, least capable (flash / mini / haiku class) |
+| `standard` | Balanced default (sonnet class) |
+| `advanced` | Most capable, most expensive (opus class) |
+
+The mapping lives in `subagents.json` — `~/.pi/agent/subagents.json` (global) and
+`<cwd>/.pi/subagents.json` (project). The two layers merge **per tier**, so a project can
+override one tier without restating the others:
+
+```json
+{
+  "modelTiers": {
+    "fast": "deepseek-flash",
+    "standard": "deepseek-flash",
+    "advanced": "qwen3.8-max"
+  }
+}
+```
+
+Tier values go through the same resolver as `model`, so `provider/modelId` and fuzzy names
+(e.g. `"haiku"`) both work. `model` and `model_tier` are mutually exclusive, and calling a
+tier that is not configured returns an error naming the file to fix — a tier request is
+never silently downgraded to the parent model. If an agent type pins `model` in its
+frontmatter, that model wins over both parameters.
 
 ## Commands
 
@@ -127,7 +160,7 @@ Background agents are subject to a configurable concurrency limit (default: 4). 
 
 ## Persistent Settings
 
-Settings set via `/subagents:settings` persist in `<cwd>/.pi/subagents.json` (project) and can be overridden globally in `~/.pi/agent/subagents.json`.
+Settings set via `/subagents:settings` persist in `<cwd>/.pi/subagents.json` (project) and can be overridden globally in `~/.pi/agent/subagents.json`. The same files also hold the [`modelTiers`](#model-tiers) mapping; saving other settings preserves it.
 
 ## Events
 

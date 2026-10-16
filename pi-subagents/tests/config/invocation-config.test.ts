@@ -87,4 +87,39 @@ describe("resolveAgentInvocationConfig", () => {
 		expect(resolved.inheritContext).toBe(false);
 		expect(resolved.runInBackground).toBe(false);
 	});
+
+	it("uses the tier-resolved model when neither config nor params specify one", () => {
+		const resolved = resolveAgentInvocationConfig(undefined, { model_tier: "fast" }, "deepseek-flash");
+
+		expect(resolved.modelInput).toBe("deepseek-flash");
+		expect(resolved.modelFromParams).toBe(true);
+	});
+
+	it("prefers an explicit model param over the tier-resolved model", () => {
+		const resolved = resolveAgentInvocationConfig(
+			undefined,
+			{ model: "provider/param-model", model_tier: "fast" },
+			"deepseek-flash",
+		);
+
+		expect(resolved.modelInput).toBe("provider/param-model");
+	});
+
+	it("prefers an agent-config model over the tier-resolved model (locked field)", () => {
+		const resolved = resolveAgentInvocationConfig(
+			makeConfig({ model: "provider/config-model" }),
+			{ model_tier: "fast" },
+			"deepseek-flash",
+		);
+
+		expect(resolved.modelInput).toBe("provider/config-model");
+		expect(resolved.modelFromParams).toBe(false);
+	});
+
+	it("inherits the parent model when no tier model is passed", () => {
+		const resolved = resolveAgentInvocationConfig(undefined, { model_tier: "fast" });
+
+		expect(resolved.modelInput).toBeUndefined();
+		expect(resolved.modelFromParams).toBe(false);
+	});
 });
