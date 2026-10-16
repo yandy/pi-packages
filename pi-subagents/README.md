@@ -13,7 +13,7 @@ A [pi](https://pi.dev) extension providing a focused, in-process sub-agent core 
 - **Graceful turn limits** — agents get a "wrap up" warning before hard abort
 - **Case-insensitive types** — `"explore"`, `"Explore"`, `"EXPLORE"` all work
 - **Fuzzy model selection** — specify models by name (`"haiku"`, `"sonnet"`) instead of full IDs
-- **Model tiers** — pick `fast` / `standard` / `advanced` and map each tier to a real model in config, instead of naming a model per call
+- **Model tiers** — map `fast` / `standard` / `advanced` to real models in config; the agent is guided to pick the configured model per task
 - **Context inheritance** — optionally fork the parent conversation into a sub-agent
 - **Styled notifications** — background results render as themed notification boxes
 - **Event bus** — lifecycle events (`subagents:created`, `started`, `completed`, `failed`, `steered`, `compacted`) via `pi.events`
@@ -75,8 +75,7 @@ Launch a sub-agent.
 | `prompt` | string | yes | The task for the agent |
 | `description` | string | yes | Short 3-5 word summary (shown in UI) |
 | `subagent_type` | string | yes | Agent type (built-in or custom) |
-| `model` | string | no | Model override (`provider/modelId` or fuzzy name). Mutually exclusive with `model_tier` |
-| `model_tier` | string | no | Capability tier: `fast` / `standard` / `advanced`. Mutually exclusive with `model` |
+| `model` | string | no | Model override (`provider/modelId` or fuzzy name) |
 | `thinking` | string | no | off / minimal / low / medium / high / xhigh |
 | `max_turns` | number | no | Max agentic turns (unlimited by default) |
 | `run_in_background` | boolean | no | Run without blocking |
@@ -104,8 +103,10 @@ Send a steering message to a running agent.
 
 ## Model Tiers
 
-The `subagent` tool accepts `model_tier` as an alternative to `model`: the caller asks for a
-capability class and each user decides which real model sits behind it.
+Instead of hardcoding model IDs, you can map capability tiers to concrete models in
+`subagents.json`. The mapping feeds the `subagent` tool's prompt guidelines, which tell the
+agent which model to pass via the `model` parameter — there is no `model_tier` tool
+parameter.
 
 | Tier | Intent |
 |------|--------|
@@ -127,11 +128,10 @@ override one tier without restating the others:
 }
 ```
 
-Tier values go through the same resolver as `model`, so `provider/modelId` and fuzzy names
-(e.g. `"haiku"`) both work. `model` and `model_tier` are mutually exclusive, and calling a
-tier that is not configured returns an error naming the file to fix — a tier request is
-never silently downgraded to the parent model. If an agent type pins `model` in its
-frontmatter, that model wins over both parameters.
+Because the agent copies the mapped value into `model`, it goes through the same resolver as
+any other model value: `provider/modelId` and fuzzy names (e.g. `"haiku"`) both work. Tiers
+without a mapping are omitted from the guidelines — nothing is silently substituted for
+them. If an agent type pins `model` in its frontmatter, that model always wins.
 
 ## Commands
 

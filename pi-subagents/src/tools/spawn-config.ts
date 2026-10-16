@@ -10,7 +10,6 @@
 import type { Model } from "@earendil-works/pi-ai";
 import type { AgentTypeRegistry } from "../config/agent-types";
 import { resolveAgentInvocationConfig } from "../config/invocation-config";
-import { type ModelTierMap, resolveModelTier } from "../config/model-tiers";
 import { normalizeMaxTurns } from "../lifecycle/turn-limits";
 import { resolveInvocationModel } from "../session/model-resolver";
 import type { AgentInvocation, SubagentType, ThinkingLevel } from "../types";
@@ -82,7 +81,7 @@ export function resolveSpawnConfig(
 	params: Record<string, unknown>,
 	registry: AgentTypeRegistry,
 	modelInfo: ModelInfo,
-	settings: { readonly defaultMaxTurns: number | undefined; readonly modelTiers?: ModelTierMap },
+	settings: { readonly defaultMaxTurns: number | undefined },
 ): ResolvedSpawnConfig | SpawnConfigError {
 	const rawType = params.subagent_type as SubagentType;
 	const resolved = registry.resolveType(rawType);
@@ -97,26 +96,9 @@ export function resolveSpawnConfig(
 
 	const displayName = getDisplayName(subagentType, registry);
 
-	// `model` and `model_tier` are two ways to express the same choice — never both.
-	const tierInput = params.model_tier;
-	if (params.model != null && tierInput != null) {
-		return { error: 'Specify either "model" or "model_tier" (capability tier), not both.' };
-	}
-
 	// Merge agent config defaults with tool-call params
 	const customConfig = registry.resolveAgentConfig(subagentType);
-
-	// A model pinned by the agent type wins over tool-call params, so the tier is
-	// only resolved when it can actually apply (mirrors how a locked config model
-	// makes an unresolvable `model` param a silent no-op).
-	let tierModel: string | undefined;
-	if (tierInput != null && customConfig?.model == null) {
-		const tierResolution = resolveModelTier(tierInput, settings.modelTiers);
-		if (tierResolution.error) return { error: tierResolution.error };
-		tierModel = tierResolution.model;
-	}
-
-	const resolvedConfig = resolveAgentInvocationConfig(customConfig, params, tierModel);
+	const resolvedConfig = resolveAgentInvocationConfig(customConfig, params);
 
 	// Resolve model
 	const resolution = resolveInvocationModel(
