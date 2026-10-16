@@ -4,6 +4,7 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { AgentTypeRegistry } from "../config/agent-types";
+import { MODEL_TIERS, type ModelTierMap } from "../config/model-tiers";
 import type { ParentSnapshot } from "../lifecycle/parent-snapshot";
 import type { AgentSpawnConfig } from "../lifecycle/subagent-manager";
 import { spawnBackground } from "../tools/background-spawner";
@@ -40,7 +41,14 @@ export interface AgentToolRuntime {
 export type AgentToolSettings = {
 	readonly defaultMaxTurns: number | undefined;
 	readonly maxConcurrent: number;
+	readonly modelTiers?: ModelTierMap;
 };
+
+/** LLM-facing summary of which tiers are configured, e.g. `fast → deepseek-flash`. */
+function buildTierListText(tiers: ModelTierMap | undefined): string {
+	const configured = MODEL_TIERS.filter((tier) => tiers?.[tier]).map((tier) => `${tier} → ${tiers?.[tier]}`);
+	return configured.length > 0 ? configured.join(", ") : "none configured";
+}
 
 // ---- Class ----
 
@@ -113,6 +121,7 @@ export class AgentTool {
 	toToolDefinition() {
 		const typeListText = this.typeListText;
 		const availableTypesText = this.availableTypesText;
+		const tierListText = buildTierListText(this.settings.modelTiers);
 		const registry = this.registry;
 
 		return defineTool({
@@ -134,6 +143,7 @@ Guidelines:
 - Use resume with an agent ID to continue a previous agent's work.
 - Use steer_subagent to send mid-run messages to a running background agent.
 - Use model to specify a different model (as "provider/modelId", or fuzzy e.g. "haiku", "sonnet").
+- Use model_tier to pick a preconfigured capability tier instead of naming a model — never pass both. Tiers: fast (cheapest, fastest, least capable), standard (balanced default), advanced (most capable, most expensive). Configured: ${tierListText}.
 - Use thinking to control extended thinking level.
 - Use inherit_context if the agent needs the parent conversation history.
 `,
@@ -150,7 +160,13 @@ Guidelines:
 				model: Type.Optional(
 					Type.String({
 						description:
-							'Optional model override. Accepts "provider/modelId" or fuzzy name (e.g. "haiku", "sonnet"). Omit to use the agent type\'s default.',
+							'Optional model override. Accepts "provider/modelId" or fuzzy name (e.g. "haiku", "sonnet"). Omit to use the agent type\'s default. Mutually exclusive with model_tier.',
+					}),
+				),
+				model_tier: Type.Optional(
+					Type.Union([Type.Literal("fast"), Type.Literal("standard"), Type.Literal("advanced")], {
+						description:
+							'Optional capability tier: "fast" (cheapest and fastest, least capable), "standard" (balanced default), or "advanced" (most capable, most expensive). Mutually exclusive with model. The real model behind each tier is configured in subagents.json (modelTiers).',
 					}),
 				),
 				thinking: Type.Optional(

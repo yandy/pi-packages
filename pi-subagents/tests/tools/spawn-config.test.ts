@@ -23,6 +23,13 @@ function makeDisabledExploreRegistry(): AgentTypeRegistry {
 	);
 }
 
+/** Registry with one agent whose model is locked by its config. */
+function makeLockedModelRegistry(): AgentTypeRegistry {
+	return new AgentTypeRegistry(
+		() => new Map([["locked", makeAgentConfig({ name: "locked", model: "anthropic/claude-opus" })]]),
+	);
+}
+
 /** Minimal registry with default agents only. */
 const testRegistry = new AgentTypeRegistry(() => new Map());
 
@@ -152,6 +159,137 @@ describe("resolveSpawnConfig — model resolution", () => {
 			defaultSettings,
 		);
 		expect("error" in result && result.error).toBeTruthy();
+	});
+});
+
+describe("resolveSpawnConfig — model tiers", () => {
+	const TIER_MODELS = [
+		{ id: "claude-haiku", name: "Claude Haiku", provider: "anthropic" },
+		{ id: "claude-opus", name: "Claude Opus", provider: "anthropic" },
+	];
+
+	function makeModelRegistry() {
+		return {
+			find: (provider: string, modelId: string) =>
+				TIER_MODELS.find((m) => m.provider === provider && m.id === modelId),
+			getAll: () => TIER_MODELS,
+			getAvailable: () => TIER_MODELS,
+		};
+	}
+
+	const tierSettings = {
+		defaultMaxTurns: undefined as number | undefined,
+		modelTiers: { fast: "anthropic/claude-haiku", advanced: "anthropic/claude-opus" },
+	};
+
+	it("resolves a configured tier to its real model", () => {
+		const result = resolveSpawnConfig(
+			{ subagent_type: "general-purpose", prompt: "test", description: "d", model_tier: "fast" },
+			testRegistry,
+			makeModelInfo({ modelRegistry: makeModelRegistry() }),
+			tierSettings,
+		);
+		if ("error" in result) throw new Error(`unexpected error: ${result.error}`);
+		expect(result.execution.model).toEqual(TIER_MODELS[0]);
+		expect(result.presentation.modelName).toBe("anthropic/claude-haiku");
+	});
+
+	it("resolves tier values through the same fuzzy matcher as model", () => {
+		const result = resolveSpawnConfig(
+			{ subagent_type: "general-purpose", prompt: "test", description: "d", model_tier: "fast" },
+			testRegistry,
+			makeModelInfo({ modelRegistry: makeModelRegistry() }),
+			{ defaultMaxTurns: undefined, modelTiers: { fast: "haiku" } },
+		);
+		if ("error" in result) throw new Error(`unexpected error: ${result.error}`);
+		expect(result.execution.model).toEqual(TIER_MODELS[0]);
+	});
+
+	it("accepts a mixed-case tier name", () => {
+		const result = resolveSpawnConfig(
+			{ subagent_type: "general-purpose", prompt: "test", description: "d", model_tier: "FAST" },
+			testRegistry,
+			makeModelInfo({ modelRegistry: makeModelRegistry() }),
+			tierSettings,
+		);
+		if ("error" in result) throw new Error(`unexpected error: ${result.error}`);
+		expect(result.execution.model).toEqual(TIER_MODELS[0]);
+	});
+
+	it("rejects model and model_tier together", () => {
+		const result = resolveSpawnConfig(
+			{
+				subagent_type: "general-purpose",
+				prompt: "test",
+				description: "d",
+				model: "anthropic/claude-opus",
+				model_tier: "fast",
+			},
+			testRegistry,
+			makeModelInfo({ modelRegistry: makeModelRegistry() }),
+			tierSettings,
+		);
+		expect("error" in result).toBe(true);
+		if (!("error" in result)) return;
+		expect(result.error).toContain("model_tier");
+		expect(result.error).toContain("model");
+		expect(result.error).toContain("not both");
+	});
+
+	it("rejects an unconfigured tier instead of silently inheriting a model", () => {
+		const result = resolveSpawnConfig(
+			{ subagent_type: "general-purpose", prompt: "test", description: "d", model_tier: "advanced" },
+			testRegistry,
+			makeModelInfo({ modelRegistry: makeModelRegistry() }),
+			{ defaultMaxTurns: undefined, modelTiers: { fast: "anthropic/claude-haiku" } },
+		);
+		expect("error" in result).toBe(true);
+		if (!("error" in result)) return;
+		expect(result.error).toContain('"advanced" is not configured');
+	});
+
+	it("rejects any tier when no tier map is configured", () => {
+		const result = resolveSpawnConfig(
+			{ subagent_type: "general-purpose", prompt: "test", description: "d", model_tier: "fast" },
+			testRegistry,
+			makeModelInfo({ modelRegistry: makeModelRegistry() }),
+			defaultSettings,
+		);
+		expect("error" in result).toBe(true);
+	});
+
+	it("rejects an unknown tier name", () => {
+		const result = resolveSpawnConfig(
+			{ subagent_type: "general-purpose", prompt: "test", description: "d", model_tier: "turbo" },
+			testRegistry,
+			makeModelInfo({ modelRegistry: makeModelRegistry() }),
+			tierSettings,
+		);
+		expect("error" in result).toBe(true);
+		if (!("error" in result)) return;
+		expect(result.error).toContain("Unknown model tier");
+	});
+
+	it("keeps an agent-config locked model even when a tier is passed", () => {
+		const result = resolveSpawnConfig(
+			{ subagent_type: "locked", prompt: "test", description: "d", model_tier: "fast" },
+			makeLockedModelRegistry(),
+			makeModelInfo({ modelRegistry: makeModelRegistry() }),
+			tierSettings,
+		);
+		if ("error" in result) throw new Error(`unexpected error: ${result.error}`);
+		expect(result.execution.model).toEqual(TIER_MODELS[1]); // locked config model wins
+	});
+
+	it("ignores an unconfigured tier when the agent type pins a model", () => {
+		const result = resolveSpawnConfig(
+			{ subagent_type: "locked", prompt: "test", description: "d", model_tier: "fast" },
+			makeLockedModelRegistry(),
+			makeModelInfo({ modelRegistry: makeModelRegistry() }),
+			{ defaultMaxTurns: undefined, modelTiers: { advanced: "anthropic/claude-opus" } },
+		);
+		if ("error" in result) throw new Error(`unexpected error: ${result.error}`);
+		expect(result.execution.model).toEqual(TIER_MODELS[1]);
 	});
 });
 

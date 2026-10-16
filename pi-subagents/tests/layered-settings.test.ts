@@ -79,6 +79,22 @@ describe("loadLayeredSettings", () => {
 		});
 	});
 
+	describe("custom merge", () => {
+		it("uses the provided merge function instead of the default shallow spread", () => {
+			writeGlobal({ name: "global", count: 1 });
+			writeProject({ name: "project" });
+			const merged = loadLayeredSettings<TestConfig>({
+				agentDir,
+				cwd,
+				filename: FILENAME,
+				sanitize,
+				warnLabel: "test-pkg",
+				merge: (global, project) => ({ name: `${global.name}+${project.name}`, count: global.count }),
+			});
+			expect(merged).toEqual({ name: "global+project", count: 1 });
+		});
+	});
+
 	describe("sanitize applied to parsed JSON", () => {
 		it("passes parsed JSON through sanitize", () => {
 			writeGlobal({ name: "valid", extraField: "ignored" });
