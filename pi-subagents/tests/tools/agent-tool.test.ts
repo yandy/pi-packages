@@ -50,21 +50,15 @@ describe("AgentTool", () => {
 	});
 });
 
-describe("AgentTool — model_tier schema", () => {
-	it("exposes model_tier with the three tier values", () => {
+describe("AgentTool — model tier guidance", () => {
+	it("does not expose a model_tier parameter", () => {
 		const def = makeTool(createToolDeps()).toToolDefinition();
 		const props = (def.parameters as { properties: Record<string, unknown> }).properties;
-		const tierSchema = props.model_tier as { anyOf?: { const?: string }[] };
-		expect(tierSchema?.anyOf?.map((s) => s.const)).toEqual(["fast", "standard", "advanced"]);
+		expect(props.model_tier).toBeUndefined();
+		expect(def.description).not.toContain("model_tier");
 	});
 
-	it("keeps model_tier optional", () => {
-		const def = makeTool(createToolDeps()).toToolDefinition();
-		const required = (def.parameters as { required?: string[] }).required ?? [];
-		expect(required).not.toContain("model_tier");
-	});
-
-	it("lists the configured tier mappings in the description", () => {
+	it("renders configured tier → model mappings in promptGuidelines", () => {
 		const deps = createToolDeps({
 			settings: {
 				defaultMaxTurns: undefined,
@@ -73,26 +67,16 @@ describe("AgentTool — model_tier schema", () => {
 			},
 		});
 		const def = makeTool(deps).toToolDefinition();
-		expect(def.description).toContain("model_tier");
-		expect(def.description).toContain("fast → deepseek-flash");
-		expect(def.description).toContain("advanced → qwen3.8-max");
+		const guidelines = (def.promptGuidelines ?? []).join("\n");
+		expect(guidelines).toContain("fast → deepseek-flash");
+		expect(guidelines).toContain("advanced → qwen3.8-max");
+		expect(guidelines).toContain("model parameter");
+		expect(guidelines).not.toContain("standard →");
 	});
 
-	it("tells the caller when no tiers are configured", () => {
+	it("omits the tier guideline when no tiers are configured", () => {
 		const def = makeTool(createToolDeps()).toToolDefinition();
-		expect(def.description).toContain("model_tier");
-		expect(def.description).toContain("none configured");
-	});
-
-	it("returns the mutual-exclusion error when both model and model_tier are passed", async () => {
-		const result = await execute(createToolDeps(), {
-			prompt: "p",
-			description: "d",
-			subagent_type: "general-purpose",
-			model: "haiku",
-			model_tier: "fast",
-		});
-		expect(result.content[0].text).toContain("not both");
+		expect(def.promptGuidelines ?? []).toEqual([]);
 	});
 });
 

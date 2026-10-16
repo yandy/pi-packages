@@ -16,10 +16,11 @@ export interface SubagentsSettings {
 	defaultMaxTurns?: number;
 	graceTurns?: number;
 	/**
-	 * Capability/cost tier → real model mapping for the `subagent` tool's
-	 * `model_tier` param. Tier names are fixed (`fast` | `standard` | `advanced`);
-	 * values accept anything `resolveModel` understands (e.g. "provider/modelId"
-	 * or a fuzzy name like "haiku").
+	 * Capability/cost tier → real model mapping. Used only to generate the
+	 * `subagent` tool's prompt guidelines, which tell the agent which model to
+	 * pass via `model` for each capability level. Tier names are fixed
+	 * (`fast` | `standard` | `advanced`); values accept anything `resolveModel`
+	 * understands (e.g. "provider/modelId" or a fuzzy name like "haiku").
 	 */
 	modelTiers?: ModelTierMap;
 }
@@ -86,7 +87,7 @@ export class SettingsManager {
 		this._maxConcurrent = Math.max(1, n);
 	}
 
-	// ── modelTiers: tier → model map for the subagent tool's model_tier param ──
+	// ── modelTiers: tier → model map used to generate the subagent prompt guidelines ──
 
 	get modelTiers(): ModelTierMap {
 		return this._modelTiers;
