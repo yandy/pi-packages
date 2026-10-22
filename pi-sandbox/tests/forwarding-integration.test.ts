@@ -123,7 +123,7 @@ describe("端到端（包内）：子会话提权 → 父会话弹窗 → 一次
 		expect(parentSelect.mock.calls[0][0] as string).toContain("user-approved external write");
 		// D4：标题不含任何子代理来源标识
 		expect(parentSelect.mock.calls[0][0] as string).not.toContain("child-1");
-		expect(parentSelect.mock.calls[0][1]).toEqual(["Allow once", "Deny"]);
+		expect(parentSelect.mock.calls[0][1]).toEqual(["Deny", "Allow once"]);
 		// 批准只对那一次调用生效：进程档位与本次 deps 的覆盖都没被改写
 		expect(processPermissionState.override).toBeNull();
 		expect(deps.permission.override).toBeNull();

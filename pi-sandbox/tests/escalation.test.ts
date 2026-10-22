@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	approveEscalation,
 	DENIAL_REASON_PROMPT,
+	ESCALATION_OPTIONS,
 	escalationAppliedMarker,
 	escalationHintMarker,
 	escalationIgnoredMarker,
@@ -182,6 +183,10 @@ describe("markers", () => {
 });
 
 describe("approveEscalation", () => {
+	it("审批选项以 Deny 开头（宿主 select 默认停在首项，误触不应变成授权）", () => {
+		expect(ESCALATION_OPTIONS[0]).toBe("Deny");
+		expect([...ESCALATION_OPTIONS]).toEqual(["Deny", "Allow once"]);
+	});
 	it("same mode as effective: no approval needed", async () => {
 		const u = ui(true, "Deny");
 		await expect(approveEscalation({ ...base, requestedMode: "workspace-write" }, u)).resolves.toBe("workspace-write");
@@ -194,7 +199,7 @@ describe("approveEscalation", () => {
 		expect(title).toContain("danger-full-access");
 		expect(title).toContain(base.justification);
 		expect(title).toContain(base.summary);
-		expect(u.ask.mock.calls[0][1]).toEqual(["Allow once", "Deny"]);
+		expect(u.ask.mock.calls[0][1]).toEqual(["Deny", "Allow once"]);
 		// 两步式的第二步：Deny 理由追问提示随对话下发（ask 的第三参）。
 		expect(u.ask.mock.calls[0][2]).toEqual(DENIAL_REASON_PROMPT);
 	});
