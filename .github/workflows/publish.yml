@@ -44,12 +44,6 @@ jobs:
             pi-vision-tools-v*)
               echo "dir=pi-vision-tools" >> "$GITHUB_OUTPUT"
               ;;
-            pi-lark-v*)
-              echo "dir=pi-lark" >> "$GITHUB_OUTPUT"
-              ;;
-            pi-dingtalk-v*)
-              echo "dir=pi-dingtalk" >> "$GITHUB_OUTPUT"
-              ;;
             pi-memory-v*)
               echo "dir=pi-memory" >> "$GITHUB_OUTPUT"
               ;;
