@@ -77,7 +77,7 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 - 拒绝记录**一次性消费**：一次拒绝只放行一笔提权重试（批准仍只对那一次调用生效）；
 - 占位符参数按字段归一化：省略或传 JSON `null` 都表示"不提权"，参数 schema 也显式声明了 `null`——因此 strict schema 提供商（pi 会把这两个字段标成必填）下的模型有一个合法的"不提权"取值可传；`justification` 上的 `"null"` / 空白字符串同样归一化为"未提供"。字符串占位符（`"null"` / 空串 / 纯空白）另有一层兜底：工具的 `prepareArguments` 在参数校验前把它们剥掉——strict 提供商下模型常把必填的可选字段写成字符串 `"null"`，这层兜底让普通调用照常执行，不再产生与沙箱无关的硬错误。
 
-弹窗提供 **Allow once / Deny**；选 Deny 后可再填一句**可选理由**（回车跳过），理由会随拒绝错误回传给模型，让它明白为什么被拒、不要换写法反复试探。subagent 子会话（前台与后台都算）的提权会转发到父会话弹窗（同进程 pi-subagents，且父会话需有 UI）；无父通道时（headless、跨进程子代理）提权一律拒绝（fail-closed），此时用 `/permission` 放宽进程档位解救。
+弹窗提供 **Deny / Allow once**（Deny 在首位，误按回车不会授予任何权限）；选 Deny 后可再填一句**可选理由**（回车跳过），理由会随拒绝错误回传给模型，让它明白为什么被拒、不要换写法反复试探。subagent 子会话（前台与后台都算）的提权会转发到父会话弹窗（同进程 pi-subagents，且父会话需有 UI）；无父通道时（headless、跨进程子代理）提权一律拒绝（fail-closed），此时用 `/permission` 放宽进程档位解救。
 
 **缓存/数据目录搬迁属于越界行为。** 工具的常驻规则要求模型不得为了绕开沙箱把全局缓存/数据目录搬进 workspace——无论是环境变量覆盖（`XDG_CACHE_HOME`、`HOME`、`UV_CACHE_DIR`、`npm_config_cache`、`PNPM_HOME` 等）、改缓存的 flag（`--cache-dir`、`--store-dir` 等）还是配置文件——正确做法是原样运行工具，包括提权重试也不得夹带搬迁：搬迁是无声的，它会消掉本可上膛提权的那次拒绝。这条政策目前仅停留在提示词层：pi-sandbox 不检测、也不拒绝这类命令，用户显式要求搬迁时仍然成立。在 `workspace-write` 模式下，让工具在工作区外写入的合法途径是**用户**把该目录加入 `extraWritableDirs`；模型仍不得自行迁移缓存/数据目录。
 

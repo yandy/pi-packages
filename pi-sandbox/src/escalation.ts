@@ -18,7 +18,8 @@ export function isStrictlyWider(effective: SandboxMode, requested: string): bool
 /** 封闭的提权目标词汇（read-only 是底线，不可作为目标）。 */
 export const ESCALATION_TARGETS = ["workspace-write", "danger-full-access"] as const;
 
-export const ESCALATION_OPTIONS = ["Allow once", "Deny"] as const;
+/** 审批弹窗选项，Deny 在首位：宿主 select 默认停在首项，拒绝应是失手时的默认值。 */
+export const ESCALATION_OPTIONS = ["Deny", "Allow once"] as const;
 
 /**
  * 畸形提权参数的错误文案（按需付费：只在模型发了畸形参数时进上下文）。三要素缺一不可——

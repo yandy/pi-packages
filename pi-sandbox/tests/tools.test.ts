@@ -418,7 +418,7 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 		);
 		expect(mode).toBe("danger-full-access");
 		expect(parentSelect).toHaveBeenCalledTimes(1);
-		expect(parentSelect.mock.calls[0][1]).toEqual(["Allow once", "Deny"]);
+		expect(parentSelect.mock.calls[0][1]).toEqual(["Deny", "Allow once"]);
 		// D4：标题文案与 direct 路径完全一致（含 justification 与摘要），不含任何子代理标识
 		const title = parentSelect.mock.calls[0][0] as string;
 		expect(title).toContain("need /etc write");
