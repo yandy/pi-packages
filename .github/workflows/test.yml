@@ -42,10 +42,6 @@ jobs:
               - "pi-todo/**"
             pi-vision-tools:
               - "pi-vision-tools/**"
-            pi-lark:
-              - "pi-lark/**"
-            pi-dingtalk:
-              - "pi-dingtalk/**"
             pi-memory:
               - "pi-memory/**"
       - id: filter-packages
