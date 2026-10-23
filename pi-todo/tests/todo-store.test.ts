@@ -294,22 +294,35 @@ describe("formatAck", () => {
 		);
 	});
 
-	it("clips long titles inside the in-flight list", () => {
-		const list: TodoItem[] = [
-			{ id: "1", title: "x".repeat(200), status: "in_progress" },
-			{ id: "2", title: "B", status: "done" },
-		];
-		const out = formatAck(list, "2");
-		expect(out).toContain("…");
-		expect(out.length).toBeLessThan(160);
-	});
-
 	it("adds nothing when the updated task is the only one in flight", () => {
 		const list: TodoItem[] = [
 			{ id: "1", title: "A", status: "in_progress" },
 			{ id: "2", title: "B", status: "pending" },
 		];
 		expect(formatAck(list, "1")).toBe("◉ #1 A in_progress (0/2 done · 1 pending)");
+	});
+
+	// +N 必须数「未列出的其它在飞项」，不能把本次更新的那条也算进去：
+	// 否则模型会以为还有一条自己看不到的在飞任务（正是本功能要消灭的幻觉）。
+	it("folds by the number of unlisted others, excluding the task just updated", () => {
+		const list: TodoItem[] = [
+			{ id: "1", title: "A", status: "in_progress" },
+			{ id: "2", title: "B", status: "in_progress" },
+			{ id: "3", title: "C", status: "in_progress" },
+			{ id: "4", title: "D", status: "in_progress" },
+			{ id: "5", title: "E", status: "pending" },
+		];
+		expect(formatAck(list, "4")).toBe(
+			"◉ #4 D in_progress (0/5 done · 1 pending) · ◉ also in flight: #1 A, #2 B +1",
+		);
+	});
+
+	it("clips long titles inside the in-flight list", () => {
+		const list: TodoItem[] = [
+			{ id: "1", title: "x".repeat(200), status: "in_progress" },
+			{ id: "2", title: "B", status: "done" },
+		];
+		expect(formatAck(list, "2")).toBe(`✓ #2 B done (1/2 done) · ◉ still in flight: #1 ${"x".repeat(60)}…`);
 	});
 
 	it("picks the earliest unblocked task as next", () => {
