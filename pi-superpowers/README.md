@@ -39,13 +39,20 @@ This package bundles the following skills from [Superpowers](https://github.com/
 
 ## Development
 
-To update skills from upstream:
+Skills are vendored from upstream, never written here. Moving to a new upstream release is two steps:
+
+1. Edit `skills.config.json`:
+   - `ref` — the upstream tag to track (e.g. `v7.0.1`); it can be any tag, branch or commit-ish that exists in the upstream repo
+   - `skills` — keep this list in sync with the upstream `skills/` directory: add names for new skills, remove names for ones upstream deleted
+2. Run:
 
 ```bash
 npm run download-skills
 ```
 
-This clones the [obra/superpowers](https://github.com/obra/superpowers) repo, copies skill directories with `supo-` prefix, and updates SKILL.md frontmatter and cross-references.
+The script clones the [obra/superpowers](https://github.com/obra/superpowers) repo at `ref` (cached under `/tmp/pi-superpowers-cache`), copies each listed skill directory with the `supo-` prefix, rewrites SKILL.md frontmatter names and cross-references, and deletes any `supo-*` directory whose skill is no longer listed. Re-running it is idempotent, so it is safe after a partial edit.
+
+Then review the diff: upstream releases sometimes restructure a skill (files moved into `references/`, docs removed) or change behavior a README description still describes.
 
 ## License
 
