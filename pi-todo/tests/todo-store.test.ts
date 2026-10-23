@@ -255,16 +255,61 @@ describe("formatAck", () => {
 			{ id: "2", title: "修 CI", status: "in_progress" },
 			{ id: "3", title: "更新文档", status: "pending" },
 		];
-		expect(formatAck(flying, "1")).toBe("✓ #1 写单测 done (1/3 done) · next: #3 更新文档");
+		expect(formatAck(flying, "1")).toBe(
+			"✓ #1 写单测 done (1/3 done) · next: #3 更新文档 · ◉ still in flight: #2 修 CI",
+		);
 	});
 
-	it("says what is in flight when nothing is left to pick up", () => {
+	it("names every in-flight task when nothing is left to pick up", () => {
 		const flying: TodoItem[] = [
 			{ id: "1", title: "A", status: "in_progress" },
 			{ id: "2", title: "B", status: "done" },
 			{ id: "3", title: "C", status: "in_progress" },
 		];
-		expect(formatAck(flying, "2")).toBe("✓ #2 B done (1/3 done) · 2 in flight");
+		expect(formatAck(flying, "2")).toBe("✓ #2 B done (1/3 done) · ◉ still in flight: #1 A, #3 C");
+	});
+
+	it("uses also in flight when the update is not a completion", () => {
+		const list: TodoItem[] = [
+			{ id: "1", title: "写单测", status: "done" },
+			{ id: "2", title: "修 CI", status: "in_progress" },
+			{ id: "3", title: "更新文档", status: "in_progress" },
+			{ id: "4", title: "发布", status: "pending" },
+		];
+		expect(formatAck(list, "3")).toBe(
+			"◉ #3 更新文档 in_progress (1/4 done · 1 pending) · ◉ also in flight: #2 修 CI",
+		);
+	});
+
+	it("folds more than two in-flight tasks", () => {
+		const list: TodoItem[] = [
+			{ id: "1", title: "甲", status: "in_progress" },
+			{ id: "2", title: "乙", status: "in_progress" },
+			{ id: "3", title: "丙", status: "in_progress" },
+			{ id: "4", title: "丁", status: "done" },
+			{ id: "5", title: "戊", status: "pending" },
+		];
+		expect(formatAck(list, "4")).toBe(
+			"✓ #4 丁 done (1/5 done) · next: #5 戊 · ◉ still in flight: #1 甲, #2 乙 +1",
+		);
+	});
+
+	it("clips long titles inside the in-flight list", () => {
+		const list: TodoItem[] = [
+			{ id: "1", title: "x".repeat(200), status: "in_progress" },
+			{ id: "2", title: "B", status: "done" },
+		];
+		const out = formatAck(list, "2");
+		expect(out).toContain("…");
+		expect(out.length).toBeLessThan(160);
+	});
+
+	it("adds nothing when the updated task is the only one in flight", () => {
+		const list: TodoItem[] = [
+			{ id: "1", title: "A", status: "in_progress" },
+			{ id: "2", title: "B", status: "pending" },
+		];
+		expect(formatAck(list, "1")).toBe("◉ #1 A in_progress (0/2 done · 1 pending)");
 	});
 
 	it("picks the earliest unblocked task as next", () => {
