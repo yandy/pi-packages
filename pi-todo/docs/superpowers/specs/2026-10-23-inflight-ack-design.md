@@ -1,7 +1,7 @@
 # Design: pi-todo — `update` 的 ack 点名「还在飞」的任务
 
 **Date:** 2026-10-23
-**Status:** proposed（待人工批准后进 writing-plans）
+**Status:** implemented（0.4.0）
 
 ## 意图与为什么
 
