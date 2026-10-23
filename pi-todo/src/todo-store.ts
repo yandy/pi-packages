@@ -134,9 +134,28 @@ export function clipTitle(title: string): string {
 	return title.length > 60 ? `${title.slice(0, 60)}…` : title;
 }
 
+/** 最多点名的在飞项数；超出以 ` +N` 折叠，避免 ack 行长失控。 */
+const IN_FLIGHT_NAMES = 2;
+
 /**
- * update 成功后的单行 ack：本次变更、进度、下一个该做的任务。
- * 它面向模型而非用户：给出闭环信号，让「完成即更新」能被强化。
+ * 「还有谁在飞」尾段：排除本次更新的那条（自己点自己没信息量）。
+ * 本次更新让任务变 done 时用 still in flight，其余用 also in flight。
+ */
+function formatInFlightOthers(todos: TodoItem[], id: string, justFinished: boolean): string {
+	const others = todos.filter((t) => t.status === "in_progress" && t.id !== id);
+	if (others.length === 0) return "";
+	const names = others
+		.slice(0, IN_FLIGHT_NAMES)
+		.map((t) => `#${t.id} ${clipTitle(t.title)}`)
+		.join(", ");
+	const more = others.length > IN_FLIGHT_NAMES ? ` +${others.length - IN_FLIGHT_NAMES}` : "";
+	return ` · ◉ ${justFinished ? "still in flight" : "also in flight"}: ${names}${more}`;
+}
+
+/**
+ * update 成功后的单行 ack：本次变更、进度、下一个该做的任务，以及其余在飞项。
+ * 它面向模型而非用户：给出闭环信号，让「完成即更新」能被强化，也让卡住的
+ * in_progress 不会因为「只看 pending 挑 next」而从反馈里消失。
  */
 export function formatAck(todos: TodoItem[], id: string): string {
 	const total = todos.length;
@@ -146,11 +165,13 @@ export function formatAck(todos: TodoItem[], id: string): string {
 	const target = todos.find((t) => t.id === id);
 	if (!target) return `${done}/${total} done`;
 
+	const tail = formatInFlightOthers(todos, target.id, target.status === "done");
+
 	if (target.status === "in_progress") {
 		// 并行派发时需要知道还剩多少可领，但不递「next」去催生新的并发
 		const pending = todos.filter((t) => t.status === "pending").length;
-		const tail = pending > 0 ? ` · ${pending} pending` : "";
-		return `◉ #${target.id} ${clipTitle(target.title)} in_progress (${done}/${total} done${tail})`;
+		const pendingTail = pending > 0 ? ` · ${pending} pending` : "";
+		return `◉ #${target.id} ${clipTitle(target.title)} in_progress (${done}/${total} done${pendingTail})${tail}`;
 	}
 
 	const marker = target.status === "done" ? "✓" : "○";
@@ -162,12 +183,10 @@ export function formatAck(todos: TodoItem[], id: string): string {
 		const blockers = (next.blockedBy ?? []).filter((dep) => byId.get(dep)?.status !== "done");
 		const suffix =
 			isBlocked(todos, next) && blockers.length > 0 ? ` (blocked by ${blockers.map((b) => `#${b}`).join(", ")})` : "";
-		return `${head} · next: #${next.id} ${clipTitle(next.title)}${suffix}`;
+		return `${head} · next: #${next.id} ${clipTitle(next.title)}${suffix}${tail}`;
 	}
 
-	// 没东西可领但还有在飞的：报数而不是沉默，否则父会以为已经完工
-	const inFlight = todos.filter((t) => t.status === "in_progress").length;
-	return inFlight > 0 ? `${head} · ${inFlight} in flight` : head;
+	return `${head}${tail}`;
 }
 
 const STATUS_MARKER: Record<TodoItem["status"], string> = {

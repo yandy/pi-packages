@@ -132,7 +132,9 @@ describe("parallel dispatch", () => {
 		expect(first.content[0].text).toBe("◉ #1 读 README in_progress (0/3 done · 2 pending)");
 
 		const second = await run({ action: "update", id: "2", status: "in_progress" }, "d2");
-		expect(second.content[0].text).toBe("◉ #2 数文件 in_progress (0/3 done · 1 pending)");
+		expect(second.content[0].text).toBe(
+			"◉ #2 数文件 in_progress (0/3 done · 1 pending) · ◉ also in flight: #1 读 README",
+		);
 
 		// 两个同时 in_progress 合法，list 也能看到
 		const board = await run({ action: "list" }, "d3");
@@ -140,7 +142,9 @@ describe("parallel dispatch", () => {
 
 		// #1 完成后，next 必须是唯一还没在飞的 #3，而不是已被别人占着的 #2
 		const done = await run({ action: "update", id: "1", status: "done" }, "d4");
-		expect(done.content[0].text).toBe("✓ #1 读 README done (1/3 done) · next: #3 报告");
+		expect(done.content[0].text).toBe(
+			"✓ #1 读 README done (1/3 done) · next: #3 报告 · ◉ still in flight: #2 数文件",
+		);
 	});
 
 	it("reports in flight instead of a next when everything left is occupied", async () => {
@@ -151,9 +155,10 @@ describe("parallel dispatch", () => {
 				{ title: "B", status: "pending" },
 			],
 		});
-		await run({ action: "update", id: "2", status: "in_progress" }, "e1");
+		const second = await run({ action: "update", id: "2", status: "in_progress" }, "e1");
+		expect(second.content[0].text).toBe("◉ #2 B in_progress (0/2 done) · ◉ also in flight: #1 A");
 		const r = await run({ action: "update", id: "1", status: "done" }, "e2");
-		expect(r.content[0].text).toBe("✓ #1 A done (1/2 done) · 1 in flight");
+		expect(r.content[0].text).toBe("✓ #1 A done (1/2 done) · ◉ still in flight: #2 B");
 	});
 });
 
