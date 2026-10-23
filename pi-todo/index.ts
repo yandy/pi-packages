@@ -77,7 +77,7 @@ export default function (pi: ExtensionAPI) {
 			"Track a task list for the current session.\n" +
 			'"set" replaces the whole list with items {title, status: pending|in_progress|done, blockedBy?: ids} and returns it. ' +
 			"The tool owns ids: it assigns 1..n by position and renumbers them on every set, so never pass an id.\n" +
-			'"update" changes one task by its exact id (status / title / blockedBy) and returns progress plus the next task.\n' +
+			'"update" changes one task by its exact id (status / title / blockedBy) and returns progress, the next task, and any other tasks still in flight.\n' +
 			'"list" returns the current list.',
 		promptSnippet: "Track a task list (set/update/list); keep statuses current.",
 		promptGuidelines: [

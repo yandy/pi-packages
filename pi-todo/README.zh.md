@@ -43,7 +43,7 @@ todo(action: "set" | "update" | "list", items?, id?, status?, title?, blockedBy?
 - 写错不猜测：`Task not found` 会回显当前清单（已截断，最多 20 行），本轮就能自纠。
 - `set` 是整表替换，id 会重新编号；请以最新 `set`/`update` 回显的 id 为准。
 
-`update` 成功时返回单行 ack：本次变更、进度，以及下一个任务。
+`update` 成功时返回单行 ack：本次变更、进度、下一个任务，以及其余仍在飞的任务。
 
 ### 并行工作与 subagent
 
@@ -52,7 +52,7 @@ todo(action: "set" | "update" | "list", items?, id?, status?, title?, blockedBy?
 并行派发是支持的：
 
 - 派出去就标 `in_progress`，结果回来标 `done`；允许多个任务同时 `in_progress`
-- `next` 不会推荐已经在飞的任务；每条 ack 都会点名其余仍在飞的任务（`· ◉ still in flight: #2 修 CI`，超过两个折叠为 ` +N`），卡住的 `in_progress` 不会无人察觉
+- `next` 不会推荐已经在飞的任务；每条 ack 都会点名其余仍在飞的任务（前两条逐一点名，其余折叠为 ` +N`，如 `· ◉ still in flight: #2 修 CI`），卡住的 `in_progress` 会在下一次 update 时被点名，而不是被静默丢掉
 - `set` 是整表替换并重新编号：若有任务在飞，返回里会附一行 `⚠ ids renumbered` 点名它们，因为你手里的 id 刚刚失效
 
 全部任务完成后，组件会自动隐藏。

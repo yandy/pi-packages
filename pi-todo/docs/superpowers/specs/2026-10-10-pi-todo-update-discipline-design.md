@@ -369,8 +369,8 @@ fresh reviewer 提的 8 条 Minor，按「minor 不做顺手修」的规矩留�
 | 情形 | 输出 |
 |---|---|
 | `next` 候选 | 只看 `pending`（`in_progress` 一律排除），第一个未阻塞的；全阻塞时退化到第一个 pending 并标 `(blocked by #x)` |
-| 本次把某项设为 in_progress | `◉ #2 B in_progress (1/5 done · 3 pending)` —— 给可领数量，但**不**递 `next`，不主动催生并发 |
-| 无 pending 可领、仍有在飞 | `✓ #1 A done (1/3 done) · 2 in flight` —— 不沉默，否则父会以为完工 |
+| 本次把某项设为 in_progress | `◉ #2 B in_progress (1/5 done · 3 pending)` —— 给可领数量，但**不**递 `next`，不主动催生并发（若还有其它在飞项，末尾追加点名，见新 spec 规则 3） |
+| ~~无 pending 可领、仍有在飞~~ | ~~`✓ #1 A done (1/3 done) · 2 in flight` —— 不沉默，否则父会以为完工~~ → **已被取代**：改为点名在飞项 `· ◉ still in flight: #1 A, #3 C`，见 [2026-10-23-inflight-ack-design.md](2026-10-23-inflight-ack-design.md) 规则 3–4 |
 | `set` 时板上有在飞任务 | 清单后附 `⚠ ids renumbered by this set; previously in flight: #2 B. Re-mark them...` |
 
 最后一条是位置式 id 的必然代价：`set` 重编号会让父手里的引用静默失效，串行时无所谓（就它一个人），并行时是真事故。这里选择**警告而不禁止** —— `set` 的语义本就是整表替换，拦下来会让「重新规划」变成需要两次调用的操作。

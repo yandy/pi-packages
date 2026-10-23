@@ -43,6 +43,8 @@ todo(action: "set" | "update" | "list", items?, id?, status?, title?, blockedBy?
 - A wrong id is never guessed at: the error echoes the current board (titles clipped, up to 20 lines) so it can be corrected without an extra `list` call.
 - `set` replaces the whole list, so ids are renumbered — trust the ids echoed by the latest `set`/`update`.
 
+`update` returns a single-line ack on success: what changed, the progress, the next task, and any other tasks still in flight.
+
 ### Parallel work and subagents
 
 The board belongs to **one session**: a subagent runs its own `todo` instance and can neither see nor update yours. So keep the parent as the only writer — hand item #2 to a subagent, and mark it yourself.
@@ -50,7 +52,7 @@ The board belongs to **one session**: a subagent runs its own `todo` instance an
 Parallel dispatch is supported:
 
 - mark an item `in_progress` when you dispatch it, `done` when its result comes back; several items may be `in_progress` at once
-- `next` never suggests a task that is already in flight, and every ack names the other tasks still in flight (`· ◉ still in flight: #2 修 CI`, folded to ` +N` past two), so a stale `in_progress` item cannot go unnoticed
+- `next` never suggests a task that is already in flight; every ack names the other tasks still in flight (the first two by name, the rest folded into ` +N`, e.g. `· ◉ still in flight: #2 修 CI`), so a stale `in_progress` item is named on the next update instead of being silently dropped
 - `set` replaces the board and renumbers ids; if items were in flight it appends a `⚠ ids renumbered` line naming them, because your in-hand references just broke
 
 The widget hides automatically when every task is done.
