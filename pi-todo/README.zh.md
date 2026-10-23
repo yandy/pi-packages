@@ -6,7 +6,7 @@
 
 - **一个工具**，三种操作：`set`（规划所有任务）、`update`（更改一个任务）、`list`（查看进度）
 - **提示词里写死更新纪律**：工具描述与 guidelines 明确了何时必须更新（每个在飞任务各一个 `in_progress`、完成后立即 `done`）
-- **每次 update 都有反馈**：`update` 返回进度与下一个任务（`✓ #2 写单测 done (2/5 done) · next: #3 修 CI`），不再只是一个 `OK`
+- **每次 update 都有反馈**：`update` 返回进度、下一个任务，以及仍在飞的任务（`✓ #2 写单测 done (2/5 done) · next: #3 修 CI · ◉ still in flight: #4 发布`），不再只是一个 `OK`
 - **三种状态**：`pending` → `in_progress` → `done`
 - **依赖关系**：可选的 `blockedBy` 数组，含自依赖和循环检测
 - **紧凑组件**悬于编辑器上方：`○` pending · `◉` in_progress · `✓` done · `🔒` blocked；清单变长时自动开窗（锚定在飞任务），并常驻一行进度
@@ -52,7 +52,7 @@ todo(action: "set" | "update" | "list", items?, id?, status?, title?, blockedBy?
 并行派发是支持的：
 
 - 派出去就标 `in_progress`，结果回来标 `done`；允许多个任务同时 `in_progress`
-- `next` 不会推荐已经在飞的任务；无任务可领时 ack 会回 `· 2 in flight` 而不是沉默
+- `next` 不会推荐已经在飞的任务；每条 ack 都会点名其余仍在飞的任务（`· ◉ still in flight: #2 修 CI`，超过两个折叠为 ` +N`），卡住的 `in_progress` 不会无人察觉
 - `set` 是整表替换并重新编号：若有任务在飞，返回里会附一行 `⚠ ids renumbered` 点名它们，因为你手里的 id 刚刚失效
 
 全部任务完成后，组件会自动隐藏。

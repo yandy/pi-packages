@@ -6,7 +6,7 @@ A minimal pi package that adds a single `todo` tool with an editor-overhead widg
 
 - **One tool**, three actions: `set` (plan all tasks), `update` (change one task), `list` (review progress)
 - **Update discipline in the prompt**: the tool description and guidelines pin down *when* to update (one `in_progress` per in-flight task, mark `done` immediately)
-- **Feedback on every update**: `update` returns progress plus the next task (`✓ #2 写单测 done (2/5 done) · next: #3 修 CI`), not a bare `OK`
+- **Feedback on every update**: `update` returns progress, the next task, and the tasks still in flight (`✓ #2 写单测 done (2/5 done) · next: #3 修 CI · ◉ still in flight: #4 发布`), not a bare `OK`
 - **3 states**: `pending` → `in_progress` → `done`
 - **Dependencies**: optional `blockedBy` array, with self-dependency and cycle detection
 - **Compact widget** above the editor: `○` pending · `◉` in_progress · `✓` done · `🔒` blocked — windowed around the in-flight task when the board grows, with an always-visible progress line
@@ -50,7 +50,7 @@ The board belongs to **one session**: a subagent runs its own `todo` instance an
 Parallel dispatch is supported:
 
 - mark an item `in_progress` when you dispatch it, `done` when its result comes back; several items may be `in_progress` at once
-- `next` never suggests a task that is already in flight, and an ack reports `· 2 in flight` when nothing is left to pick up
+- `next` never suggests a task that is already in flight, and every ack names the other tasks still in flight (`· ◉ still in flight: #2 修 CI`, folded to ` +N` past two), so a stale `in_progress` item cannot go unnoticed
 - `set` replaces the board and renumbers ids; if items were in flight it appends a `⚠ ids renumbered` line naming them, because your in-hand references just broke
 
 The widget hides automatically when every task is done.
