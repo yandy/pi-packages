@@ -26,7 +26,11 @@ export default function (pi: ExtensionAPI) {
 				Type.Number({ minimum: 1, maximum: 20, default: 10, description: "Number of results (1-20)." }),
 			),
 			provider: Type.Optional(
-				Type.String({ enum: ["exa", "aliyun"], description: "Search provider (exa or aliyun). Default: exa." }),
+				Type.String({
+					enum: ["exa", "deepseek", "aliyun"],
+					description:
+						"Search provider: exa (free default), deepseek (requires key, good Chinese support, search syntax), aliyun (requires key, Chinese fallback). Default: fallback chain exa → deepseek → aliyun.",
+				}),
 			),
 		}),
 		renderCall(args, theme) {
@@ -62,8 +66,9 @@ export default function (pi: ExtensionAPI) {
 			};
 
 			try {
+				const deepseekApiKey = await ctx.modelRegistry.getApiKeyForProvider("deepseek").catch(() => undefined);
 				const aliyunApiKey = await ctx.modelRegistry.getApiKeyForProvider("aliyun").catch(() => undefined);
-				const providers = buildProviders({ aliyun: aliyunApiKey });
+				const providers = buildProviders({ deepseek: deepseekApiKey, aliyun: aliyunApiKey });
 				const result = await search(query, p.numResults ?? 10, signal, onProgress, p.provider, providers);
 				const providerLabel = `\n\n*Provider: ${result.providerLabel}*`;
 				return {

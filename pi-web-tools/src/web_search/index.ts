@@ -1,4 +1,5 @@
 import { aliyunSearch } from "./aliyun";
+import { deepseekSearch } from "./deepseek";
 import { exaSearch } from "./exa";
 import type { SearchResponse } from "./types";
 
@@ -12,6 +13,10 @@ interface ProviderEntry {
 export function buildProviders(apiKeys: Record<string, string | undefined>): ProviderEntry[] {
 	return [
 		{ name: "exa", fn: exaSearch },
+		{
+			name: "deepseek",
+			fn: (query, numResults, signal) => deepseekSearch(query, numResults, signal, apiKeys.deepseek),
+		},
 		{
 			name: "aliyun",
 			fn: (query, numResults, signal) => aliyunSearch(query, numResults, signal, apiKeys.aliyun),

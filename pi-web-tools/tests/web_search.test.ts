@@ -375,6 +375,110 @@ describe("search orchestrator", () => {
 		expect(result.providerLabel).toBe("aliyun");
 	});
 
+	it("falls back to deepseek when exa fails", async () => {
+		vi.stubEnv("EXA_API_KEY", "");
+		vi.stubEnv("DEEPSEEK_API_KEY", "");
+
+		testServer.setRequestHandler(CallToolRequestSchema, async () => {
+			throw new Error("Exa down");
+		});
+
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					results: [{ title: "DeepSeek Fallback", url: "https://ds.com", snippet: "ds" }],
+				}),
+		});
+
+		const providers = buildProviders({ deepseek: "ds-key" });
+		const result = await search("test", 5, undefined, undefined, undefined, providers);
+		expect(result.providerLabel).toBe("deepseek");
+		expect(result.sources[0].title).toBe("DeepSeek Fallback");
+	});
+
+	it("falls back to aliyun when exa and deepseek both fail", async () => {
+		vi.stubEnv("EXA_API_KEY", "");
+		vi.stubEnv("DEEPSEEK_API_KEY", "");
+		vi.stubEnv("ALIYUN_API_KEY", "aliyun-key");
+
+		testServer.setRequestHandler(CallToolRequestSchema, async (request) => {
+			if (request.params.name === "bailian_web_search") {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								pages: [{ title: "Aliyun Third", link: "https://a.com", snippet: "third" }],
+							}),
+						},
+					],
+				};
+			}
+			throw new Error("Exa down");
+		});
+
+		mockFetch.mockResolvedValueOnce({
+			ok: false,
+			status: 500,
+			json: () => Promise.resolve({ error: { message: "server error" } }),
+		});
+
+		const providers = buildProviders({ deepseek: "ds-key", aliyun: "aliyun-key" });
+		const result = await search("test", 5, undefined, undefined, undefined, providers);
+		expect(result.providerLabel).toBe("aliyun");
+		expect(result.sources[0].title).toBe("Aliyun Third");
+	});
+
+	it("uses only deepseek when provider specified", async () => {
+		vi.stubEnv("EXA_API_KEY", "");
+		vi.stubEnv("DEEPSEEK_API_KEY", "");
+
+		// 若 exa 被尝试，会先成功返回 exa 结果；断言 deepseek 结果即证明 exa 未被尝试
+		testServer.setRequestHandler(CallToolRequestSchema, async () => ({
+			content: [{ type: "text", text: "Title: Exa Result\nURL: https://exa.com\nHighlights:\nexa content" }],
+		}));
+
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					results: [{ title: "DeepSeek Direct", url: "https://ds.com", snippet: "direct" }],
+				}),
+		});
+
+		const providers = buildProviders({ deepseek: "ds-key" });
+		const result = await search("test", 5, undefined, undefined, "deepseek", providers);
+		expect(result.providerLabel).toBe("deepseek");
+		expect(result.sources[0].title).toBe("DeepSeek Direct");
+	});
+
+	it("skips keyless deepseek in chain and falls through to aliyun", async () => {
+		vi.stubEnv("EXA_API_KEY", "");
+		vi.stubEnv("DEEPSEEK_API_KEY", "");
+		vi.stubEnv("ALIYUN_API_KEY", "aliyun-key");
+
+		testServer.setRequestHandler(CallToolRequestSchema, async (request) => {
+			if (request.params.name === "bailian_web_search") {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								pages: [{ title: "Aliyun After Keyless", link: "https://a.com", snippet: "after" }],
+							}),
+						},
+					],
+				};
+			}
+			throw new Error("Exa down");
+		});
+
+		const providers = buildProviders({ aliyun: "aliyun-key" });
+		const result = await search("test", 5, undefined, undefined, undefined, providers);
+		expect(result.providerLabel).toBe("aliyun");
+	});
+
 	it("throws when all sources fail", async () => {
 		vi.stubEnv("EXA_API_KEY", "");
 		vi.stubEnv("ALIYUN_API_KEY", "");
