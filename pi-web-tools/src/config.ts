@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 
-interface WebToolsConfig {
+export interface WebToolsConfig {
 	websearch?: {
 		provider?: string;
 	};

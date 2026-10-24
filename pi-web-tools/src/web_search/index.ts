@@ -57,5 +57,5 @@ export async function search(
 		}
 	}
 
-	throw new Error(`All search sources failed:\n${errors.map((e) => `  - ${e}`).join("\n")}`);
+	throw new Error(`All search providers failed:\n${errors.map((e) => `  - ${e}`).join("\n")}`);
 }

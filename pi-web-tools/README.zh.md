@@ -96,6 +96,8 @@ pi -e ./index.ts
 
 回落触发条件（仅链式模式）：local 硬失败（网络错误/超时/非 2xx），或 local 成功但内容薄（空壳页或垃圾标签堆积页，有效文本 < 200 字符）。薄内容时若 DeepSeek 也失败，则返回 local 原结果。`format: "html"` 永不回落（DeepSeek 只返回 Markdown）。显式指定 `provider`（参数或配置）时独占使用——唯一例外：`provider: "deepseek"` + `format: "html"` 自动走 local。
 
+注：`format: "text"` 搭配 DeepSeek 时返回 Markdown 原文（Markdown 本身即文本，不做纯文本转换）。
+
 ## 开发
 
 ```bash

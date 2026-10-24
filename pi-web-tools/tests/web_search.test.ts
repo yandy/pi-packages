@@ -489,7 +489,7 @@ describe("search orchestrator", () => {
 
 		const providers = buildProviders({});
 		await expect(search("test", 5, undefined, undefined, undefined, providers)).rejects.toThrow(
-			"All search sources failed",
+			"All search providers failed",
 		);
 	});
 

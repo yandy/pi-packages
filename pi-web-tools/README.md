@@ -96,6 +96,8 @@ Fetch content from a URL and return as text, markdown, or raw HTML.
 
 Fallback triggers (chain mode only): local hard failure (network error / timeout / non-2xx), or local success with thin content (empty shell or junk-tag pages, < 200 meaningful characters). If DeepSeek also fails after a thin-content local result, the local result is returned as-is. `format: "html"` never falls back (DeepSeek returns markdown only). With `provider` specified (parameter or config), that provider is used exclusively — except `provider: "deepseek"` + `format: "html"`, which auto-routes to local.
 
+Note: `format: "text"` with DeepSeek returns the markdown body as-is (Markdown is text; no plain-text conversion is applied).
+
 ## Development
 
 ```bash
