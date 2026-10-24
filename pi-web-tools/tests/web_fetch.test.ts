@@ -222,3 +222,182 @@ describe("isThinContent", () => {
 		expect(isThinContent(article, "text/markdown")).toBe(false);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// webFetch provider 路由
+// ---------------------------------------------------------------------------
+
+describe("webFetch 路由", () => {
+	const dsBody = JSON.stringify({ title: "DS Page", content: "# Rendered\n\nDeepSeek content." });
+
+	function localOk(content = "Full article body. ".repeat(30), contentType = "text/html") {
+		return vi.fn().mockResolvedValueOnce(
+			mockFetchResponse({
+				headers: new Headers({ "content-type": contentType }),
+				text: () => Promise.resolve(`<html><body>${content}</body></html>`),
+			}),
+		);
+	}
+
+	it("returns local result without deepseek when local succeeds with real content", async () => {
+		const globalFetch = vi.fn();
+		vi.stubGlobal("fetch", globalFetch);
+		try {
+			const result = await webFetch("https://example.com", "markdown", 30, undefined, localOk(), {
+				deepseekApiKey: "k",
+			});
+			expect(result.provider).toBe("local");
+			expect(globalFetch).not.toHaveBeenCalled();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("falls back to deepseek on local hard failure when key available", async () => {
+		const localFail = vi.fn().mockRejectedValueOnce(new Error("HTTP 403 from https://example.com"));
+		const globalFetch = vi.fn().mockResolvedValueOnce(mockJsonResponse(200, JSON.parse(dsBody)));
+		vi.stubGlobal("fetch", globalFetch);
+		try {
+			const result = await webFetch("https://example.com", "markdown", 30, undefined, localFail, {
+				deepseekApiKey: "k",
+			});
+			expect(result.provider).toBe("deepseek");
+			expect(result.title).toBe("DS Page");
+			expect(globalFetch).toHaveBeenCalledWith(
+				"https://api.deepseek.com/v1/tools/fetch",
+				expect.objectContaining({ method: "POST" }),
+			);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("propagates local error when no deepseek key", async () => {
+		vi.stubEnv("DEEPSEEK_API_KEY", "");
+		const localFail = vi.fn().mockRejectedValueOnce(new Error("HTTP 403 from https://example.com"));
+		const globalFetch = vi.fn();
+		vi.stubGlobal("fetch", globalFetch);
+		try {
+			await expect(
+				webFetch("https://example.com", "markdown", 30, undefined, localFail, { deepseekApiKey: "" }),
+			).rejects.toThrow("HTTP 403");
+			expect(globalFetch).not.toHaveBeenCalled();
+		} finally {
+			vi.unstubAllGlobals();
+			vi.unstubAllEnvs();
+		}
+	});
+
+	it("aggregates errors when both providers fail", async () => {
+		const localFail = vi.fn().mockRejectedValueOnce(new Error("HTTP 403 from https://example.com"));
+		const globalFetch = vi.fn().mockResolvedValueOnce(mockJsonResponse(404, { error: { message: "no content" } }));
+		vi.stubGlobal("fetch", globalFetch);
+		try {
+			await expect(
+				webFetch("https://example.com", "markdown", 30, undefined, localFail, { deepseekApiKey: "k" }),
+			).rejects.toThrow("All fetch providers failed");
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("falls back to deepseek on thin content and returns deepseek result", async () => {
+		const thinLocal = localOk("<div></div>");
+		const globalFetch = vi.fn().mockResolvedValueOnce(mockJsonResponse(200, JSON.parse(dsBody)));
+		vi.stubGlobal("fetch", globalFetch);
+		try {
+			const result = await webFetch("https://example.com", "markdown", 30, undefined, thinLocal, {
+				deepseekApiKey: "k",
+			});
+			expect(result.provider).toBe("deepseek");
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("returns local result when thin content and deepseek also fails", async () => {
+		const thinLocal = localOk("<div></div>");
+		const globalFetch = vi.fn().mockResolvedValueOnce(mockJsonResponse(404, { error: { message: "no content" } }));
+		vi.stubGlobal("fetch", globalFetch);
+		try {
+			const result = await webFetch("https://example.com", "markdown", 30, undefined, thinLocal, {
+				deepseekApiKey: "k",
+			});
+			expect(result.provider).toBe("local");
+			// deepseek 确实被尝试且失败，而非从未尝试
+			expect(globalFetch).toHaveBeenCalledTimes(1);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("never falls back for html format in chain mode", async () => {
+		const localFail = vi.fn().mockRejectedValueOnce(new Error("HTTP 500 from https://example.com"));
+		const globalFetch = vi.fn();
+		vi.stubGlobal("fetch", globalFetch);
+		try {
+			await expect(
+				webFetch("https://example.com", "html", 30, undefined, localFail, { deepseekApiKey: "k" }),
+			).rejects.toThrow("HTTP 500");
+			expect(globalFetch).not.toHaveBeenCalled();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("auto-routes explicit deepseek with html format to local", async () => {
+		const globalFetch = vi.fn();
+		vi.stubGlobal("fetch", globalFetch);
+		try {
+			const result = await webFetch("https://example.com", "html", 30, undefined, localOk("<p>raw</p>"), {
+				provider: "deepseek",
+				deepseekApiKey: "k",
+			});
+			expect(result.provider).toBe("local");
+			expect(globalFetch).not.toHaveBeenCalled();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("throws when explicit deepseek requested without key", async () => {
+		vi.stubEnv("DEEPSEEK_API_KEY", "");
+		const globalFetch = vi.fn();
+		vi.stubGlobal("fetch", globalFetch);
+		try {
+			await expect(
+				webFetch("https://example.com", "markdown", 30, undefined, localOk(), {
+					provider: "deepseek",
+					deepseekApiKey: "",
+				}),
+			).rejects.toThrow("DEEPSEEK_API_KEY not set");
+			expect(globalFetch).not.toHaveBeenCalled();
+		} finally {
+			vi.unstubAllGlobals();
+			vi.unstubAllEnvs();
+		}
+	});
+
+	it("does not fall back when provider explicitly local", async () => {
+		const localFail = vi.fn().mockRejectedValueOnce(new Error("HTTP 500 from https://example.com"));
+		const globalFetch = vi.fn();
+		vi.stubGlobal("fetch", globalFetch);
+		try {
+			await expect(
+				webFetch("https://example.com", "markdown", 30, undefined, localFail, {
+					provider: "local",
+					deepseekApiKey: "k",
+				}),
+			).rejects.toThrow("HTTP 500");
+			expect(globalFetch).not.toHaveBeenCalled();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("throws for unknown explicit provider", async () => {
+		await expect(
+			webFetch("https://example.com", "markdown", 30, undefined, localOk(), { provider: "bogus" }),
+		).rejects.toThrow("Unknown provider: bogus. Available: local, deepseek");
+	});
+});

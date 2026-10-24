@@ -26,14 +26,66 @@ function applyTruncation(content: string): string {
 	return content;
 }
 
+export interface WebFetchOptions {
+	provider?: string;
+	deepseekApiKey?: string;
+	onProgress?: (msg: string) => void;
+}
+
 export async function webFetch(
 	url: string,
 	format: "text" | "markdown" | "html",
 	timeout: number,
 	signal?: AbortSignal,
 	_fetch?: typeof fetch,
+	opts?: WebFetchOptions,
 ): Promise<FetchResult> {
-	return localFetch(url, format, timeout, signal, _fetch);
+	// 入口校验与 provider 无关，保持不变
+	const parsedUrl = new URL(url);
+	if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+		throw new Error(`Unsupported protocol: ${parsedUrl.protocol}`);
+	}
+
+	const apiKey = opts?.deepseekApiKey || process.env.DEEPSEEK_API_KEY;
+
+	if (opts?.provider === "deepseek") {
+		// deepseek 服务端只返回 Markdown，html 无法产出：自动走 local 并如实标注
+		if (format === "html") return localFetch(url, format, timeout, signal, _fetch);
+		return deepseekFetch(url, apiKey ?? "", timeout, signal);
+	}
+	if (opts?.provider === "local") {
+		return localFetch(url, format, timeout, signal, _fetch);
+	}
+	if (opts?.provider !== undefined) {
+		throw new Error(`Unknown provider: ${opts.provider}. Available: local, deepseek`);
+	}
+
+	// 链式：local → deepseek
+	const canFallback = format !== "html" && Boolean(apiKey);
+	try {
+		const local = await localFetch(url, format, timeout, signal, _fetch);
+		if (canFallback && isThinContent(local.content, local.contentType)) {
+			opts?.onProgress?.("Local fetch returned thin content, trying deepseek...");
+			try {
+				return await deepseekFetch(url, apiKey ?? "", timeout, signal);
+			} catch {
+				// 聊胜于无：返回 local 原结果
+				return local;
+			}
+		}
+		return local;
+	} catch (localErr) {
+		if (canFallback) {
+			try {
+				return await deepseekFetch(url, apiKey ?? "", timeout, signal);
+			} catch (dsErr) {
+				const localMsg = localErr instanceof Error ? localErr.message : String(localErr);
+				const dsMsg = dsErr instanceof Error ? dsErr.message : String(dsErr);
+				throw new Error(`All fetch providers failed:\n  - local: ${localMsg}\n  - deepseek: ${dsMsg}`);
+			}
+		}
+		throw localErr;
+	}
 }
 
 export async function localFetch(
