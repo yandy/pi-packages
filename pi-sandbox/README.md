@@ -44,7 +44,7 @@ PowerShell language mode follows startup constraints, not the ACL boundary: unde
 
 **`NUL` is writable in both modes** — an environment property of the device (its DACL grants Everyone read/write/execute), not a capability grant, so it holds regardless of which roots the token was granted. It is reachable only through the device spellings: `cmd`'s `> NUL` and Node's `\\.\NUL`. A *relative* `NUL` is not the device: libuv builds NT paths and does not apply the Win32 device-name mapping, so `writeFileSync('NUL', …)` is an ordinary file named `NUL` in the child's cwd — allowed inside the workspace, denied outside it, exactly like any other name.
 
-**Standing security-descriptor changes.** Granting is idempotent but never revoked: after pi exits, the ACEs, the world `FILE_DELETE_CHILD` deny and the Low mandatory label on the workspace and `%TEMP%` remain. Each granted `extraWritableDirs` directory gets the same standing changes in `workspace-write` (a per-directory capability ACE, the world `FILE_DELETE_CHILD` deny and a Low label); a directory that cannot be granted (you cannot change its ACL — no WRITE_DAC/WRITE_OWNER) makes the confined command **fail closed** — it is never run unconfined. This relaxes those trees for **any** Low-integrity process running as the same user, and clearing an inheritable label later does not walk back what already propagated to child objects. Switching back to `read-only` makes the capability ACEs inert (that token carries no capability SID) but does not remove them. The first grant eagerly propagates across the whole `%TEMP%` tree (seconds on a large tree); later calls hit the exact-match fast path. `%TEMP%` and `TMP` themselves are **not** rewritten — the sandbox's writable temp root is the host `%TEMP%`.
+**Standing security-descriptor changes.** Granting is idempotent but never revoked: after pi exits, the ACEs, the world `FILE_DELETE_CHILD` deny and the Low mandatory label on the workspace and `%TEMP%` remain. Each directory listed in `~/.pi/agent/sandbox-writable.json` gets the same standing changes in `workspace-write` (a per-directory capability ACE, the world `FILE_DELETE_CHILD` deny and a Low label); a directory that cannot be granted (you cannot change its ACL — no WRITE_DAC/WRITE_OWNER) makes the confined command **fail closed** — it is never run unconfined. This relaxes those trees for **any** Low-integrity process running as the same user, and clearing an inheritable label later does not walk back what already propagated to child objects. Switching back to `read-only` makes the capability ACEs inert (that token carries no capability SID) but does not remove them. The first grant eagerly propagates across the whole `%TEMP%` tree (seconds on a large tree); later calls hit the exact-match fast path. `%TEMP%` and `TMP` themselves are **not** rewritten — the sandbox's writable temp root is the host `%TEMP%`.
 
 **The `%TEMP%` cost.** `%TEMP%` is a shared user tree: its subdirectories inherit the deny ACE, so a third party that opens its own temp subdirectory with `GENERIC_ALL`/`FullControl` is refused. DELETE-based deletes, `MAXIMUM_ALLOWED` and ordinary read/write opens are unaffected.
 
@@ -59,14 +59,14 @@ The bundled `diagnose-windows-sandbox-acl` skill (diagnoses and repairs cases wh
 | Mode | File effects |
 |---|---|
 | `read-only` | only `/dev/null` writable |
-| `workspace-write` (default) | working directory + `/tmp` + `os.tmpdir()` + `extraWritableDirs` writable, everything else read-only |
+| `workspace-write` (default) | working directory + `/tmp` + `os.tmpdir()` + the extra roots listed in `sandbox-writable.json` writable, everything else read-only |
 | `danger-full-access` | sandbox bypassed entirely (explicit escape hatch) |
 
 Network is always allowed (no network isolation).
 
 ## /permission command
 
-- `/permission` — show the current status (mode and source, selected runner and enforcement, workspace; when `extraWritableDirs` is configured, an `extra writable:` line, suffixed `(inactive: <mode>)` when the current mode does not apply it)
+- `/permission` — show the current status (mode and source, selected runner and enforcement, workspace; when `sandbox-writable.json` lists extra roots, an `extra writable:` line, suffixed `(inactive: <mode>)` when the current mode does not apply them)
 - `/permission <read-only|workspace-write|danger-full-access>` — switch mode, **process-wide**: the next tool call in the parent session and in every subagent child session adopts it immediately
 
 ## Escalation approval (model-initiated, denial-first)
@@ -79,19 +79,20 @@ bash/write/edit take two optional parameters: `sandbox_permissions` (`workspace-
 
 The prompt offers **Deny / Allow once**, Deny first so a stray Enter does not grant anything; after choosing Deny you may type an **optional reason** (press Enter to skip) that is passed back to the model with the rejection, so it understands why instead of retrying a rewritten command. A subagent child session's escalation (foreground or background) is forwarded to the parent session's prompt (in-process pi-subagents, and the parent must have UI); with no parent channel available (headless, cross-process subagents) escalation is always refused (fail-closed) — widen the process mode with `/permission` to unblock it.
 
-**Cache/data relocation is out of policy.** The tools' rules instruct the model never to work around the sandbox by relocating global cache/data directories into the workspace — via environment-variable overrides (`XDG_CACHE_HOME`, `HOME`, `UV_CACHE_DIR`, `npm_config_cache`, `PNPM_HOME`, …), cache-relocating flags (`--cache-dir`, `--store-dir`, …), or config files — and to run tools unmodified instead, including on the escalated retry: a relocation is silent, it suppresses the denial that would have armed escalation. This is a prompt-level policy only: pi-sandbox does not detect or refuse such commands, and an explicit user request to relocate stays legitimate. The legitimate way to let a tool write outside the workspace in `workspace-write` mode is for the **user** to add that directory to `extraWritableDirs`; the model still must not relocate cache/data directories itself.
+**Cache/data relocation is out of policy.** The tools' rules instruct the model never to work around the sandbox by relocating global cache/data directories into the workspace — via environment-variable overrides (`XDG_CACHE_HOME`, `HOME`, `UV_CACHE_DIR`, `npm_config_cache`, `PNPM_HOME`, …), cache-relocating flags (`--cache-dir`, `--store-dir`, …), or config files — and to run tools unmodified instead, including on the escalated retry: a relocation is silent, it suppresses the denial that would have armed escalation. This is a prompt-level policy only: pi-sandbox does not detect or refuse such commands, and an explicit user request to relocate stays legitimate. The legitimate way to let a tool write outside the workspace in `workspace-write` mode is for the **user** to add that directory to `~/.pi/agent/sandbox-writable.json`; the model still must not relocate cache/data directories itself.
 
 ## Configuration
 
-One file is read: `~/.pi/agent/sandbox.json` (global); it is read once per pi process (the parsed config is cached), so config changes need a pi restart. A project-level `<project>/.pi/sandbox.json` is **ignored silently** — not parsed, not validated, not warned about. (The project directory is writable by the confined model, so a config layer there would hand the model the ability to rewrite its own `mode` / `runnerCommand`.) Missing or corrupt file, and invalid values, fall back the same way as before.
+Two files are read from the agent dir (`~/.pi/agent/`): `sandbox.json` for the sandbox itself, and `sandbox-writable.json` for the extra writable roots. Both are read once per pi process (the parsed config is cached), so config changes need a pi restart. A project-level `<project>/.pi/sandbox.json` or `<project>/.pi/sandbox-writable.json` is **ignored silently** — not parsed, not validated, not warned about. (The project directory is writable by the confined model, so a config layer there would hand the model the ability to rewrite its own `mode` / `runnerCommand` / writable roots.) Missing or corrupt files, and invalid values, fall back the same way as before; the two files fail independently — a broken `sandbox-writable.json` never changes `mode` or the runner settings.
+
+`~/.pi/agent/sandbox.json`:
 
 ```json
 {
   "mode": "workspace-write",
   "runnerCommand": null,
   "runnerFailureSignatures": null,
-  "probeTimeoutMs": 5000,
-  "extraWritableDirs": []
+  "probeTimeoutMs": 5000
 }
 ```
 
@@ -101,11 +102,18 @@ One file is read: `~/.pi/agent/sandbox.json` (global); it is read once per pi pr
 | `runnerCommand` | `null` | custom bwrap-compatible runner argv (must be paired with the next field) |
 | `runnerFailureSignatures` | `null` | fatal diagnostic signatures for the custom runner (non-empty single lines) |
 | `probeTimeoutMs` | `5000` | runner capability probe timeout (positive) |
-| `extraWritableDirs` | `[]` | extra writable roots in `workspace-write` mode, beyond the workspace and tmp; absolute paths only, `~` / `~/` (Win32 `~\`) expand to your home, `~user` unsupported; non-absolute or non-existing-directory entries are warned about at load and ignored; a value that is not a string array falls the whole config back to defaults |
+
+`~/.pi/agent/sandbox-writable.json` is a bare JSON array of directory paths — no root key — so adding a root is a one-line edit:
+
+```json
+["~/.cache/uv", "~/.local/share/pnpm/store", "/srv/team-data"]
+```
+
+Extra writable roots apply in `workspace-write` mode only, beyond the workspace and tmp. Entries must be absolute paths; `~` / `~/` (Win32 `~\`) expand to your home, `~user` is unsupported. Non-absolute, missing, or non-directory entries are warned about at load and ignored one by one; a file that is not a JSON array of strings (including invalid JSON) is warned about and ignored as a whole, leaving no extra roots. A missing file means no extra roots, silently — the same as `[]`. `extraWritableDirs` inside `sandbox.json` is a leftover from 1.7.x: it is warned about and ignored — move the list to `sandbox-writable.json`.
 
 ### Example: writable cache directories for common tools
 
-Tools that keep a global cache or store outside the workspace fail (or re-download every time) in `workspace-write` mode. Listing those directories in `extraWritableDirs` is the intended fix: the user authorizes the storage directories once, and the model then runs the tools unmodified — no `UV_CACHE_DIR` / `PNPM_HOME` / `npm_config_cache` relocation (see "Cache/data relocation is out of policy" above).
+Tools that keep a global cache or store outside the workspace fail (or re-download every time) in `workspace-write` mode. Listing those directories in `~/.pi/agent/sandbox-writable.json` is the intended fix: the user authorizes the storage directories once, and the model then runs the tools unmodified — no `UV_CACHE_DIR` / `PNPM_HOME` / `npm_config_cache` relocation (see "Cache/data relocation is out of policy" above).
 
 Entries must already exist (missing directories are warned about and ignored), so create them first:
 
@@ -114,17 +122,14 @@ mkdir -p ~/.cache/uv ~/.local/share/pnpm/store ~/.cache/pnpm ~/.npm ~/.cache/pip
 ```
 
 ```json
-{
-  "mode": "workspace-write",
-  "extraWritableDirs": [
-    "~/.cache/uv",
-    "~/.local/share/pnpm/store",
-    "~/.cache/pnpm",
-    "~/.npm",
-    "~/.cache/pip",
-    "~/.cache/huggingface"
-  ]
-}
+[
+  "~/.cache/uv",
+  "~/.local/share/pnpm/store",
+  "~/.cache/pnpm",
+  "~/.npm",
+  "~/.cache/pip",
+  "~/.cache/huggingface"
+]
 ```
 
 | Tool | Directory (Linux defaults) | Override | Query the path on your machine |
@@ -152,7 +157,7 @@ Optional grants and their trade-offs:
 ## Security notes
 
 - Confined processes can **read** everything you can read on the host (including `~/.ssh` and the like) — that is this sandbox's design semantics (same as the deepseek harness); root-only files stay protected by file permissions
-- **Do not** put your home directory, `~/.pi`, or any ancestor of pi's agent dir into `extraWritableDirs`: the confined model could then rewrite the global sandbox config, `AGENTS.md`, or extensions — which run unconfined on the next start; such entries are warned about at load time, but still kept (warn-only)
+- **Do not** put your home directory, `~/.pi`, or any ancestor of pi's agent dir into `sandbox-writable.json`: the confined model could then rewrite the global sandbox config, `AGENTS.md`, or extensions — which run unconfined on the next start; such entries are warned about at load time, but still kept (warn-only)
 - Under bwrap, bash's `/tmp` **is the host `/tmp`** (rw bind, matching the write/edit fence and the landlock/macOS runners): confined commands can modify or delete the host's temporary files — including live session sockets and pi's own temp files — and the host's `/tmp` permissions apply as-is. If the host `/tmp` is not writable, neither is the sandbox's
 - On Windows the sandbox's temp root is the host `%TEMP%` (the `windows-acl` runner grants the real path and does not rewrite `TMP`/`TEMP`): confined commands can modify or delete the host's temporary files there — the same "the host tmp is the host tmp" semantics as the bwrap bind above
 - Confined child processes force `LC_MESSAGES=C` (so denial diagnostics stay classifiable) and do not touch your `LANG`/`LC_CTYPE`
