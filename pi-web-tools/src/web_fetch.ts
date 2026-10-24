@@ -1,6 +1,9 @@
 import TurndownService from "turndown";
 
 const MAX_CONTENT_CHARS = 100_000;
+const DEEPSEEK_FETCH_URL = "https://api.deepseek.com/v1/tools/fetch";
+const DEEPSEEK_MAX_URL = 8192;
+
 const turndown = new TurndownService({
 	headingStyle: "atx",
 	codeBlockStyle: "fenced",
@@ -11,9 +14,29 @@ export interface FetchResult {
 	contentType: string;
 	url: string;
 	status: number;
+	provider: "local" | "deepseek";
+	title?: string;
+}
+
+function applyTruncation(content: string): string {
+	if (content.length > MAX_CONTENT_CHARS) {
+		const truncated = content.slice(0, MAX_CONTENT_CHARS);
+		return `${truncated}\n\n... [truncated ${content.length - MAX_CONTENT_CHARS} characters]`;
+	}
+	return content;
 }
 
 export async function webFetch(
+	url: string,
+	format: "text" | "markdown" | "html",
+	timeout: number,
+	signal?: AbortSignal,
+	_fetch?: typeof fetch,
+): Promise<FetchResult> {
+	return localFetch(url, format, timeout, signal, _fetch);
+}
+
+export async function localFetch(
 	url: string,
 	format: "text" | "markdown" | "html",
 	timeout: number,
@@ -70,12 +93,57 @@ export async function webFetch(
 		content = stripTags(body);
 	}
 
-	if (content.length > MAX_CONTENT_CHARS) {
-		const truncated = content.slice(0, MAX_CONTENT_CHARS);
-		content = `${truncated}\n\n... [truncated ${content.length - MAX_CONTENT_CHARS} characters]`;
+	return { content: applyTruncation(content), contentType, url: response.url, status: response.status, provider: "local" };
+}
+
+export async function deepseekFetch(
+	url: string,
+	apiKey: string,
+	timeout: number,
+	signal?: AbortSignal,
+	_fetch?: typeof fetch,
+): Promise<FetchResult> {
+	const key = apiKey || process.env.DEEPSEEK_API_KEY;
+	if (!key) {
+		throw new Error("DEEPSEEK_API_KEY not set. Get one at https://platform.deepseek.com");
+	}
+	if (url.length > DEEPSEEK_MAX_URL) {
+		throw new Error(`URL exceeds ${DEEPSEEK_MAX_URL} characters`);
 	}
 
-	return { content, contentType, url: response.url, status: response.status };
+	const doFetch = _fetch ?? fetch;
+	const timeoutMs = Math.min(timeout * 1000, 120_000);
+	const timeoutSignal = AbortSignal.timeout(timeoutMs);
+	const s = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+
+	const resp = await doFetch(DEEPSEEK_FETCH_URL, {
+		method: "POST",
+		headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+		body: JSON.stringify({ url }),
+		signal: s,
+	});
+
+	if (!resp.ok) {
+		const detail = await resp
+			.json()
+			.then((data) => {
+				const message = (data as { error?: { message?: string } })?.error?.message;
+				return message || resp.statusText;
+			})
+			.catch(() => resp.statusText);
+		throw new Error(`DeepSeek API ${resp.status}: ${detail}`);
+	}
+
+	const data = (await resp.json()) as { title?: string; content?: string };
+
+	return {
+		content: applyTruncation(data.content || ""),
+		contentType: "text/markdown",
+		url,
+		status: 200,
+		provider: "deepseek",
+		title: data.title || undefined,
+	};
 }
 
 function stripTags(html: string): string {
