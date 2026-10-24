@@ -40,7 +40,7 @@ export async function aliyunSearch(
 		const sources = parseBailianResults(text);
 		const answer = formatAnswer(sources, query);
 
-		return { answer, sources, sourceLabel: "aliyun" };
+		return { answer, sources, providerLabel: "aliyun" };
 	} finally {
 		await client.close().catch(() => {});
 	}

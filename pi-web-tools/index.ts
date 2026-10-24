@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { webFetch } from "./src/web_fetch";
-import { buildSources, search } from "./src/web_search/index";
+import { buildProviders, search } from "./src/web_search/index";
 
 export default function (pi: ExtensionAPI) {
 	// -------------------------------------------------------------------
@@ -25,7 +25,9 @@ export default function (pi: ExtensionAPI) {
 			numResults: Type.Optional(
 				Type.Number({ minimum: 1, maximum: 20, default: 10, description: "Number of results (1-20)." }),
 			),
-			source: Type.Optional(Type.String({ enum: ["exa", "aliyun"], description: "Search source. Default: exa." })),
+			provider: Type.Optional(
+				Type.String({ enum: ["exa", "aliyun"], description: "Search provider (exa or aliyun). Default: exa." }),
+			),
 		}),
 		renderCall(args, theme) {
 			const p = args as { query: string };
@@ -43,7 +45,7 @@ export default function (pi: ExtensionAPI) {
 			return new Text(body, 0, 0);
 		},
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const p = params as { query: string; numResults?: number; source?: string };
+			const p = params as { query: string; numResults?: number; provider?: string };
 			const query = p.query?.trim();
 			if (!query) {
 				return { content: [{ type: "text", text: "Error: query is required." }], details: {}, isError: true };
@@ -61,12 +63,12 @@ export default function (pi: ExtensionAPI) {
 
 			try {
 				const aliyunApiKey = await ctx.modelRegistry.getApiKeyForProvider("aliyun").catch(() => undefined);
-				const sources = buildSources({ aliyun: aliyunApiKey });
-				const result = await search(query, p.numResults ?? 10, signal, onProgress, p.source, sources);
-				const sourceLabel = `\n\n*Source: ${result.sourceLabel}*`;
+				const providers = buildProviders({ aliyun: aliyunApiKey });
+				const result = await search(query, p.numResults ?? 10, signal, onProgress, p.provider, providers);
+				const providerLabel = `\n\n*Provider: ${result.providerLabel}*`;
 				return {
-					content: [{ type: "text", text: result.answer + sourceLabel }],
-					details: { source: result.sourceLabel, sources: result.sources },
+					content: [{ type: "text", text: result.answer + providerLabel }],
+					details: { provider: result.providerLabel, sources: result.sources },
 				};
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);

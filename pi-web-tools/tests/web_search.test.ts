@@ -5,7 +5,7 @@ import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 let search: typeof import("../src/web_search/index.js").search;
-let buildSources: typeof import("../src/web_search/index.js").buildSources;
+let buildProviders: typeof import("../src/web_search/index.js").buildProviders;
 let testServer: Server;
 
 const mockFetch = vi.fn();
@@ -29,7 +29,7 @@ beforeEach(async () => {
 
 	const wsMod = await import("../src/web_search/index.js");
 	search = wsMod.search;
-	buildSources = wsMod.buildSources;
+	buildProviders = wsMod.buildProviders;
 });
 
 // ---------------------------------------------------------------------------
@@ -55,7 +55,7 @@ describe("exaSearch", () => {
 
 		const result = await mod.exaSearch("test query", 5);
 
-		expect(result.sourceLabel).toBe("exa");
+		expect(result.providerLabel).toBe("exa");
 		expect(result.sources).toHaveLength(1);
 		expect(result.sources[0].title).toBe("Test");
 	});
@@ -84,7 +84,7 @@ describe("exaSearch", () => {
 				headers: expect.objectContaining({ "x-api-key": "test-key" }),
 			}),
 		);
-		expect(result.sourceLabel).toBe("exa");
+		expect(result.providerLabel).toBe("exa");
 		expect(result.sources).toHaveLength(2);
 		expect(result.sources[0].title).toBe("Test Page");
 	});
@@ -162,7 +162,7 @@ describe("aliyunSearch", () => {
 
 		const result = await mod.aliyunSearch("test query", 5);
 
-		expect(result.sourceLabel).toBe("aliyun");
+		expect(result.providerLabel).toBe("aliyun");
 		expect(result.sources).toHaveLength(1);
 		expect(result.sources[0].title).toBe("Bailian Test");
 		expect(result.sources[0].url).toBe("https://example.com");
@@ -211,7 +211,7 @@ describe("aliyunSearch", () => {
 
 		const result = await mod.aliyunSearch("test query", 5, undefined, "param-key");
 
-		expect(result.sourceLabel).toBe("aliyun");
+		expect(result.providerLabel).toBe("aliyun");
 		expect(result.sources[0].title).toBe("Param Key");
 		expect(vi.mocked(createMcpClient)).toHaveBeenCalledWith(
 			expect.any(String),
@@ -236,9 +236,9 @@ describe("search orchestrator", () => {
 				}),
 		});
 
-		const sources = buildSources({});
-		const result = await search("test", 5, undefined, undefined, undefined, sources);
-		expect(result.sourceLabel).toBe("exa");
+		const providers = buildProviders({});
+		const result = await search("test", 5, undefined, undefined, undefined, providers);
+		expect(result.providerLabel).toBe("exa");
 	});
 
 	it("falls back to aliyun when exa fails", async () => {
@@ -264,9 +264,9 @@ describe("search orchestrator", () => {
 			throw new Error(`Unexpected tool: ${request.params.name}`);
 		});
 
-		const sources = buildSources({ aliyun: "aliyun-key" });
-		const result = await search("test", 5, undefined, undefined, undefined, sources);
-		expect(result.sourceLabel).toBe("aliyun");
+		const providers = buildProviders({ aliyun: "aliyun-key" });
+		const result = await search("test", 5, undefined, undefined, undefined, providers);
+		expect(result.providerLabel).toBe("aliyun");
 		expect(result.sources[0].title).toBe("Aliyun Fallback");
 	});
 
@@ -283,9 +283,9 @@ describe("search orchestrator", () => {
 			],
 		}));
 
-		const sources = buildSources({ aliyun: "aliyun-key" });
-		const result = await search("test", 5, undefined, undefined, "aliyun", sources);
-		expect(result.sourceLabel).toBe("aliyun");
+		const providers = buildProviders({ aliyun: "aliyun-key" });
+		const result = await search("test", 5, undefined, undefined, "aliyun", providers);
+		expect(result.providerLabel).toBe("aliyun");
 	});
 
 	it("throws when all sources fail", async () => {
@@ -296,14 +296,14 @@ describe("search orchestrator", () => {
 			throw new Error("Fail");
 		});
 
-		const sources = buildSources({});
-		await expect(search("test", 5, undefined, undefined, undefined, sources)).rejects.toThrow(
+		const providers = buildProviders({});
+		await expect(search("test", 5, undefined, undefined, undefined, providers)).rejects.toThrow(
 			"All search sources failed",
 		);
 	});
 
 	it("throws for unknown source", async () => {
-		const sources = buildSources({});
-		await expect(search("test", 5, undefined, undefined, "unknown", sources)).rejects.toThrow("Unknown source");
+		const providers = buildProviders({});
+		await expect(search("test", 5, undefined, undefined, "unknown", providers)).rejects.toThrow("Unknown provider");
 	});
 });
