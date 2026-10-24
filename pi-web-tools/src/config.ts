@@ -3,9 +3,11 @@ import { resolve } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 
 interface WebToolsConfig {
-	aliyun?: {
-		baseUrl?: string;
-		aliyunProviderKey?: string;
+	websearch?: {
+		provider?: string;
+	};
+	webfetch?: {
+		provider?: string;
 	};
 }
 
@@ -23,7 +25,7 @@ function readJsonFile(path: string): WebToolsConfig | null {
 
 function mergeConfigs(base: WebToolsConfig, override: WebToolsConfig): WebToolsConfig {
 	const merged: WebToolsConfig = {};
-	for (const section of ["aliyun"] as const) {
+	for (const section of ["websearch", "webfetch"] as const) {
 		if (base[section] || override[section]) {
 			merged[section] = {
 				...base[section],
