@@ -146,6 +146,31 @@ export async function deepseekFetch(
 	};
 }
 
+const THIN_MIN_CHARS = 200;
+
+export function isThinContent(content: string, contentType: string): boolean {
+	if (contentType.includes("json")) return false;
+	const meaningful = content
+		.split("\n")
+		.filter((line) => !isJunkLine(line))
+		.join("\n");
+	return meaningful.trim().length < THIN_MIN_CHARS;
+}
+
+function isJunkLine(line: string): boolean {
+	const t = line.trim();
+	if (!t) return true;
+	if (/^<\/?[a-z][^>]*>$/i.test(t)) return true;
+	if (/^(?:var|let|const|function|return|import|export|window\.|document\.|self\.|@media|@import)\b/.test(t)) return true;
+	if (/^[{}()\[\];,]/.test(t)) return true;
+	if (/^(?:\/\/|\/\*|\*\/|<!--)/.test(t)) return true;
+	if (t.length > 500) {
+		const spaces = t.match(/\s/g)?.length ?? 0;
+		if (spaces / t.length < 0.05) return true;
+	}
+	return false;
+}
+
 function stripTags(html: string): string {
 	let text = html;
 	text = text.replace(/<head[\s\S]*?<\/head>/gi, "");

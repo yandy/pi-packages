@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { deepseekFetch, webFetch } from "../src/web_fetch.js";
+import { deepseekFetch, isThinContent, webFetch } from "../src/web_fetch.js";
 
 function mockFetchResponse(overrides: Partial<Response> & { text: () => Promise<string> }) {
 	return {
@@ -165,5 +165,60 @@ describe("deepseekFetch", () => {
 		const result = await deepseekFetch("https://example.com", "k", 30, undefined, mockFetch);
 
 		expect(result.content).toContain("... [truncated 1 characters]");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// isThinContent
+// ---------------------------------------------------------------------------
+
+describe("isThinContent", () => {
+	it("detects empty shell pages", () => {
+		expect(isThinContent("<div></div>", "text/html")).toBe(true);
+	});
+
+	it("detects js tag junk piles", () => {
+		const junk = [
+			"<script src=\"a.js\">",
+			"<script src=\"b.js\">",
+			"window.x = 1;",
+			"{",
+			"}",
+			"document.write('x');",
+			"",
+			"Loading...",
+		].join("\n");
+		expect(isThinContent(junk, "text/html")).toBe(true);
+	});
+
+	it("exempts JSON responses", () => {
+		expect(isThinContent("{}", "application/json")).toBe(false);
+	});
+
+	it("passes normal articles", () => {
+		const article = [
+			"# Title",
+			"",
+			"This is a normal article with plenty of meaningful natural-language text. ".repeat(5),
+			"",
+			"- list item one",
+			"- list item two",
+			"",
+			"More paragraphs of real content follow here to push well past the threshold.".repeat(3),
+		].join("\n");
+		expect(isThinContent(article, "text/markdown")).toBe(false);
+	});
+
+	it("does not false-positive on parenthesis-led natural lines", () => {
+		const article = [
+			"# Research Notes",
+			"",
+			"(See figure 1.) The measurement setup was carefully calibrated before each run.",
+			"",
+			"Researchers repeated the experiment three times to confirm the observed effect. ".repeat(4),
+			"",
+			"Conclusion paragraphs with additional natural language content go here. ".repeat(3),
+		].join("\n");
+		expect(isThinContent(article, "text/markdown")).toBe(false);
 	});
 });
