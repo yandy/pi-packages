@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { mockConfigValue, dirRef, dirOverrideRef } = vi.hoisted(() => ({
@@ -621,6 +622,21 @@ describe("index wiring (integration)", () => {
 		await new Promise((resolve) => setTimeout(resolve, 0));
 	}
 
+	/**
+	 * 等条件成立（默认 2s，每 10ms 轮询一次）。完成回调在 notify 之前会做真实磁盘 I/O
+	 * （`SessionManager.list`），单个 `setTimeout(0)` tick 覆盖不到它——实测空闲机器上仍有
+	 * 约 2% 的概率输给这段 I/O，并行跑整仓时更容易翻车。所以这里等条件，不猜时间。
+	 */
+	async function waitFor(condition: () => boolean, description: string, timeoutMs = 2000): Promise<void> {
+		const start = Date.now();
+		while (!condition()) {
+			if (Date.now() - start > timeoutMs) {
+				throw new Error(`timeout waiting for ${description} after ${timeoutMs}ms`);
+			}
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		}
+	}
+
 	function uiWith(notify = vi.fn()) {
 		return { hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } };
 	}
@@ -1078,7 +1094,7 @@ describe("index wiring (integration)", () => {
 				await commands["dream"].handler("", session.ctx);
 				session.dispose();
 				resolveDream?.("consolidated");
-				await flush();
+				await waitFor(() => session.notify.mock.calls.length > 0, "dream completion notify");
 			});
 
 			expect(caught).toEqual([]);
@@ -1128,7 +1144,8 @@ describe("index wiring (integration)", () => {
 		try {
 			const caught = await captureUnhandledRejections(async () => {
 				await commands["dream"].handler("", uiCtx({ hasUI: true, ui: { notify, confirm, setStatus: vi.fn() } }));
-				await flush();
+				// 成功分支先 `SessionManager.list`（真实 I/O）再写 meta；meta 写失败也只在 I/O 之后才发通知。
+				await waitFor(() => notify.mock.calls.length > 0, "dream meta-failure notify");
 			});
 
 			expect(caught).toEqual([]);
@@ -1412,29 +1429,39 @@ describe("index wiring (integration)", () => {
 		// 按 docs/guides/testing.md 隔离到本用例的 temp dir（并行/沙箱下不得碰真实 ~/.pi）。
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(dir, "agent"));
 		try {
-			await commands["dream"].handler("", uiCtx({ hasUI: true, ui: { confirm, notify, setStatus: vi.fn() } }));
+			// 完成回调在 notify 之前 `await SessionManager.list(cwd)`，那是真实磁盘 I/O：把它固定拖慢到
+			// 一个 setTimeout(0) tick 之上，这条断言就必须等条件成立，不能靠"猜一个 tick"。
+			const listSpy = vi.spyOn(SessionManager, "list").mockImplementation(async () => {
+				await new Promise((resolve) => setTimeout(resolve, 30));
+				return [];
+			});
+			try {
+				await commands["dream"].handler("", uiCtx({ hasUI: true, ui: { confirm, notify, setStatus: vi.fn() } }));
 
-			expect(runDreamMock).toHaveBeenCalledTimes(1);
-			const args = runDreamMock.mock.calls[0][0];
-			expect(args.memoryDir).toBe(dir);
-			expect(args.maxLines).toBe(200);
-			expect(typeof args.store.withLogicalLock).toBe("function");
-			expect(args.customTools).toHaveLength(1);
-			expect(args.customTools[0].parameters.properties.action.enum).toEqual([
-				"add",
-				"replace",
-				"remove",
-				"list",
-				"search",
-				"rename",
-				"rebuild_index",
-			]);
-			expect(Object.keys(args.customTools[0].parameters.properties)).toContain("new_name");
+				expect(runDreamMock).toHaveBeenCalledTimes(1);
+				const args = runDreamMock.mock.calls[0][0];
+				expect(args.memoryDir).toBe(dir);
+				expect(args.maxLines).toBe(200);
+				expect(typeof args.store.withLogicalLock).toBe("function");
+				expect(args.customTools).toHaveLength(1);
+				expect(args.customTools[0].parameters.properties.action.enum).toEqual([
+					"add",
+					"replace",
+					"remove",
+					"list",
+					"search",
+					"rename",
+					"rebuild_index",
+				]);
+				expect(Object.keys(args.customTools[0].parameters.properties)).toContain("new_name");
 
-			// 成功回调（SessionManager.list → writeDreamMeta → notifyDream）必须在 unstub 前排空，
-			// 否则会漏到真实 ~/.pi；notify 断言证明回调确实在本用例内跑完。
-			await flush();
-			expect(notify).toHaveBeenCalledWith("consolidated", "info");
+				// 成功回调（SessionManager.list → writeDreamMeta → notifyDream）必须在 unstub 前排空，
+				// 否则会漏到真实 ~/.pi；notify 断言证明回调确实在本用例内跑完。
+				await waitFor(() => notify.mock.calls.length > 0, "dream completion notify");
+				expect(notify).toHaveBeenCalledWith("consolidated", "info");
+			} finally {
+				listSpy.mockRestore();
+			}
 		} finally {
 			vi.unstubAllEnvs();
 		}

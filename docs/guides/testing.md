@@ -5,6 +5,7 @@
 ## 目录
 
 - [通用约定](#通用约定)
+  - [异步等待](#异步等待)
 - [环境隔离](#环境隔离)
   - [文件系统隔离](#文件系统隔离)
   - [环境变量隔离](#环境变量隔离)
@@ -58,6 +59,38 @@ export default defineConfig({
   }
 }
 ```
+
+### 异步等待
+
+触发异步 handler / 回调后，**断言其副作用前必须等条件成立**，不能用
+`await new Promise((r) => setTimeout(r, 0))` 顶替——那是猜时间，被测链里只要有真实 I/O 就会
+偶发失败，而且只在并行跑整仓时暴露。
+
+实测（pi-memory `/dream`，2026-10-24）：成功回调在 `notify` 之前 `await SessionManager.list(cwd)`
+（真实磁盘 I/O），测试只等一个 tick。空闲机器上 tick 被 clamp 到 0–4ms，而 `list` 中位 1.4ms、
+最长 6.4ms——300 次里 **5 次 tick 先到（1.7%）**；整仓 26 个 vitest worker 并行时余量进一步被吃掉，
+于是表现为「包内单跑必绿、`npm test` 偶发红」。
+
+```ts
+/** 等条件成立（10ms 轮询，默认 2s 封顶，超时抛明确错误）。 */
+async function waitFor(condition: () => boolean, description: string, timeoutMs = 2000): Promise<void> {
+  const start = Date.now();
+  while (!condition()) {
+    if (Date.now() - start > timeoutMs) throw new Error(`timeout waiting for ${description} after ${timeoutMs}ms`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+await waitFor(() => notify.mock.calls.length > 0, "dream completion notify");
+expect(notify).toHaveBeenCalledWith("consolidated", "info");
+```
+
+- **负向断言**（断言"没被调用"）不要用 `waitFor`：条件本来就不会成立，等满超时再失败。这类断言保留
+  `flush()`（或等一个已知时间窗口），并说明为什么这个窗口足够。
+- **防止回退**：把被测链里的真实 I/O 依赖固定拖慢到 tick 之上（如
+  `vi.spyOn(SessionManager, "list")` 延迟 30ms），这样谁把 `waitFor` 换回 `flush`，用例会**确定性**变红。
+- 只有**确实在测时间行为**（debounce、interval、超时）时才用固定 sleep，并注明"为什么是这个值"。
+- 轮询间隔不要小于 10ms（`setTimeout(check, 1)` 白烧 CPU）。
 
 ---
 
@@ -169,6 +202,8 @@ it("reads config from temp dir", async () => {
 - [ ] `getAgentDir()` 的返回值被隔离（mock / stub `PI_CODING_AGENT_DIR` / 替换 `HOME`，三选一）
 - [ ] 不使用硬编码的 `/tmp/xxx` 路径（并行运行会冲突）
 - [ ] 被测函数接受路径参数注入（而非硬编码读取真实路径）
+- [ ] 异步副作用用 `waitFor` 等条件，不是猜一个 `setTimeout(0)`（见[异步等待](#异步等待)）
+- [ ] 负向断言（"没被调用"）没有套用 `waitFor`；确有固定等待处注明了原因
 
 ---
 
@@ -186,3 +221,4 @@ it("reads config from temp dir", async () => {
 | `vi.hoisted()` + `mkdtempSync` 解决 hoisting | `pi-container-sandbox/tests/config-global-merge.test.ts` |
 | Stub `PI_CODING_AGENT_DIR` 隔离全局目录（跨平台） | `pi-subagents/tests/config/custom-agents.test.ts` |
 | 双目录隔离（globalDir + projectDir）工具函数 | `pi-subagents/tests/helpers/tmp-settings-dirs.ts` |
+| 异步条件等待（真实 I/O 之后断言副作用 + 拖慢依赖防回退） | `pi-memory/tests/index-wiring.test.ts` |
