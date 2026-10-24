@@ -1,8 +1,9 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { resolveProvider, loadConfig } from "./src/config";
 import { webFetch } from "./src/web_fetch";
-import { buildSources, search } from "./src/web_search/index";
+import { buildProviders, search } from "./src/web_search/index";
 
 export default function (pi: ExtensionAPI) {
 	// -------------------------------------------------------------------
@@ -12,10 +13,11 @@ export default function (pi: ExtensionAPI) {
 		name: "websearch",
 		label: "Web Search",
 		description:
-			`Search the web via Exa (primary) or Aliyun (fallback) and return raw results (titles, URLs, snippets). With EXA_API_KEY: full REST API. Without: MCP free tier (150 calls/day). Set ALIYUN_API_KEY to enable Aliyun fallback. ` +
+			`Search the web via Exa, DeepSeek, or Aliyun (fallback chain: exa → deepseek → aliyun) and return raw results (titles, URLs, snippets). ` +
+			`Exa: free MCP tier without key, full REST with EXA_API_KEY. DeepSeek: requires DEEPSEEK_API_KEY or a configured deepseek provider, good for Chinese queries, supports site:/lang:/after: search syntax. Aliyun: requires ALIYUN_API_KEY or a configured aliyun provider, Chinese-search fallback. ` +
 			`The current year is ${new Date().getFullYear()}.`,
 		promptSnippet:
-			"websearch: search the web via Exa (primary) or Aliyun (fallback). Returns raw results with titles, URLs, snippets. LLM synthesizes the answer.",
+			"websearch: search the web via Exa/DeepSeek/Aliyun (fallback chain: exa → deepseek → aliyun). Returns raw results with titles, URLs, snippets. LLM synthesizes the answer.",
 		promptGuidelines: [
 			"Use websearch when you need current information outside your training data.",
 			"Synthesize a clear answer from the search results and cite sources with markdown hyperlinks.",
@@ -25,7 +27,13 @@ export default function (pi: ExtensionAPI) {
 			numResults: Type.Optional(
 				Type.Number({ minimum: 1, maximum: 20, default: 10, description: "Number of results (1-20)." }),
 			),
-			source: Type.Optional(Type.String({ enum: ["exa", "aliyun"], description: "Search source. Default: exa." })),
+			provider: Type.Optional(
+				Type.String({
+					enum: ["exa", "deepseek", "aliyun"],
+					description:
+						"Search provider: exa (free default), deepseek (requires key, good Chinese support, search syntax), aliyun (requires key, Chinese fallback). Default: fallback chain exa → deepseek → aliyun.",
+				}),
+			),
 		}),
 		renderCall(args, theme) {
 			const p = args as { query: string };
@@ -43,7 +51,7 @@ export default function (pi: ExtensionAPI) {
 			return new Text(body, 0, 0);
 		},
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const p = params as { query: string; numResults?: number; source?: string };
+			const p = params as { query: string; numResults?: number; provider?: string };
 			const query = p.query?.trim();
 			if (!query) {
 				return { content: [{ type: "text", text: "Error: query is required." }], details: {}, isError: true };
@@ -60,13 +68,18 @@ export default function (pi: ExtensionAPI) {
 			};
 
 			try {
+				const deepseekApiKey = await ctx.modelRegistry.getApiKeyForProvider("deepseek").catch(() => undefined);
 				const aliyunApiKey = await ctx.modelRegistry.getApiKeyForProvider("aliyun").catch(() => undefined);
-				const sources = buildSources({ aliyun: aliyunApiKey });
-				const result = await search(query, p.numResults ?? 10, signal, onProgress, p.source, sources);
-				const sourceLabel = `\n\n*Source: ${result.sourceLabel}*`;
+				const { provider, error } = resolveProvider("websearch", p.provider, loadConfig(ctx.cwd));
+				if (error) {
+					return { content: [{ type: "text", text: `Search failed: ${error}` }], details: {}, isError: true };
+				}
+				const providers = buildProviders({ deepseek: deepseekApiKey, aliyun: aliyunApiKey });
+				const result = await search(query, p.numResults ?? 10, signal, onProgress, provider, providers);
+				const providerLabel = `\n\n*Provider: ${result.providerLabel}*`;
 				return {
-					content: [{ type: "text", text: result.answer + sourceLabel }],
-					details: { source: result.sourceLabel, sources: result.sources },
+					content: [{ type: "text", text: result.answer + providerLabel }],
+					details: { provider: result.providerLabel, sources: result.sources },
 				};
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
@@ -104,6 +117,13 @@ export default function (pi: ExtensionAPI) {
 					description: "Timeout in seconds (1-120). Default: 30.",
 				}),
 			),
+			provider: Type.Optional(
+				Type.String({
+					enum: ["local", "deepseek"],
+					description:
+						"Fetch provider: local (direct HTTP, default) or deepseek (server-side rendering, handles JS-heavy pages, returns markdown, requires DEEPSEEK_API_KEY or a configured deepseek provider). Default: local with deepseek fallback on failure/thin content.",
+				}),
+			),
 		}),
 		renderCall(args, theme) {
 			const p = args as { url: string };
@@ -120,8 +140,8 @@ export default function (pi: ExtensionAPI) {
 			}
 			return new Text(body, 0, 0);
 		},
-		async execute(_toolCallId, params, signal, onUpdate, _ctx) {
-			const p = params as { url: string; format?: "text" | "markdown" | "html"; timeout?: number };
+		async execute(_toolCallId, params, signal, onUpdate, ctx) {
+			const p = params as { url: string; format?: "text" | "markdown" | "html"; timeout?: number; provider?: string };
 			const url = p.url?.trim();
 			if (!url) {
 				return { content: [{ type: "text", text: "Error: url is required." }], details: {}, isError: true };
@@ -132,11 +152,28 @@ export default function (pi: ExtensionAPI) {
 			onUpdate?.({ content: [{ type: "text", text: `Fetching ${url}...` }], details: {} });
 
 			try {
-				const result = await webFetch(url, format, timeout, signal);
-				const header = `URL: ${result.url}\nContent-Type: ${result.contentType}\n\n`;
+				const deepseekApiKey = await ctx.modelRegistry.getApiKeyForProvider("deepseek").catch(() => undefined);
+				const { provider, error } = resolveProvider("webfetch", p.provider, loadConfig(ctx.cwd));
+				if (error) {
+					return { content: [{ type: "text", text: `Fetch failed: ${error}` }], details: {}, isError: true };
+				}
+				const result = await webFetch(url, format, timeout, signal, undefined, {
+					provider,
+					deepseekApiKey,
+					onProgress: (msg) => onUpdate?.({ content: [{ type: "text", text: msg }], details: {} }),
+				});
+				const titleLine = result.title ? `Title: ${result.title}\n` : "";
+				const header = `URL: ${result.url}\n${titleLine}Content-Type: ${result.contentType}\n\n`;
+				const providerLabel = `\n\n*Provider: ${result.provider}*`;
 				return {
-					content: [{ type: "text", text: header + result.content }],
-					details: { url: result.url, contentType: result.contentType, status: result.status },
+					content: [{ type: "text", text: header + result.content + providerLabel }],
+					details: {
+						url: result.url,
+						contentType: result.contentType,
+						status: result.status,
+						provider: result.provider,
+						...(result.title ? { title: result.title } : {}),
+					},
 				};
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);

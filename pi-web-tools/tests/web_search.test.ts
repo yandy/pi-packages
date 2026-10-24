@@ -5,7 +5,7 @@ import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 let search: typeof import("../src/web_search/index.js").search;
-let buildSources: typeof import("../src/web_search/index.js").buildSources;
+let buildProviders: typeof import("../src/web_search/index.js").buildProviders;
 let testServer: Server;
 
 const mockFetch = vi.fn();
@@ -29,7 +29,7 @@ beforeEach(async () => {
 
 	const wsMod = await import("../src/web_search/index.js");
 	search = wsMod.search;
-	buildSources = wsMod.buildSources;
+	buildProviders = wsMod.buildProviders;
 });
 
 // ---------------------------------------------------------------------------
@@ -55,7 +55,7 @@ describe("exaSearch", () => {
 
 		const result = await mod.exaSearch("test query", 5);
 
-		expect(result.sourceLabel).toBe("exa");
+		expect(result.providerLabel).toBe("exa");
 		expect(result.sources).toHaveLength(1);
 		expect(result.sources[0].title).toBe("Test");
 	});
@@ -84,7 +84,7 @@ describe("exaSearch", () => {
 				headers: expect.objectContaining({ "x-api-key": "test-key" }),
 			}),
 		);
-		expect(result.sourceLabel).toBe("exa");
+		expect(result.providerLabel).toBe("exa");
 		expect(result.sources).toHaveLength(2);
 		expect(result.sources[0].title).toBe("Test Page");
 	});
@@ -162,7 +162,7 @@ describe("aliyunSearch", () => {
 
 		const result = await mod.aliyunSearch("test query", 5);
 
-		expect(result.sourceLabel).toBe("aliyun");
+		expect(result.providerLabel).toBe("aliyun");
 		expect(result.sources).toHaveLength(1);
 		expect(result.sources[0].title).toBe("Bailian Test");
 		expect(result.sources[0].url).toBe("https://example.com");
@@ -211,13 +211,100 @@ describe("aliyunSearch", () => {
 
 		const result = await mod.aliyunSearch("test query", 5, undefined, "param-key");
 
-		expect(result.sourceLabel).toBe("aliyun");
+		expect(result.providerLabel).toBe("aliyun");
 		expect(result.sources[0].title).toBe("Param Key");
 		expect(vi.mocked(createMcpClient)).toHaveBeenCalledWith(
 			expect.any(String),
 			{ Authorization: "Bearer param-key" },
 			expect.any(AbortSignal),
 		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// deepseekSearch
+// ---------------------------------------------------------------------------
+
+describe("deepseekSearch", () => {
+	it("throws when no API key available", async () => {
+		vi.stubEnv("DEEPSEEK_API_KEY", "");
+		const mod = await import("../src/web_search/deepseek.js");
+
+		await expect(mod.deepseekSearch("test query", 5)).rejects.toThrow("DEEPSEEK_API_KEY not set");
+	});
+
+	it("calls REST API with Bearer auth and maps summary as snippet", async () => {
+		vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
+		const mod = await import("../src/web_search/deepseek.js");
+
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					results: [{ title: "T", url: "https://x.com", snippet: "short", summary: "long summary for model" }],
+				}),
+		});
+
+		const result = await mod.deepseekSearch("test query", 5);
+
+		expect(mockFetch).toHaveBeenCalledWith(
+			"https://api.deepseek.com/v1/tools/search",
+			expect.objectContaining({
+				method: "POST",
+				headers: { Authorization: "Bearer test-key", "Content-Type": "application/json" },
+				body: JSON.stringify({ query: "test query", count: 5 }),
+			}),
+		);
+		expect(result.providerLabel).toBe("deepseek");
+		expect(result.sources[0].snippet).toBe("long summary for model");
+		expect(result.answer).toContain("1. [T](https://x.com)");
+	});
+
+	it("falls back to snippet when summary missing", async () => {
+		vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
+		const mod = await import("../src/web_search/deepseek.js");
+
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					results: [{ title: "T", url: "https://x.com", snippet: "short only" }],
+				}),
+		});
+
+		const result = await mod.deepseekSearch("test query", 5);
+
+		expect(result.sources[0].snippet).toBe("short only");
+	});
+
+	it("throws with API error message on non-2xx", async () => {
+		vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
+		const mod = await import("../src/web_search/deepseek.js");
+
+		mockFetch.mockResolvedValueOnce({
+			ok: false,
+			status: 400,
+			json: () => Promise.resolve({ error: { message: "'count' must be between 1 and 50" } }),
+		});
+
+		await expect(mod.deepseekSearch("test query", 5)).rejects.toThrow(
+			"DeepSeek API 400: 'count' must be between 1 and 50",
+		);
+	});
+
+	it("returns no-results answer for empty results", async () => {
+		vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
+		const mod = await import("../src/web_search/deepseek.js");
+
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () => Promise.resolve({ results: [] }),
+		});
+
+		const result = await mod.deepseekSearch("test query", 5);
+
+		expect(result.sources).toHaveLength(0);
+		expect(result.answer).toContain("No results found");
 	});
 });
 
@@ -236,9 +323,9 @@ describe("search orchestrator", () => {
 				}),
 		});
 
-		const sources = buildSources({});
-		const result = await search("test", 5, undefined, undefined, undefined, sources);
-		expect(result.sourceLabel).toBe("exa");
+		const providers = buildProviders({});
+		const result = await search("test", 5, undefined, undefined, undefined, providers);
+		expect(result.providerLabel).toBe("exa");
 	});
 
 	it("falls back to aliyun when exa fails", async () => {
@@ -264,9 +351,9 @@ describe("search orchestrator", () => {
 			throw new Error(`Unexpected tool: ${request.params.name}`);
 		});
 
-		const sources = buildSources({ aliyun: "aliyun-key" });
-		const result = await search("test", 5, undefined, undefined, undefined, sources);
-		expect(result.sourceLabel).toBe("aliyun");
+		const providers = buildProviders({ aliyun: "aliyun-key" });
+		const result = await search("test", 5, undefined, undefined, undefined, providers);
+		expect(result.providerLabel).toBe("aliyun");
 		expect(result.sources[0].title).toBe("Aliyun Fallback");
 	});
 
@@ -283,9 +370,113 @@ describe("search orchestrator", () => {
 			],
 		}));
 
-		const sources = buildSources({ aliyun: "aliyun-key" });
-		const result = await search("test", 5, undefined, undefined, "aliyun", sources);
-		expect(result.sourceLabel).toBe("aliyun");
+		const providers = buildProviders({ aliyun: "aliyun-key" });
+		const result = await search("test", 5, undefined, undefined, "aliyun", providers);
+		expect(result.providerLabel).toBe("aliyun");
+	});
+
+	it("falls back to deepseek when exa fails", async () => {
+		vi.stubEnv("EXA_API_KEY", "");
+		vi.stubEnv("DEEPSEEK_API_KEY", "");
+
+		testServer.setRequestHandler(CallToolRequestSchema, async () => {
+			throw new Error("Exa down");
+		});
+
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					results: [{ title: "DeepSeek Fallback", url: "https://ds.com", snippet: "ds" }],
+				}),
+		});
+
+		const providers = buildProviders({ deepseek: "ds-key" });
+		const result = await search("test", 5, undefined, undefined, undefined, providers);
+		expect(result.providerLabel).toBe("deepseek");
+		expect(result.sources[0].title).toBe("DeepSeek Fallback");
+	});
+
+	it("falls back to aliyun when exa and deepseek both fail", async () => {
+		vi.stubEnv("EXA_API_KEY", "");
+		vi.stubEnv("DEEPSEEK_API_KEY", "");
+		vi.stubEnv("ALIYUN_API_KEY", "aliyun-key");
+
+		testServer.setRequestHandler(CallToolRequestSchema, async (request) => {
+			if (request.params.name === "bailian_web_search") {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								pages: [{ title: "Aliyun Third", link: "https://a.com", snippet: "third" }],
+							}),
+						},
+					],
+				};
+			}
+			throw new Error("Exa down");
+		});
+
+		mockFetch.mockResolvedValueOnce({
+			ok: false,
+			status: 500,
+			json: () => Promise.resolve({ error: { message: "server error" } }),
+		});
+
+		const providers = buildProviders({ deepseek: "ds-key", aliyun: "aliyun-key" });
+		const result = await search("test", 5, undefined, undefined, undefined, providers);
+		expect(result.providerLabel).toBe("aliyun");
+		expect(result.sources[0].title).toBe("Aliyun Third");
+	});
+
+	it("uses only deepseek when provider specified", async () => {
+		vi.stubEnv("EXA_API_KEY", "");
+		vi.stubEnv("DEEPSEEK_API_KEY", "");
+
+		// 若 exa 被尝试，会先成功返回 exa 结果；断言 deepseek 结果即证明 exa 未被尝试
+		testServer.setRequestHandler(CallToolRequestSchema, async () => ({
+			content: [{ type: "text", text: "Title: Exa Result\nURL: https://exa.com\nHighlights:\nexa content" }],
+		}));
+
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					results: [{ title: "DeepSeek Direct", url: "https://ds.com", snippet: "direct" }],
+				}),
+		});
+
+		const providers = buildProviders({ deepseek: "ds-key" });
+		const result = await search("test", 5, undefined, undefined, "deepseek", providers);
+		expect(result.providerLabel).toBe("deepseek");
+		expect(result.sources[0].title).toBe("DeepSeek Direct");
+	});
+
+	it("skips keyless deepseek in chain and falls through to aliyun", async () => {
+		vi.stubEnv("EXA_API_KEY", "");
+		vi.stubEnv("DEEPSEEK_API_KEY", "");
+		vi.stubEnv("ALIYUN_API_KEY", "aliyun-key");
+
+		testServer.setRequestHandler(CallToolRequestSchema, async (request) => {
+			if (request.params.name === "bailian_web_search") {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								pages: [{ title: "Aliyun After Keyless", link: "https://a.com", snippet: "after" }],
+							}),
+						},
+					],
+				};
+			}
+			throw new Error("Exa down");
+		});
+
+		const providers = buildProviders({ aliyun: "aliyun-key" });
+		const result = await search("test", 5, undefined, undefined, undefined, providers);
+		expect(result.providerLabel).toBe("aliyun");
 	});
 
 	it("throws when all sources fail", async () => {
@@ -296,14 +487,14 @@ describe("search orchestrator", () => {
 			throw new Error("Fail");
 		});
 
-		const sources = buildSources({});
-		await expect(search("test", 5, undefined, undefined, undefined, sources)).rejects.toThrow(
-			"All search sources failed",
+		const providers = buildProviders({});
+		await expect(search("test", 5, undefined, undefined, undefined, providers)).rejects.toThrow(
+			"All search providers failed",
 		);
 	});
 
 	it("throws for unknown source", async () => {
-		const sources = buildSources({});
-		await expect(search("test", 5, undefined, undefined, "unknown", sources)).rejects.toThrow("Unknown source");
+		const providers = buildProviders({});
+		await expect(search("test", 5, undefined, undefined, "unknown", providers)).rejects.toThrow("Unknown provider");
 	});
 });

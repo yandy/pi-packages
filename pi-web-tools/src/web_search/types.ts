@@ -7,5 +7,5 @@ export interface SearchSource {
 export interface SearchResponse {
 	answer: string;
 	sources: SearchSource[];
-	sourceLabel: string;
+	providerLabel: string;
 }

@@ -53,7 +53,7 @@ async function exaRestSearch(
 	}));
 
 	const answer = formatAnswer(sources, query);
-	return { answer, sources, sourceLabel: "exa" };
+	return { answer, sources, providerLabel: "exa" };
 }
 
 async function exaMcpSearch(query: string, numResults: number, signal: AbortSignal): Promise<SearchResponse> {
@@ -79,7 +79,7 @@ async function exaMcpSearch(query: string, numResults: number, signal: AbortSign
 		const sources = parseMcpResults(text);
 		const answer = formatAnswer(sources, query);
 
-		return { answer, sources, sourceLabel: "exa" };
+		return { answer, sources, providerLabel: "exa" };
 	} finally {
 		await client.close().catch(() => {});
 	}

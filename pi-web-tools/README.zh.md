@@ -4,10 +4,10 @@
 
 ## 工具
 
-| 工具 | 描述 | 来源 |
-|------|------|------|
-| `websearch` | 纯网页搜索，返回原始结果（标题、URL、摘要） | Exa → 阿里云回退 |
-| `webfetch` | 抓取网页并转换为文本、Markdown 或原始 HTML | — |
+| 工具 | 描述 | Provider |
+|------|------|----------|
+| `websearch` | 纯网页搜索，返回原始结果（标题、URL、摘要） | Exa → DeepSeek → 阿里云回退 |
+| `webfetch` | 抓取网页并转换为文本、Markdown 或原始 HTML | Local → DeepSeek 回退 |
 
 ## 快速开始
 
@@ -19,29 +19,46 @@ pi install npm:@yandy0725/pi-web-tools
 pi install ./path/to/pi-web-tools
 
 # 或直接运行
+npm install
 pi -e ./index.ts
 ```
 
 ### 前置条件
 
-- `websearch`：无需配置——Exa MCP 免费层（150次/天）。设置 `EXA_API_KEY` 可获得更高限额。可选：设置 `ALIYUN_API_KEY` 或在 pi 中配置 `aliyun` provider，启用[百炼 WebSearch](https://bailian.console.aliyun.com/cn-beijing?tab=mcp#/mcp-market/detail/WebSearch) 回退（中文搜索效果更好）。
+- `websearch`：无需配置——Exa MCP 免费层（150次/天）。可选：设置 `DEEPSEEK_API_KEY`（或在 pi 中配置 `deepseek` provider）启用 DeepSeek 回退位；设置 `ALIYUN_API_KEY`（或配置 `aliyun` provider）启用阿里云回退位。
+- `webfetch`：无需配置——直接 HTTP 抓取。可选：设置 `DEEPSEEK_API_KEY`（或在 pi 中配置 `deepseek` provider）启用 DeepSeek 回退，服务端渲染 JS 重度页面。
 
 ## 配置
 
-API Key 通过环境变量配置。
-
-### API Key（仅环境变量）
+### API Key（环境变量或 pi provider 配置）
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `EXA_API_KEY` | Exa API key，不设则走 MCP 免费层（150次/天） | — |
-| `ALIYUN_API_KEY` | 阿里云百炼 API key，用于 websearch 回退。也支持通过 pi 的 aliyun provider 配置获取 | — |
+| `DEEPSEEK_API_KEY` | DeepSeek API key，用于 websearch/webfetch 的 deepseek provider。也会自动从 pi 的 deepseek provider 配置解析 | — |
+| `ALIYUN_API_KEY` | 阿里云百炼 API key，用于 websearch 回退。也会自动从 pi 的 aliyun provider 配置解析 | — |
+
+### 配置文件（`web-tools.json`）
+
+可选：为每个工具固定默认 provider。全局：`<agent-dir>/web-tools.json`；项目：`<cwd>/.pi/web-tools.json`（项目按段覆盖全局）。
+
+```json
+{
+	"websearch": { "provider": "deepseek" },
+	"webfetch": { "provider": "deepseek" }
+}
+```
+
+- 合法值：`websearch` → `"exa" | "deepseek" | "aliyun"`；`webfetch` → `"local" | "deepseek"`。
+- 优先级：工具调用 `provider` 参数 > 配置文件 > 内置回退链。
+- 通过参数或配置指定的 provider 独占使用——失败不回退其他 provider。
+- 配置值非法会得到明确报错（指明文件与期望值列表）。
 
 ## 工具参考
 
 ### websearch
 
-搜索网页，自动回退到可用源。
+搜索网页，自动回退到可用 provider。
 
 **参数：**
 
@@ -49,12 +66,15 @@ API Key 通过环境变量配置。
 |------|------|------|--------|------|
 | `query` | string | 是 | — | 搜索查询 |
 | `numResults` | number | 否 | 10 | 结果数量（1-20） |
-| `source` | `"exa"` \| `"aliyun"` | 否 | — | 搜索源 |
+| `provider` | `"exa"` \| `"deepseek"` \| `"aliyun"` | 否 | — | 搜索 provider（指定即独占） |
 
-**搜索源：**
+**Provider：**
 
-- **Exa**（默认）— AI 原生搜索 API。有 `EXA_API_KEY`：完整 REST API。无 key：MCP 免费层（150次/天，3 QPS）。无需 key 即可使用。
-- **阿里云**（回退）— [百炼 WebSearch MCP](https://bailian.console.aliyun.com/cn-beijing?tab=mcp#/mcp-market/detail/WebSearch)。需要配置 `ALIYUN_API_KEY` 环境变量或在 pi 的 `models.json` 中注册 `aliyun` provider。中文搜索效果更好。Exa 失败时自动回退到阿里云。
+- **Exa**（默认首选）— AI 原生搜索 API。有 `EXA_API_KEY`：完整 REST API。无 key：MCP 免费层（150次/天，3 QPS）。无需 key 即可使用。
+- **DeepSeek**（回退位 2）— [DeepSeek Search API](https://api-docs.deepseek.com/zh-cn/guides/search)，自研搜索引擎。中文查询效果好；query 支持搜索语法（`site:`、`lang:`、`after:`、`before:`、精确短语）；摘要字段面向模型阅读。需要 `DEEPSEEK_API_KEY` 环境变量或在 pi 中配置 `deepseek` provider。按成功请求计费（5元/1000次；空结果不计费）。
+- **阿里云**（回退位 3）— [百炼 WebSearch MCP](https://bailian.console.aliyun.com/cn-beijing?tab=mcp#/mcp-market/detail/WebSearch)。需要 `ALIYUN_API_KEY` 环境变量或在 pi 中配置 `aliyun` provider。中文搜索效果更好。
+
+某个 provider 失败时自动回退到下一个（exa → deepseek → aliyun）。未配置 key 的 provider 在链中快速失败并被跳过。
 
 ### webfetch
 
@@ -67,14 +87,28 @@ API Key 通过环境变量配置。
 | `url` | string | 是 | — | 要抓取的 URL |
 | `format` | `"text"` \| `"markdown"` \| `"html"` | 否 | `"markdown"` | 输出格式 |
 | `timeout` | number | 否 | 30 | 超时秒数（1-120） |
+| `provider` | `"local"` \| `"deepseek"` | 否 | — | 抓取 provider（指定即独占） |
+
+**Provider：**
+
+- **Local**（默认首选）— 直接 HTTP GET，HTML 转 Markdown/文本。
+- **DeepSeek**（回退）— [DeepSeek Fetch API](https://api-docs.deepseek.com/zh-cn/guides/search)，服务端抓取并返回 Markdown。能处理 local 搞不定的 JS 渲染页。需要 `DEEPSEEK_API_KEY` 环境变量或在 pi 中配置 `deepseek` provider。按成功请求计费（5元/1000次；失败不计费）。
+
+回落触发条件（仅链式模式）：local 硬失败（网络错误/超时/非 2xx），或 local 成功但内容薄（空壳页或垃圾标签堆积页，有效文本 < 200 字符）。薄内容时若 DeepSeek 也失败，则返回 local 原结果。`format: "html"` 永不回落（DeepSeek 只返回 Markdown）。显式指定 `provider`（参数或配置）时独占使用——唯一例外：`provider: "deepseek"` + `format: "html"` 自动走 local。
+
+注：`format: "text"` 搭配 DeepSeek 时返回 Markdown 原文（Markdown 本身即文本，不做纯文本转换）。
 
 ## 开发
 
 ```bash
-npm install              # 安装依赖
-npm run typecheck        # tsc --noEmit
-npm run lint             # biome lint
-npm test                 # vitest run
+# 从仓库根目录：
+npm ci                    # 安装全部依赖
+npm run typecheck         # 全包类型检查
+npm run lint              # Biome lint
+npm test                  # 运行全部测试
+
+# 包内：
+pi -e ./index.ts          # 本地运行扩展（在包目录下）
 ```
 
 ## 许可证

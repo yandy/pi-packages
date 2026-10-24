@@ -1,17 +1,22 @@
 import { aliyunSearch } from "./aliyun";
+import { deepseekSearch } from "./deepseek";
 import { exaSearch } from "./exa";
 import type { SearchResponse } from "./types";
 
 type SearchFn = (query: string, numResults: number, signal?: AbortSignal) => Promise<SearchResponse>;
 
-interface SourceEntry {
+interface ProviderEntry {
 	name: string;
 	fn: SearchFn;
 }
 
-export function buildSources(apiKeys: Record<string, string | undefined>): SourceEntry[] {
+export function buildProviders(apiKeys: Record<string, string | undefined>): ProviderEntry[] {
 	return [
 		{ name: "exa", fn: exaSearch },
+		{
+			name: "deepseek",
+			fn: (query, numResults, signal) => deepseekSearch(query, numResults, signal, apiKeys.deepseek),
+		},
 		{
 			name: "aliyun",
 			fn: (query, numResults, signal) => aliyunSearch(query, numResults, signal, apiKeys.aliyun),
@@ -19,24 +24,26 @@ export function buildSources(apiKeys: Record<string, string | undefined>): Sourc
 	];
 }
 
-const DEFAULT_SOURCES = buildSources({});
+const DEFAULT_PROVIDERS = buildProviders({});
 
 export async function search(
 	query: string,
 	numResults: number,
 	signal?: AbortSignal,
 	onProgress?: (msg: string) => void,
-	specifiedSource?: string,
-	sources?: SourceEntry[],
+	specifiedProvider?: string,
+	providers?: ProviderEntry[],
 ): Promise<SearchResponse> {
 	const errors: string[] = [];
 
-	const src = sources ?? DEFAULT_SOURCES;
+	const src = providers ?? DEFAULT_PROVIDERS;
 
-	const filtered = specifiedSource ? src.filter((s) => s.name === specifiedSource) : src;
+	const filtered = specifiedProvider ? src.filter((s) => s.name === specifiedProvider) : src;
 
-	if (specifiedSource && filtered.length === 0) {
-		throw new Error(`Unknown source: ${specifiedSource}. Available: ${src.map((s) => s.name).join(", ")}`);
+	if (specifiedProvider && filtered.length === 0) {
+		throw new Error(
+			`Unknown provider: ${specifiedProvider}. Available: ${src.map((s) => s.name).join(", ")}`,
+		);
 	}
 
 	for (const source of filtered) {
@@ -50,5 +57,5 @@ export async function search(
 		}
 	}
 
-	throw new Error(`All search sources failed:\n${errors.map((e) => `  - ${e}`).join("\n")}`);
+	throw new Error(`All search providers failed:\n${errors.map((e) => `  - ${e}`).join("\n")}`);
 }
