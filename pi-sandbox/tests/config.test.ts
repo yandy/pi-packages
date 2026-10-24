@@ -16,6 +16,14 @@ function writeProject(obj: unknown) {
 	mkdirSync(join(projectDir, ".pi"), { recursive: true });
 	writeFileSync(join(projectDir, ".pi", "sandbox.json"), JSON.stringify(obj));
 }
+function writeWritable(content: unknown) {
+	mkdirSync(agentDir, { recursive: true });
+	writeFileSync(join(agentDir, "sandbox-writable.json"), typeof content === "string" ? content : JSON.stringify(content));
+}
+function writeProjectWritable(content: unknown) {
+	mkdirSync(join(projectDir, ".pi"), { recursive: true });
+	writeFileSync(join(projectDir, ".pi", "sandbox-writable.json"), JSON.stringify(content));
+}
 
 beforeEach(() => {
 	dir = mkdtempSync(join(tmpdir(), "cfg-"));
@@ -141,58 +149,110 @@ describe("validateSandboxConfig", () => {
 		expect(() => validateSandboxConfig({ probeTimeoutMs: Number.NaN }, "t")).toThrow(/probeTimeoutMs/);
 		expect(validateSandboxConfig({ probeTimeoutMs: 100 }, "t").probeTimeoutMs).toBe(100);
 	});
+	it("不再校验 extraWritableDirs（该字段已迁出 sandbox.json），返回空列表", () => {
+		const cfg = validateSandboxConfig({ extraWritableDirs: "nope" }, "t");
+		expect(cfg.extraWritableDirs).toEqual([]);
+	});
 });
 
-describe("extraWritableDirs", () => {
-	it("默认是空数组", () => {
-		expect(loadSandboxConfig().extraWritableDirs).toEqual([]);
-		expect(DEFAULT_SANDBOX_CONFIG.extraWritableDirs).toEqual([]);
+describe("extraWritableDirs（独立文件 sandbox-writable.json）", () => {
+	it("文件缺失时为空数组且不告警（与空数组等价，Review Focus #5）", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			expect(loadSandboxConfig().extraWritableDirs).toEqual([]);
+			expect(DEFAULT_SANDBOX_CONFIG.extraWritableDirs).toEqual([]);
+			expect(warn).not.toHaveBeenCalled();
+		} finally {
+			warn.mockRestore();
+		}
 	});
 	it("解析已存在目录，按 canonical 拼写去重并保持顺序", () => {
-		const a = join(dir, "extra-a"); const b = join(dir, "extra-b");
-		mkdirSync(a); mkdirSync(b);
-		writeGlobal({ extraWritableDirs: [a, a, join(a, "."), b] });
+		const a = join(dir, "extra-a");
+		const b = join(dir, "extra-b");
+		mkdirSync(a);
+		mkdirSync(b);
+		writeWritable([a, a, join(a, "."), b]);
 		expect(loadSandboxConfig().extraWritableDirs).toEqual([realpathSync.native(a), realpathSync.native(b)]);
 	});
 	it("展开 ~/ 到用户主目录", () => {
-		const home = join(dir, "home"); mkdirSync(join(home, "cache"), { recursive: true });
-		vi.stubEnv("HOME", home); vi.stubEnv("USERPROFILE", home);
-		writeGlobal({ extraWritableDirs: ["~/cache"] });
+		const home = join(dir, "home");
+		mkdirSync(join(home, "cache"), { recursive: true });
+		vi.stubEnv("HOME", home);
+		vi.stubEnv("USERPROFILE", home);
+		writeWritable(["~/cache"]);
 		expect(loadSandboxConfig().extraWritableDirs).toEqual([realpathSync.native(join(home, "cache"))]);
 	});
 	it("非绝对、~user、缺失、文件条目都告警并丢弃，其余条目照常", () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		const file = join(dir, "not-a-dir"); writeFileSync(file, "x");
-		const ok = join(dir, "extra-ok"); mkdirSync(ok);
-		writeGlobal({ extraWritableDirs: ["relative/cache", "~someone/cache", join(dir, "missing"), file, ok] });
-		expect(loadSandboxConfig().extraWritableDirs).toEqual([realpathSync.native(ok)]);
-		expect(warn.mock.calls.flat().join(" ")).toMatch(/extraWritableDirs/);
-		warn.mockRestore();
-	});
-	it("结构错误（非数组/非字符串元素）整份回退默认并告警", () => {
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		for (const bad of ["nope", [1, 2]] as const) {
-			writeGlobal({ extraWritableDirs: bad });
-			resetSandboxConfigCache();
-			expect(() => loadSandboxConfig()).toThrow(/extraWritableDirs must be a string array/);
-			expect(getSandboxConfig().extraWritableDirs).toEqual([]);
+		try {
+			const file = join(dir, "not-a-dir");
+			writeFileSync(file, "x");
+			const ok = join(dir, "extra-ok");
+			mkdirSync(ok);
+			writeWritable(["relative/cache", "~someone/cache", join(dir, "missing"), file, ok]);
+			expect(loadSandboxConfig().extraWritableDirs).toEqual([realpathSync.native(ok)]);
+			expect(warn.mock.calls.flat().join(" ")).toMatch(/extraWritableDirs/);
+		} finally {
+			warn.mockRestore();
 		}
-		expect(warn).toHaveBeenCalled();
-		warn.mockRestore();
 	});
-	it("项目级文件里的 extraWritableDirs 仍被静默忽略", () => {
+	it("顶层不是数组 / 含非字符串元素：告警 + 空列表，且不连坐 sandbox.json（Review Focus #1 #2）", () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		writeProject({ extraWritableDirs: [dir] });
-		expect(loadSandboxConfig().extraWritableDirs).toEqual([]);
-		expect(warn).not.toHaveBeenCalled();
-		warn.mockRestore();
+		try {
+			writeGlobal({ mode: "read-only", probeTimeoutMs: 1234 });
+			for (const bad of ["{broken", "nope", "/abs/path", 5, { dirs: ["/tmp"] }, [1, 2], ["/tmp", null]] as const) {
+				writeWritable(bad);
+				resetSandboxConfigCache();
+				const cfg = loadSandboxConfig(); // 不抛
+				expect(cfg.extraWritableDirs, String(bad)).toEqual([]);
+				expect(cfg.mode, String(bad)).toBe("read-only");
+				expect(cfg.probeTimeoutMs, String(bad)).toBe(1234);
+			}
+			expect(warn).toHaveBeenCalled();
+		} finally {
+			warn.mockRestore();
+		}
+	});
+	it("sandbox.json 里的旧字段告警并忽略，新文件的值仍生效（Review Focus #3）", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const legacyDir = join(dir, "legacy-extra");
+			const newDir = join(dir, "new-extra");
+			mkdirSync(legacyDir);
+			mkdirSync(newDir);
+			writeGlobal({ mode: "read-only", extraWritableDirs: [legacyDir] });
+			writeWritable([newDir]);
+			const cfg = loadSandboxConfig();
+			expect(cfg.mode).toBe("read-only");
+			expect(cfg.extraWritableDirs).toEqual([realpathSync.native(newDir)]);
+			const warned = warn.mock.calls.flat().join(" ");
+			expect(warned).toMatch(/ignoring/);
+			expect(warned).toMatch(/moved to/);
+		} finally {
+			warn.mockRestore();
+		}
+	});
+	it("项目级 sandbox-writable.json 静默忽略，即使全局文件缺失（Review Focus #4）", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const projectExtra = join(dir, "project-extra");
+			mkdirSync(projectExtra);
+			writeProjectWritable([projectExtra]);
+			expect(loadSandboxConfig().extraWritableDirs).toEqual([]);
+			expect(warn).not.toHaveBeenCalled();
+		} finally {
+			warn.mockRestore();
+		}
 	});
 	it("条目等于 pi 的 agent 目录：告警但仍保留该条（warn-only，不丢弃）", () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		writeGlobal({ extraWritableDirs: [agentDir] });
-		const cfg = loadSandboxConfig();
-		expect(cfg.extraWritableDirs).toEqual([realpathSync.native(agentDir)]);
-		expect(warn.mock.calls.flat().join(" ")).toMatch(/agent dir/);
-		warn.mockRestore();
+		try {
+			writeWritable([agentDir]);
+			const cfg = loadSandboxConfig();
+			expect(cfg.extraWritableDirs).toEqual([realpathSync.native(agentDir)]);
+			expect(warn.mock.calls.flat().join(" ")).toMatch(/agent dir/);
+		} finally {
+			warn.mockRestore();
+		}
 	});
 });
