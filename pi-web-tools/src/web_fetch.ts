@@ -41,7 +41,12 @@ export async function webFetch(
 	opts?: WebFetchOptions,
 ): Promise<FetchResult> {
 	// 入口校验与 provider 无关，保持不变
-	const parsedUrl = new URL(url);
+	let parsedUrl: URL;
+	try {
+		parsedUrl = new URL(url);
+	} catch {
+		throw new Error(`Invalid URL: ${url}`);
+	}
 	if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
 		throw new Error(`Unsupported protocol: ${parsedUrl.protocol}`);
 	}

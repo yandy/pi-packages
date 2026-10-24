@@ -87,7 +87,7 @@ describe("webFetch", () => {
 	});
 
 	it("rejects invalid URLs", async () => {
-		await expect(webFetch("not-a-url", "text", 30)).rejects.toThrow("Invalid URL");
+		await expect(webFetch("not-a-url", "text", 30)).rejects.toThrow("Invalid URL: not-a-url");
 	});
 
 	it("truncates content over 100K characters", async () => {
