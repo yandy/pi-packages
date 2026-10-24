@@ -13,10 +13,11 @@ export default function (pi: ExtensionAPI) {
 		name: "websearch",
 		label: "Web Search",
 		description:
-			`Search the web via Exa (primary) or Aliyun (fallback) and return raw results (titles, URLs, snippets). With EXA_API_KEY: full REST API. Without: MCP free tier (150 calls/day). Set ALIYUN_API_KEY to enable Aliyun fallback. ` +
+			`Search the web via Exa, DeepSeek, or Aliyun (fallback chain: exa → deepseek → aliyun) and return raw results (titles, URLs, snippets). ` +
+			`Exa: free MCP tier without key, full REST with EXA_API_KEY. DeepSeek: requires DEEPSEEK_API_KEY or a configured deepseek provider, good for Chinese queries, supports site:/lang:/after: search syntax. Aliyun: requires ALIYUN_API_KEY or a configured aliyun provider, Chinese-search fallback. ` +
 			`The current year is ${new Date().getFullYear()}.`,
 		promptSnippet:
-			"websearch: search the web via Exa (primary) or Aliyun (fallback). Returns raw results with titles, URLs, snippets. LLM synthesizes the answer.",
+			"websearch: search the web via Exa/DeepSeek/Aliyun (fallback chain: exa → deepseek → aliyun). Returns raw results with titles, URLs, snippets. LLM synthesizes the answer.",
 		promptGuidelines: [
 			"Use websearch when you need current information outside your training data.",
 			"Synthesize a clear answer from the search results and cite sources with markdown hyperlinks.",
