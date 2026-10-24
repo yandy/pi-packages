@@ -121,6 +121,8 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 mkdir -p ~/.cache/uv ~/.local/share/pnpm/store ~/.cache/pnpm ~/.npm ~/.cache/pip ~/.cache/huggingface
 ```
 
+写入 `~/.pi/agent/sandbox-writable.json`：
+
 ```json
 [
   "~/.cache/uv",
@@ -166,7 +168,7 @@ mkdir -p ~/.cache/uv ~/.local/share/pnpm/store ~/.cache/pnpm ~/.npm ~/.cache/pip
 
 ## 从 pi-container-sandbox 1.x 迁移
 
-- 配置只认 `~/.pi/agent/sandbox.json`：项目级 `<项目>/.pi/sandbox.json` 被静默忽略（原本依赖的项目设置请移到全局文件）；旧 `image`/`runtime`/`host` 段会被忽略并告警，按需改写为上面的新字段
+- 配置只认 agent 目录下的全局文件（`~/.pi/agent/sandbox.json` 管沙箱字段，`~/.pi/agent/sandbox-writable.json` 管额外可写根）：项目级 `<项目>/.pi/sandbox.json` 与 `<项目>/.pi/sandbox-writable.json` 都被静默忽略（原本依赖的项目设置请移到全局文件）；旧 `image`/`runtime`/`host` 段会被忽略并告警，按需改写为上面的新字段
 - 容器运行时（docker/podman）、镜像构建、`runtime.mounts`、`/sandbox` 命令、`--container*` flags、外部路径审批流不属于本包
 - 需要容器级强隔离（独立文件系统/网络命名空间）请安装 `@yandy0725/pi-container-sandbox`（保留容器实现）
 - `pi-sandbox` 与 `@yandy0725/pi-container-sandbox` **互斥**：两者都接管 `bash`/`write`/`edit`，且共用同一个全局 `~/.pi/agent/sandbox.json`（schema 不兼容）——同一时刻只启用一个，切换前先卸载或停用另一个。pi-sandbox 忽略项目级文件；pi-container-sandbox 仍读它自己的项目 scope

@@ -1,8 +1,10 @@
 # pi-sandbox：workspace-write 额外可写目录（`extraWritableDirs`）设计
 
 日期：2026-10-14
-状态：已批准（待实现）
+状态：已实现
 落点：`pi-sandbox/src/config.ts`、`src/policy.ts`、`src/fence.ts`、`src/runners.ts`、`src/confine.ts`、`src/shell-ops.ts`、`src/tools.ts`、`index.ts`、`src/win32/cli.js`、`src/win32/runner.js`、`src/win32/sid.js`、`tests/*`、`README.md`、`README.zh.md`
+
+> **2026-10-24 修订**：§3 的配置落点与失败分层已被 `2026-10-24-writable-dirs-file-design.md` **取代**——字段从 `sandbox.json` 迁到独立的 `~/.pi/agent/sandbox-writable.json`（顶层裸字符串数组），且「取值不是字符串数组 → throw → 整份配置回退默认」不再成立（改为告警 + 空列表，绝不连坐 `mode`/runner 设置）；`sandbox.json` 里的旧字段告警并忽略。§2 的逐条规范化语义（`~` 展开、绝对路径、必须已存在、realpath、canonical 去重、agent 目录 warn-only）与 §4–§6 的运行时接线、§5 的 Windows SID 方案仍有效且不得重排。
 
 ## 1. 背景与目标
 

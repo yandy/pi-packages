@@ -108,6 +108,21 @@ describe("getSandboxConfig (fail-safe + cache)", () => {
 			warn.mockRestore();
 		}
 	});
+	it("sandbox.json 校验失败回落默认时仍保留新文件的授权（失败隔离是双向的）", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const extra = join(dir, "isolated-extra");
+			mkdirSync(extra);
+			writeGlobal({ runnerCommand: ["myrunner"] }); // 缺配对 → validate throw → fail-safe
+			writeWritable([extra]);
+			resetSandboxConfigCache();
+			const cfg = getSandboxConfig();
+			expect(cfg.mode).toBe(DEFAULT_SANDBOX_CONFIG.mode);
+			expect(cfg.extraWritableDirs).toEqual([realpathSync.native(extra)]);
+		} finally {
+			warn.mockRestore();
+		}
+	});
 	it("caches: second call does not re-warn", () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		try {
@@ -200,15 +215,58 @@ describe("extraWritableDirs（独立文件 sandbox-writable.json）", () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		try {
 			writeGlobal({ mode: "read-only", probeTimeoutMs: 1234 });
-			for (const bad of ["{broken", "nope", "/abs/path", 5, { dirs: ["/tmp"] }, [1, 2], ["/tmp", null]] as const) {
-				writeWritable(bad);
+			const cases = [
+				// writeWritable 对字符串是原样写入，所以裸文本/裸路径属于“JSON 非法”分支
+				{ content: "{broken", expected: /is not valid JSON/u },
+				{ content: "nope", expected: /is not valid JSON/u },
+				{ content: "/abs/path", expected: /is not valid JSON/u },
+				{ content: 5, expected: /must be a JSON array of path strings/u },
+				{ content: { dirs: ["/tmp"] }, expected: /must be a JSON array of path strings/u },
+				{ content: [1, 2], expected: /must be a JSON array of path strings/u },
+				{ content: ["/tmp", null], expected: /must be a JSON array of path strings/u },
+			] as const;
+			for (const { content, expected } of cases) {
+				// 逐轮清告警：否则解析分支的告警会喂饱循环外的断言，另两个分支就没被钉住。
+				warn.mockClear();
+				writeWritable(content);
 				resetSandboxConfigCache();
+				const label = String(content);
 				const cfg = loadSandboxConfig(); // 不抛
-				expect(cfg.extraWritableDirs, String(bad)).toEqual([]);
-				expect(cfg.mode, String(bad)).toBe("read-only");
-				expect(cfg.probeTimeoutMs, String(bad)).toBe(1234);
+				expect(cfg.extraWritableDirs, label).toEqual([]);
+				expect(cfg.mode, label).toBe("read-only");
+				expect(cfg.probeTimeoutMs, label).toBe(1234);
+				expect(warn.mock.calls.flat().join(" "), label).toMatch(expected);
 			}
-			expect(warn).toHaveBeenCalled();
+		} finally {
+			warn.mockRestore();
+		}
+	});
+	it("新文件不可读（非 ENOENT，例如同名目录）：告警 + 空列表，不静默", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			mkdirSync(join(agentDir, "sandbox-writable.json"), { recursive: true }); // 同名目录 → EISDIR
+			expect(loadSandboxConfig().extraWritableDirs).toEqual([]);
+			expect(warn.mock.calls.flat().join(" ")).toMatch(/sandbox-writable\.json/u);
+		} finally {
+			warn.mockRestore();
+		}
+	});
+	it("只写 sandbox-writable.json 时其余字段仍是默认（sandbox.json 缺失）", () => {
+		const extra = join(dir, "only-writable");
+		mkdirSync(extra);
+		writeWritable([extra]);
+		const cfg = loadSandboxConfig();
+		expect(cfg.extraWritableDirs).toEqual([realpathSync.native(extra)]);
+		expect(cfg.mode).toBe(DEFAULT_SANDBOX_CONFIG.mode);
+		expect(cfg.probeTimeoutMs).toBe(DEFAULT_SANDBOX_CONFIG.probeTimeoutMs);
+		expect(cfg.runnerCommand).toBeNull();
+	});
+	it("空数组与文件缺失等价：空列表且不告警", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			writeWritable([]);
+			expect(loadSandboxConfig().extraWritableDirs).toEqual([]);
+			expect(warn).not.toHaveBeenCalled();
 		} finally {
 			warn.mockRestore();
 		}
@@ -238,8 +296,16 @@ describe("extraWritableDirs（独立文件 sandbox-writable.json）", () => {
 			const projectExtra = join(dir, "project-extra");
 			mkdirSync(projectExtra);
 			writeProjectWritable([projectExtra]);
-			expect(loadSandboxConfig().extraWritableDirs).toEqual([]);
-			expect(warn).not.toHaveBeenCalled();
+			// 被测代码唯一可能读到项目层的路径是 process.cwd()：把 cwd 真的放到项目目录，
+			// 否则夹具与 cwd 永不相交，这条断言会变成装饰性的（变异不敏感）。
+			const prev = process.cwd();
+			try {
+				process.chdir(projectDir);
+				expect(loadSandboxConfig().extraWritableDirs).toEqual([]);
+				expect(warn).not.toHaveBeenCalled();
+			} finally {
+				process.chdir(prev);
+			}
 		} finally {
 			warn.mockRestore();
 		}

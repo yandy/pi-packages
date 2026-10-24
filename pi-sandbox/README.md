@@ -121,6 +121,8 @@ Entries must already exist (missing directories are warned about and ignored), s
 mkdir -p ~/.cache/uv ~/.local/share/pnpm/store ~/.cache/pnpm ~/.npm ~/.cache/pip ~/.cache/huggingface
 ```
 
+Put this in `~/.pi/agent/sandbox-writable.json`:
+
 ```json
 [
   "~/.cache/uv",
@@ -166,7 +168,7 @@ Optional grants and their trade-offs:
 
 ## Migrating from pi-container-sandbox 1.x
 
-- Config lives in `~/.pi/agent/sandbox.json` only: project-level `<project>/.pi/sandbox.json` is ignored silently (move any settings you rely on to the global file). Legacy `image`/`runtime`/`host` sections are ignored with a warning — rewrite them as the new fields above as needed
+- Config lives in the agent dir's global files only (`~/.pi/agent/sandbox.json` for the sandbox fields, `~/.pi/agent/sandbox-writable.json` for the extra writable roots): project-level `<project>/.pi/sandbox.json` and `<project>/.pi/sandbox-writable.json` are ignored silently (move any settings you rely on to the global files). Legacy `image`/`runtime`/`host` sections are ignored with a warning — rewrite them as the new fields above as needed
 - The container runtime (docker/podman), image builds, `runtime.mounts`, the `/sandbox` command, `--container*` flags, and the external-path approval flow are not part of this package
 - Need container-grade isolation (separate filesystem/network namespaces)? Install `@yandy0725/pi-container-sandbox` — it keeps the container implementation
 - `pi-sandbox` and `@yandy0725/pi-container-sandbox` are **mutually exclusive**: both take over `bash`/`write`/`edit` and both read the same global `~/.pi/agent/sandbox.json` (with incompatible schemas) — enable only one at a time, and uninstall or disable the other before switching. pi-sandbox ignores project-level files; pi-container-sandbox still reads its own project scope

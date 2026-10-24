@@ -151,8 +151,13 @@ export function loadWritableDirs(): string[] {
 	let text: string;
 	try {
 		text = readFileSync(path, "utf-8");
-	} catch {
-		return []; // 缺失 = 无授权，静默
+	} catch (err) {
+		// 缺失（ENOENT/ENOTDIR）= 无授权，静默；其它读失败（EACCES、EISDIR…）用户明明放了文件
+		// 却拿不到授权，必须告警，否则是无提示的失败。
+		const code = (err as NodeJS.ErrnoException).code;
+		if (code === "ENOENT" || code === "ENOTDIR") return [];
+		console.warn(`sandbox: cannot read ${path} (${code ?? String(err)}), ignoring extra writable dirs`);
+		return [];
 	}
 	let parsed: unknown;
 	try {
@@ -200,7 +205,9 @@ export function getSandboxConfig(): SandboxConfig {
 			cachedConfig = loadSandboxConfig();
 		} catch (err) {
 			console.warn(`sandbox: failed to load config, falling back to defaults (mode "${DEFAULT_SANDBOX_CONFIG.mode}"): ${err instanceof Error ? err.message : String(err)}`);
-			cachedConfig = DEFAULT_SANDBOX_CONFIG;
+			// 失败隔离是双向的：sandbox.json 坏了只回落它自己的字段，额外可写根仍从独立文件取
+			// （该文件自身不 throw），绝不让一边的手误吞掉另一边的授权。
+			cachedConfig = { ...DEFAULT_SANDBOX_CONFIG, extraWritableDirs: loadWritableDirs() };
 		}
 	}
 	return cachedConfig;

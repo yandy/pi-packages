@@ -1,7 +1,7 @@
 # pi-sandbox：`extraWritableDirs` 迁到独立文件 `sandbox-writable.json` 设计
 
 日期：2026-10-24
-状态：已批准
+状态：已实现
 落点：`pi-sandbox/src/config.ts`、`tests/config.test.ts`、`tests/index-smoke.test.ts`、`README.md`、`README.zh.md`
 
 ## 1. 背景与目标
@@ -42,10 +42,13 @@
 | 情况 | 处理 |
 |---|---|
 | 文件缺失 | 空列表，静默 |
+| 文件不可读（非 `ENOENT`/`ENOTDIR`，如 `EACCES`、同名目录） | `console.warn` + 空列表（用户放了文件却拿不到授权，不得无提示） |
 | JSON 损坏 / 顶层不是数组 / 含非字符串元素 | `console.warn` + 空列表 |
 | 单条非绝对 / 不存在 / 不是目录 | `console.warn` + 丢弃该条 |
 
 关键变化：这个字段的任何错误**都不再**让 `sandbox.json` 整份回落默认（旧行为是"取值不是字符串数组 → 整份配置回退"）。`mode` / `runnerCommand` / `probeTimeoutMs` 的校验与 fail-safe 路径不受新文件影响。
+
+失败隔离是**双向**的：`sandbox.json` 校验失败时，`getSandboxConfig()` 回落的默认配置仍带上 `loadWritableDirs()` 的结果（该函数自身不会 throw），所以一边的手误不会吞掉另一边的授权。
 
 读取时机不变：`getSandboxConfig()` 进程内缓存一次，改文件需重启 pi；`resetSandboxConfigCache()` 同时清掉新文件的结果。
 
