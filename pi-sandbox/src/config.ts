@@ -12,7 +12,7 @@ export interface SandboxConfig {
 	runnerFailureSignatures: string[] | null;
 	/** 每个功能探测的超时；必须为正有限数（0 对 Node 意味着无超时）。 */
 	probeTimeoutMs: number;
-	/** workspace-write 下额外可写目录（已 ~ 展开 + realpath 规范化 + 去重）。 */
+	/** workspace-write 下额外可写目录；来源是独立的 `sandbox-writable.json`（已 ~ 展开 + realpath 规范化 + 去重）。 */
 	extraWritableDirs: string[];
 }
 
@@ -73,17 +73,13 @@ export function validateSandboxConfig(raw: Record<string, unknown>, source: stri
 		throw new Error(`sandbox: ${source}: probeTimeoutMs must be a positive finite number`);
 	}
 
-	const extraWritableDirs = raw.extraWritableDirs ?? [];
-	if (!isStringArray(extraWritableDirs)) {
-		throw new Error(`sandbox: ${source}: extraWritableDirs must be a string array`);
-	}
-
 	return {
 		mode,
 		runnerCommand: runnerCommand as string[] | null,
 		runnerFailureSignatures: runnerFailureSignatures as string[] | null,
 		probeTimeoutMs,
-		extraWritableDirs: [...extraWritableDirs],
+		// 该字段已迁出 sandbox.json，由 loadWritableDirs() 另行提供（loadSandboxConfig 里合并）
+		extraWritableDirs: [],
 	};
 }
 
@@ -145,9 +141,43 @@ export function resolveExtraWritableDirs(entries: readonly string[], source: str
 }
 
 /**
+ * 独立授权文件 `~/.pi/agent/sandbox-writable.json`（2026-10-24 决策）：顶层是 JSON 字符串数组，
+ * 无根 key，便于手工编辑/脚本追加。缺失与 `[]` 等价且不告警；损坏/非数组/含非字符串元素
+ * → 告警 + 空列表（绝不连坐 `sandbox.json` 的校验与 fail-safe）。逐条语义复用
+ * `resolveExtraWritableDirs`。
+ */
+export function loadWritableDirs(): string[] {
+	const path = resolvePath(getAgentDir(), "sandbox-writable.json");
+	let text: string;
+	try {
+		text = readFileSync(path, "utf-8");
+	} catch (err) {
+		// 缺失（ENOENT/ENOTDIR）= 无授权，静默；其它读失败（EACCES、EISDIR…）用户明明放了文件
+		// 却拿不到授权，必须告警，否则是无提示的失败。
+		const code = (err as NodeJS.ErrnoException).code;
+		if (code === "ENOENT" || code === "ENOTDIR") return [];
+		console.warn(`sandbox: cannot read ${path} (${code ?? String(err)}), ignoring extra writable dirs`);
+		return [];
+	}
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(text);
+	} catch {
+		console.warn(`sandbox: ${path} is not valid JSON, ignoring extra writable dirs`);
+		return [];
+	}
+	if (!isStringArray(parsed)) {
+		console.warn(`sandbox: ${path} must be a JSON array of path strings, ignoring extra writable dirs`);
+		return [];
+	}
+	return resolveExtraWritableDirs(parsed, path);
+}
+
+/**
  * 只读全局配置 `~/.pi/agent/sandbox.json`（2026-10-14 决策）。项目级 `<cwd>/.pi/sandbox.json`
  * 被**静默忽略**：项目目录对模型可写，把配置层留在那里等于把 mode / runnerCommand 的改写权
  * 交给模型；不解析、不校验、不告警（决策与被否方案见 docs/superpowers/specs/2026-10-14-global-only-config-decision.md）。
+ * 额外可写目录读独立的 `sandbox-writable.json`（2026-10-24 决策），项目级同名文件同样静默忽略。
  */
 export function loadSandboxConfig(): SandboxConfig {
 	const globalPath = resolvePath(getAgentDir(), "sandbox.json");
@@ -157,8 +187,13 @@ export function loadSandboxConfig(): SandboxConfig {
 		if (key in globalRaw) console.warn(`sandbox: ignoring legacy "${key}" section in ${globalPath} (removed in 2.0; see README migration notes)`);
 	}
 
+	const writablePath = resolvePath(getAgentDir(), "sandbox-writable.json");
+	if ("extraWritableDirs" in globalRaw) {
+		console.warn(`sandbox: ignoring "extraWritableDirs" in ${globalPath} (moved to ${writablePath}; see README migration notes)`);
+	}
+
 	const validated = validateSandboxConfig(globalRaw, globalPath);
-	return { ...validated, extraWritableDirs: resolveExtraWritableDirs(validated.extraWritableDirs, globalPath) };
+	return { ...validated, extraWritableDirs: loadWritableDirs() };
 }
 
 let cachedConfig: SandboxConfig | undefined;
@@ -170,7 +205,9 @@ export function getSandboxConfig(): SandboxConfig {
 			cachedConfig = loadSandboxConfig();
 		} catch (err) {
 			console.warn(`sandbox: failed to load config, falling back to defaults (mode "${DEFAULT_SANDBOX_CONFIG.mode}"): ${err instanceof Error ? err.message : String(err)}`);
-			cachedConfig = DEFAULT_SANDBOX_CONFIG;
+			// 失败隔离是双向的：sandbox.json 坏了只回落它自己的字段，额外可写根仍从独立文件取
+			// （该文件自身不 throw），绝不让一边的手误吞掉另一边的授权。
+			cachedConfig = { ...DEFAULT_SANDBOX_CONFIG, extraWritableDirs: loadWritableDirs() };
 		}
 	}
 	return cachedConfig;

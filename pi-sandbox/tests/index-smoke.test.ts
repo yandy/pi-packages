@@ -161,7 +161,9 @@ describe("extension activate", () => {
 		const extra = mkdtempSync(join(tmpdir(), "permission-extra-"));
 		try {
 			const globalPath = join(dir, "agent", "sandbox.json");
-			writeFileSync(globalPath, JSON.stringify({ mode: "workspace-write", extraWritableDirs: [extra] }));
+			const writablePath = join(dir, "agent", "sandbox-writable.json");
+			writeFileSync(globalPath, JSON.stringify({ mode: "workspace-write" }));
+			writeFileSync(writablePath, JSON.stringify([extra]));
 			const { fakePi, commandHandlers } = makeFakePi();
 			const activate = (await import("../index")).default;
 			activate(fakePi as never);
@@ -173,7 +175,7 @@ describe("extension activate", () => {
 
 			// describeStatus 每次现读 getSandboxConfig()：清缓存 + 改写配置即可切到 read-only。
 			resetSandboxConfigCache();
-			writeFileSync(globalPath, JSON.stringify({ mode: "read-only", extraWritableDirs: [extra] }));
+			writeFileSync(globalPath, JSON.stringify({ mode: "read-only" }));
 			await commandHandlers.permission.handler("", { ui: { notify } });
 			text = String(notify.mock.calls[1]?.[0]);
 			expect(text).toContain(`extra writable: ${realpathSync.native(extra)} (inactive: read-only)`);
