@@ -48,3 +48,25 @@ export function loadConfig(cwd: string): WebToolsConfig {
 	return cachedConfig;
 }
 
+const VALID_PROVIDERS: Record<"websearch" | "webfetch", readonly string[]> = {
+	websearch: ["exa", "deepseek", "aliyun"],
+	webfetch: ["local", "deepseek"],
+};
+
+export function resolveProvider(
+	tool: "websearch" | "webfetch",
+	paramValue: string | undefined,
+	config: WebToolsConfig,
+): { provider?: string; error?: string } {
+	if (paramValue !== undefined) return { provider: paramValue };
+	const configured = config[tool]?.provider;
+	if (configured === undefined) return {};
+	const valid = VALID_PROVIDERS[tool];
+	if (!valid.includes(configured)) {
+		return {
+			error: `Invalid provider "${configured}" for ${tool} in web-tools.json. Expected one of: ${valid.join(", ")}`,
+		};
+	}
+	return { provider: configured };
+}
+

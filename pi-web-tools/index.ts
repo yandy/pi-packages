@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { resolveProvider, loadConfig } from "./src/config";
 import { webFetch } from "./src/web_fetch";
 import { buildProviders, search } from "./src/web_search/index";
 
@@ -68,8 +69,12 @@ export default function (pi: ExtensionAPI) {
 			try {
 				const deepseekApiKey = await ctx.modelRegistry.getApiKeyForProvider("deepseek").catch(() => undefined);
 				const aliyunApiKey = await ctx.modelRegistry.getApiKeyForProvider("aliyun").catch(() => undefined);
+				const { provider, error } = resolveProvider("websearch", p.provider, loadConfig(ctx.cwd));
+				if (error) {
+					return { content: [{ type: "text", text: `Search failed: ${error}` }], details: {}, isError: true };
+				}
 				const providers = buildProviders({ deepseek: deepseekApiKey, aliyun: aliyunApiKey });
-				const result = await search(query, p.numResults ?? 10, signal, onProgress, p.provider, providers);
+				const result = await search(query, p.numResults ?? 10, signal, onProgress, provider, providers);
 				const providerLabel = `\n\n*Provider: ${result.providerLabel}*`;
 				return {
 					content: [{ type: "text", text: result.answer + providerLabel }],
@@ -147,8 +152,12 @@ export default function (pi: ExtensionAPI) {
 
 			try {
 				const deepseekApiKey = await ctx.modelRegistry.getApiKeyForProvider("deepseek").catch(() => undefined);
+				const { provider, error } = resolveProvider("webfetch", p.provider, loadConfig(ctx.cwd));
+				if (error) {
+					return { content: [{ type: "text", text: `Fetch failed: ${error}` }], details: {}, isError: true };
+				}
 				const result = await webFetch(url, format, timeout, signal, undefined, {
-					provider: p.provider,
+					provider,
 					deepseekApiKey,
 					onProgress: (msg) => onUpdate?.({ content: [{ type: "text", text: msg }], details: {} }),
 				});

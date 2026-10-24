@@ -125,3 +125,47 @@ describe("loadConfig", () => {
 		expect(readCount).toBeLessThanOrEqual(2);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// resolveProvider
+// ---------------------------------------------------------------------------
+
+describe("resolveProvider", () => {
+	beforeEach(async () => {
+		await importModule();
+	});
+
+	it("param value overrides config", async () => {
+		const { resolveProvider } = await import("../src/config.js");
+		const result = resolveProvider("websearch", "exa", { websearch: { provider: "deepseek" } });
+		expect(result).toEqual({ provider: "exa" });
+	});
+
+	it("uses valid config value when param absent", async () => {
+		const { resolveProvider } = await import("../src/config.js");
+		const result = resolveProvider("webfetch", undefined, { webfetch: { provider: "deepseek" } });
+		expect(result).toEqual({ provider: "deepseek" });
+	});
+
+	it("returns error for invalid websearch config value", async () => {
+		const { resolveProvider } = await import("../src/config.js");
+		const result = resolveProvider("websearch", undefined, { websearch: { provider: "exaa" } });
+		expect(result).toEqual({
+			error: 'Invalid provider "exaa" for websearch in web-tools.json. Expected one of: exa, deepseek, aliyun',
+		});
+	});
+
+	it("returns error for invalid webfetch config value", async () => {
+		const { resolveProvider } = await import("../src/config.js");
+		const result = resolveProvider("webfetch", undefined, { webfetch: { provider: "remote" } });
+		expect(result).toEqual({
+			error: 'Invalid provider "remote" for webfetch in web-tools.json. Expected one of: local, deepseek',
+		});
+	});
+
+	it("returns empty when neither param nor config present", async () => {
+		const { resolveProvider } = await import("../src/config.js");
+		const result = resolveProvider("websearch", undefined, {});
+		expect(result).toEqual({});
+	});
+});
