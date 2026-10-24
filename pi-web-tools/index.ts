@@ -111,6 +111,13 @@ export default function (pi: ExtensionAPI) {
 					description: "Timeout in seconds (1-120). Default: 30.",
 				}),
 			),
+			provider: Type.Optional(
+				Type.String({
+					enum: ["local", "deepseek"],
+					description:
+						"Fetch provider: local (direct HTTP, default) or deepseek (server-side rendering, handles JS-heavy pages, returns markdown, requires DEEPSEEK_API_KEY or a configured deepseek provider). Default: local with deepseek fallback on failure/thin content.",
+				}),
+			),
 		}),
 		renderCall(args, theme) {
 			const p = args as { url: string };
@@ -127,8 +134,8 @@ export default function (pi: ExtensionAPI) {
 			}
 			return new Text(body, 0, 0);
 		},
-		async execute(_toolCallId, params, signal, onUpdate, _ctx) {
-			const p = params as { url: string; format?: "text" | "markdown" | "html"; timeout?: number };
+		async execute(_toolCallId, params, signal, onUpdate, ctx) {
+			const p = params as { url: string; format?: "text" | "markdown" | "html"; timeout?: number; provider?: string };
 			const url = p.url?.trim();
 			if (!url) {
 				return { content: [{ type: "text", text: "Error: url is required." }], details: {}, isError: true };
@@ -139,11 +146,24 @@ export default function (pi: ExtensionAPI) {
 			onUpdate?.({ content: [{ type: "text", text: `Fetching ${url}...` }], details: {} });
 
 			try {
-				const result = await webFetch(url, format, timeout, signal);
-				const header = `URL: ${result.url}\nContent-Type: ${result.contentType}\n\n`;
+				const deepseekApiKey = await ctx.modelRegistry.getApiKeyForProvider("deepseek").catch(() => undefined);
+				const result = await webFetch(url, format, timeout, signal, undefined, {
+					provider: p.provider,
+					deepseekApiKey,
+					onProgress: (msg) => onUpdate?.({ content: [{ type: "text", text: msg }], details: {} }),
+				});
+				const titleLine = result.title ? `Title: ${result.title}\n` : "";
+				const header = `URL: ${result.url}\n${titleLine}Content-Type: ${result.contentType}\n\n`;
+				const providerLabel = `\n\n*Provider: ${result.provider}*`;
 				return {
-					content: [{ type: "text", text: header + result.content }],
-					details: { url: result.url, contentType: result.contentType, status: result.status },
+					content: [{ type: "text", text: header + result.content + providerLabel }],
+					details: {
+						url: result.url,
+						contentType: result.contentType,
+						status: result.status,
+						provider: result.provider,
+						...(result.title ? { title: result.title } : {}),
+					},
 				};
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);

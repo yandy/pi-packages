@@ -214,7 +214,7 @@ function isJunkLine(line: string): boolean {
 	if (!t) return true;
 	if (/^<\/?[a-z][^>]*>$/i.test(t)) return true;
 	if (/^(?:var|let|const|function|return|import|export|window\.|document\.|self\.|@media|@import)\b/.test(t)) return true;
-	if (/^[{}()\[\];,]/.test(t)) return true;
+	if (/^[{}()[\];,]/.test(t)) return true;
 	if (/^(?:\/\/|\/\*|\*\/|<!--)/.test(t)) return true;
 	if (t.length > 500) {
 		const spaces = t.match(/\s/g)?.length ?? 0;
