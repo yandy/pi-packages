@@ -222,6 +222,93 @@ describe("aliyunSearch", () => {
 });
 
 // ---------------------------------------------------------------------------
+// deepseekSearch
+// ---------------------------------------------------------------------------
+
+describe("deepseekSearch", () => {
+	it("throws when no API key available", async () => {
+		vi.stubEnv("DEEPSEEK_API_KEY", "");
+		const mod = await import("../src/web_search/deepseek.js");
+
+		await expect(mod.deepseekSearch("test query", 5)).rejects.toThrow("DEEPSEEK_API_KEY not set");
+	});
+
+	it("calls REST API with Bearer auth and maps summary as snippet", async () => {
+		vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
+		const mod = await import("../src/web_search/deepseek.js");
+
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					results: [{ title: "T", url: "https://x.com", snippet: "short", summary: "long summary for model" }],
+				}),
+		});
+
+		const result = await mod.deepseekSearch("test query", 5);
+
+		expect(mockFetch).toHaveBeenCalledWith(
+			"https://api.deepseek.com/v1/tools/search",
+			expect.objectContaining({
+				method: "POST",
+				headers: { Authorization: "Bearer test-key", "Content-Type": "application/json" },
+				body: JSON.stringify({ query: "test query", count: 5 }),
+			}),
+		);
+		expect(result.providerLabel).toBe("deepseek");
+		expect(result.sources[0].snippet).toBe("long summary for model");
+		expect(result.answer).toContain("1. [T](https://x.com)");
+	});
+
+	it("falls back to snippet when summary missing", async () => {
+		vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
+		const mod = await import("../src/web_search/deepseek.js");
+
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					results: [{ title: "T", url: "https://x.com", snippet: "short only" }],
+				}),
+		});
+
+		const result = await mod.deepseekSearch("test query", 5);
+
+		expect(result.sources[0].snippet).toBe("short only");
+	});
+
+	it("throws with API error message on non-2xx", async () => {
+		vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
+		const mod = await import("../src/web_search/deepseek.js");
+
+		mockFetch.mockResolvedValueOnce({
+			ok: false,
+			status: 400,
+			json: () => Promise.resolve({ error: { message: "'count' must be between 1 and 50" } }),
+		});
+
+		await expect(mod.deepseekSearch("test query", 5)).rejects.toThrow(
+			"DeepSeek API 400: 'count' must be between 1 and 50",
+		);
+	});
+
+	it("returns no-results answer for empty results", async () => {
+		vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
+		const mod = await import("../src/web_search/deepseek.js");
+
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () => Promise.resolve({ results: [] }),
+		});
+
+		const result = await mod.deepseekSearch("test query", 5);
+
+		expect(result.sources).toHaveLength(0);
+		expect(result.answer).toContain("No results found");
+	});
+});
+
+// ---------------------------------------------------------------------------
 // search orchestrator
 // ---------------------------------------------------------------------------
 
