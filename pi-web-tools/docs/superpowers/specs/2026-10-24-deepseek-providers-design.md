@@ -93,7 +93,13 @@ index.ts                   # 改：两个工具的参数 schema（provider）、
 - **FetchResult 既有字段（deepseek 路径，我的裁定）**：`contentType: "text/markdown"`、`status: 200`、`url` 为请求 URL（deepseek 不暴露最终跳转地址）。
 - `webFetch(url, format, timeout, signal?, _fetch?, opts?)`：URL/协议校验保持在入口（与 provider 无关），然后路由：
   - **显式 provider（参数或配置解析后传入）**：独占。`"local"` → 仅 local；`"deepseek"` → 仅 deepseek（无 key 报错，不回退）。例外：`format: "html"` 时 deepseek 无法产出（服务端只返回 Markdown），自动走 local 并在结果 provider 字段如实标注。
-  - **未指定**：链 **local → deepseek**。local 失败且 deepseek key 可用且 `format !== "html"` 时回落 deepseek；两者都失败抛 `All fetch providers failed`（聚合两端错误，与 search 一致）。无 key 时 local 错误直接透传。
+  - **未指定**：链 **local → deepseek**。回落触发条件：
+    1. **硬失败**：local 网络错误 / 超时 / 非 2xx → 尝试 deepseek；deepseek 也失败 → 抛 `All fetch providers failed`（聚合两端错误，与 search 一致）。
+    2. **薄内容**：local 返回 200 但转换后内容"薄"（见下方 `isThinContent`，仅 text/markdown 格式）→ 尝试 deepseek；deepseek 失败则**返回 local 的原结果而非报错**（聊胜于无）。同时通过 onUpdate 提示回落原因（如 `Local fetch returned thin content, trying deepseek...`）。
+    3. `format: "html"` → 永不回落（deepseek 产不出 html）。
+    4. 无 deepseek key → 永不回落，local 错误直接透传。
+
+    `isThinContent(content, contentType)`：JSON 响应豁免（数据响应非渲染页）；其余按行过滤疑似垃圾行（纯 HTML 标签行、JS/CSS 语句行如 `var/let/const/function/window./document./@media` 开头、括号/分号开头、注释行、少空格超长压缩行），剩余有效文本 < 200 字符即薄。启发式是尽力而为、保守设计：误判只会多一次 deepseek 尝试（不成功不计费）；漏判则返回 local 原结果。该检测同时覆盖空壳页与无效 js tag 堆积页（维护者实测案例）。阈值为内部常量，不暴露为配置。
 - `format: "text"` + deepseek：返回 Markdown 原文（Markdown 即文本），文档注明。
 - `FetchResult` 增加 `provider: "local" | "deepseek"` 与可选 `title`（deepseek 返回的页面标题）。
 - 超时：deepseek 复用现有 `timeout` 参数（每次尝试独立计时）。
@@ -127,7 +133,7 @@ index.ts                   # 改：两个工具的参数 schema（provider）、
 
 **`describe("search orchestrator")`**：链序 exa → deepseek → aliyun（exa 失败回落 deepseek；deepseek 再失败回落 aliyun）；`provider: "deepseek"` 独占；未知 provider 报错；现有 `source` 用例全部改名适配。
 
-**`describe("webFetch 路由")`**：local 成功不碰 deepseek；local 失败回落 deepseek（有 key）；无 key 时 local 错误透传；`format: "html"` 显式 deepseek 自动走 local；`provider: "local"` 独占（local 失败不回落）；两者失败聚合错误；deepseek 成功结果含 title/provider 字段。
+**`describe("webFetch 路由")`**：local 成功不碰 deepseek；local 硬失败回落 deepseek（有 key）；无 key 时 local 错误透传；`format: "html"` 显式 deepseek 自动走 local；`provider: "local"` 独占（local 失败不回落）；两者失败聚合错误；deepseek 成功结果含 title/provider 字段；薄内容回落（空壳页、js tag 堆积页 → 回落 deepseek；JSON 响应豁免不回落；薄内容 + deepseek 失败 → 返回 local 原结果不报错）。
 
 **`describe("loadConfig")`**：新段加载与全局/项目合并；现有 aliyun 段用例改为新 schema。
 
