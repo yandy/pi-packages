@@ -1,13 +1,30 @@
-import TurndownService from "turndown";
+import {
+	isBinaryContentType,
+	isHtmlContentType,
+	isJsonContentType,
+	looksLikeHtml,
+	mediaType,
+} from "./content_type.js";
+import { htmlToMarkdown } from "./html_to_markdown.js";
 
 const MAX_CONTENT_CHARS = 100_000;
 const DEEPSEEK_FETCH_URL = "https://api.deepseek.com/v1/tools/fetch";
 const DEEPSEEK_MAX_URL = 8192;
 
-const turndown = new TurndownService({
-	headingStyle: "atx",
-	codeBlockStyle: "fenced",
-});
+/** 输出格式：markdown 做最小必要变换，origin 原样返回 */
+export type FetchFormat = "markdown" | "origin";
+
+/** 内容类型无法产出文本时的终态错误：链式模式不应再回落其它 provider */
+export class UnsupportedContentTypeError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "UnsupportedContentTypeError";
+	}
+}
+
+export function isTerminalFetchError(error: unknown): boolean {
+	return error instanceof UnsupportedContentTypeError;
+}
 
 export interface FetchResult {
 	content: string;
@@ -52,14 +69,16 @@ export async function webFetch(
 	}
 
 	const apiKey = opts?.deepseekApiKey || process.env.DEEPSEEK_API_KEY;
+	// index.ts 仍会传旧枚举（text/html，Task 5 才迁移）：html 的旧语义是原样返回，对应新的 origin
+	const localFormat: FetchFormat = format === "html" ? "origin" : "markdown";
 
 	if (opts?.provider === "deepseek") {
 		// deepseek 服务端只返回 Markdown，html 无法产出：自动走 local 并如实标注
-		if (format === "html") return localFetch(url, format, timeout, signal, _fetch);
+		if (format === "html") return localFetch(url, localFormat, timeout, signal, _fetch);
 		return deepseekFetch(url, apiKey ?? "", timeout, signal);
 	}
 	if (opts?.provider === "local") {
-		return localFetch(url, format, timeout, signal, _fetch);
+		return localFetch(url, localFormat, timeout, signal, _fetch);
 	}
 	if (opts?.provider !== undefined) {
 		throw new Error(`Unknown provider: ${opts.provider}. Available: local, deepseek`);
@@ -68,7 +87,7 @@ export async function webFetch(
 	// 链式：local → deepseek
 	const canFallback = format !== "html" && Boolean(apiKey);
 	try {
-		const local = await localFetch(url, format, timeout, signal, _fetch);
+		const local = await localFetch(url, localFormat, timeout, signal, _fetch);
 		if (canFallback && isThinContent(local.content, local.contentType)) {
 			opts?.onProgress?.("Local fetch returned thin content, trying deepseek...");
 			try {
@@ -95,7 +114,7 @@ export async function webFetch(
 
 export async function localFetch(
 	url: string,
-	format: "text" | "markdown" | "html",
+	format: FetchFormat,
 	timeout: number,
 	signal?: AbortSignal,
 	_fetch?: typeof fetch,
@@ -120,37 +139,47 @@ export async function localFetch(
 		method: "GET",
 		headers: {
 			"User-Agent": "pi-web-tools/1.0",
-			Accept: format === "html" ? "text/html" : "text/html, text/plain, application/json",
+			Accept: format === "origin" ? "*/*" : "text/html, text/plain, application/json",
 		},
 		redirect: "follow",
 		signal: s,
 	});
 
 	const contentType = response.headers.get("content-type") || "text/plain";
-	const body = await response.text();
 
 	if (!response.ok) {
-		const truncated = body.slice(0, 500);
+		const truncated = (await response.text()).slice(0, 500);
 		throw new Error(`HTTP ${response.status} from ${url}${truncated ? `: ${truncated}` : ""}`);
 	}
 
-	let content: string;
-
-	if (contentType.includes("application/json")) {
-		try {
-			content = JSON.stringify(JSON.parse(body), null, 2);
-		} catch {
-			content = body;
-		}
-	} else if (format === "html") {
-		content = body;
-	} else if (format === "markdown") {
-		content = turndown.turndown(body);
-	} else {
-		content = stripTags(body);
+	if (isBinaryContentType(contentType)) {
+		const length = response.headers.get("content-length");
+		throw new UnsupportedContentTypeError(
+			`Unsupported content type: ${mediaType(contentType)}${length ? `, ${length} bytes` : ""}. webfetch only returns text; download the file with another tool.`,
+		);
 	}
 
-	return { content: applyTruncation(content), contentType, url: response.url, status: response.status, provider: "local" };
+	const body = await response.text();
+	const base = { contentType, url: response.url, status: response.status, provider: "local" as const };
+
+	if (format === "origin") {
+		return { ...base, content: applyTruncation(body) };
+	}
+
+	if (isHtmlContentType(contentType) || looksLikeHtml(body)) {
+		const { content, title } = htmlToMarkdown(body);
+		return { ...base, content: applyTruncation(content), title };
+	}
+
+	if (isJsonContentType(contentType)) {
+		try {
+			return { ...base, content: applyTruncation(JSON.stringify(JSON.parse(body), null, 2)) };
+		} catch {
+			return { ...base, content: applyTruncation(body) };
+		}
+	}
+
+	return { ...base, content: applyTruncation(body) };
 }
 
 export async function deepseekFetch(
@@ -226,22 +255,4 @@ function isJunkLine(line: string): boolean {
 		if (spaces / t.length < 0.05) return true;
 	}
 	return false;
-}
-
-function stripTags(html: string): string {
-	let text = html;
-	text = text.replace(/<head[\s\S]*?<\/head>/gi, "");
-	text = text.replace(/<style[\s\S]*?<\/style>/gi, "");
-	text = text.replace(/<script[\s\S]*?<\/script>/gi, "");
-	text = text.replace(/<br\s*\/?>/gi, "\n");
-	text = text.replace(/<[^>]+>/g, "");
-	text = text.replace(/&amp;/g, "&");
-	text = text.replace(/&lt;/g, "<");
-	text = text.replace(/&gt;/g, ">");
-	text = text.replace(/&quot;/g, '"');
-	text = text.replace(/&#39;/g, "'");
-	text = text.replace(/&nbsp;/g, " ");
-	text = text.replace(/\n{3,}/g, "\n\n");
-	text = text.replace(/[ \t]+/g, " ");
-	return text.trim();
 }
