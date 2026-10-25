@@ -88,6 +88,41 @@ describe("htmlToMarkdown", () => {
 		expect(content).not.toContain("FOOTER JUNK");
 	});
 
+	it("prefers <main> over an earlier <article> and an earlier [role=main]", () => {
+		// 容器优先级只有在多种容器同时出现时才可观测：article 与 [role=main] 都排在 <main> 之前
+		const html = [
+			"<html><body>",
+			'<div role="main"><h1>ROLEMAINMARKER</h1></div>',
+			"<article><h1>ARTICLEMARKER</h1></article>",
+			"<main><h1>Main Wins</h1><p>Main body text.</p></main>",
+			"</body></html>",
+		].join("");
+
+		const { content } = htmlToMarkdown(html);
+
+		expect(content).toContain("# Main Wins");
+		expect(content).toContain("Main body text.");
+		expect(content).not.toContain("ROLEMAINMARKER");
+		expect(content).not.toContain("ARTICLEMARKER");
+	});
+
+	it("keeps nav, aside and footer inside the winning container", () => {
+		const html = [
+			"<html><body><nav>OUTERNAVJUNK</nav>",
+			"<main><h1>Doc Title</h1><nav>INNERNAV</nav><p>Main body text.</p>",
+			"<aside>INNERASIDE</aside><footer>INNERFOOTER</footer></main>",
+			"</body></html>",
+		].join("");
+
+		const { content } = htmlToMarkdown(html);
+
+		expect(content).toContain("# Doc Title");
+		expect(content).toContain("INNERNAV");
+		expect(content).toContain("INNERASIDE");
+		expect(content).toContain("INNERFOOTER");
+		expect(content).not.toContain("OUTERNAVJUNK");
+	});
+
 	it("falls back to <article> when there is no <main>", () => {
 		const { content } = htmlToMarkdown(
 			"<html><body><nav>NAV JUNK</nav><article><h1>Article Title</h1></article></body></html>",
