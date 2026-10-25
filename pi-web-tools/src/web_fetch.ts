@@ -51,7 +51,7 @@ export interface WebFetchOptions {
 
 export async function webFetch(
 	url: string,
-	format: string,
+	format: FetchFormat,
 	timeout: number,
 	signal?: AbortSignal,
 	_fetch?: typeof fetch,

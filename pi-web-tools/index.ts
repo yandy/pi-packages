@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { resolveProvider, loadConfig } from "./src/config";
-import { webFetch } from "./src/web_fetch";
+import { type FetchFormat, webFetch } from "./src/web_fetch";
 import { buildProviders, search } from "./src/web_search/index";
 
 export default function (pi: ExtensionAPI) {
@@ -94,19 +94,25 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "webfetch",
 		label: "Web Fetch",
-		description: "Fetch content from a URL and return as text, markdown, or raw HTML.",
-		promptSnippet: "webfetch: fetch content from a URL as text, markdown, or raw HTML.",
+		description:
+			`Fetch content from a URL. format "markdown" (default) cleans HTML (strips scripts, styles and navigation), locates the main content and converts it to markdown, pretty-prints JSON, and returns other text types as-is. ` +
+			`format "origin" returns the untouched raw response body exactly as received, with no cleaning, extraction, or conversion. ` +
+			`Binary content (images, PDFs, archives) is rejected: only text-like responses are returned.`,
+		promptSnippet:
+			"webfetch: fetch a URL as cleaned markdown (HTML sanitized + main content extracted, JSON pretty-printed) or as the untouched raw body (format: \"origin\"); binary responses are rejected.",
 		promptGuidelines: [
 			"Use webfetch to retrieve full page content from a URL.",
 			"Prefer fetching specific pages rather than homepages for more targeted information.",
+			'Use format: "origin" only when you need the unprocessed raw response body; it is never routed to the deepseek fallback.',
 		],
 		parameters: Type.Object({
 			url: Type.String({ minLength: 5, description: "The URL to fetch content from." }),
 			format: Type.Optional(
 				Type.String({
-					enum: ["text", "markdown", "html"],
+					enum: ["markdown", "origin"],
 					default: "markdown",
-					description: "Output format. Default: markdown.",
+					description:
+						'Output format. markdown (default): HTML cleaned and main content extracted, then converted to markdown; JSON pretty-printed; other text types returned as-is. origin: the untouched raw response body, no cleaning/extraction/conversion. Binary content is rejected.',
 				}),
 			),
 			timeout: Type.Optional(
@@ -141,12 +147,12 @@ export default function (pi: ExtensionAPI) {
 			return new Text(body, 0, 0);
 		},
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const p = params as { url: string; format?: "text" | "markdown" | "html"; timeout?: number; provider?: string };
+			const p = params as { url: string; format?: FetchFormat; timeout?: number; provider?: string };
 			const url = p.url?.trim();
 			if (!url) {
 				return { content: [{ type: "text", text: "Error: url is required." }], details: {}, isError: true };
 			}
-			const format = p.format || "markdown";
+			const format: FetchFormat = p.format ?? "markdown";
 			const timeout = p.timeout ?? 30;
 
 			onUpdate?.({ content: [{ type: "text", text: `Fetching ${url}...` }], details: {} });
