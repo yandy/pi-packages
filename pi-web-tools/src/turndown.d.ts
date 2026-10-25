@@ -14,6 +14,6 @@ declare module "turndown" {
 
 	export default class TurndownService {
 		constructor(options?: TurndownOptions);
-		turndown(html: string | Node): string;
+		turndown(input: string | import("@mixmark-io/domino").DomNode): string;
 	}
 }
