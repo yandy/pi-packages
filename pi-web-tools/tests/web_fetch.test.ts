@@ -374,13 +374,13 @@ describe("webFetch 路由", () => {
 		}
 	});
 
-	it("never falls back for html format in chain mode", async () => {
+	it("never falls back for origin format in chain mode", async () => {
 		const localFail = vi.fn().mockRejectedValueOnce(new Error("HTTP 500 from https://example.com"));
 		const globalFetch = vi.fn();
 		vi.stubGlobal("fetch", globalFetch);
 		try {
 			await expect(
-				webFetch("https://example.com", "html", 30, undefined, localFail, { deepseekApiKey: "k" }),
+				webFetch("https://example.com", "origin", 30, undefined, localFail, { deepseekApiKey: "k" }),
 			).rejects.toThrow("HTTP 500");
 			expect(globalFetch).not.toHaveBeenCalled();
 		} finally {
@@ -388,15 +388,45 @@ describe("webFetch 路由", () => {
 		}
 	});
 
-	it("auto-routes explicit deepseek with html format to local", async () => {
+	it("auto-routes explicit deepseek with origin format to local", async () => {
 		const globalFetch = vi.fn();
 		vi.stubGlobal("fetch", globalFetch);
 		try {
-			const result = await webFetch("https://example.com", "html", 30, undefined, localOk("<p>raw</p>"), {
+			const result = await webFetch("https://example.com", "origin", 30, undefined, localOk("<p>raw</p>"), {
 				provider: "deepseek",
 				deepseekApiKey: "k",
 			});
 			expect(result.provider).toBe("local");
+			expect(result.content).toContain("<p>raw</p>");
+			expect(globalFetch).not.toHaveBeenCalled();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("throws on an unknown format value without calling any provider", async () => {
+		const localFetchImpl = vi.fn();
+		const globalFetch = vi.fn();
+		vi.stubGlobal("fetch", globalFetch);
+		try {
+			await expect(
+				webFetch("https://example.com", "text" as never, 30, undefined, localFetchImpl, { deepseekApiKey: "k" }),
+			).rejects.toThrow("Unknown format: text. Available: markdown, origin");
+			expect(localFetchImpl).not.toHaveBeenCalled();
+			expect(globalFetch).not.toHaveBeenCalled();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("does not fall back to deepseek for a binary response", async () => {
+		const localBinary = mockBodyResponse("\uFFFDPNG", "image/png");
+		const globalFetch = vi.fn();
+		vi.stubGlobal("fetch", globalFetch);
+		try {
+			await expect(
+				webFetch("https://example.com/logo.png", "markdown", 30, undefined, localBinary, { deepseekApiKey: "k" }),
+			).rejects.toThrow("Unsupported content type: image/png");
 			expect(globalFetch).not.toHaveBeenCalled();
 		} finally {
 			vi.unstubAllGlobals();

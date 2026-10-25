@@ -51,7 +51,7 @@ export interface WebFetchOptions {
 
 export async function webFetch(
 	url: string,
-	format: "text" | "markdown" | "html",
+	format: string,
 	timeout: number,
 	signal?: AbortSignal,
 	_fetch?: typeof fetch,
@@ -68,26 +68,28 @@ export async function webFetch(
 		throw new Error(`Unsupported protocol: ${parsedUrl.protocol}`);
 	}
 
+	if (format !== "markdown" && format !== "origin") {
+		throw new Error(`Unknown format: ${format}. Available: markdown, origin`);
+	}
+
 	const apiKey = opts?.deepseekApiKey || process.env.DEEPSEEK_API_KEY;
-	// index.ts 仍会传旧枚举（text/html，Task 5 才迁移）：html 的旧语义是原样返回，对应新的 origin
-	const localFormat: FetchFormat = format === "html" ? "origin" : "markdown";
 
 	if (opts?.provider === "deepseek") {
-		// deepseek 服务端只返回 Markdown，html 无法产出：自动走 local 并如实标注
-		if (format === "html") return localFetch(url, localFormat, timeout, signal, _fetch);
+		// deepseek 服务端只返回 Markdown，origin 无法产出：自动走 local 并如实标注
+		if (format === "origin") return localFetch(url, format, timeout, signal, _fetch);
 		return deepseekFetch(url, apiKey ?? "", timeout, signal);
 	}
 	if (opts?.provider === "local") {
-		return localFetch(url, localFormat, timeout, signal, _fetch);
+		return localFetch(url, format, timeout, signal, _fetch);
 	}
 	if (opts?.provider !== undefined) {
 		throw new Error(`Unknown provider: ${opts.provider}. Available: local, deepseek`);
 	}
 
 	// 链式：local → deepseek
-	const canFallback = format !== "html" && Boolean(apiKey);
+	const canFallback = format !== "origin" && Boolean(apiKey);
 	try {
-		const local = await localFetch(url, localFormat, timeout, signal, _fetch);
+		const local = await localFetch(url, format, timeout, signal, _fetch);
 		if (canFallback && isThinContent(local.content, local.contentType)) {
 			opts?.onProgress?.("Local fetch returned thin content, trying deepseek...");
 			try {
@@ -99,7 +101,8 @@ export async function webFetch(
 		}
 		return local;
 	} catch (localErr) {
-		if (canFallback) {
+		// terminal 错误（如二进制内容）：换 provider 也拿不到文本，直接抛原错误
+		if (canFallback && !isTerminalFetchError(localErr)) {
 			try {
 				return await deepseekFetch(url, apiKey ?? "", timeout, signal);
 			} catch (dsErr) {
