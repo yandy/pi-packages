@@ -6,7 +6,7 @@ interface ToolDef {
 	description: string;
 	promptSnippet?: string;
 	parameters: {
-		properties?: Record<string, { enum?: string[]; anyOf?: Array<{ enum?: string[] }> }>;
+		properties?: Record<string, { enum?: string[]; description?: string; anyOf?: Array<{ enum?: string[] }> }>;
 	};
 }
 
@@ -61,9 +61,10 @@ describe("tool registration", () => {
 		expect(formatEnum(webfetch as ToolDef)).toEqual(["markdown", "origin"]);
 	});
 
-	it("webfetch description tells the model origin means untouched raw body", () => {
+	it("webfetch format parameter explains both output formats", () => {
 		const webfetch = captureTools().find((t) => t.name === "webfetch");
-		expect(webfetch?.description).toContain("origin");
-		expect(webfetch?.description?.toLowerCase()).toContain("raw");
+		const description = webfetch?.parameters.properties?.format?.description ?? "";
+		expect(description).toContain("markdown");
+		expect(description).toContain("origin");
 	});
 });

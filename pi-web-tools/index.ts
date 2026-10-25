@@ -94,16 +94,11 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "webfetch",
 		label: "Web Fetch",
-		description:
-			`Fetch content from a URL. format "markdown" (default) drops non-content elements (scripts, styles, noscript, template, svg, iframe, canvas), keeps the main content container and converts it to markdown, pretty-prints JSON, and returns other text types as-is. ` +
-			`format "origin" returns the raw response body unmodified apart from length truncation, with no cleaning, extraction, or conversion. ` +
-			`Binary content with a recognised binary media type (image/audio/video/font/model, PDFs, archives, application/octet-stream, ...) is rejected in either format; media types outside that list are returned as text.`,
-		promptSnippet:
-			'webfetch: fetch a URL as readable markdown (HTML: drops non-content elements, keeps the main content container and converts it to markdown; JSON pretty-printed) or as the raw response body unmodified apart from truncation (format: "origin"); recognised binary types are rejected.',
+		description: "Fetch content from a URL and return as readable markdown or the raw response body.",
+		promptSnippet: "webfetch: fetch content from a URL as readable markdown or the raw response body.",
 		promptGuidelines: [
 			"Use webfetch to retrieve full page content from a URL.",
 			"Prefer fetching specific pages rather than homepages for more targeted information.",
-			'Use format: "origin" only when you need the unprocessed raw response body (still length-truncated); it is never routed to the deepseek fallback.',
 		],
 		parameters: Type.Object({
 			url: Type.String({ minLength: 5, description: "The URL to fetch content from." }),
@@ -111,8 +106,7 @@ export default function (pi: ExtensionAPI) {
 				Type.String({
 					enum: ["markdown", "origin"],
 					default: "markdown",
-					description:
-						"Output format. markdown (default): HTML drops non-content elements (script/style/noscript/template/svg/iframe/canvas), keeps the main content container and converts it to markdown; JSON pretty-printed; other text types returned as-is. origin: the raw response body unmodified apart from length truncation, no cleaning/extraction/conversion, no Title line. Recognised binary types are rejected in both formats.",
+					description: "Output format. markdown (default): cleaned main content. origin: raw response body (still length-truncated).",
 				}),
 			),
 			timeout: Type.Optional(
