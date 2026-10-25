@@ -85,27 +85,20 @@ pi -e ./index.ts
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | `url` | string | 是 | — | 要抓取的 URL |
-| `format` | `"markdown"` \| `"origin"` | 否 | `"markdown"` | 输出格式 |
+| `format` | `"markdown"` \| `"origin"` | 否 | `"markdown"` | `markdown`：清洗后的正文；`origin`：原样正文 |
 | `timeout` | number | 否 | 30 | 超时秒数（1-120） |
 | `provider` | `"local"` \| `"deepseek"` | 否 | — | 抓取 provider（指定即独占） |
 
-**格式：**
-
-- `"markdown"`（默认）——按下面的顺序分流（HTML 优先，其次 JSON，最后原样返回）：
-  - **HTML**（最先判定，适用于所有未被识别为二进制的正文）：`text/html` 或 `application/xhtml+xml`，或前 1024 个字符去掉前导空白后以 `<!doctype html` / `<html` 开头的正文。嗅探不限于 `text/plain`：标成 `text/markdown`、`application/json` 或任何其他类型的正文，只要看起来是完整文档就按 HTML 处理。先移除 `script`、`style`、`noscript`、`template`、`svg`、`iframe`、`canvas`，再按 `main` → `article` → `[role=main]` → `body` 的顺序定位正文容器。取第一个有非空匹配的选择器，把其中**全部**非空匹配转换为 Markdown 并以空行拼接。页面 `<title>` 不进正文，改放输出的 `Title:` 行。选中容器内的 `nav`/`aside`/`header`/`footer` 不会被删除——页面骨架仅靠容器选择排除。
-  - **JSON**（`application/json`、`text/json`、任意 `*+json`）：按 2 空格缩进美化；解析失败则原样返回。
-  - **其余文本类型**（源码、diff、纯文本、原始 Markdown 等）：原样返回，不做标签剥离或转换。
-  - **被识别的二进制类型**：报错，见下。
-- `"origin"`——除既有的 100,000 字符截断外，响应正文不做任何改动：不解析、不抽取、不美化，也不产生 `Title:` 行。被识别的二进制类型同样被拒绝。
-- **二进制判定是一份媒体类型黑名单，两种格式都适用**：被拒绝的是 `image/*`、`audio/*`、`video/*`、`font/*`、`model/*`、`application/vnd.*`（`*+json` / `*+xml` 除外），以及恰好这些类型：`application/pdf`、`application/zip`、`application/gzip`、`application/x-gzip`、`application/x-tar`、`application/x-bzip2`、`application/x-7z-compressed`、`application/x-rar-compressed`、`application/octet-stream`、`application/wasm`、`application/x-protobuf`、`application/protobuf`、`application/epub+zip`。其余媒体类型不会被判为二进制，而会作为文本返回——包括 `application/msword`、`application/ogg`、`application/zstd`，以及不带 `x-` 的写法 `application/tar` / `application/bzip2`。报错形如 `Unsupported content type: <媒体类型>[, <字节数> bytes]. webfetch only returns text; download the file with another tool.`
-- 其他 `format` 值会报错：`Unknown format: <值>. Available: markdown, origin`。
+- `markdown`（默认）——HTML 裁剪到正文容器（`main` → `article` → `[role=main]` → `body`，命中项全部拼接）后转成 Markdown，页面 `<title>` 改放输出的 `Title:` 行；JSON 按 2 空格美化；其余文本类型原样返回。
+- `origin`——除既有的 100,000 字符截断外，响应正文原样返回。
+- 二进制响应在两种格式下都会报错，错误里带媒体类型与字节数。
 
 **Provider：**
 
-- **Local**（默认首选）— 直接 HTTP GET；`markdown` 做上节所述的抽取与转换，`origin` 除上述截断外原样返回正文。
+- **Local**（默认首选）— 直接 HTTP GET，按上节所述做抽取与转换。
 - **DeepSeek**（回退）— [DeepSeek Fetch API](https://api-docs.deepseek.com/zh-cn/guides/search)，服务端抓取并返回 Markdown。能处理 local 搞不定的 JS 渲染页。需要 `DEEPSEEK_API_KEY` 环境变量或在 pi 中配置 `deepseek` provider。按成功请求计费（5元/1000次；失败不计费）。
 
-回落触发条件（仅链式模式）：local 硬失败（网络错误/超时/非 2xx），或 local 成功但内容薄（空壳页或垃圾标签堆积页，有效文本 < 200 字符）。薄内容时若 DeepSeek 也失败，则返回 local 原结果。未指定 `provider` 时 local 总会先跑；只有当存在 DeepSeek key 且 `format: "markdown"` 时才会走 DeepSeek 这一腿。`format: "origin"` 永不回落（DeepSeek 只返回 Markdown）。被识别的二进制类型与未知 `format` 是终态错误：永不触发 DeepSeek 回落，因为换 provider 也拿不到文本。显式指定 `provider`（参数或配置）时独占使用——唯一例外：`provider: "deepseek"` + `format: "origin"` 自动走 local。
+回落触发条件（仅链式模式）：local 硬失败（网络错误/超时/非 2xx），或 local 内容薄（有效文本 < 200 字符）；若 DeepSeek 也失败，则返回 local 原结果。DeepSeek 这一腿需要 key，且只对 `format: "markdown"` 生效。二进制响应与未知 `format` 值永不回落——换 provider 也拿不到文本。显式指定 `provider`（参数或配置）时独占使用——唯一例外：`provider: "deepseek"` + `format: "origin"` 自动走 local。
 
 ## 开发
 
