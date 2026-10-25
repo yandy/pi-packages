@@ -7,7 +7,7 @@ A [pi](https://pi.dev/docs/latest/packages) package providing web search and web
 | Tool | Description | Provider |
 |------|-------------|----------|
 | `websearch` | Pure web search, returns raw results (titles, URLs, snippets) | Exa → DeepSeek → Aliyun fallback |
-| `webfetch` | Fetch and convert web pages to text, markdown, or raw HTML | Local → DeepSeek fallback |
+| `webfetch` | Fetch a URL and convert HTML to readable markdown, or return the raw body | Local → DeepSeek fallback |
 
 ## Quick Start
 
@@ -78,25 +78,27 @@ When a provider fails, the tool automatically falls back to the next one (exa �
 
 ### webfetch
 
-Fetch content from a URL and return as text, markdown, or raw HTML.
+Fetch content from a URL as readable markdown, or as the raw response body.
 
 **Parameters:**
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `url` | string | yes | — | URL to fetch |
-| `format` | `"text"` \| `"markdown"` \| `"html"` | no | `"markdown"` | Output format |
+| `format` | `"markdown"` \| `"origin"` | no | `"markdown"` | `markdown`: cleaned main content; `origin`: raw body |
 | `timeout` | number | no | 30 | Timeout in seconds (1-120) |
 | `provider` | `"local"` \| `"deepseek"` | no | — | Fetch provider (exclusive when specified) |
 
+- `markdown` (default) — HTML is reduced to its main content container (`main` → `article` → `[role=main]` → `body`, all matches joined) and converted to markdown, with the page `<title>` reported on the `Title:` line; JSON is pretty-printed; other text types are returned verbatim.
+- `origin` — the response body unmodified, apart from the existing 100,000-character truncation.
+- Binary responses are rejected in both formats, with the media type and byte size in the error.
+
 **Providers:**
 
-- **Local** (default first) — direct HTTP GET with HTML-to-markdown/text conversion.
+- **Local** (default first) — direct HTTP GET with the extraction described above.
 - **DeepSeek** (fallback) — [DeepSeek Fetch API](https://api-docs.deepseek.com/zh-cn/guides/search), server-side fetch returning markdown. Handles JS-rendered pages that local fetch cannot. Requires `DEEPSEEK_API_KEY` env var or a configured `deepseek` provider in pi. Billed per successful request (¥5/1000; failures are free).
 
-Fallback triggers (chain mode only): local hard failure (network error / timeout / non-2xx), or local success with thin content (empty shell or junk-tag pages, < 200 meaningful characters). If DeepSeek also fails after a thin-content local result, the local result is returned as-is. `format: "html"` never falls back (DeepSeek returns markdown only). With `provider` specified (parameter or config), that provider is used exclusively — except `provider: "deepseek"` + `format: "html"`, which auto-routes to local.
-
-Note: `format: "text"` with DeepSeek returns the markdown body as-is (Markdown is text; no plain-text conversion is applied).
+Fallback triggers (chain mode only): local hard failure (network error / timeout / non-2xx), or thin local content (< 200 meaningful characters); if DeepSeek also fails, the local result is returned as-is. The DeepSeek leg needs a key and runs only for `format: "markdown"`. Binary responses and unknown `format` values never fall back — another provider cannot turn them into text either. With `provider` specified (parameter or config), it is used exclusively — except `provider: "deepseek"` + `format: "origin"`, which auto-routes to local.
 
 ## Development
 

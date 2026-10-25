@@ -1,13 +1,30 @@
-import TurndownService from "turndown";
+import { isBinaryContentType, isHtmlContentType, isJsonContentType, looksLikeHtml, mediaType } from "./content_type.js";
+import { htmlToMarkdown } from "./html_to_markdown.js";
 
 const MAX_CONTENT_CHARS = 100_000;
 const DEEPSEEK_FETCH_URL = "https://api.deepseek.com/v1/tools/fetch";
 const DEEPSEEK_MAX_URL = 8192;
 
-const turndown = new TurndownService({
-	headingStyle: "atx",
-	codeBlockStyle: "fenced",
-});
+// 两种 format 一律发同一个 Accept：分类完全由响应的 content-type 决定，
+// 让请求头随 format 变化只会制造不可预测的差异。
+// 首选文本族（服务器同时提供多种表征时拿到可读文本），末尾的 q=0.8 通配垫底
+// 避免 406，并让二进制响应仍能到达，从而报出清晰的 Unsupported content type。
+const ACCEPT_HEADER = "text/*, application/json, */*;q=0.8";
+
+/** 输出格式：markdown 做最小必要变换，origin 原样返回 */
+export type FetchFormat = "markdown" | "origin";
+
+/** 内容类型无法产出文本时的终态错误：链式模式不应再回落其它 provider */
+export class UnsupportedContentTypeError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "UnsupportedContentTypeError";
+	}
+}
+
+export function isTerminalFetchError(error: unknown): boolean {
+	return error instanceof UnsupportedContentTypeError;
+}
 
 export interface FetchResult {
 	content: string;
@@ -34,13 +51,13 @@ export interface WebFetchOptions {
 
 export async function webFetch(
 	url: string,
-	format: "text" | "markdown" | "html",
+	format: FetchFormat,
 	timeout: number,
 	signal?: AbortSignal,
 	_fetch?: typeof fetch,
 	opts?: WebFetchOptions,
 ): Promise<FetchResult> {
-	// 入口校验与 provider 无关，保持不变
+	// 入口校验与 provider 无关：URL/协议以及 format 都在这里先校验，不依赖最终选中哪个 provider
 	let parsedUrl: URL;
 	try {
 		parsedUrl = new URL(url);
@@ -51,11 +68,15 @@ export async function webFetch(
 		throw new Error(`Unsupported protocol: ${parsedUrl.protocol}`);
 	}
 
+	if (format !== "markdown" && format !== "origin") {
+		throw new Error(`Unknown format: ${format}. Available: markdown, origin`);
+	}
+
 	const apiKey = opts?.deepseekApiKey || process.env.DEEPSEEK_API_KEY;
 
 	if (opts?.provider === "deepseek") {
-		// deepseek 服务端只返回 Markdown，html 无法产出：自动走 local 并如实标注
-		if (format === "html") return localFetch(url, format, timeout, signal, _fetch);
+		// deepseek 服务端只返回 Markdown，origin 无法产出：自动走 local 并如实标注
+		if (format === "origin") return localFetch(url, format, timeout, signal, _fetch);
 		return deepseekFetch(url, apiKey ?? "", timeout, signal);
 	}
 	if (opts?.provider === "local") {
@@ -66,7 +87,7 @@ export async function webFetch(
 	}
 
 	// 链式：local → deepseek
-	const canFallback = format !== "html" && Boolean(apiKey);
+	const canFallback = format !== "origin" && Boolean(apiKey);
 	try {
 		const local = await localFetch(url, format, timeout, signal, _fetch);
 		if (canFallback && isThinContent(local.content, local.contentType)) {
@@ -80,7 +101,8 @@ export async function webFetch(
 		}
 		return local;
 	} catch (localErr) {
-		if (canFallback) {
+		// terminal 错误（如二进制内容）：换 provider 也拿不到文本，直接抛原错误
+		if (canFallback && !isTerminalFetchError(localErr)) {
 			try {
 				return await deepseekFetch(url, apiKey ?? "", timeout, signal);
 			} catch (dsErr) {
@@ -95,7 +117,7 @@ export async function webFetch(
 
 export async function localFetch(
 	url: string,
-	format: "text" | "markdown" | "html",
+	format: FetchFormat,
 	timeout: number,
 	signal?: AbortSignal,
 	_fetch?: typeof fetch,
@@ -120,37 +142,47 @@ export async function localFetch(
 		method: "GET",
 		headers: {
 			"User-Agent": "pi-web-tools/1.0",
-			Accept: format === "html" ? "text/html" : "text/html, text/plain, application/json",
+			Accept: ACCEPT_HEADER,
 		},
 		redirect: "follow",
 		signal: s,
 	});
 
 	const contentType = response.headers.get("content-type") || "text/plain";
-	const body = await response.text();
 
 	if (!response.ok) {
-		const truncated = body.slice(0, 500);
+		const truncated = (await response.text()).slice(0, 500);
 		throw new Error(`HTTP ${response.status} from ${url}${truncated ? `: ${truncated}` : ""}`);
 	}
 
-	let content: string;
-
-	if (contentType.includes("application/json")) {
-		try {
-			content = JSON.stringify(JSON.parse(body), null, 2);
-		} catch {
-			content = body;
-		}
-	} else if (format === "html") {
-		content = body;
-	} else if (format === "markdown") {
-		content = turndown.turndown(body);
-	} else {
-		content = stripTags(body);
+	if (isBinaryContentType(contentType)) {
+		const length = response.headers.get("content-length");
+		throw new UnsupportedContentTypeError(
+			`Unsupported content type: ${mediaType(contentType)}${length ? `, ${length} bytes` : ""}. webfetch only returns text; download the file with another tool.`,
+		);
 	}
 
-	return { content: applyTruncation(content), contentType, url: response.url, status: response.status, provider: "local" };
+	const body = await response.text();
+	const base = { contentType, url: response.url, status: response.status, provider: "local" as const };
+
+	if (format === "origin") {
+		return { ...base, content: applyTruncation(body) };
+	}
+
+	if (isHtmlContentType(contentType) || looksLikeHtml(body)) {
+		const { content, title } = htmlToMarkdown(body);
+		return { ...base, content: applyTruncation(content), title };
+	}
+
+	if (isJsonContentType(contentType)) {
+		try {
+			return { ...base, content: applyTruncation(JSON.stringify(JSON.parse(body), null, 2)) };
+		} catch {
+			return { ...base, content: applyTruncation(body) };
+		}
+	}
+
+	return { ...base, content: applyTruncation(body) };
 }
 
 export async function deepseekFetch(
@@ -226,22 +258,4 @@ function isJunkLine(line: string): boolean {
 		if (spaces / t.length < 0.05) return true;
 	}
 	return false;
-}
-
-function stripTags(html: string): string {
-	let text = html;
-	text = text.replace(/<head[\s\S]*?<\/head>/gi, "");
-	text = text.replace(/<style[\s\S]*?<\/style>/gi, "");
-	text = text.replace(/<script[\s\S]*?<\/script>/gi, "");
-	text = text.replace(/<br\s*\/?>/gi, "\n");
-	text = text.replace(/<[^>]+>/g, "");
-	text = text.replace(/&amp;/g, "&");
-	text = text.replace(/&lt;/g, "<");
-	text = text.replace(/&gt;/g, ">");
-	text = text.replace(/&quot;/g, '"');
-	text = text.replace(/&#39;/g, "'");
-	text = text.replace(/&nbsp;/g, " ");
-	text = text.replace(/\n{3,}/g, "\n\n");
-	text = text.replace(/[ \t]+/g, " ");
-	return text.trim();
 }

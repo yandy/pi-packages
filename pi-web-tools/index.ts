@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { resolveProvider, loadConfig } from "./src/config";
-import { webFetch } from "./src/web_fetch";
+import { type FetchFormat, webFetch } from "./src/web_fetch";
 import { buildProviders, search } from "./src/web_search/index";
 
 export default function (pi: ExtensionAPI) {
@@ -94,8 +94,8 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "webfetch",
 		label: "Web Fetch",
-		description: "Fetch content from a URL and return as text, markdown, or raw HTML.",
-		promptSnippet: "webfetch: fetch content from a URL as text, markdown, or raw HTML.",
+		description: "Fetch content from a URL and return as readable markdown or the raw response body.",
+		promptSnippet: "webfetch: fetch content from a URL as readable markdown or the raw response body.",
 		promptGuidelines: [
 			"Use webfetch to retrieve full page content from a URL.",
 			"Prefer fetching specific pages rather than homepages for more targeted information.",
@@ -104,9 +104,9 @@ export default function (pi: ExtensionAPI) {
 			url: Type.String({ minLength: 5, description: "The URL to fetch content from." }),
 			format: Type.Optional(
 				Type.String({
-					enum: ["text", "markdown", "html"],
+					enum: ["markdown", "origin"],
 					default: "markdown",
-					description: "Output format. Default: markdown.",
+					description: "Output format. markdown (default): cleaned main content. origin: raw response body (still length-truncated).",
 				}),
 			),
 			timeout: Type.Optional(
@@ -141,12 +141,12 @@ export default function (pi: ExtensionAPI) {
 			return new Text(body, 0, 0);
 		},
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const p = params as { url: string; format?: "text" | "markdown" | "html"; timeout?: number; provider?: string };
+			const p = params as { url: string; format?: FetchFormat; timeout?: number; provider?: string };
 			const url = p.url?.trim();
 			if (!url) {
 				return { content: [{ type: "text", text: "Error: url is required." }], details: {}, isError: true };
 			}
-			const format = p.format || "markdown";
+			const format: FetchFormat = p.format ?? "markdown";
 			const timeout = p.timeout ?? 30;
 
 			onUpdate?.({ content: [{ type: "text", text: `Fetching ${url}...` }], details: {} });

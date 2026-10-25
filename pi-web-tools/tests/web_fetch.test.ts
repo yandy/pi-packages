@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { deepseekFetch, isThinContent, webFetch } from "../src/web_fetch.js";
+import {
+	deepseekFetch,
+	isTerminalFetchError,
+	isThinContent,
+	localFetch,
+	UnsupportedContentTypeError,
+	webFetch,
+} from "../src/web_fetch.js";
 
 function mockFetchResponse(overrides: Partial<Response> & { text: () => Promise<string> }) {
 	return {
@@ -9,6 +16,15 @@ function mockFetchResponse(overrides: Partial<Response> & { text: () => Promise<
 		headers: new Headers(),
 		...overrides,
 	} as Response;
+}
+
+function mockBodyResponse(body: string, contentType: string, extraHeaders: Record<string, string> = {}) {
+	return vi.fn().mockResolvedValueOnce(
+		mockFetchResponse({
+			headers: new Headers({ "content-type": contentType, ...extraHeaders }),
+			text: () => Promise.resolve(body),
+		}),
+	);
 }
 
 function mockJsonResponse(status: number, body: unknown) {
@@ -36,70 +52,118 @@ describe("webFetch", () => {
 		expect(result.provider).toBe("local");
 	});
 
-	it("converts HTML to plain text", async () => {
-		const mockFetch = vi.fn().mockResolvedValueOnce(
-			mockFetchResponse({
-				headers: new Headers({ "content-type": "text/html" }),
-				text: () => Promise.resolve("<html><body><p>Hello World</p></body></html>"),
-			}),
-		);
-
-		const result = await webFetch("https://example.com", "text", 30, undefined, mockFetch);
-		expect(result.content.trim()).toBe("Hello World");
-	});
-
-	it("returns raw HTML in html format", async () => {
-		const mockFetch = vi.fn().mockResolvedValueOnce(
-			mockFetchResponse({
-				headers: new Headers({ "content-type": "text/html" }),
-				text: () => Promise.resolve("<html>raw</html>"),
-			}),
-		);
-
-		const result = await webFetch("https://example.com", "html", 30, undefined, mockFetch);
-		expect(result.content).toContain("<html>");
-	});
-
-	it("formats JSON responses", async () => {
-		const mockFetch = vi.fn().mockResolvedValueOnce(
-			mockFetchResponse({
-				headers: new Headers({ "content-type": "application/json" }),
-				text: () => Promise.resolve('{"key":"value"}'),
-			}),
-		);
-
-		const result = await webFetch("https://api.example.com", "text", 30, undefined, mockFetch);
-		// JSON is pretty-printed with a 2-space indent — the raw body has no space after the colon.
-		expect(result.content).toContain('"key": "value"');
-	});
-
-	it("throws on non-2xx", async () => {
-		const mockFetch = vi.fn().mockResolvedValueOnce(
-			mockFetchResponse({
-				ok: false,
-				status: 404,
-				headers: new Headers({ "content-type": "text/html" }),
-				text: () => Promise.resolve("Not Found"),
-			}),
-		);
-
-		await expect(webFetch("https://example.com", "text", 30, undefined, mockFetch)).rejects.toThrow("404");
-	});
-
 	it("rejects invalid URLs", async () => {
-		await expect(webFetch("not-a-url", "text", 30)).rejects.toThrow("Invalid URL: not-a-url");
+		await expect(webFetch("not-a-url", "markdown", 30)).rejects.toThrow("Invalid URL: not-a-url");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// localFetch 输出分支
+// ---------------------------------------------------------------------------
+
+describe("localFetch 输出分支", () => {
+	it("returns the raw body untouched in origin format", async () => {
+		const html = '<!doctype html><html><body><script>var x = 1;</script><main><h1>Raw</h1></main></body></html>';
+		const result = await localFetch("https://example.com", "origin", 30, undefined, mockBodyResponse(html, "text/html"));
+
+		expect(result.content).toBe(html);
+		expect(result.title).toBeUndefined();
+	});
+
+	it("returns the page <title> in markdown format", async () => {
+		const html =
+			"<html><head><title>Mislabeled Page</title></head><body><main><h1>Body</h1><p>Copy.</p></main></body></html>";
+		const result = await localFetch("https://example.com", "markdown", 30, undefined, mockBodyResponse(html, "text/html"));
+
+		expect(result.title).toBe("Mislabeled Page");
+		expect(result.content).not.toContain("Mislabeled Page");
+		// 标题走 result.title 透传，而不是混进正文
+		expect(result.content).toContain("# Body");
+	});
+
+	it("does not pretty-print JSON in origin format", async () => {
+		const result = await localFetch(
+			"https://api.example.com",
+			"origin",
+			30,
+			undefined,
+			mockBodyResponse('{"key":"value"}', "application/json"),
+		);
+		expect(result.content).toBe('{"key":"value"}');
+	});
+
+	it("pretty-prints JSON in markdown format", async () => {
+		const result = await localFetch(
+			"https://api.example.com",
+			"markdown",
+			30,
+			undefined,
+			mockBodyResponse('{"key":"value"}', "application/json"),
+		);
+		expect(result.content).toContain('"key": "value"');
+		expect(result.title).toBeUndefined();
+	});
+
+	it("returns plain text verbatim, preserving angle brackets", async () => {
+		const source = "const xs: Array<string> = [];\n#include <vector>\nstd::vector<int> v;";
+		const result = await localFetch("https://example.com/a.ts", "markdown", 30, undefined, mockBodyResponse(source, "text/plain"));
+
+		expect(result.content).toBe(source);
+		expect(result.title).toBeUndefined();
+	});
+
+	it("treats HTML mislabeled as text/plain as HTML", async () => {
+		const html = "<!doctype html><html><body><main><h1>Mislabeled</h1><p>Body.</p></main></body></html>";
+		const result = await localFetch("https://example.com", "markdown", 30, undefined, mockBodyResponse(html, "text/plain"));
+
+		expect(result.content).toContain("# Mislabeled");
+	});
+
+	it("rejects binary content types with a terminal error in markdown format", async () => {
+		const text = vi.fn().mockResolvedValue("\uFFFDPNG\u001a");
+		const fetchImpl = vi.fn().mockResolvedValueOnce(
+			mockFetchResponse({
+				headers: new Headers({ "content-type": "image/png", "content-length": "612980" }),
+				text,
+			}),
+		);
+
+		const error = await localFetch("https://example.com/logo.png", "markdown", 30, undefined, fetchImpl).catch((e) => e);
+
+		expect(error).toBeInstanceOf(UnsupportedContentTypeError);
+		expect(error.message).toContain("Unsupported content type: image/png");
+		expect(error.message).toContain("612980");
+		expect(isTerminalFetchError(error)).toBe(true);
+		// 二进制判定必须在读取正文之前：拒绝时不应解码整个响应体
+		expect(text).not.toHaveBeenCalled();
+	});
+
+	it("rejects binary content types in origin format too", async () => {
+		await expect(
+			localFetch("https://example.com/doc.pdf", "origin", 30, undefined, mockBodyResponse("%PDF-1.7", "application/pdf")),
+		).rejects.toThrow("Unsupported content type: application/pdf");
+	});
+
+	it("keeps HTTP errors non-terminal", async () => {
+		const fetchImpl = vi.fn().mockResolvedValueOnce(
+			mockFetchResponse({ ok: false, status: 404, headers: new Headers({ "content-type": "text/html" }), text: () => Promise.resolve("Not Found") }),
+		);
+
+		const error = await localFetch("https://example.com", "markdown", 30, undefined, fetchImpl).catch((e) => e);
+
+		expect(error.message).toContain("404");
+		expect(isTerminalFetchError(error)).toBe(false);
 	});
 
 	it("truncates content over 100K characters", async () => {
-		const longText = "a".repeat(150_000);
-		const mockFetch = vi.fn().mockResolvedValueOnce(
-			mockFetchResponse({
-				headers: new Headers({ "content-type": "text/plain" }),
-				text: () => Promise.resolve(longText),
-			}),
+		const result = await localFetch(
+			"https://example.com",
+			"markdown",
+			30,
+			undefined,
+			mockBodyResponse("a".repeat(150_000), "text/plain"),
 		);
 
-		const result = await webFetch("https://example.com", "text", 30, undefined, mockFetch);
 		expect(result.content.length).toBeLessThan(150_000);
 		expect(result.content).toContain("truncated");
 	});
@@ -331,13 +395,13 @@ describe("webFetch 路由", () => {
 		}
 	});
 
-	it("never falls back for html format in chain mode", async () => {
+	it("never falls back for origin format in chain mode", async () => {
 		const localFail = vi.fn().mockRejectedValueOnce(new Error("HTTP 500 from https://example.com"));
 		const globalFetch = vi.fn();
 		vi.stubGlobal("fetch", globalFetch);
 		try {
 			await expect(
-				webFetch("https://example.com", "html", 30, undefined, localFail, { deepseekApiKey: "k" }),
+				webFetch("https://example.com", "origin", 30, undefined, localFail, { deepseekApiKey: "k" }),
 			).rejects.toThrow("HTTP 500");
 			expect(globalFetch).not.toHaveBeenCalled();
 		} finally {
@@ -345,15 +409,48 @@ describe("webFetch 路由", () => {
 		}
 	});
 
-	it("auto-routes explicit deepseek with html format to local", async () => {
+	it("auto-routes explicit deepseek with origin format to local", async () => {
 		const globalFetch = vi.fn();
 		vi.stubGlobal("fetch", globalFetch);
 		try {
-			const result = await webFetch("https://example.com", "html", 30, undefined, localOk("<p>raw</p>"), {
+			const result = await webFetch("https://example.com", "origin", 30, undefined, localOk("<p>raw</p>"), {
 				provider: "deepseek",
 				deepseekApiKey: "k",
 			});
 			expect(result.provider).toBe("local");
+			expect(result.content).toContain("<p>raw</p>");
+			expect(globalFetch).not.toHaveBeenCalled();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("throws on an unknown format value without calling any provider", async () => {
+		const localFetchImpl = vi.fn();
+		const globalFetch = vi.fn();
+		vi.stubGlobal("fetch", globalFetch);
+		try {
+			await expect(
+				webFetch("https://example.com", "text" as never, 30, undefined, localFetchImpl, { deepseekApiKey: "k" }),
+			).rejects.toThrow("Unknown format: text. Available: markdown, origin");
+			expect(localFetchImpl).not.toHaveBeenCalled();
+			expect(globalFetch).not.toHaveBeenCalled();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("does not fall back to deepseek for a binary response", async () => {
+		const localBinary = mockBodyResponse("\uFFFDPNG", "image/png");
+		const globalFetch = vi.fn();
+		vi.stubGlobal("fetch", globalFetch);
+		try {
+			const error = await webFetch("https://example.com/logo.png", "markdown", 30, undefined, localBinary, {
+				deepseekApiKey: "k",
+			}).catch((e) => e);
+			// 终态错误必须穿透路由原样抛出，而不是被包成 "All fetch providers failed"
+			expect(error).toBeInstanceOf(UnsupportedContentTypeError);
+			expect(error.message).toContain("Unsupported content type: image/png");
 			expect(globalFetch).not.toHaveBeenCalled();
 		} finally {
 			vi.unstubAllGlobals();
@@ -399,5 +496,38 @@ describe("webFetch 路由", () => {
 		await expect(
 			webFetch("https://example.com", "markdown", 30, undefined, localOk(), { provider: "bogus" }),
 		).rejects.toThrow("Unknown provider: bogus. Available: local, deepseek");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Accept 内容协商
+// ---------------------------------------------------------------------------
+
+describe("Accept 内容协商", () => {
+	const HTML = "<html><body><main><p>x</p></main></body></html>";
+
+	function acceptHeaderOf(fetchImpl: ReturnType<typeof mockBodyResponse>): string | undefined {
+		const init = fetchImpl.mock.calls[0]?.[1] as { headers?: Record<string, string> } | undefined;
+		return init?.headers?.Accept ?? init?.headers?.accept;
+	}
+
+	it("sends the same Accept header for markdown and origin", async () => {
+		const markdownFetch = mockBodyResponse(HTML, "text/html");
+		const originFetch = mockBodyResponse(HTML, "text/html");
+
+		await localFetch("https://example.com", "markdown", 30, undefined, markdownFetch);
+		await localFetch("https://example.com", "origin", 30, undefined, originFetch);
+
+		expect(acceptHeaderOf(markdownFetch)).toBe(acceptHeaderOf(originFetch));
+	});
+
+	it("prefers text representations but still accepts anything", async () => {
+		const fetchImpl = mockBodyResponse(HTML, "text/html");
+
+		await localFetch("https://example.com", "markdown", 30, undefined, fetchImpl);
+
+		// 首选文本族（服务器同时提供多表征时拿到可读文本），`*/*;q=0.8` 兵底避免 406，
+		// 并让二进制仍能到达（从而报出清晰的 Unsupported content type）。
+		expect(acceptHeaderOf(fetchImpl)).toBe("text/*, application/json, */*;q=0.8");
 	});
 });
