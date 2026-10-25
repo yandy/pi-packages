@@ -112,7 +112,9 @@ webFetch:
      可回落：网络错误 / 超时 / 非 2xx / thin 内容
 
 localFetch:
-  1. GET；origin 发 Accept: */*；markdown 发 text/html, text/plain, application/json
+  1. GET；两种 format 发同一个 Accept: `text/*, application/json, */*;q=0.8`
+        （分类由响应的 content-type 决定，请求头不随 format 变化；首选文本族，
+         末尾通配避免 406 并让二进制仍能到达以报出清晰错误）
   2. !response.ok → 读 body 前 500 字符，抛 HTTP <status>
   3. isBinaryContentType(content-type) → 抛 terminal 错误（含 media type + content-length），两个 format 一致
   4. format === "origin" → body 原样（不解析、不填 title）

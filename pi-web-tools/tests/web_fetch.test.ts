@@ -498,3 +498,36 @@ describe("webFetch 路由", () => {
 		).rejects.toThrow("Unknown provider: bogus. Available: local, deepseek");
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Accept 内容协商
+// ---------------------------------------------------------------------------
+
+describe("Accept 内容协商", () => {
+	const HTML = "<html><body><main><p>x</p></main></body></html>";
+
+	function acceptHeaderOf(fetchImpl: ReturnType<typeof mockBodyResponse>): string | undefined {
+		const init = fetchImpl.mock.calls[0]?.[1] as { headers?: Record<string, string> } | undefined;
+		return init?.headers?.Accept ?? init?.headers?.accept;
+	}
+
+	it("sends the same Accept header for markdown and origin", async () => {
+		const markdownFetch = mockBodyResponse(HTML, "text/html");
+		const originFetch = mockBodyResponse(HTML, "text/html");
+
+		await localFetch("https://example.com", "markdown", 30, undefined, markdownFetch);
+		await localFetch("https://example.com", "origin", 30, undefined, originFetch);
+
+		expect(acceptHeaderOf(markdownFetch)).toBe(acceptHeaderOf(originFetch));
+	});
+
+	it("prefers text representations but still accepts anything", async () => {
+		const fetchImpl = mockBodyResponse(HTML, "text/html");
+
+		await localFetch("https://example.com", "markdown", 30, undefined, fetchImpl);
+
+		// 首选文本族（服务器同时提供多表征时拿到可读文本），`*/*;q=0.8` 兵底避免 406，
+		// 并让二进制仍能到达（从而报出清晰的 Unsupported content type）。
+		expect(acceptHeaderOf(fetchImpl)).toBe("text/*, application/json, */*;q=0.8");
+	});
+});

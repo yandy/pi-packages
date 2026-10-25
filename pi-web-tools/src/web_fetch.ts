@@ -5,6 +5,12 @@ const MAX_CONTENT_CHARS = 100_000;
 const DEEPSEEK_FETCH_URL = "https://api.deepseek.com/v1/tools/fetch";
 const DEEPSEEK_MAX_URL = 8192;
 
+// 两种 format 一律发同一个 Accept：分类完全由响应的 content-type 决定，
+// 让请求头随 format 变化只会制造不可预测的差异。
+// 首选文本族（服务器同时提供多种表征时拿到可读文本），末尾的 q=0.8 通配垫底
+// 避免 406，并让二进制响应仍能到达，从而报出清晰的 Unsupported content type。
+const ACCEPT_HEADER = "text/*, application/json, */*;q=0.8";
+
 /** 输出格式：markdown 做最小必要变换，origin 原样返回 */
 export type FetchFormat = "markdown" | "origin";
 
@@ -136,7 +142,7 @@ export async function localFetch(
 		method: "GET",
 		headers: {
 			"User-Agent": "pi-web-tools/1.0",
-			Accept: format === "origin" ? "*/*" : "text/html, text/plain, application/json",
+			Accept: ACCEPT_HEADER,
 		},
 		redirect: "follow",
 		signal: s,
