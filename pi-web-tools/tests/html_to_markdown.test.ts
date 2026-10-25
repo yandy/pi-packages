@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { htmlToMarkdown } from "../src/html_to_markdown.js";
+import { REMOVE_SELECTORS, htmlToMarkdown } from "../src/html_to_markdown.js";
 
 describe("htmlToMarkdown", () => {
 	it("drops script, style and other non-content elements", () => {
@@ -20,6 +20,42 @@ describe("htmlToMarkdown", () => {
 		expect(content).not.toContain("enable javascript");
 		expect(content).not.toContain("template-text");
 		expect(content).not.toContain("M12 2C6.48");
+	});
+
+	it("removes every REMOVE_SELECTORS element even inside the winning container", () => {
+		// 所有待删元素都放进胜出的 <main>：若 removeNonContent 不生效，标记文本会直接漏进 content
+		// （标记故意不用下划线等 markdown 特殊字符：turndown 会把 "_" 转义成 "\_"，导致断言假通过）
+		const html = [
+			"<html><body><main><h1>Comfy Skills</h1><p>Real content here.</p>",
+			'<script type="application/json">{"marker":"SCRIPTJUNK"}</script>',
+			'<style>.junk::before { content: "STYLEJUNK"; }</style>',
+			"<noscript>NOSCRIPTJUNK</noscript>",
+			// domino 会把 <template> 的子节点丢进不可访问的 content fragment，
+			// 所以 TEMPLATEJUNK 只是金丝雀：真正提供载荷的是下面的 svg/iframe/canvas
+			"<template><p>TEMPLATEJUNK</p></template>",
+			"<svg><text>SVGJUNK</text></svg>",
+			'<iframe src="https://example.com">IFRAMEJUNK</iframe>',
+			"<canvas>CANVASJUNK</canvas>",
+			"</main></body></html>",
+		].join("");
+
+		const { content } = htmlToMarkdown(html);
+
+		expect(content).toContain("# Comfy Skills");
+		expect(content).toContain("Real content here.");
+		expect(content).not.toContain("SCRIPTJUNK");
+		expect(content).not.toContain("STYLEJUNK");
+		expect(content).not.toContain("NOSCRIPTJUNK");
+		expect(content).not.toContain("TEMPLATEJUNK");
+		expect(content).not.toContain("SVGJUNK");
+		expect(content).not.toContain("IFRAMEJUNK");
+		expect(content).not.toContain("CANVASJUNK");
+	});
+
+	it("covers every selector listed in REMOVE_SELECTORS", () => {
+		expect([...REMOVE_SELECTORS].sort()).toEqual(
+			["canvas", "iframe", "noscript", "script", "style", "svg", "template"].sort(),
+		);
 	});
 
 	it("returns <title> as title and keeps it out of the content", () => {
