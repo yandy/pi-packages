@@ -99,7 +99,7 @@ export default function (pi: ExtensionAPI) {
 			`format "origin" returns the raw response body unmodified apart from length truncation, with no cleaning, extraction, or conversion. ` +
 			`Binary content with a recognised binary media type (image/audio/video/font/model, PDFs, archives, application/octet-stream, ...) is rejected in either format; media types outside that list are returned as text.`,
 		promptSnippet:
-			"webfetch: fetch a URL as readable markdown (HTML: drops non-content elements, keeps the main content container and converts it to markdown; JSON pretty-printed) or as the raw response body unmodified apart from truncation (format: \"origin\"); recognised binary types are rejected.",
+			'webfetch: fetch a URL as readable markdown (HTML: drops non-content elements, keeps the main content container and converts it to markdown; JSON pretty-printed) or as the raw response body unmodified apart from truncation (format: "origin"); recognised binary types are rejected.',
 		promptGuidelines: [
 			"Use webfetch to retrieve full page content from a URL.",
 			"Prefer fetching specific pages rather than homepages for more targeted information.",
@@ -112,7 +112,7 @@ export default function (pi: ExtensionAPI) {
 					enum: ["markdown", "origin"],
 					default: "markdown",
 					description:
-						'Output format. markdown (default): HTML drops non-content elements (script/style/noscript/template/svg/iframe/canvas), keeps the main content container and converts it to markdown; JSON pretty-printed; other text types returned as-is. origin: the raw response body unmodified apart from length truncation, no cleaning/extraction/conversion, no Title line. Recognised binary types are rejected in both formats.',
+						"Output format. markdown (default): HTML drops non-content elements (script/style/noscript/template/svg/iframe/canvas), keeps the main content container and converts it to markdown; JSON pretty-printed; other text types returned as-is. origin: the raw response body unmodified apart from length truncation, no cleaning/extraction/conversion, no Title line. Recognised binary types are rejected in both formats.",
 				}),
 			),
 			timeout: Type.Optional(

@@ -1,10 +1,4 @@
-import {
-	isBinaryContentType,
-	isHtmlContentType,
-	isJsonContentType,
-	looksLikeHtml,
-	mediaType,
-} from "./content_type.js";
+import { isBinaryContentType, isHtmlContentType, isJsonContentType, looksLikeHtml, mediaType } from "./content_type.js";
 import { htmlToMarkdown } from "./html_to_markdown.js";
 
 const MAX_CONTENT_CHARS = 100_000;
@@ -57,7 +51,7 @@ export async function webFetch(
 	_fetch?: typeof fetch,
 	opts?: WebFetchOptions,
 ): Promise<FetchResult> {
-	// 入口校验与 provider 无关，保持不变
+	// 入口校验与 provider 无关：URL/协议以及 format 都在这里先校验，不依赖最终选中哪个 provider
 	let parsedUrl: URL;
 	try {
 		parsedUrl = new URL(url);
