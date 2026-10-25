@@ -1,6 +1,6 @@
 # webfetch：HTML 正文抽取与 origin 格式设计
 
-**状态：待批准（批准前不写任何实现代码）**
+**状态：已实现（见 docs/superpowers/plans/2026-10-25-webfetch-html-extraction-and-origin-format.md）**
 
 ## 意图与缘由
 

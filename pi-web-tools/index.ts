@@ -95,15 +95,15 @@ export default function (pi: ExtensionAPI) {
 		name: "webfetch",
 		label: "Web Fetch",
 		description:
-			`Fetch content from a URL. format "markdown" (default) cleans HTML (strips scripts, styles and navigation), locates the main content and converts it to markdown, pretty-prints JSON, and returns other text types as-is. ` +
-			`format "origin" returns the untouched raw response body exactly as received, with no cleaning, extraction, or conversion. ` +
-			`Binary content (images, PDFs, archives) is rejected: only text-like responses are returned.`,
+			`Fetch content from a URL. format "markdown" (default) drops scripts/styles and keeps the main content container, converts it to markdown, pretty-prints JSON, and returns other text types as-is. ` +
+			`format "origin" returns the raw response body unmodified apart from length truncation, with no cleaning, extraction, or conversion. ` +
+			`Binary content (images, PDFs, archives) is rejected in either format: only text-like responses are returned.`,
 		promptSnippet:
-			"webfetch: fetch a URL as cleaned markdown (HTML sanitized + main content extracted, JSON pretty-printed) or as the untouched raw body (format: \"origin\"); binary responses are rejected.",
+			"webfetch: fetch a URL as cleaned markdown (HTML sanitized + main content extracted, JSON pretty-printed) or as the raw response body unmodified apart from truncation (format: \"origin\"); binary responses are rejected.",
 		promptGuidelines: [
 			"Use webfetch to retrieve full page content from a URL.",
 			"Prefer fetching specific pages rather than homepages for more targeted information.",
-			'Use format: "origin" only when you need the unprocessed raw response body; it is never routed to the deepseek fallback.',
+			'Use format: "origin" only when you need the unprocessed raw response body (still length-truncated); it is never routed to the deepseek fallback.',
 		],
 		parameters: Type.Object({
 			url: Type.String({ minLength: 5, description: "The URL to fetch content from." }),
@@ -112,7 +112,7 @@ export default function (pi: ExtensionAPI) {
 					enum: ["markdown", "origin"],
 					default: "markdown",
 					description:
-						'Output format. markdown (default): HTML cleaned and main content extracted, then converted to markdown; JSON pretty-printed; other text types returned as-is. origin: the untouched raw response body, no cleaning/extraction/conversion. Binary content is rejected.',
+						'Output format. markdown (default): HTML cleaned and main content extracted, then converted to markdown; JSON pretty-printed; other text types returned as-is. origin: the raw response body unmodified apart from length truncation, no cleaning/extraction/conversion, no Title line. Binary content is rejected in both formats.',
 				}),
 			),
 			timeout: Type.Optional(

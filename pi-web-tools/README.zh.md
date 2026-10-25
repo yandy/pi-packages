@@ -7,7 +7,7 @@
 | 工具 | 描述 | Provider |
 |------|------|----------|
 | `websearch` | 纯网页搜索，返回原始结果（标题、URL、摘要） | Exa → DeepSeek → 阿里云回退 |
-| `webfetch` | 抓取网页并转换为文本、Markdown 或原始 HTML | Local → DeepSeek 回退 |
+| `webfetch` | 抓取 URL 并把 HTML 转为可读 Markdown，或返回原始响应正文 | Local → DeepSeek 回退 |
 
 ## 快速开始
 
@@ -78,25 +78,34 @@ pi -e ./index.ts
 
 ### webfetch
 
-抓取 URL 内容并返回文本、Markdown 或原始 HTML。
+抓取 URL 内容：返回可读的 Markdown，或原样的响应正文。
 
 **参数：**
 
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | `url` | string | 是 | — | 要抓取的 URL |
-| `format` | `"text"` \| `"markdown"` \| `"html"` | 否 | `"markdown"` | 输出格式 |
+| `format` | `"markdown"` \| `"origin"` | 否 | `"markdown"` | 输出格式 |
 | `timeout` | number | 否 | 30 | 超时秒数（1-120） |
 | `provider` | `"local"` \| `"deepseek"` | 否 | — | 抓取 provider（指定即独占） |
 
+**格式：**
+
+- `"markdown"`（默认）——按响应 content-type 分流：
+  - **HTML**（`text/html`、`application/xhtml+xml`，或正文以 `<!doctype html` / `<html` 开头、即使服务端标成 `text/plain`）：先移除 `script`、`style`、`noscript`、`template`、`svg`、`iframe`、`canvas`，再按 `main` → `article` → `[role=main]` → `body` 的顺序定位正文容器。取第一个有非空匹配的选择器，把其中**全部**非空匹配转换为 Markdown 并以空行拼接。页面 `<title>` 不进正文，改放输出的 `Title:` 行。选中容器内的 `nav`/`aside`/`header`/`footer` 不会被删除——页面骨架仅靠容器选择排除。
+  - **JSON**（`application/json`、`text/json`、任意 `*+json`）：按 2 空格缩进美化；解析失败则原样返回。
+  - **其余文本类型**（源码、diff、纯文本、原始 Markdown 等）：原样返回，不做标签剥离或转换。
+  - **二进制**：报错，见下。
+- `"origin"`——除既有的 100,000 字符截断外，响应正文不做任何改动：不解析、不抽取、不美化，也不产生 `Title:` 行。二进制响应同样被拒绝。
+- **两种格式都拒绝二进制响应**：`image/*`、`audio/*`、`video/*`、`font/*`、`model/*`，以及 PDF、ZIP、GZip、TAR、BZip2、7z、RAR、`application/octet-stream`、WASM、protobuf、EPUB 和任意 `application/vnd.*`。报错形如 `Unsupported content type: <媒体类型>[, <字节数> bytes]. webfetch only returns text; download the file with another tool.`
+- 其他 `format` 值会报错：`Unknown format: <值>. Available: markdown, origin`。
+
 **Provider：**
 
-- **Local**（默认首选）— 直接 HTTP GET，HTML 转 Markdown/文本。
+- **Local**（默认首选）— 直接 HTTP GET；`markdown` 做上节所述的抽取与转换，`origin` 原样透传正文。
 - **DeepSeek**（回退）— [DeepSeek Fetch API](https://api-docs.deepseek.com/zh-cn/guides/search)，服务端抓取并返回 Markdown。能处理 local 搞不定的 JS 渲染页。需要 `DEEPSEEK_API_KEY` 环境变量或在 pi 中配置 `deepseek` provider。按成功请求计费（5元/1000次；失败不计费）。
 
-回落触发条件（仅链式模式）：local 硬失败（网络错误/超时/非 2xx），或 local 成功但内容薄（空壳页或垃圾标签堆积页，有效文本 < 200 字符）。薄内容时若 DeepSeek 也失败，则返回 local 原结果。`format: "html"` 永不回落（DeepSeek 只返回 Markdown）。显式指定 `provider`（参数或配置）时独占使用——唯一例外：`provider: "deepseek"` + `format: "html"` 自动走 local。
-
-注：`format: "text"` 搭配 DeepSeek 时返回 Markdown 原文（Markdown 本身即文本，不做纯文本转换）。
+回落触发条件（仅链式模式）：local 硬失败（网络错误/超时/非 2xx），或 local 成功但内容薄（空壳页或垃圾标签堆积页，有效文本 < 200 字符）。薄内容时若 DeepSeek 也失败，则返回 local 原结果。链式模式只在未指定 `provider` 且存在 DeepSeek key 时运行。`format: "origin"` 永不回落（DeepSeek 只返回 Markdown）。二进制响应与未知 `format` 是终态错误：永不触发 DeepSeek 回落，因为换 provider 也拿不到文本。显式指定 `provider`（参数或配置）时独占使用——唯一例外：`provider: "deepseek"` + `format: "origin"` 自动走 local。
 
 ## 开发
 
