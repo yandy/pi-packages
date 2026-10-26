@@ -17,10 +17,6 @@
 | [pi-vision-tools](./pi-vision-tools/README.zh.md) | `describe_image` 工具——将图像分析委托给视觉模型 | `@yandy0725/pi-vision-tools` |
 | [pi-web-tools](./pi-web-tools/README.zh.md) | websearch + webfetch 工具 | `@yandy0725/pi-web-tools` |
 
-## 相关项目
-
-- [picode](https://github.com/yandy/picode) —— 为 coding 场景做了配置优化的预配置集合，包含精选的设置、模型配置、代理定义、技能、按键绑定和记忆管理。
-
 ## 开发
 
 ```bash
@@ -30,7 +26,3 @@ npm run lint              # Biome 代码检查
 npm run format            # 格式化所有包
 npm test                  # 运行所有测试
 ```
-
-## 发布
-
-参见 [docs/guides/release.md](docs/guides/release.md)。
