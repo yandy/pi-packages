@@ -37,6 +37,7 @@ const DEFAULT_GRACE_TURNS = 5;
  */
 export class SettingsManager {
 	private _defaultMaxTurns: number | undefined = undefined;
+	private _defaultTimeoutSeconds: number | undefined = undefined;
 	private _graceTurns: number = DEFAULT_GRACE_TURNS;
 	private _maxConcurrent: number = DEFAULT_MAX_CONCURRENT;
 	private _modelTiers: ModelTierMap = {};
@@ -64,6 +65,20 @@ export class SettingsManager {
 			this._defaultMaxTurns = undefined;
 		} else {
 			this._defaultMaxTurns = Math.max(1, n);
+		}
+	}
+
+	// ── defaultTimeoutSeconds: 0 or undefined → unlimited (undefined); else max(1, n) ──
+
+	get defaultTimeoutSeconds(): number | undefined {
+		return this._defaultTimeoutSeconds;
+	}
+
+	set defaultTimeoutSeconds(n: number | undefined) {
+		if (n == null || n === 0) {
+			this._defaultTimeoutSeconds = undefined;
+		} else {
+			this._defaultTimeoutSeconds = Math.max(1, n);
 		}
 	}
 

@@ -10,7 +10,7 @@
 import type { Model } from "@earendil-works/pi-ai";
 import type { AgentTypeRegistry } from "../config/agent-types";
 import { resolveAgentInvocationConfig } from "../config/invocation-config";
-import { normalizeMaxTurns } from "../lifecycle/turn-limits";
+import { normalizeMaxTurns, normalizeTimeoutSeconds } from "../lifecycle/turn-limits";
 import { resolveInvocationModel } from "../session/model-resolver";
 import type { AgentInvocation, SubagentType, ThinkingLevel } from "../types";
 import { type AgentDetails, buildInvocationTags, getDisplayName, getPromptModeLabel } from "../ui/display";
@@ -46,6 +46,7 @@ export interface SpawnExecution {
 	description: string;
 	model: Model<any> | undefined;
 	effectiveMaxTurns: number | undefined;
+	effectiveTimeoutSeconds: number | undefined;
 	thinking: ThinkingLevel | undefined;
 	inheritContext: boolean;
 	runInBackground: boolean;
@@ -81,7 +82,7 @@ export function resolveSpawnConfig(
 	params: Record<string, unknown>,
 	registry: AgentTypeRegistry,
 	modelInfo: ModelInfo,
-	settings: { readonly defaultMaxTurns: number | undefined },
+	settings: { readonly defaultMaxTurns: number | undefined; readonly defaultTimeoutSeconds: number | undefined },
 ): ResolvedSpawnConfig | SpawnConfigError {
 	const rawType = params.subagent_type as SubagentType;
 	const resolved = registry.resolveType(rawType);
@@ -118,11 +119,15 @@ export function resolveSpawnConfig(
 	const modelName = resolveModelName(model ?? modelInfo.parentModel);
 
 	const effectiveMaxTurns = normalizeMaxTurns(resolvedConfig.maxTurns ?? settings.defaultMaxTurns);
+	const effectiveTimeoutSeconds = normalizeTimeoutSeconds(
+		resolvedConfig.timeout ?? settings.defaultTimeoutSeconds,
+	);
 
 	const agentInvocation: AgentInvocation = {
 		modelName,
 		thinking,
 		maxTurns: normalizeMaxTurns(resolvedConfig.maxTurns),
+		timeout: normalizeTimeoutSeconds(resolvedConfig.timeout),
 		inheritContext,
 		runInBackground,
 	};
@@ -146,6 +151,7 @@ export function resolveSpawnConfig(
 			description: params.description as string,
 			model,
 			effectiveMaxTurns,
+			effectiveTimeoutSeconds,
 			thinking,
 			inheritContext,
 			runInBackground,

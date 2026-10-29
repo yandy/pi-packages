@@ -40,6 +40,7 @@ export interface AgentToolRuntime {
 /** Narrow settings accessor — only the fields the Agent tool reads. */
 export type AgentToolSettings = {
 	readonly defaultMaxTurns: number | undefined;
+	readonly defaultTimeoutSeconds: number | undefined;
 	readonly maxConcurrent: number;
 	readonly modelTiers?: ModelTierMap;
 };

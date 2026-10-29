@@ -40,6 +40,7 @@ tools: read, grep, find
 model: anthropic/claude-opus-4-6
 thinking: high
 max_turns: 30
+timeout: 300
 prompt_mode: replace
 inherit_context: true
 run_in_background: true
@@ -58,10 +59,26 @@ You are a security auditor.`,
 		expect(agent.model).toBe("anthropic/claude-opus-4-6");
 		expect(agent.thinking).toBe("high");
 		expect(agent.maxTurns).toBe(30);
+		expect(agent.timeout).toBe(300);
 		expect(agent.promptMode).toBe("replace");
 		expect(agent.inheritContext).toBe(true);
 		expect(agent.runInBackground).toBe(true);
 		expect(agent.systemPrompt).toBe("You are a security auditor.");
+	});
+
+	it("drops a non-numeric timeout", () => {
+		writeAgent(
+			"badtimeout",
+			`---
+description: Bad Timeout
+timeout: abc
+---
+
+Prompt.`,
+		);
+
+		const agent = loadCustomAgents(tmpDir).get("badtimeout")!;
+		expect(agent.timeout).toBeUndefined();
 	});
 
 	it("uses sensible defaults when frontmatter is empty", () => {

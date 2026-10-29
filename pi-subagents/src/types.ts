@@ -50,6 +50,8 @@ export interface AgentConfig extends AgentIdentity, AgentPromptConfig {
 	model?: string;
 	thinking?: ThinkingLevel;
 	maxTurns?: number;
+	/** Wall-clock timeout in seconds; 0 = unlimited. */
+	timeout?: number;
 	/** Default for spawn: fork parent conversation. undefined = caller decides. */
 	inheritContext?: boolean;
 	/** Default for spawn: run in background. undefined = caller decides. */
@@ -67,6 +69,8 @@ export interface AgentInvocation {
 	modelName?: string;
 	thinking?: ThinkingLevel;
 	maxTurns?: number;
+	/** Normalized wall-clock timeout in seconds (display value; undefined = unlimited). */
+	timeout?: number;
 	inheritContext?: boolean;
 	runInBackground?: boolean;
 }

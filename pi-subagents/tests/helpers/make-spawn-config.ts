@@ -10,6 +10,7 @@ export interface ResolvedSpawnConfigOptions {
 	description?: string;
 	model?: string;
 	runInBackground?: boolean;
+	timeout?: number;
 }
 
 /**
@@ -39,6 +40,7 @@ export function createResolvedSpawnConfig(options: ResolvedSpawnConfigOptions = 
 			description,
 			model: undefined,
 			effectiveMaxTurns: undefined,
+			effectiveTimeoutSeconds: options.timeout,
 			thinking: undefined,
 			inheritContext: false,
 			runInBackground,
@@ -46,6 +48,7 @@ export function createResolvedSpawnConfig(options: ResolvedSpawnConfigOptions = 
 				modelName,
 				thinking: undefined,
 				maxTurns: undefined,
+				timeout: options.timeout,
 				inheritContext: false,
 				runInBackground,
 			},

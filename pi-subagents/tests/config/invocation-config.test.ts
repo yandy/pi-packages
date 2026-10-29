@@ -87,4 +87,14 @@ describe("resolveAgentInvocationConfig", () => {
 		expect(resolved.inheritContext).toBe(false);
 		expect(resolved.runInBackground).toBe(false);
 	});
+
+	it("prefers agent config timeout over tool-call param", () => {
+		const resolved = resolveAgentInvocationConfig(makeConfig({ timeout: 300 }), { timeout: 60 });
+		expect(resolved.timeout).toBe(300);
+	});
+
+	it("uses tool-call param timeout when agent config omits it", () => {
+		const resolved = resolveAgentInvocationConfig(makeConfig(), { timeout: 60 });
+		expect(resolved.timeout).toBe(60);
+	});
 });

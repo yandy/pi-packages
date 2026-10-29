@@ -35,7 +35,17 @@ function makeModelInfo(overrides: Partial<Parameters<typeof resolveSpawnConfig>[
 	};
 }
 
-const defaultSettings = { defaultMaxTurns: undefined as number | undefined };
+const defaultSettings = {
+	defaultMaxTurns: undefined as number | undefined,
+	defaultTimeoutSeconds: undefined as number | undefined,
+};
+
+/** Registry whose single agent locks timeout: 300 (frontmatter-style). */
+function makeTimeoutRegistry(): AgentTypeRegistry {
+	return new AgentTypeRegistry(
+		() => new Map([["test-agent", makeAgentConfig({ timeout: 300 })]]),
+	);
+}
 
 describe("resolveModelName", () => {
 	it("returns provider/id when provider and id are present", () => {
@@ -187,6 +197,41 @@ describe("resolveSpawnConfig — max turns normalization", () => {
 		);
 		if ("error" in result) return;
 		expect(result.execution.effectiveMaxTurns).toBeUndefined();
+	});
+
+	it("resolves effectiveTimeoutSeconds from params and normalizes", () => {
+		const result = resolveSpawnConfig(
+			{ subagent_type: "general-purpose", prompt: "p", description: "d", timeout: 0.5 },
+			testRegistry,
+			makeModelInfo(),
+			defaultSettings,
+		);
+		if ("error" in result) return;
+		expect(result.execution.effectiveTimeoutSeconds).toBe(1);
+		expect(result.execution.agentInvocation.timeout).toBe(1);
+	});
+
+	it("uses settings defaultTimeoutSeconds when no param is given", () => {
+		const result = resolveSpawnConfig(
+			{ subagent_type: "general-purpose", prompt: "p", description: "d" },
+			testRegistry,
+			makeModelInfo(),
+			{ defaultMaxTurns: undefined, defaultTimeoutSeconds: 600 },
+		);
+		if ("error" in result) return;
+		expect(result.execution.effectiveTimeoutSeconds).toBe(600);
+		expect(result.execution.agentInvocation.timeout).toBeUndefined();
+	});
+
+	it("frontmatter timeout wins over param; neither → undefined", () => {
+		const result = resolveSpawnConfig(
+			{ subagent_type: "test-agent", prompt: "p", description: "d", timeout: 60 },
+			makeTimeoutRegistry(),
+			makeModelInfo(),
+			{ defaultMaxTurns: undefined, defaultTimeoutSeconds: 600 },
+		);
+		if ("error" in result) return;
+		expect(result.execution.effectiveTimeoutSeconds).toBe(300);
 	});
 });
 

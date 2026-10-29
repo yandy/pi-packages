@@ -62,6 +62,7 @@ describe("AgentTool — model tier guidance", () => {
 		const deps = createToolDeps({
 			settings: {
 				defaultMaxTurns: undefined,
+				defaultTimeoutSeconds: undefined,
 				maxConcurrent: 4,
 				modelTiers: { fast: "deepseek-flash", advanced: "qwen3.8-max" },
 			},
