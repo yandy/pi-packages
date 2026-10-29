@@ -16,8 +16,7 @@ export default function (pi: ExtensionAPI) {
 			`Search the web via Exa, DeepSeek, or Aliyun (fallback chain: exa → deepseek → aliyun) and return raw results (titles, URLs, snippets). ` +
 			`Exa: free MCP tier without key, full REST with EXA_API_KEY. DeepSeek: requires DEEPSEEK_API_KEY or a configured deepseek provider, good for Chinese queries, supports site:/lang:/after: search syntax. Aliyun: requires ALIYUN_API_KEY or a configured aliyun provider, Chinese-search fallback. ` +
 			`The current year is ${new Date().getFullYear()}.`,
-		promptSnippet:
-			"websearch: search the web via Exa/DeepSeek/Aliyun (fallback chain: exa → deepseek → aliyun). Returns raw results with titles, URLs, snippets. LLM synthesizes the answer.",
+		promptSnippet: "Search the web via Exa/DeepSeek/Aliyun fallback; returns titles, URLs, snippets",
 		promptGuidelines: [
 			"Use websearch when you need current information outside your training data.",
 			"Synthesize a clear answer from the search results and cite sources with markdown hyperlinks.",
@@ -31,7 +30,7 @@ export default function (pi: ExtensionAPI) {
 				Type.String({
 					enum: ["exa", "deepseek", "aliyun"],
 					description:
-						"Search provider: exa (free default), deepseek (requires key, good Chinese support, search syntax), aliyun (requires key, Chinese fallback). Default: fallback chain exa → deepseek → aliyun.",
+						"Provider override: exa, deepseek, or aliyun. Default: fallback chain exa → deepseek → aliyun.",
 				}),
 			),
 		}),
@@ -95,7 +94,7 @@ export default function (pi: ExtensionAPI) {
 		name: "webfetch",
 		label: "Web Fetch",
 		description: "Fetch content from a URL and return as readable markdown or the raw response body.",
-		promptSnippet: "webfetch: fetch content from a URL as readable markdown or the raw response body.",
+		promptSnippet: "Fetch a URL as readable markdown or raw body",
 		promptGuidelines: [
 			"Use webfetch to retrieve full page content from a URL.",
 			"Prefer fetching specific pages rather than homepages for more targeted information.",
@@ -121,7 +120,7 @@ export default function (pi: ExtensionAPI) {
 				Type.String({
 					enum: ["local", "deepseek"],
 					description:
-						"Fetch provider: local (direct HTTP, default) or deepseek (server-side rendering, handles JS-heavy pages, returns markdown, requires DEEPSEEK_API_KEY or a configured deepseek provider). Default: local with deepseek fallback on failure/thin content.",
+						"Fetch provider: local (default) or deepseek (server-side render for JS-heavy pages; needs DEEPSEEK_API_KEY). Default: local with deepseek fallback on thin/failed response.",
 				}),
 			),
 		}),
