@@ -108,6 +108,7 @@ export class SubagentSession {
 
 		try {
 			await session.prompt(effectivePrompt);
+			aborted ||= opts.signal?.aborted === true;
 			this.meta.lifecycle.completed({
 				sessionDir: this.meta.sessionDir,
 				agentName: this.meta.agentName,
@@ -220,10 +221,16 @@ function getLastAssistantText(session: AgentSession): string {
 
 /**
  * Wire an AbortSignal to abort a session.
+ * An already-aborted signal aborts immediately — addEventListener on a fired
+ * signal never fires, so wiring alone would silently drop it.
  * Returns a cleanup function to remove the listener.
  */
 function forwardAbortSignal(session: AgentSession, signal?: AbortSignal): () => void {
 	if (!signal) return () => {};
+	if (signal.aborted) {
+		void session.abort();
+		return () => {};
+	}
 	const onAbort = (): void => {
 		void session.abort();
 	};
