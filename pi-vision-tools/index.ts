@@ -63,7 +63,7 @@ export default function (pi: ExtensionAPI) {
 			),
 			thinkLevel: Type.Optional(
 				StringEnum(THINK_LEVELS, {
-					description: "Vision model thinking effort. Default off.",
+					description: "Vision model thinking effort. Default: the /vision config default, else off.",
 				}),
 			),
 		}),
