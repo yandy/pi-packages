@@ -1,7 +1,7 @@
 # pi-packages 工具提示词整改设计（三通道定位 · 去重 · 预算闸门）
 
 日期：2026-10-30
-状态：**待实施**（W1 无争议项已可直接开工；W3 的 D1/D2 待拍板）
+状态：**已定稿，待实施**（D1/D2/D3 已于 2026-10-30 拍板；D2a 待定；W1–W2 可直接开工）
 范围：`pi-coding-tools`、`pi-sandbox`、`pi-container-sandbox`、`pi-subagents`、`pi-memory`、`pi-ask-user`、`pi-web-tools`、`pi-todo`、`pi-vision-tools`（`pi-superpowers` 不注册工具，仅注入 skills，不在范围内）
 落点：上述包的 tool 定义文件 + 各包 `tests/` + `docs/guides/pi-package-spec.md`
 
@@ -39,7 +39,7 @@ pi 的自定义 tool 有三处内容会进模型上下文，性质完全不同�
 
 - 修掉 1 个真实缺陷（`pi-container-sandbox` 静默吞掉 4 个工具的提示词元数据）；
 - 修掉 8 处会误导模型的事实错误；
-- 在不削弱行为约束的前提下回收 **≈3.0k 字符/请求（-11.9%）**；
+- 在不削弱行为约束的前提下回收 **≈3.4k 字符/请求（-13.7%）**；
 - 把三通道分工与预算写成可执行的约定，并加回归闸门防止再次腐烂。
 
 **非目标**
@@ -124,7 +124,7 @@ pi 的自定义 tool 有三处内容会进模型上下文，性质完全不同�
 | 2 | preamble 同义反复句 + 面向用户的 override 说明 | `agent-tool.ts:138-141` | ~285 | （已计入上行） |
 | 3 | description 尾部两句与 guidelines 逐字重复 | `pi-ask-user/index.ts:1538` | 256→72 | 184 |
 | 4 | 两条"一问一题" guideline 合并 | `index.ts:1545-1546` | 144→128 | 16 |
-| 5 | 4 个 UI 旋钮描述（模型不该填） | `index.ts:1546-1560` | 670→200 | 470 |
+| 5 | 3 个外观参数从模型可见 schema 整体移除（D2 方案 B） | `index.ts:1575-1595` | 外观三件 schema 782 | 782 |
 | 6 | snippet 重名 + 复述 | `pi-web-tools/index.ts:19-21` | 169→70 | 99 |
 | 7 | `provider` 参数复述 description | `index.ts:26-30` | 188→93 | 95 |
 | 8 | snippet 重名 + 复述 | `index.ts:98` | 81→44 | 37 |
@@ -142,11 +142,11 @@ pi 的自定义 tool 有三处内容会进模型上下文，性质完全不同�
 | 20 | 三工具重复句合并 + 删 3× "Requires a language server." | `lsp-tools.ts`（desc 562 / guidelines 875） | 1437→997 | 440 |
 | 21 | SANDBOX_NOTE ×3（缩短 + 修 /tmp 措辞） | `pi-sandbox/src/tools.ts:293` | 156×3→130×3 | 78 |
 
-毛回收 **3598 字符/请求（-14.4%）**。为正确性必须**新增**的内容：todo 参数描述 +180、`lang` 静默默认说明 +120×2 = +240、`thinking` 枚举 +30、ask_user “别设 UI 旋钮” guideline +130、vision `thinkLevel` 默认值说明 +43 = **+623**。
+毛回收 **3910 字符/请求（-15.7%）**。为正确性必须**新增**的内容：todo 参数描述 +180、`lang` 静默默认说明 +120×2 = +240、`thinking` 枚举 +30、vision `thinkLevel` 默认值说明 +43 = **+493**。
 
-**净回收 2975 字符/请求（-11.9%，≈740 tokens）**；另 `pi-container-sandbox` 需**加回** 779 字符（185 snippet + 594 guidelines，修缺陷，非浪费）。
+**净回收 3417 字符/请求（-13.7%，≈850 tokens）**；另 `pi-container-sandbox` 需**加回** 779 字符（185 snippet + 594 guidelines，修缺陷，非浪费）。
 
-口径说明：第 1 项的 780 = 删掉 6 条完全重复的 516 + 迁移后 preamble 冗余 270 + 标题 12 − 重写并行条目 +24；迁移到 guidelines 的 4 条不产生净变化，故不计入毛回收。第 2 项并入第 1 项（preamble 冗余即 270）。
+口径说明：第 1 项的 780 = 删掉 6 条完全重复的 516 + 迁移后 preamble 冗余 270 + 标题 12 − 重写并行条目 +24；迁移到 guidelines 的 4 条不产生净变化，故不计入毛回收。第 2 项并入第 1 项（preamble 冗余即 270）。第 5 项只计外观三件（`timeout` 的处置见 D2a）。
 
 ## 5. 整改方案（按波次）
 
@@ -160,10 +160,12 @@ pi 的自定义 tool 有三处内容会进模型上下文，性质完全不同�
 
 §4.5 除第 5 项外的全部条目：snippet 重写、description 删复述、guideline 合并、LSP 三件套收敛。
 
-### W3 需拍板（见 §8）
+### W3 已拍板（2026-10-30）
 
-- D1：`subagent` 的 Guidelines 块迁到 `promptGuidelines`（净省 ~780 + 修错配，但自定义 system prompt 下会整体失效）；
-- D2：`ask_user` 的 4 个 UI 旋钮——缩短描述 + 一句"别设"（推荐）还是从模型可见 schema 移除。
+- **D1 = 迁移**：`subagent` 的 Guidelines 块——删 6 条与参数重复的（516 字符），把 4 条独有的迁到 `promptGuidelines`（并行条目重写以修事实错误）；
+- **D2 = 方案 B**：`ask_user` 的 `displayMode` / `overlayToggleKey` / `commentToggleKey` 从模型可见 schema 移除（-782），只从 env/config 读；**`timeout` 另议（D2a）**——它没有 env/config 兜底，移除即删能力。
+
+实施注意（D2）：`pi-ask-user` 只导出 `export default`，无程序化 API，所以移除声明后 per-call 入参只剩测试在用。本方案**保留**内部优先级链（代码不动，测试全部保持绿），只改 `parameters` 声明——避免为了删死代码而重写 8 处测试。若日后加 RPC/SDK 入口，该链路自动可用。README（EN+ZH）的「参数表」与「优先级表」需同步：per-call 一档改为“仅 SDK/内部调用”，模型调用不再可见。
 
 ### W4 约定与闸门
 
@@ -211,8 +213,9 @@ pi.registerTool({ ...localRead, async execute(id, params, signal, onUpdate, ctx)
 | description | 256（含两句重复规则 + `read/web/ref`） | `Ask the user one focused question with optional multiple-choice answers.` |
 | guideline[0] | "…with tools (read/web/ref)…" | `Before calling ask_user, gather context with your read/search/web tools and pass a short summary via the context field.` |
 | guideline[2]+[3] | 两条同义 | 合并为 `Ask exactly one focused question per ask_user call — never combine multiple, numbered, or unrelated questions in one prompt.` |
-| 新增 guideline | — | `Leave the UI options (displayMode, overlayToggleKey, commentToggleKey, timeout) at their defaults unless the user asked for a specific one.` |
-| `displayMode` / `overlayToggleKey` / `commentToggleKey` / `timeout` 描述 | 200 / 196 / 201 / 73 | 各压到 ≤45：`Overlay or inline rendering. Leave unset (env/config decides).` / `Overlay toggle keybinding, e.g. 'alt+o'. Leave unset.` / `Comment-row toggle keybinding, e.g. 'ctrl+g'. Leave unset.` / `Auto-dismiss after N ms; returns null when expired.` |
+| 新增 guideline | — | **不新增**（外观三件已从 schema 移除，不需要“别设”提示） |
+| `displayMode` / `overlayToggleKey` / `commentToggleKey` | schema 里各 200 / 196 / 201 字符 | **从 `parameters` 删除这三个键**（-782）；内部 `AskParams`、`buildCustomUIOptions`、`resolveShortcut` 与优先级链全部保留。README（EN+ZH）参数表与优先级表同步改口径 |
+| `timeout` | 73 | 待 D2a：保留（推荐）或加 config/env 后移除 |
 
 ### 6.4 `pi-web-tools`
 
@@ -288,13 +291,14 @@ pi.registerTool({ ...localRead, async execute(id, params, signal, onUpdate, ctx)
 3. **逐包**：`npm test -w pi-<name>`；全仓 `npm run typecheck && npm run lint`；`npm test`（`pi-container-sandbox` 的 1 条 `No container runtime available` 为本机环境性失败，与改动无关）。
 4. **手工复核**：用 §10 的配方在改前/改后各 dump 一次三通道文本，确认 (a) 表中回收量对得上、(b) 没有事实在删除过程中丢失、(c) `pi-container-sandbox` 的 4 条目录项回归。
 
-## 8. 待拍板项
+## 8. 决策记录
 
-| # | 问题 | 推荐 | 若不同意的退路 |
+| # | 问题 | 结论 | 备注 |
 |---|---|---|---|
-| **D1** | `subagent` 的 Guidelines 块是否迁到 `promptGuidelines`？ | **迁**（修 R1 错配、净省 ~780） | 留在 description，仅删 6 条与参数重复的（净省 516，错配保留）；两种选择的共同副作用是“自定义 system prompt 下不再可见”，迁走后不再可见的范围更大，需你确认可接受 |
-| **D2** | `ask_user` 的 4 个 UI 旋钮 | **留参数、缩短描述 + 加一句"别设"**（回收 ~470） | 从模型可见 schema 移除、只读 env/config（回收 ~900，但去掉模型显式覆盖的能力） |
-| **D3** | 是否顺带做 memory 的 extract 子会话精简（旧 spec 方案 1） | **本轮不做** | 单开一轮，先按旧 spec §5 重建量取脚本 |
+| **D1** | `subagent` 的 Guidelines 块是否迁到 `promptGuidelines`？ | ✅ **已定（2026-10-30）：迁** | 删 6 条与参数重复的（516），4 条独有的迁入 guidelines，并行条目重写以修事实错误；净省 ~780。已知代价：自定义 system prompt 下这 4 条不再可见 |
+| **D2** | `ask_user` 的 UI 旋钮 | ✅ **已定（2026-10-30）：方案 B**——外观三件从模型可见 schema 移除，只从 env/config 读（-782） | 内部优先级链保留，测试不改 |
+| **D2a** | `timeout` 怎么处理？（它**没有** env/config 兜底：`ask-user.json` 只支持 3 个字段） | ⏳ **待定**——推荐保留（模型唯一能给自己“别无限等”设上限的手段，仅 73 字符） | 全移除：需新增 `ask-user.json` 的 `timeout` 键与 `PI_ASK_USER_TIMEOUT`，能力由“逐次”变“全局”（-900） |
+| **D3** | 是否顺带做 memory 的 extract 子会话精简（旧 spec 方案 1） | ✅ **已定（2026-10-30）：本轮不做** | 单开一轮时先按旧 spec §5 重建量取脚本 |
 | **D4** | 是否加 per-package 预算测试 | **加**（W4） | 只写约定、不加闸门（漂移风险回到现状） |
 | **D5** | 发布粒度 | **每包一个 patch release**，改完一包发一包 | 攒成一批（需求侧无收益，且 prompt 变更与功能变更混在一起难回溯） |
 
@@ -331,9 +335,9 @@ pi.registerTool({ ...localRead, async execute(id, params, signal, onUpdate, ctx)
 | pi-sandbox | 3 | 1175 | 1885 | 167 | 1551 | 4778 | 4800 |
 | pi-subagents | 3 | 1827 | 2198 | 224 | 0 | 4249 | 3300 |
 | pi-memory | 1 | 522 | 1003 | 152 | 1137 | 2814 | 2750 |
-| pi-ask-user | 1 | 256 | 1846 | 107 | 390 | 2599 | 2150 |
+| pi-ask-user | 1 | 256 | 1846 | 107 | 390 | 2599 | 1650 |
 | pi-web-tools | 2 | 532 | 1290 | 250 | 304 | 2376 | 2150 |
 | pi-todo | 1 | 437 | 527 | 59 | 422 | 1445 | 1700 |
 | pi-vision-tools | 1 | 357 | 542 | 82 | 295 | 1276 | 1150 |
-| **合计** | 17 | 6114 | 11218 | 1371 | 6233 | **24936** | **21961** |
+| **合计** | 17 | 6114 | 11218 | 1371 | 6233 | **24936** | **21519** |
 | pi-container-sandbox（单独装配，W1 修复后） | 4 | 999 | 1580 | 0→**185** | 0→**594** | 2579→**3358** | 3500 |
