@@ -1,7 +1,7 @@
 # pi-packages 工具提示词整改设计（三通道定位 · 去重 · 预算闸门）
 
 日期：2026-10-30
-状态：**已定稿，待实施**（D1/D2/D3 已于 2026-10-30 拍板；D2a 待定；W1–W2 可直接开工）
+状态：**已定稿，待实施**（D1/D2/D2a/D3 已于 2026-10-30 全部拍板；W1–W3 均可开工）
 范围：`pi-coding-tools`、`pi-sandbox`、`pi-container-sandbox`、`pi-subagents`、`pi-memory`、`pi-ask-user`、`pi-web-tools`、`pi-todo`、`pi-vision-tools`（`pi-superpowers` 不注册工具，仅注入 skills，不在范围内）
 落点：上述包的 tool 定义文件 + 各包 `tests/` + `docs/guides/pi-package-spec.md`
 
@@ -146,7 +146,7 @@ pi 的自定义 tool 有三处内容会进模型上下文，性质完全不同�
 
 **净回收 3417 字符/请求（-13.7%，≈850 tokens）**；另 `pi-container-sandbox` 需**加回** 779 字符（185 snippet + 594 guidelines，修缺陷，非浪费）。
 
-口径说明：第 1 项的 780 = 删掉 6 条完全重复的 516 + 迁移后 preamble 冗余 270 + 标题 12 − 重写并行条目 +24；迁移到 guidelines 的 4 条不产生净变化，故不计入毛回收。第 2 项并入第 1 项（preamble 冗余即 270）。第 5 项只计外观三件（`timeout` 的处置见 D2a）。
+口径说明：第 1 项的 780 = 删掉 6 条完全重复的 516 + 迁移后 preamble 冗余 270 + 标题 12 − 重写并行条目 +24；迁移到 guidelines 的 4 条不产生净变化，故不计入毛回收。第 2 项并入第 1 项（preamble 冗余即 270）。第 5 项只计外观三件；`timeout` 按 D2a 的决定**保留**（其 73 字符不计入回收）。
 
 ## 5. 整改方案（按波次）
 
@@ -163,7 +163,7 @@ pi 的自定义 tool 有三处内容会进模型上下文，性质完全不同�
 ### W3 已拍板（2026-10-30）
 
 - **D1 = 迁移**：`subagent` 的 Guidelines 块——删 6 条与参数重复的（516 字符），把 4 条独有的迁到 `promptGuidelines`（并行条目重写以修事实错误）；
-- **D2 = 方案 B**：`ask_user` 的 `displayMode` / `overlayToggleKey` / `commentToggleKey` 从模型可见 schema 移除（-782），只从 env/config 读；**`timeout` 另议（D2a）**——它没有 env/config 兜底，移除即删能力。
+- **D2 = 方案 B**：`ask_user` 的 `displayMode` / `overlayToggleKey` / `commentToggleKey` 从模型可见 schema 移除（-782），只从 env/config 读；**`timeout` 保留**（D2a）——它没有 env/config 兜底，移除即删能力，而它是模型唯一能给自己设等待上限的手段。
 
 实施注意（D2）：`pi-ask-user` 只导出 `export default`，无程序化 API，所以移除声明后 per-call 入参只剩测试在用。本方案**保留**内部优先级链（代码不动，测试全部保持绿），只改 `parameters` 声明——避免为了删死代码而重写 8 处测试。若日后加 RPC/SDK 入口，该链路自动可用。README（EN+ZH）的「参数表」与「优先级表」需同步：per-call 一档改为“仅 SDK/内部调用”，模型调用不再可见。
 
@@ -215,7 +215,7 @@ pi.registerTool({ ...localRead, async execute(id, params, signal, onUpdate, ctx)
 | guideline[2]+[3] | 两条同义 | 合并为 `Ask exactly one focused question per ask_user call — never combine multiple, numbered, or unrelated questions in one prompt.` |
 | 新增 guideline | — | **不新增**（外观三件已从 schema 移除，不需要“别设”提示） |
 | `displayMode` / `overlayToggleKey` / `commentToggleKey` | schema 里各 200 / 196 / 201 字符 | **从 `parameters` 删除这三个键**（-782）；内部 `AskParams`、`buildCustomUIOptions`、`resolveShortcut` 与优先级链全部保留。README（EN+ZH）参数表与优先级表同步改口径 |
-| `timeout` | 73 | 待 D2a：保留（推荐）或加 config/env 后移除 |
+| `timeout` | 73 | **保留不动**（D2a 已定），仅把描述澄清为 `Auto-dismiss after N ms; returns null when expired.` |
 
 ### 6.4 `pi-web-tools`
 
@@ -297,7 +297,7 @@ pi.registerTool({ ...localRead, async execute(id, params, signal, onUpdate, ctx)
 |---|---|---|---|
 | **D1** | `subagent` 的 Guidelines 块是否迁到 `promptGuidelines`？ | ✅ **已定（2026-10-30）：迁** | 删 6 条与参数重复的（516），4 条独有的迁入 guidelines，并行条目重写以修事实错误；净省 ~780。已知代价：自定义 system prompt 下这 4 条不再可见 |
 | **D2** | `ask_user` 的 UI 旋钮 | ✅ **已定（2026-10-30）：方案 B**——外观三件从模型可见 schema 移除，只从 env/config 读（-782） | 内部优先级链保留，测试不改 |
-| **D2a** | `timeout` 怎么处理？（它**没有** env/config 兜底：`ask-user.json` 只支持 3 个字段） | ⏳ **待定**——推荐保留（模型唯一能给自己“别无限等”设上限的手段，仅 73 字符） | 全移除：需新增 `ask-user.json` 的 `timeout` 键与 `PI_ASK_USER_TIMEOUT`，能力由“逐次”变“全局”（-900） |
+| **D2a** | `timeout` 怎么处理？（它**没有** env/config 兜底：`ask-user.json` 只支持 3 个字段） | ✅ **已定（2026-10-30）：保留**——模型唯一能给自己“别无限等”设上限的手段，仅 73 字符 | 全移除需新增 `ask-user.json` 的 `timeout` 键与 `PI_ASK_USER_TIMEOUT`（-900），本轮不做 |
 | **D3** | 是否顺带做 memory 的 extract 子会话精简（旧 spec 方案 1） | ✅ **已定（2026-10-30）：本轮不做** | 单开一轮时先按旧 spec §5 重建量取脚本 |
 | **D4** | 是否加 per-package 预算测试 | **加**（W4） | 只写约定、不加闸门（漂移风险回到现状） |
 | **D5** | 发布粒度 | **每包一个 patch release**，改完一包发一包 | 攒成一批（需求侧无收益，且 prompt 变更与功能变更混在一起难回溯） |
