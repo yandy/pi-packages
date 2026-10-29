@@ -9,7 +9,7 @@
  *   - test/lifecycle/subagent-session.test.ts — turn-loop limit integration
  */
 import { describe, expect, it } from "vitest";
-import { normalizeMaxTurns } from "../../src/lifecycle/turn-limits";
+import { normalizeMaxTurns, normalizeTimeoutSeconds } from "../../src/lifecycle/turn-limits";
 
 describe("normalizeMaxTurns", () => {
 	it("treats undefined as unlimited", () => {
@@ -30,5 +30,27 @@ describe("normalizeMaxTurns", () => {
 
 	it("accepts boundary value 1", () => {
 		expect(normalizeMaxTurns(1)).toBe(1);
+	});
+});
+
+describe("normalizeTimeoutSeconds", () => {
+	it("returns undefined for null, undefined, and 0 (unlimited)", () => {
+		expect(normalizeTimeoutSeconds(undefined)).toBeUndefined();
+		expect(normalizeTimeoutSeconds(0)).toBeUndefined();
+	});
+
+	it("clamps below 1 up to 1", () => {
+		expect(normalizeTimeoutSeconds(0.5)).toBe(1);
+		expect(normalizeTimeoutSeconds(-5)).toBe(1);
+	});
+
+	it("passes positive values through unchanged, including huge ones", () => {
+		expect(normalizeTimeoutSeconds(30)).toBe(30);
+		expect(normalizeTimeoutSeconds(1e9)).toBe(1e9);
+	});
+
+	it("returns undefined for non-finite values", () => {
+		expect(normalizeTimeoutSeconds(Number.NaN)).toBeUndefined();
+		expect(normalizeTimeoutSeconds(Number.POSITIVE_INFINITY)).toBeUndefined();
 	});
 });
