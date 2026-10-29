@@ -32,7 +32,7 @@ function writeProjectFiles(): void {
 
 function config(promptMode: "append" | "replace"): SessionConfig {
 	return {
-		effectiveCwd: cwd,
+		cwd,
 		promptMode,
 		promptSection: SECTION,
 		toolNames: ["read"],

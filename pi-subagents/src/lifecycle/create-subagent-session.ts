@@ -82,7 +82,7 @@ export interface CreateSessionOptions {
 export interface EnvironmentIO {
 	detectEnv: (exec: ShellExec, cwd: string) => Promise<EnvInfo>;
 	getAgentDir: () => string;
-	deriveSessionDir: (parentSessionFile: string | undefined, effectiveCwd: string) => string;
+	deriveSessionDir: (parentSessionFile: string | undefined, cwd: string) => string;
 }
 
 /**
@@ -146,7 +146,7 @@ export interface CreateSubagentSessionParams {
 export function buildResourceLoaderOptions(cfg: SessionConfig, agentDir: string): ResourceLoaderOptions {
 	const isReplace = cfg.promptMode === "replace";
 	return {
-		cwd: cfg.effectiveCwd,
+		cwd: cfg.cwd,
 		agentDir,
 		noPromptTemplates: true,
 		noThemes: true,
@@ -171,9 +171,8 @@ export async function createSubagentSession(
 	const parentSessionId = params.parentSession?.parentSessionId;
 	deps.lifecycle.spawning({ agentName: type, parentSessionId });
 
-	// Resolve working directory upfront - needed for detectEnv before assembly.
-	const effectiveCwd = snapshot.cwd;
-	const env = await deps.io.detectEnv(deps.exec, effectiveCwd);
+	// detectEnv runs before assembly, so it reads the cwd from the snapshot directly.
+	const env = await deps.io.detectEnv(deps.exec, snapshot.cwd);
 
 	// Assemble session configuration (synchronous, no SDK objects).
 	const cfg = assembleSessionConfig(
@@ -206,16 +205,16 @@ export async function createSubagentSession(
 	// Create a persisted SessionManager so transcripts are written in Pi's
 	// official JSONL format. Falls back to a temp directory when the parent
 	// session is not persisted (e.g. headless/API mode).
-	const sessionDir = deps.io.deriveSessionDir(params.parentSession?.parentSessionFile, cfg.effectiveCwd);
-	const sessionManager = deps.io.createSessionManager(cfg.effectiveCwd, sessionDir);
+	const sessionDir = deps.io.deriveSessionDir(params.parentSession?.parentSessionFile, cfg.cwd);
+	const sessionManager = deps.io.createSessionManager(cfg.cwd, sessionDir);
 	sessionManager.newSession({ parentSession: params.parentSession?.parentSessionId });
 	const sessionId = sessionManager.getSessionId();
 
 	const { session } = await deps.io.createSession({
-		cwd: cfg.effectiveCwd,
+		cwd: cfg.cwd,
 		agentDir,
 		sessionManager,
-		settingsManager: deps.io.createSettingsManager(cfg.effectiveCwd, agentDir),
+		settingsManager: deps.io.createSettingsManager(cfg.cwd, agentDir),
 		modelRegistry: snapshot.modelRegistry,
 		model: cfg.model,
 		tools: cfg.toolNames,

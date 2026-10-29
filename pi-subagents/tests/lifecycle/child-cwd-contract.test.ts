@@ -48,6 +48,6 @@ describe("child cwd — no seam, single source", () => {
 			{ buildReplacePrompt: () => "replace prompt", buildAppendSection: () => "append section" },
 		);
 
-		expect(result.effectiveCwd).toBe("/parent");
+		expect(result.cwd).toBe("/parent");
 	});
 });

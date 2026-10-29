@@ -67,8 +67,8 @@ export interface AssemblerOptions {
  * with no SDK object references.
  */
 export interface SessionConfig {
-	/** Resolved working directory (the parent's cwd). */
-	effectiveCwd: string;
+	/** Working directory for the child — the parent's cwd, the only source. */
+	cwd: string;
 	/** Prompt mode declared by the agent; decides how the caller wires the resource loader. */
 	promptMode: "replace" | "append";
 	/** Mode-specific text: the complete system prompt for "replace", the appended section for "append". */
@@ -144,8 +144,6 @@ export function assembleSessionConfig(
 ): SessionConfig {
 	const agentConfig = registry.resolveAgentConfig(type);
 
-	const effectiveCwd = ctx.cwd;
-
 	const toolNames = registry.getToolNamesForType(type);
 
 	// Assemble the prompt text: "replace" owns the whole prompt, "append" only
@@ -165,7 +163,7 @@ export function assembleSessionConfig(
 	const agentMaxTurns = agentConfig.maxTurns;
 
 	return {
-		effectiveCwd,
+		cwd: ctx.cwd,
 		promptMode: agentConfig.promptMode,
 		promptSection,
 		toolNames,
