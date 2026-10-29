@@ -43,7 +43,7 @@ Foreground agents block until complete. Background agents return an ID immediate
 
 | Type | Tools | Model | Description |
 |------|-------|-------|-------------|
-| `general-purpose` | all | inherit | Full parent system prompt — same rules, same conventions |
+| `general-purpose` | all | inherit | Harness-rendered prompt for the child's own tool set — same conventions, plus the sub-agent bridge |
 | `Explore` | read, bash, grep, find, ls | haiku (fallback: inherit) | Fast codebase exploration (read-only) |
 
 ## Custom Agents
@@ -74,11 +74,9 @@ Agents are discovered from `.pi/agents/<name>.md` (project) and `~/.pi/agent/age
 | Value | Assembled system prompt | Use when |
 |-------|------------------------|----------|
 | `append` (default) | Harness-rendered prompt for the child's own tool set + `bridge + <active_agent> + environment` + body wrapped in `<agent_instructions>` | The agent should keep the caller's conventions and only add a role on top |
-| `replace` | A fixed generic base + `<active_agent>` + environment + body verbatim — the caller's prompt is never reused | The agent needs a self-contained spec: read-only auditors, evaluators, non-coding roles |
+| `replace` | A fixed generic base + `<active_agent>` + environment + your body — the caller's rendered prompt is never reused, but the harness still appends the skills index, the date, and the child's own working directory | The agent needs a self-contained spec: read-only auditors, evaluators, non-coding roles |
 
-`replace` is a clean room on purpose: it does not inherit the caller's tool list, tool guidelines, project context files (`AGENTS.md`), `SYSTEM.md`, or working directory, because those describe a different toolset and role. Anything the agent needs — including house rules such as language or tool preferences — must be restated in its body. Prompt mode never widens or narrows capabilities: only the `tools` allowlist does that.
-
-> Behavior change: agents that already declare `prompt_mode: replace` stop inheriting project instructions on upgrade. See the release notes.
+`replace` is a clean room on purpose: it does not inherit the caller's rendered prompt (its tool list and tool guidelines), the project context files (`AGENTS.md`), or `SYSTEM.md` / `APPEND_SYSTEM.md`, because those describe a different toolset and role. Anything the agent needs — including house rules such as language or tool preferences — must be restated in its body. Prompt mode never widens or narrows capabilities: only the `tools` allowlist does that.
 
 ## Tools
 

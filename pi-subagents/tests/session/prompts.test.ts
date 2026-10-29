@@ -62,6 +62,15 @@ describe("buildReplacePrompt", () => {
 		expect(prompt).toContain('<active_agent name="test-agent"/>');
 	});
 
+	it("never claims capabilities the agent's tool allowlist does not grant", () => {
+		// The built-in Explore agent is replace-mode with read-only tools, and
+		// replace mode renders no tool list, so genericBase is the only place a
+		// capability claim could reach the model.
+		const prompt = buildReplacePrompt(getDefaultConfig("Explore"), env);
+		expect(prompt).not.toContain("full access to read, write");
+		expect(prompt).toContain("READ-ONLY");
+	});
+
 	it("orders: genericBase → active_agent → env → body", () => {
 		const config = agent({ name: "ordered", promptMode: "replace", systemPrompt: "Final custom instructions." });
 		const prompt = buildReplacePrompt(config, env);

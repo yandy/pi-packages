@@ -17,10 +17,10 @@
 import type { EnvInfo } from "../session/env";
 import type { AgentPromptConfig } from "../types";
 
-/** Base persona for replace-mode agents. */
+/** Base persona for replace-mode agents. Capability-neutral: only the `tools` allowlist grants abilities. */
 const genericBase = `# Role
 You are a general-purpose coding agent for complex, multi-step tasks.
-You have full access to read, write, edit files, and execute commands.
+Your available tools are the ones exposed to you in this session; respect any restrictions stated below.
 Do what has been asked; nothing more, nothing less.`;
 
 /** Environment header shared by both modes. cwd and date are rendered by the harness. */
