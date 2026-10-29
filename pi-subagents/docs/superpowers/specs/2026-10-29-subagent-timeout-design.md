@@ -2,7 +2,7 @@
 
 - Date: 2026-10-29
 - Package: pi-subagents
-- Status: Proposed
+- Status: Implemented
 
 ## Intent
 
@@ -100,6 +100,13 @@ Guidelines list gains one line: `Use timeout (seconds) as a hard safety net for 
 - `turn-limits`: normalize (0/undefined → unlimited, < 1 → 1, fractional passes through).
 - `subagent` (fake timers): fires → session aborted, status `"aborted"`, result carries timeout note; completes before deadline → timer cleared, no abort; queued agent → timer starts only when the slot opens; fires during session creation → run fails fast after creation.
 - `subagent-session`: `aborted` derived from `opts.signal.aborted` when no turn-limit watcher fired.
-- `spawn-config` / `invocation-config` precedence: param > frontmatter > settings default.
+- `spawn-config` / `invocation-config` precedence: frontmatter > param > settings default.
 - `settings`: sanitize bounds (0–86400), apply + persist round-trip.
 - `custom-agents`: frontmatter `timeout` parsed, non-numeric ignored.
+
+## Deviations
+
+None from the behavior contract. Two implementation notes:
+
+- The tool's "Guidelines:" text lives in the tool `description`; `promptGuidelines` stays reserved for the user-configured model-tier mapping. The new timeout guidance line therefore appears in the description, alongside the other guidelines.
+- No new lifecycle status was added; a timed-out run ends `"aborted"` and is distinguished by the `⏱ Timed out after Ns` result prefix.
