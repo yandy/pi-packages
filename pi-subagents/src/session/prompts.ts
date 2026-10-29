@@ -17,9 +17,15 @@
 import type { EnvInfo } from "../session/env";
 import type { AgentPromptConfig } from "../types";
 
-/** Base persona for replace-mode agents. Capability-neutral: only the `tools` allowlist grants abilities. */
-const genericBase = `# Role
-You are a general-purpose coding agent for complex, multi-step tasks.
+/**
+ * Fallback prompt for a replace agent whose body is empty — nothing else uses
+ * it. It asserts no role and no capability: in replace mode the body IS the
+ * spec, and a generic persona prepended to it would mislabel read-only or
+ * non-coding agents (and is the only capability text the model would see, since
+ * replace mode renders no tool list). Only the `tools` allowlist grants abilities.
+ */
+const emptyPrompt = `# Role
+Your role is defined by the instructions below.
 Your available tools are the ones exposed to you in this session; respect any restrictions stated below.
 Do what has been asked; nothing more, nothing less.`;
 
@@ -32,13 +38,16 @@ Platform: ${env.platform}`;
 
 /**
  * Build the complete system prompt for a "replace" agent:
- * genericBase → active_agent tag → env header → the agent body verbatim.
+ * active_agent tag → env header → the agent body verbatim.
  *
- * No `<sub_agent_context>` bridge and no `<agent_instructions>` wrapper: the
- * body is the agent's own top-level spec, not an addendum to someone else's.
+ * Only an empty body gets `emptyPrompt` in front of it; a non-empty body is the
+ * agent's whole spec, so nothing generic is prepended. No `<sub_agent_context>`
+ * bridge and no `<agent_instructions>` wrapper either: this is not an addendum
+ * to someone else's prompt.
  */
 export function buildReplacePrompt(config: AgentPromptConfig, env: EnvInfo): string {
-	return `${genericBase}\n\n<active_agent name="${config.name}"/>\n\n${environmentBlock(env)}\n\n${config.systemPrompt}`;
+	const identity = config.systemPrompt.trim() ? "" : `${emptyPrompt}\n\n`;
+	return `${identity}<active_agent name="${config.name}"/>\n\n${environmentBlock(env)}\n\n${config.systemPrompt}`;
 }
 
 /**

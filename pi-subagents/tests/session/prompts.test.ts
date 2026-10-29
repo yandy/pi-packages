@@ -38,7 +38,8 @@ describe("buildReplacePrompt", () => {
 		const config = agent({ name: "standalone", systemPrompt: "You are a standalone agent.", promptMode: "replace" });
 		const prompt = buildReplacePrompt(config, env);
 		expect(prompt).toContain("You are a standalone agent.");
-		expect(prompt).toContain("general-purpose coding agent");
+		// Nothing generic is prepended: the body is the whole spec.
+		expect(prompt).not.toContain("general-purpose coding agent");
 		expect(prompt).not.toContain("<sub_agent_context>");
 		expect(prompt).not.toContain("<agent_instructions>");
 	});
@@ -56,30 +57,38 @@ describe("buildReplacePrompt", () => {
 		expect(prompt).not.toContain("Branch:");
 	});
 
-	it("keeps a valid prompt when the body is empty", () => {
+	it("falls back to a capability-neutral empty-body prompt", () => {
 		const prompt = buildReplacePrompt(agent({ promptMode: "replace", systemPrompt: "" }), env);
-		expect(prompt).toContain("general-purpose coding agent");
+		expect(prompt).toContain("Do what has been asked; nothing more, nothing less.");
 		expect(prompt).toContain('<active_agent name="test-agent"/>');
+		// The fallback must not claim abilities: an empty-body agent may be read-only.
+		expect(prompt).not.toContain("full access to read, write");
 	});
 
-	it("never claims capabilities the agent's tool allowlist does not grant", () => {
-		// The built-in Explore agent is replace-mode with read-only tools, and
-		// replace mode renders no tool list, so genericBase is the only place a
-		// capability claim could reach the model.
+	it("never borrows another agent's role or capabilities (built-in Explore)", () => {
+		// Explore is replace-mode with read-only tools. Nothing generic may be
+		// prepended to its spec: it would both mislabel the role (general-purpose)
+		// and claim write access the tool allowlist does not grant.
 		const prompt = buildReplacePrompt(getDefaultConfig("Explore"), env);
+		expect(prompt).not.toContain("general-purpose coding agent");
 		expect(prompt).not.toContain("full access to read, write");
+		expect(prompt).toContain("file search specialist");
 		expect(prompt).toContain("READ-ONLY");
 	});
 
-	it("orders: genericBase → active_agent → env → body", () => {
+	it("is exactly tag + env + body when the body is non-empty", () => {
+		const prompt = buildReplacePrompt(agent({ name: "solo", promptMode: "replace", systemPrompt: "Body spec." }), env);
+		expect(prompt.startsWith('<active_agent name="solo"/>')).toBe(true);
+		expect(prompt.endsWith("Body spec.")).toBe(true);
+	});
+
+	it("orders: active_agent → env → body", () => {
 		const config = agent({ name: "ordered", promptMode: "replace", systemPrompt: "Final custom instructions." });
 		const prompt = buildReplacePrompt(config, env);
-		const idxIdentity = prompt.indexOf("general-purpose coding agent");
 		const idxTag = prompt.indexOf('<active_agent name="ordered"/>');
 		const idxEnv = prompt.indexOf("# Environment");
 		const idxCustom = prompt.indexOf("Final custom instructions.");
-		expect(idxIdentity).toBeGreaterThan(-1);
-		expect(idxTag).toBeGreaterThan(idxIdentity);
+		expect(idxTag).toBe(0);
 		expect(idxEnv).toBeGreaterThan(idxTag);
 		expect(idxCustom).toBeGreaterThan(idxEnv);
 	});
@@ -143,11 +152,11 @@ describe("active_agent tag injection", () => {
 		expect(envIdx).toBeGreaterThan(tagIdx);
 	});
 
-	it("replace prompt places the tag before the env block", () => {
+	it("replace prompt places the tag first, before the env block", () => {
 		const prompt = buildReplacePrompt(agent({ name: "agent-a", promptMode: "replace" }), env);
 		const tagIdx = prompt.indexOf('<active_agent name="agent-a"/>');
 		const envIdx = prompt.indexOf("# Environment");
-		expect(tagIdx).toBeGreaterThan(0);
+		expect(tagIdx).toBe(0);
 		expect(envIdx).toBeGreaterThan(tagIdx);
 	});
 });

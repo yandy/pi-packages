@@ -72,9 +72,13 @@ snapshot 拿到这些规则。
 
 ### C. replace 干净房间 + append 交还 harness（已选）
 
-- `replace`：system prompt 完全由 `genericBase + <active_agent> + env + 正文` 组成，
-  是 agent 配置的纯函数。loader 传 `systemPromptOverride`、`noContextFiles: true`、
+- `replace`：system prompt 完全由 `<active_agent> + env + 正文` 组成，是 agent 配置的纯函数；
+  **不再前置任何通用人格**——正文就是该 agent 的全部角色声明（空正文时才回落到一段不含
+  角色、不含能力断言的中性提示词）。loader 传 `systemPromptOverride`、`noContextFiles: true`、
   `appendSystemPromptOverride: () => []`。
+  （2026-10-29 修订：初版为 `genericBase + tag + env + 正文`，会使 replace 代理同时带有
+  "You are a general-purpose coding agent" 与自身角色两个互相矛盾的断言，例如内置 `Explore`。
+  经你拍板去掉前置人格。）
 - `append`：**不**传 `systemPromptOverride`，由 harness 按子代理自身工具集渲染基础提示词
   （工具清单、guidelines、skills、AGENTS.md、SYSTEM.md/APPEND_SYSTEM.md、date/cwd），
   我们只通过 `appendSystemPromptOverride` 追加一段
@@ -88,8 +92,8 @@ snapshot 拿到这些规则。
 
 ## 我做的判断（请检查）
 
-1. **replace 正文为空**时不报错：仍产出 `genericBase + tag + env`，与 append 空正文
-   "纯克隆"的对称行为一致。
+1. **replace 正文为空**时不报错：产出 `中性兜底提示词 + tag + env`，与 append 空正文
+   "纯克隆"的对称行为一致。该兜底不声明任何角色或能力。
 2. **删除 `ParentSnapshot.systemPrompt`** 与 `AssemblerContext.parentSystemPrompt`：两种模式
    都不再用父级提示词，保留它只会诱导回退。
 3. **`SessionConfig.systemPrompt` 改名为 `promptMode` + `promptSection`**：append 下这段文本
