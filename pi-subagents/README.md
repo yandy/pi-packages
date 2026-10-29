@@ -76,7 +76,9 @@ Agents are discovered from `.pi/agents/<name>.md` (project) and `~/.pi/agent/age
 | `append` (default) | Harness-rendered prompt for the child's own tool set + `bridge + <active_agent> + environment` + body wrapped in `<agent_instructions>` | The agent should keep the caller's conventions and only add a role on top |
 | `replace` | `<active_agent>` + environment + your body, nothing else — the caller's rendered prompt is never reused (an empty body falls back to a minimal, capability-neutral prompt), but the harness still appends the skills index, the date, and the child's own working directory | The agent needs a self-contained spec: read-only auditors, evaluators, non-coding roles |
 
-`replace` is a clean room on purpose: it does not inherit the caller's rendered prompt (its tool list and tool guidelines), the project context files (`AGENTS.md`), or `SYSTEM.md` / `APPEND_SYSTEM.md`, because those describe a different toolset and role. Anything the agent needs — including house rules such as language or tool preferences — must be restated in its body. Prompt mode never widens or narrows capabilities: only the `tools` allowlist does that.
+`replace` is a clean room on purpose: nothing rendered for the caller reaches the agent — not its prompt, tool list or tool guidelines, not the project context files (`AGENTS.md`), not `SYSTEM.md` / `APPEND_SYSTEM.md` — because those describe a different toolset and role. It gets no tool list of its own either: the prompt carries no tool list and no tool guidelines, while the harness still passes the agent's tools to the model directly. That is why prompt mode never widens or narrows capabilities: only the `tools` allowlist does that. Anything the agent needs — including house rules such as language or tool preferences, and tool-usage conventions — must be restated in its body.
+
+`append` is the other side of that line: neither mode inherits the caller's tool list. `append` gets the base prompt the harness renders from the agent's **own** tool set (its own tools and guidelines), then the bridge and your body are appended.
 
 ## Tools
 
