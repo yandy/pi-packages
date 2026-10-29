@@ -4,9 +4,11 @@
 export interface SubagentsSettingsManager {
 	readonly maxConcurrent: number;
 	readonly defaultMaxTurns: number | undefined;
+	readonly defaultTimeoutSeconds: number | undefined;
 	readonly graceTurns: number;
 	applyMaxConcurrent(n: number): { message: string; level: "info" | "warning" };
 	applyDefaultMaxTurns(n: number): { message: string; level: "info" | "warning" };
+	applyDefaultTimeoutSeconds(n: number): { message: string; level: "info" | "warning" };
 	applyGraceTurns(n: number): { message: string; level: "info" | "warning" };
 }
 
@@ -32,6 +34,7 @@ export class SubagentsSettingsHandler {
 		const choice = await ui.select("Settings", [
 			`Max concurrency (current: ${this.settings.maxConcurrent})`,
 			`Default max turns (current: ${this.settings.defaultMaxTurns ?? "unlimited"})`,
+			`Default timeout (current: ${this.settings.defaultTimeoutSeconds != null ? `${this.settings.defaultTimeoutSeconds}s` : "unlimited"})`,
 			`Grace turns (current: ${this.settings.graceTurns})`,
 		]);
 		if (!choice) return;
@@ -56,6 +59,20 @@ export class SubagentsSettingsHandler {
 				const n = parseInt(val, 10);
 				if (n >= 0) {
 					const toast = this.settings.applyDefaultMaxTurns(n);
+					ui.notify(toast.message, toast.level);
+				} else {
+					ui.notify("Must be 0 (unlimited) or a positive integer.", "warning");
+				}
+			}
+		} else if (choice.startsWith("Default timeout")) {
+			const val = await ui.input(
+				"Default timeout in seconds (0 = unlimited)",
+				String(this.settings.defaultTimeoutSeconds ?? 0),
+			);
+			if (val) {
+				const n = parseInt(val, 10);
+				if (n >= 0) {
+					const toast = this.settings.applyDefaultTimeoutSeconds(n);
 					ui.notify(toast.message, toast.level);
 				} else {
 					ui.notify("Must be 0 (unlimited) or a positive integer.", "warning");
