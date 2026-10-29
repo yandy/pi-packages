@@ -67,6 +67,19 @@ Agents are discovered from `.pi/agents/<name>.md` (project) and `~/.pi/agent/age
 
 `max_turns` and `timeout` (wall-clock seconds, `0` = unlimited) lock their limits for the agent type: a frontmatter value wins over the per-call parameter.
 
+### Prompt mode
+
+`prompt_mode` decides how the agent body relates to the system prompt of the agent that invokes it:
+
+| Value | Assembled system prompt | Use when |
+|-------|------------------------|----------|
+| `append` (default) | Harness-rendered prompt for the child's own tool set + `bridge + <active_agent> + environment` + body wrapped in `<agent_instructions>` | The agent should keep the caller's conventions and only add a role on top |
+| `replace` | A fixed generic base + `<active_agent>` + environment + body verbatim — the caller's prompt is never reused | The agent needs a self-contained spec: read-only auditors, evaluators, non-coding roles |
+
+`replace` is a clean room on purpose: it does not inherit the caller's tool list, tool guidelines, project context files (`AGENTS.md`), `SYSTEM.md`, or working directory, because those describe a different toolset and role. Anything the agent needs — including house rules such as language or tool preferences — must be restated in its body. Prompt mode never widens or narrows capabilities: only the `tools` allowlist does that.
+
+> Behavior change: agents that already declare `prompt_mode: replace` stop inheriting project instructions on upgrade. See the release notes.
+
 ## Tools
 
 ### `subagent`
