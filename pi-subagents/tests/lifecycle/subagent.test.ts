@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CreateSubagentSessionParams } from "../../src/lifecycle/create-subagent-session";
 import { Subagent, type SubagentExecution, type SubagentLifecycleObserver } from "../../src/lifecycle/subagent";
 import type { SubagentSession, TurnLoopResult } from "../../src/lifecycle/subagent-session";
@@ -423,6 +423,7 @@ function createRunnableAgent(overrides?: {
 	signal?: AbortSignal;
 	baseCwd?: string;
 	workspaceProvider?: WorkspaceProvider;
+	timeoutSeconds?: number;
 }) {
 	const createSubagentSession = overrides?.createSubagentSession ?? defaultFactory();
 	const observer = overrides?.observer ?? {};
@@ -441,6 +442,7 @@ function createRunnableAgent(overrides?: {
 			signal: overrides?.signal,
 			baseCwd: overrides?.baseCwd ?? "/base",
 			getWorkspaceProvider: provider ? () => provider : undefined,
+			timeoutSeconds: overrides?.timeoutSeconds,
 		},
 	});
 }
@@ -600,6 +602,101 @@ describe("Subagent.run() — RunConfig threading", () => {
 		const turnOpts = stub.runTurnLoop.mock.calls[0][1];
 		expect(turnOpts.defaultMaxTurns).toBe(10);
 		expect(turnOpts.graceTurns).toBe(3);
+	});
+});
+
+describe("Subagent.run() — timeout guard", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("aborts at the deadline: controller fires, status aborted, result carries the note", async () => {
+		vi.useFakeTimers();
+		const stub = createSubagentSessionStub();
+		stub.runTurnLoop.mockImplementation(
+			(_prompt: string, opts: { signal?: AbortSignal }) =>
+				new Promise<TurnLoopResult>((resolve) => {
+					const settleAborted = () => resolve({ responseText: "partial", aborted: true, steered: false });
+					// Mirror forwardAbortSignal: an already-fired signal never fires addEventListener again.
+					if (opts.signal?.aborted) return settleAborted();
+					opts.signal?.addEventListener("abort", settleAborted, { once: true });
+				}),
+		);
+		const agent = createRunnableAgent({
+			createSubagentSession: async () => toSubagentSession(stub),
+			timeoutSeconds: 5,
+		});
+		const done = agent.run();
+		await vi.advanceTimersByTimeAsync(4999);
+		expect(agent.status).toBe("running");
+		await vi.advanceTimersByTimeAsync(1);
+		await done;
+		expect(agent.abortController.signal.aborted).toBe(true);
+		expect(agent.status).toBe("aborted");
+		expect(agent.result).toContain("⏱ Timed out after 5s — output may be truncated.");
+		expect(agent.result).toContain("partial");
+	});
+
+	it("clears the timer when the run completes before the deadline", async () => {
+		vi.useFakeTimers();
+		const agent = createRunnableAgent({ timeoutSeconds: 5 });
+		await agent.run();
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(agent.status).toBe("completed");
+		expect(agent.abortController.signal.aborted).toBe(false);
+	});
+
+	it("does not start the timer while queued (limiter slot opens later)", async () => {
+		vi.useFakeTimers();
+		let release: (() => void) | undefined;
+		const agent = makeSubagent({ execution: makeStubExecution({ timeoutSeconds: 5 }) });
+		agent.scheduleVia((thunk) => new Promise<void>((r) => (release = () => void thunk().then(r))));
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(agent.status).toBe("queued");
+		release?.();
+		await agent.promise;
+		expect(agent.status).toBe("completed");
+	});
+
+	it("fails fast when the timeout fires during session creation", async () => {
+		vi.useFakeTimers();
+		const stub = createSubagentSessionStub();
+		const factory = () =>
+			new Promise<SubagentSession>((resolve) => {
+				setTimeout(() => resolve(toSubagentSession(stub)), 3000);
+			});
+		const agent = createRunnableAgent({ createSubagentSession: factory, timeoutSeconds: 1 });
+		const done = agent.run();
+		await vi.advanceTimersByTimeAsync(1000); // timer fires, no session yet
+		await vi.advanceTimersByTimeAsync(2500); // factory resolves
+		await done;
+		expect(agent.status).toBe("error");
+		expect(agent.error).toContain("Timed out after 1s");
+		expect(stub.dispose).toHaveBeenCalled();
+	});
+
+	it("manual abort before the deadline wins; timer never fires afterwards", async () => {
+		vi.useFakeTimers();
+		const stub = createSubagentSessionStub();
+		stub.runTurnLoop.mockImplementation(
+			(_prompt: string, opts: { signal?: AbortSignal }) =>
+				new Promise<TurnLoopResult>((resolve) => {
+					const settleAborted = () => resolve({ responseText: "partial", aborted: true, steered: false });
+					// Mirror forwardAbortSignal: an already-fired signal never fires addEventListener again.
+					if (opts.signal?.aborted) return settleAborted();
+					opts.signal?.addEventListener("abort", settleAborted, { once: true });
+				}),
+		);
+		const agent = createRunnableAgent({
+			createSubagentSession: async () => toSubagentSession(stub),
+			timeoutSeconds: 5,
+		});
+		const done = agent.run();
+		agent.abort(); // manual Esc-style abort at T-Δ
+		await done;
+		expect(agent.status).toBe("stopped");
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(agent.result).not.toContain("Timed out");
 	});
 });
 

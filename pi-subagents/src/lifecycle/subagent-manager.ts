@@ -67,6 +67,8 @@ export interface AgentSpawnConfig {
 	description: string;
 	model?: Model<any>;
 	maxTurns?: number;
+	/** Hard wall-clock timeout in seconds (already normalized; undefined = unlimited). */
+	timeoutSeconds?: number;
 	inheritContext?: boolean;
 	thinkingLevel?: ThinkingLevel;
 	isBackground?: boolean;
@@ -178,6 +180,7 @@ export class SubagentManager {
 				getWorkspaceProvider: () => this._workspaceProvider,
 				model: options.model,
 				maxTurns: options.maxTurns,
+				timeoutSeconds: options.timeoutSeconds,
 				thinkingLevel: options.thinkingLevel,
 				parentSession: options.parentSession,
 				signal: options.signal,
