@@ -69,8 +69,8 @@
 
 ## 验证
 
-- `cd pi-subagents && npx vitest run` → 59 文件 / 900 用例通过（删除了接缝自身的 26 条用例，
-  新增 4 条契约用例：没有 provider 注册接缝、cwd 只有父级一个来源）
+- `cd pi-subagents && npx vitest run` → 58 文件 / 899 用例通过（删除了接缝自身的 26 条用例，
+  新增 3 条契约用例：服务/管理器没有 provider 注册口、工厂忽略传入的 cwd、assembler 恒用父级 cwd）
 - `npm run typecheck -w pi-subagents`、`npm run lint -w pi-subagents` → exit 0（29 条既有 warning）
 - `grep -rn "WorkspaceProvider\|registerWorkspaceProvider\|workspaceBracket\|baseCwd" pi-subagents/src pi-subagents/tests`
   → 只命中新契约测试里那两条 `"registerWorkspaceProvider" in …` 断言（故意的反向守卫）
