@@ -39,7 +39,7 @@ export interface AssemblerIO {
  * `resolveDefaultModel`.
  */
 export interface AssemblerContext {
-	/** Parent working directory (overridable via options.cwd). */
+	/** Parent working directory — every child runs here. */
 	cwd: string;
 	/** Parent's current model instance (fallback when agent config has no model). */
 	parentModel?: unknown;
@@ -55,8 +55,6 @@ export interface AssemblerContext {
  * All fields are optional — callers pass only what they have.
  */
 export interface AssemblerOptions {
-	/** Override working directory (e.g. for worktree isolation). */
-	cwd?: string;
 	/** Explicit model override — wins over agentConfig.model and parent model. */
 	model?: unknown;
 	/** Explicit thinking level — wins over agentConfig.thinking. */
@@ -69,7 +67,7 @@ export interface AssemblerOptions {
  * with no SDK object references.
  */
 export interface SessionConfig {
-	/** Resolved working directory (`options.cwd ?? ctx.cwd`). */
+	/** Resolved working directory (the parent's cwd). */
 	effectiveCwd: string;
 	/** Prompt mode declared by the agent; decides how the caller wires the resource loader. */
 	promptMode: "replace" | "append";
@@ -131,7 +129,7 @@ function resolveDefaultModel(
  *
  * @param type       The subagent type name (case-insensitive registry lookup).
  * @param ctx        Narrow context from the parent session.
- * @param options    Per-call overrides (cwd, model, thinkingLevel).
+ * @param options    Per-call overrides (model, thinkingLevel).
  * @param env        Pre-resolved environment info from `detectEnv()`.
  * @param registry   Agent config lookup — provides resolveAgentConfig and getToolNamesForType.
  * @param io         IO collaborators (skill loader, memory builder, prompt builder).
@@ -146,7 +144,7 @@ export function assembleSessionConfig(
 ): SessionConfig {
 	const agentConfig = registry.resolveAgentConfig(type);
 
-	const effectiveCwd = options.cwd ?? ctx.cwd;
+	const effectiveCwd = ctx.cwd;
 
 	const toolNames = registry.getToolNamesForType(type);
 

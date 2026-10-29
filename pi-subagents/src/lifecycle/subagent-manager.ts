@@ -56,8 +56,6 @@ export interface SubagentManagerOptions {
 	createSubagentSession: (params: CreateSubagentSessionParams) => Promise<SubagentSession>;
 	/** Concurrency limiter — schedules background run thunks FIFO against the limit. */
 	limiter: ConcurrencyLimiter;
-	/** Base working directory handed to a workspace provider (the parent cwd). */
-	baseCwd: string;
 	getRunConfig?: () => RunConfig;
 	observer?: SubagentManagerObserver;
 }
@@ -95,12 +93,10 @@ export class SubagentManager {
 	private readonly observer?: SubagentManagerObserver;
 	private readonly createSubagentSession: (params: CreateSubagentSessionParams) => Promise<SubagentSession>;
 	private readonly limiter: ConcurrencyLimiter;
-	private readonly baseCwd: string;
 	private getRunConfig?: () => RunConfig;
 	constructor(options: SubagentManagerOptions) {
 		this.createSubagentSession = options.createSubagentSession;
 		this.limiter = options.limiter;
-		this.baseCwd = options.baseCwd;
 		this.observer = options.observer;
 		this.getRunConfig = options.getRunConfig;
 		// Cleanup completed agents after 10 minutes (but keep sessions for resume)
@@ -151,7 +147,6 @@ export class SubagentManager {
 				createSubagentSession: this.createSubagentSession,
 				snapshot,
 				prompt,
-				baseCwd: this.baseCwd,
 				observer: this.buildObserver(options),
 				getRunConfig: this.getRunConfig,
 				model: options.model,

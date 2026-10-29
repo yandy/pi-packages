@@ -16,7 +16,6 @@ export function makeStubExecution(overrides: Partial<SubagentExecution> = {}): S
 			toSubagentSession(createSubagentSessionStub()),
 		snapshot: STUB_SNAPSHOT,
 		prompt: "do something",
-		baseCwd: "",
 		...overrides,
 	};
 }

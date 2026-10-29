@@ -115,7 +115,6 @@ export class SubagentsServiceAdapter implements SubagentsService {
 	hasRunning(): boolean {
 		return this.manager.hasRunning();
 	}
-
 }
 
 /**

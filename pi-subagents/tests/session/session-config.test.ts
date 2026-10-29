@@ -60,18 +60,12 @@ describe("assembleSessionConfig — default agent shape", () => {
 	it("returns correct shape for Explore agent with defaults", () => {
 		const result = assembleSessionConfig("Explore", ctx, {}, mockEnv, mockAgentLookup, mockIO);
 
-		expect(result.effectiveCwd).toBe("/tmp");
+		expect(result.effectiveCwd).toBe(ctx.cwd);
 		expect(result.promptMode).toBe("replace");
 		expect(result.promptSection).toBe("replace prompt");
 		expect(result.toolNames).toEqual(["read"]);
 		expect(result.model).toBeUndefined();
 		expect(result.thinkingLevel).toBeUndefined();
-	});
-
-	it("uses options.cwd as effectiveCwd when provided", () => {
-		const result = assembleSessionConfig("Explore", ctx, { cwd: "/tmp/worktree" }, mockEnv, mockAgentLookup, mockIO);
-
-		expect(result.effectiveCwd).toBe("/tmp/worktree");
 	});
 
 	it("replace agents route to buildReplacePrompt and report mode + section", () => {

@@ -3,7 +3,6 @@ import { ConcurrencyLimiter } from "../../src/lifecycle/concurrency-limiter";
 import type { CreateSubagentSessionParams } from "../../src/lifecycle/create-subagent-session";
 import { SubagentManager, type SubagentManagerObserver } from "../../src/lifecycle/subagent-manager";
 import type { SubagentSession } from "../../src/lifecycle/subagent-session";
-import type { WorkspaceProvider } from "../../src/lifecycle/workspace";
 import { NotificationState } from "../../src/observation/notification-state";
 import type { RunConfig } from "../../src/runtime";
 import type { Subagent } from "../../src/types";
@@ -32,7 +31,6 @@ function createManager(overrides?: {
 	observer?: Partial<SubagentManagerObserver>;
 	getMaxConcurrent?: () => number;
 	getRunConfig?: () => RunConfig;
-	baseCwd?: string;
 }) {
 	const createSubagentSession: SessionFactory = overrides?.createSubagentSession ?? defaultFactory();
 	const observer: SubagentManagerObserver | undefined = overrides?.observer
@@ -48,7 +46,6 @@ function createManager(overrides?: {
 		createSubagentSession,
 		observer,
 		limiter,
-		baseCwd: overrides?.baseCwd ?? "/repo",
 		getRunConfig: overrides?.getRunConfig,
 	});
 	return { manager: mgr, createSubagentSession, limiter };

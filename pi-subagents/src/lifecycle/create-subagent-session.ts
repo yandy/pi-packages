@@ -7,9 +7,8 @@
  * and apply the recursion guard. It returns a fully usable `SubagentSession` —
  * `Subagent` then only coordinates (turn loop, steer, dispose).
  *
- * The factory takes a resolved `cwd` value, never the WorkspaceProvider: `cwd`
- * is a value the factory consumes directly (detectEnv, assembleSessionConfig,
- * createSession), so threading the provider through here would be a relay smell.
+ * Every child runs in the parent's cwd: `snapshot.cwd` feeds detectEnv,
+ * assembleSessionConfig and createSession directly.
  */
 
 import type { Model } from "@earendil-works/pi-ai";
@@ -124,8 +123,6 @@ export interface SubagentSessionDeps {
 export interface CreateSubagentSessionParams {
 	snapshot: ParentSnapshot;
 	type: SubagentType;
-	/** Resolved workspace cwd; undefined → parent cwd. */
-	cwd?: string;
 	/** Parent session identity (file path + session ID). */
 	parentSession?: ParentSessionInfo;
 	model?: Model<any>;
@@ -175,7 +172,7 @@ export async function createSubagentSession(
 	deps.lifecycle.spawning({ agentName: type, parentSessionId });
 
 	// Resolve working directory upfront - needed for detectEnv before assembly.
-	const effectiveCwd = params.cwd ?? snapshot.cwd;
+	const effectiveCwd = snapshot.cwd;
 	const env = await deps.io.detectEnv(deps.exec, effectiveCwd);
 
 	// Assemble session configuration (synchronous, no SDK objects).
@@ -187,7 +184,6 @@ export async function createSubagentSession(
 			modelRegistry: snapshot.modelRegistry,
 		},
 		{
-			cwd: params.cwd,
 			model: params.model,
 			thinkingLevel: params.thinkingLevel,
 		},

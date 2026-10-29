@@ -110,7 +110,6 @@ export default function (pi: ExtensionAPI) {
 
 	const manager = new SubagentManager({
 		createSubagentSession: (params) => createSubagentSession(params, subagentSessionDeps),
-		baseCwd: process.cwd(),
 		observer,
 		limiter,
 		getRunConfig: () => settings,
