@@ -57,12 +57,15 @@ tools: read, grep, find, bash
 model: anthropic/claude-opus-4-6
 thinking: high
 max_turns: 30
+timeout: 300
 ---
 
 You are a security auditor. Review code for vulnerabilities...
 ```
 
 Agents are discovered from `.pi/agents/<name>.md` (project) and `~/.pi/agent/agents/<name>.md` (global). Project-level overrides global.
+
+`max_turns` and `timeout` (wall-clock seconds, `0` = unlimited) lock their limits for the agent type: a frontmatter value wins over the per-call parameter.
 
 ## Tools
 
@@ -78,6 +81,7 @@ Launch a sub-agent.
 | `model` | string | no | Model override (`provider/modelId` or fuzzy name) |
 | `thinking` | string | no | off / minimal / low / medium / high / xhigh |
 | `max_turns` | number | no | Max agentic turns (unlimited by default) |
+| `timeout` | number | no | Hard wall-clock limit in seconds; the agent is killed at the deadline and partial output is returned (unlimited by default) |
 | `run_in_background` | boolean | no | Run without blocking |
 | `resume` | string | no | Agent ID to resume a previous session |
 | `inherit_context` | boolean | no | Fork parent conversation into agent |
@@ -137,7 +141,7 @@ them. If an agent type pins `model` in its frontmatter, that model always wins.
 
 | Command | Description |
 |---------|-------------|
-| `/subagents:settings` | Configure concurrency, turn limits |
+| `/subagents:settings` | Configure concurrency, turn limits, timeouts |
 | `/subagents:sessions` | View a subagent's session transcript |
 
 The session viewer renders the transcript read-only with Pi's own per-entry
@@ -161,6 +165,15 @@ Background agents are subject to a configurable concurrency limit (default: 4). 
 ## Persistent Settings
 
 Settings set via `/subagents:settings` persist in `<cwd>/.pi/subagents.json` (project) and can be overridden globally in `~/.pi/agent/subagents.json`. The same files also hold the [`modelTiers`](#model-tiers) mapping; saving other settings preserves it.
+
+| Setting | Meaning |
+|---------|---------|
+| `maxConcurrent` | Background agents allowed to run at once |
+| `defaultMaxTurns` | Default max agentic turns (`0` = unlimited) |
+| `defaultTimeoutSeconds` | Default hard wall-clock timeout in seconds (`0` = unlimited, max `86400`) |
+| `graceTurns` | Turns allowed after the wrap-up steer |
+
+`defaultMaxTurns` / `defaultTimeoutSeconds` sit at the bottom of the precedence chain: agent frontmatter wins over the per-call parameter, which wins over these defaults.
 
 ## Events
 

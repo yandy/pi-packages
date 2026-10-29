@@ -32,6 +32,7 @@ export function spawnBackground(manager: BackgroundManagerDeps, params: Backgrou
 			description: execution.description,
 			model: execution.model,
 			maxTurns: execution.effectiveMaxTurns,
+			timeoutSeconds: execution.effectiveTimeoutSeconds,
 			inheritContext: execution.inheritContext,
 			thinkingLevel: execution.thinking,
 			isBackground: true,

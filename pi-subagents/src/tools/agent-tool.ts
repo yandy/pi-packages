@@ -40,6 +40,7 @@ export interface AgentToolRuntime {
 /** Narrow settings accessor — only the fields the Agent tool reads. */
 export type AgentToolSettings = {
 	readonly defaultMaxTurns: number | undefined;
+	readonly defaultTimeoutSeconds: number | undefined;
 	readonly maxConcurrent: number;
 	readonly modelTiers?: ModelTierMap;
 };
@@ -148,6 +149,7 @@ Guidelines:
 - Use steer_subagent to send mid-run messages to a running background agent.
 - Use model to specify a different model (as "provider/modelId", or fuzzy e.g. "haiku", "sonnet").
 - Use thinking to control extended thinking level.
+- Use timeout (seconds) as a hard safety net for tasks that might run away — the agent is killed at the deadline and output may be truncated.
 - Use inherit_context if the agent needs the parent conversation history.
 `,
 			parameters: Type.Object({
@@ -174,6 +176,13 @@ Guidelines:
 				max_turns: Type.Optional(
 					Type.Number({
 						description: "Maximum number of agentic turns before stopping. Omit for unlimited (default).",
+						minimum: 1,
+					}),
+				),
+				timeout: Type.Optional(
+					Type.Number({
+						description:
+							"Hard wall-clock limit in seconds. When exceeded, the agent is terminated immediately and only partial output is returned. Use as a safety net for tasks that could run away (long builds, hanging commands); omit for unlimited.",
 						minimum: 1,
 					}),
 				),

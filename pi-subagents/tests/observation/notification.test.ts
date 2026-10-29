@@ -31,7 +31,7 @@ describe("getStatusLabel", () => {
 	});
 
 	it('returns label for "aborted"', () => {
-		expect(getStatusLabel("aborted")).toBe("Aborted (max turns exceeded)");
+		expect(getStatusLabel("aborted")).toBe("Aborted (hard limit exceeded)");
 	});
 
 	it('returns label for "steered"', () => {

@@ -62,6 +62,7 @@ describe("AgentTool — model tier guidance", () => {
 		const deps = createToolDeps({
 			settings: {
 				defaultMaxTurns: undefined,
+				defaultTimeoutSeconds: undefined,
 				maxConcurrent: 4,
 				modelTiers: { fast: "deepseek-flash", advanced: "qwen3.8-max" },
 			},
@@ -77,6 +78,22 @@ describe("AgentTool — model tier guidance", () => {
 	it("omits the tier guideline when no tiers are configured", () => {
 		const def = makeTool(createToolDeps()).toToolDefinition();
 		expect(def.promptGuidelines ?? []).toEqual([]);
+	});
+});
+
+describe("AgentTool — timeout parameter", () => {
+	it("exposes an optional timeout parameter described as a hard safety net", () => {
+		const def = makeTool(createToolDeps()).toToolDefinition();
+		const props = (def.parameters as { properties: Record<string, unknown> }).properties;
+		expect(props.timeout).toBeDefined();
+		expect(def.description).toContain("hard safety net");
+	});
+
+	it("tells the agent in its guidelines that timeout kills the agent at the deadline", () => {
+		const def = makeTool(createToolDeps()).toToolDefinition();
+		// The tool's "Guidelines:" list lives in the description text; promptGuidelines
+		// is reserved for the user-configured model-tier mapping.
+		expect(def.description).toContain("Use timeout (seconds) as a hard safety net");
 	});
 });
 

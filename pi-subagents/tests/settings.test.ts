@@ -80,6 +80,11 @@ describe("settings persistence", () => {
 		expect(loadSettings(globalDir, projectDir)).toEqual({ defaultMaxTurns: 0 });
 	});
 
+	it("round-trips defaultTimeoutSeconds: 0 (unlimited marker)", () => {
+		saveSettings({ defaultTimeoutSeconds: 0 }, projectDir);
+		expect(loadSettings(globalDir, projectDir)).toEqual({ defaultTimeoutSeconds: 0 });
+	});
+
 	it("ignores unknown extra fields on load (forward-compat)", () => {
 		writeProject({ maxConcurrent: 2, futureField: "ignored" });
 		const loaded = loadSettings(globalDir, projectDir);
@@ -92,6 +97,17 @@ describe("settings persistence", () => {
 		it("drops maxConcurrent < 1", () => {
 			writeProject({ maxConcurrent: 0, graceTurns: 5 });
 			expect(loadSettings(globalDir, projectDir)).toEqual({ graceTurns: 5 });
+		});
+
+		it("accepts defaultTimeoutSeconds at the ceiling (86400) and drops 86401 / -1 / non-integer", () => {
+			writeProject({ defaultTimeoutSeconds: 86400 });
+			expect(loadSettings(globalDir, projectDir).defaultTimeoutSeconds).toBe(86400);
+			writeProject({ defaultTimeoutSeconds: 86401 });
+			expect(loadSettings(globalDir, projectDir).defaultTimeoutSeconds).toBeUndefined();
+			writeProject({ defaultTimeoutSeconds: -1 });
+			expect(loadSettings(globalDir, projectDir).defaultTimeoutSeconds).toBeUndefined();
+			writeProject({ defaultTimeoutSeconds: 1.5 });
+			expect(loadSettings(globalDir, projectDir).defaultTimeoutSeconds).toBeUndefined();
 		});
 
 		it("drops non-integer maxConcurrent (floats, NaN, strings)", () => {
@@ -416,7 +432,7 @@ describe("SettingsManager", () => {
 
 		it("omits modelTiers from snapshot() when none are configured", () => {
 			const sm = new SettingsManager({ emit: vi.fn(), cwd: "/tmp", agentDir: "/nonexistent" });
-			expect(sm.snapshot()).toEqual({ maxConcurrent: 4, defaultMaxTurns: 0, graceTurns: 5 });
+			expect(sm.snapshot()).toEqual({ maxConcurrent: 4, defaultMaxTurns: 0, defaultTimeoutSeconds: 0, graceTurns: 5 });
 		});
 
 		it("includes configured modelTiers in snapshot()", () => {
@@ -426,6 +442,7 @@ describe("SettingsManager", () => {
 			expect(sm.snapshot()).toEqual({
 				maxConcurrent: 3,
 				defaultMaxTurns: 0,
+				defaultTimeoutSeconds: 0,
 				graceTurns: 5,
 				modelTiers: { fast: "deepseek-flash" },
 			});
@@ -445,7 +462,7 @@ describe("SettingsManager", () => {
 	describe("snapshot()", () => {
 		it("returns default values before any changes", () => {
 			const sm = new SettingsManager({ emit: vi.fn(), cwd: "/tmp", agentDir: "/nonexistent" });
-			expect(sm.snapshot()).toEqual({ maxConcurrent: 4, defaultMaxTurns: 0, graceTurns: 5 });
+			expect(sm.snapshot()).toEqual({ maxConcurrent: 4, defaultMaxTurns: 0, defaultTimeoutSeconds: 0, graceTurns: 5 });
 		});
 
 		it("reflects mutations: defaultMaxTurns undefined maps to 0 in snapshot", () => {
@@ -453,13 +470,13 @@ describe("SettingsManager", () => {
 			sm.defaultMaxTurns = undefined;
 			sm.graceTurns = 3;
 			sm.maxConcurrent = 8;
-			expect(sm.snapshot()).toEqual({ maxConcurrent: 8, defaultMaxTurns: 0, graceTurns: 3 });
+			expect(sm.snapshot()).toEqual({ maxConcurrent: 8, defaultMaxTurns: 0, defaultTimeoutSeconds: 0, graceTurns: 3 });
 		});
 
 		it("reflects a concrete defaultMaxTurns value", () => {
 			const sm = new SettingsManager({ emit: vi.fn(), cwd: "/tmp", agentDir: "/nonexistent" });
 			sm.defaultMaxTurns = 20;
-			expect(sm.snapshot()).toEqual({ maxConcurrent: 4, defaultMaxTurns: 20, graceTurns: 5 });
+			expect(sm.snapshot()).toEqual({ maxConcurrent: 4, defaultMaxTurns: 20, defaultTimeoutSeconds: 0, graceTurns: 5 });
 		});
 	});
 
@@ -481,7 +498,7 @@ describe("SettingsManager", () => {
 			const toast = sm.saveAndNotify("Max concurrency set to 5");
 			expect(toast).toEqual({ message: "Max concurrency set to 5", level: "info" });
 			const written = JSON.parse(readFileSync(join(projectDir, ".pi", "subagents.json"), "utf-8"));
-			expect(written).toEqual({ maxConcurrent: 5, defaultMaxTurns: 0, graceTurns: 5 });
+			expect(written).toEqual({ maxConcurrent: 5, defaultMaxTurns: 0, defaultTimeoutSeconds: 0, graceTurns: 5 });
 		});
 
 		it("emits subagents:settings_changed with persisted:true on success", () => {
@@ -490,7 +507,7 @@ describe("SettingsManager", () => {
 			sm.graceTurns = 3;
 			sm.saveAndNotify("Grace turns set to 3");
 			expect(emit).toHaveBeenCalledWith("subagents:settings_changed", {
-				settings: { maxConcurrent: 4, defaultMaxTurns: 0, graceTurns: 3 },
+				settings: { maxConcurrent: 4, defaultMaxTurns: 0, defaultTimeoutSeconds: 0, graceTurns: 3 },
 				persisted: true,
 			});
 		});
@@ -520,7 +537,7 @@ describe("SettingsManager", () => {
 				const sm = new SettingsManager({ emit, cwd: filePosingAsCwd, agentDir: "/nonexistent" });
 				sm.saveAndNotify("something");
 				expect(emit).toHaveBeenCalledWith("subagents:settings_changed", {
-					settings: { maxConcurrent: 4, defaultMaxTurns: 0, graceTurns: 5 },
+					settings: { maxConcurrent: 4, defaultMaxTurns: 0, defaultTimeoutSeconds: 0, graceTurns: 5 },
 					persisted: false,
 				});
 			} finally {
@@ -570,7 +587,7 @@ describe("SettingsManager", () => {
 		});
 	});
 
-	describe("applyDefaultMaxTurns()", () => {
+		describe("applyDefaultMaxTurns()", () => {
 		let projectDir: string;
 
 		beforeEach(() => {
@@ -605,6 +622,54 @@ describe("SettingsManager", () => {
 			});
 			sm.applyDefaultMaxTurns(5);
 			expect(onChanged).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("defaultTimeoutSeconds setter normalization", () => {
+		it("stores a positive value as-is", () => {
+			const sm = new SettingsManager({ emit: vi.fn(), cwd: "/tmp", agentDir: "/nonexistent" });
+			sm.defaultTimeoutSeconds = 300;
+			expect(sm.defaultTimeoutSeconds).toBe(300);
+		});
+
+		it("maps 0 to undefined (unlimited)", () => {
+			const sm = new SettingsManager({ emit: vi.fn(), cwd: "/tmp", agentDir: "/nonexistent" });
+			sm.defaultTimeoutSeconds = 0;
+			expect(sm.defaultTimeoutSeconds).toBeUndefined();
+		});
+
+		it("clamps below 1 up to 1", () => {
+			const sm = new SettingsManager({ emit: vi.fn(), cwd: "/tmp", agentDir: "/nonexistent" });
+			sm.defaultTimeoutSeconds = -5;
+			expect(sm.defaultTimeoutSeconds).toBe(1);
+		});
+	});
+
+	describe("applyDefaultTimeoutSeconds()", () => {
+		let projectDir: string;
+
+		beforeEach(() => {
+			projectDir = mkdtempSync(join(tmpdir(), "pi-sm-apply-dts-"));
+		});
+
+		afterEach(() => {
+			rmSync(projectDir, { recursive: true, force: true });
+		});
+
+		it("sets to unlimited when 0 is passed and reports 'unlimited' in toast", () => {
+			const sm = new SettingsManager({ emit: vi.fn(), cwd: projectDir, agentDir: "/nonexistent" });
+			const toast = sm.applyDefaultTimeoutSeconds(0);
+			expect(sm.defaultTimeoutSeconds).toBeUndefined();
+			expect(toast).toEqual({ message: "Default timeout set to unlimited", level: "info" });
+			expect(sm.snapshot().defaultTimeoutSeconds).toBe(0);
+		});
+
+		it("sets to the given value, includes it in the toast, and snapshots it", () => {
+			const sm = new SettingsManager({ emit: vi.fn(), cwd: projectDir, agentDir: "/nonexistent" });
+			const toast = sm.applyDefaultTimeoutSeconds(300);
+			expect(sm.defaultTimeoutSeconds).toBe(300);
+			expect(toast).toEqual({ message: "Default timeout set to 300s", level: "info" });
+			expect(sm.snapshot().defaultTimeoutSeconds).toBe(300);
 		});
 	});
 

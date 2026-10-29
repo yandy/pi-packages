@@ -31,6 +31,18 @@ describe("runForeground", () => {
 		expect(result.content[0].text).toContain("All done.");
 	});
 
+	it("threads effectiveTimeoutSeconds into spawnAndWait opts", async () => {
+		const { manager } = createToolDeps();
+		await runForeground(
+			manager,
+			makeParams({ config: createResolvedSpawnConfig({ description: "fg task", timeout: 300 }) }),
+			undefined,
+			undefined,
+		);
+		const spawnOpts = (manager.spawnAndWait as ReturnType<typeof vi.fn>).mock.calls[0][3];
+		expect(spawnOpts.timeoutSeconds).toBe(300);
+	});
+
 	it("returns error message when agent record status is error", async () => {
 		const deps = createToolDeps({
 			manager: {

@@ -6,7 +6,7 @@ import { type AgentDetails, formatTokens } from "../ui/display";
 export function getStatusNote(status: string): string {
 	switch (status) {
 		case "aborted":
-			return " (aborted \u2014 max turns exceeded, output may be incomplete)";
+			return " (aborted \u2014 hard limit exceeded, output may be incomplete)";
 		case "steered":
 			return " (wrapped up \u2014 reached turn limit)";
 		case "stopped":

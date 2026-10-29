@@ -156,7 +156,7 @@ describe("buildTypeListText", () => {
 
 describe("getStatusNote", () => {
 	it("returns aborted note for aborted status", () => {
-		expect(getStatusNote("aborted")).toBe(" (aborted \u2014 max turns exceeded, output may be incomplete)");
+		expect(getStatusNote("aborted")).toBe(" (aborted \u2014 hard limit exceeded, output may be incomplete)");
 	});
 
 	it("returns steered note for steered status", () => {

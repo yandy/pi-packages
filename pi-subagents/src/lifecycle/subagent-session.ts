@@ -79,6 +79,19 @@ export class SubagentSession {
 	async runTurnLoop(prompt: string, opts: TurnLoopOptions): Promise<TurnLoopResult> {
 		const session = this._session;
 
+		// An already-aborted signal must not start a run at all: pi's abort() only
+		// reaches an in-flight run, and prompt() starts a fresh AbortController, so
+		// aborting an idle session cannot stop the run that follows it.
+		if (opts.signal?.aborted) {
+			this.meta.lifecycle.completed({
+				sessionDir: this.meta.sessionDir,
+				agentName: this.meta.agentName,
+				aborted: true,
+				steered: false,
+			});
+			return { responseText: getLastAssistantText(session), aborted: true, steered: false };
+		}
+
 		// Track turns for graceful max_turns enforcement.
 		let turnCount = 0;
 		const maxTurns = normalizeMaxTurns(opts.maxTurns ?? this.meta.agentMaxTurns ?? opts.defaultMaxTurns);
@@ -86,6 +99,11 @@ export class SubagentSession {
 		let aborted = false;
 
 		const unsubTurns = session.subscribe((event: AgentSessionEvent) => {
+			// A wall-clock abort can land while no run is active (prompt preamble,
+			// auto-compaction between turns) and be dropped — abort() only reaches an
+			// in-flight run. Re-assert on every event so the next window closes.
+			if (opts.signal?.aborted) void session.abort();
+
 			if (event.type === "turn_end") {
 				turnCount++;
 				if (maxTurns != null) {
@@ -108,6 +126,7 @@ export class SubagentSession {
 
 		try {
 			await session.prompt(effectivePrompt);
+			aborted ||= opts.signal?.aborted === true;
 			this.meta.lifecycle.completed({
 				sessionDir: this.meta.sessionDir,
 				agentName: this.meta.agentName,
@@ -127,6 +146,9 @@ export class SubagentSession {
 	/** Re-prompt the same session (resume); does not emit `completed`. */
 	async resumeTurnLoop(prompt: string, signal?: AbortSignal): Promise<string> {
 		const session = this._session;
+		// Same early-return as runTurnLoop: an aborted signal must not start a run.
+		if (signal?.aborted) return getLastAssistantText(session);
+
 		const collector = collectResponseText(session);
 		const cleanupAbort = forwardAbortSignal(session, signal);
 
@@ -220,6 +242,8 @@ function getLastAssistantText(session: AgentSession): string {
 
 /**
  * Wire an AbortSignal to abort a session.
+ * Fires immediately when the signal is already aborted — addEventListener on a
+ * fired signal never fires, so wiring alone would silently drop it.
  * Returns a cleanup function to remove the listener.
  */
 function forwardAbortSignal(session: AgentSession, signal?: AbortSignal): () => void {
@@ -227,6 +251,10 @@ function forwardAbortSignal(session: AgentSession, signal?: AbortSignal): () => 
 	const onAbort = (): void => {
 		void session.abort();
 	};
+	if (signal.aborted) {
+		onAbort();
+		return () => {};
+	}
 	signal.addEventListener("abort", onAbort, { once: true });
 	return () => signal.removeEventListener("abort", onAbort);
 }

@@ -64,6 +64,8 @@ export interface SubagentExecution {
 	getWorkspaceProvider?: () => WorkspaceProvider | undefined;
 	model?: Model<any>;
 	maxTurns?: number;
+	/** Hard wall-clock timeout in seconds (already normalized; undefined = unlimited). */
+	timeoutSeconds?: number;
 	thinkingLevel?: ThinkingLevel;
 	parentSession?: ParentSessionInfo;
 	signal?: AbortSignal;
@@ -143,6 +145,10 @@ export class Subagent {
 	get promise(): Promise<void> | undefined {
 		return this._promise;
 	}
+
+	// Timeout guard — started at run() after markRunning, cleared on every terminal path.
+	private _timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+	private _timedOut = false;
 
 	private readonly execution: SubagentExecution;
 	private readonly listeners = new RunListeners();
@@ -256,6 +262,7 @@ export class Subagent {
 		this.markRunning(Date.now());
 		this.execution.observer?.onStarted?.(this);
 		this.listeners.wireSignal(this.execution.signal, () => this.abort());
+		this.startTimeoutGuard();
 
 		// Guard the await so the no-provider path stays synchronous, preserving
 		// the original run() timing: the factory is called in the same turn as
@@ -270,6 +277,7 @@ export class Subagent {
 					invocation: this.invocation,
 				});
 			} catch (err) {
+				this.clearTimeoutGuard();
 				this.markError(err);
 				this.listeners.release();
 				this.execution.observer?.onRunFinished?.(this);
@@ -289,6 +297,15 @@ export class Subagent {
 		} catch (err) {
 			// The factory disposed its own session on a post-creation failure.
 			this.failRun(err);
+			return;
+		}
+
+		// Timeout fired before the session existed: the controller had no listener
+		// (forwardAbortSignal is wired inside runTurnLoop), so nothing was killed.
+		// Fail fast instead of running a turn loop the budget already exhausted.
+		if (this._timedOut) {
+			this.disposeSession();
+			this.failRun(new Error(`Timed out after ${this.execution.timeoutSeconds}s before the session started`));
 			return;
 		}
 
@@ -440,9 +457,35 @@ export class Subagent {
 	 */
 	abort(): boolean {
 		if (this.status !== "running") return false;
+		// A stopped run has no use for a deadline: without this, a timer firing
+		// during the abort unwind would stamp a timeout note on a user-stopped run.
+		this.clearTimeoutGuard();
 		this.abortController.abort();
 		this.markStopped();
 		return true;
+	}
+
+	/** Start the wall-clock timeout guard (no-op when no timeout is configured). */
+	private startTimeoutGuard(): void {
+		// Guard on > 0 so an unnormalized 0/negative/NaN can never arm a timer.
+		const seconds = Number(this.execution.timeoutSeconds);
+		if (!(seconds > 0)) return;
+		this._timeoutHandle = setTimeout(() => {
+			// Fire the controller without markStopped(): the abort flows through
+			// forwardAbortSignal into session.abort(), and the turn loop settles
+			// through the aborted path (status "aborted", not "stopped").
+			this._timedOut = true;
+			this.abortController.abort();
+		}, seconds * 1000);
+		this._timeoutHandle.unref();
+	}
+
+	/** Clear the timeout guard (idempotent; safe after it already fired). */
+	private clearTimeoutGuard(): void {
+		if (this._timeoutHandle) {
+			clearTimeout(this._timeoutHandle);
+			this._timeoutHandle = undefined;
+		}
 	}
 
 	/**
@@ -472,11 +515,17 @@ export class Subagent {
 
 	/** Complete a run: release listeners, dispose the workspace, status transition, notify observer. */
 	completeRun(result: TurnLoopResult): void {
+		this.clearTimeoutGuard();
 		this.listeners.release();
 
 		const finalStatus: SubagentStatus = result.aborted ? "aborted" : result.steered ? "steered" : "completed";
+		const responseText = result.responseText;
+		const timeoutNote =
+			this._timedOut && finalStatus === "aborted"
+				? `⏱ Timed out after ${this.execution.timeoutSeconds}s — output may be truncated.\n\n`
+				: "";
 		const finalResult =
-			result.responseText + this.workspaceBracket.dispose({ status: finalStatus, description: this.description });
+			timeoutNote + responseText + this.workspaceBracket.dispose({ status: finalStatus, description: this.description });
 
 		if (result.aborted) this.markAborted(finalResult);
 		else if (result.steered) this.markSteered(finalResult);
@@ -492,6 +541,7 @@ export class Subagent {
 
 	/** Fail a run: mark error, release listeners, best-effort workspace dispose, notify observer. */
 	failRun(err: unknown): void {
+		this.clearTimeoutGuard();
 		this.markError(err);
 		this.listeners.release();
 

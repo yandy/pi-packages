@@ -14,6 +14,8 @@ export interface SubagentsSettings {
 	 * `/agents` → Settings input prompt explicitly says "0 = unlimited".
 	 */
 	defaultMaxTurns?: number;
+	/** Default wall-clock timeout in seconds for spawned agents. 0 = unlimited. */
+	defaultTimeoutSeconds?: number;
 	graceTurns?: number;
 	/**
 	 * Capability/cost tier → real model mapping. Used only to generate the
@@ -37,6 +39,7 @@ const DEFAULT_GRACE_TURNS = 5;
  */
 export class SettingsManager {
 	private _defaultMaxTurns: number | undefined = undefined;
+	private _defaultTimeoutSeconds: number | undefined = undefined;
 	private _graceTurns: number = DEFAULT_GRACE_TURNS;
 	private _maxConcurrent: number = DEFAULT_MAX_CONCURRENT;
 	private _modelTiers: ModelTierMap = {};
@@ -64,6 +67,20 @@ export class SettingsManager {
 			this._defaultMaxTurns = undefined;
 		} else {
 			this._defaultMaxTurns = Math.max(1, n);
+		}
+	}
+
+	// ── defaultTimeoutSeconds: 0 or undefined → unlimited (undefined); else max(1, n) ──
+
+	get defaultTimeoutSeconds(): number | undefined {
+		return this._defaultTimeoutSeconds;
+	}
+
+	set defaultTimeoutSeconds(n: number | undefined) {
+		if (n == null || n === 0) {
+			this._defaultTimeoutSeconds = undefined;
+		} else {
+			this._defaultTimeoutSeconds = Math.max(1, n);
 		}
 	}
 
@@ -104,6 +121,9 @@ export class SettingsManager {
 		const settings = loadSettings(this.agentDir, this.cwd);
 		if (typeof settings.maxConcurrent === "number") this.maxConcurrent = settings.maxConcurrent;
 		if (typeof settings.defaultMaxTurns === "number") this.defaultMaxTurns = settings.defaultMaxTurns;
+		if (typeof settings.defaultTimeoutSeconds === "number") {
+			this.defaultTimeoutSeconds = settings.defaultTimeoutSeconds;
+		}
 		if (typeof settings.graceTurns === "number") this.graceTurns = settings.graceTurns;
 		this._modelTiers = settings.modelTiers ? { ...settings.modelTiers } : {};
 		this.emit("subagents:settings_loaded", { settings });
@@ -116,10 +136,17 @@ export class SettingsManager {
 	 * `modelTiers` is omitted when empty so hand-edited tier maps are only
 	 * rewritten (not replaced with an empty object) when they exist.
 	 */
-	snapshot(): { maxConcurrent: number; defaultMaxTurns: number; graceTurns: number; modelTiers?: ModelTierMap } {
+	snapshot(): {
+		maxConcurrent: number;
+		defaultMaxTurns: number;
+		defaultTimeoutSeconds: number;
+		graceTurns: number;
+		modelTiers?: ModelTierMap;
+	} {
 		return {
 			maxConcurrent: this._maxConcurrent,
 			defaultMaxTurns: this._defaultMaxTurns ?? 0,
+			defaultTimeoutSeconds: this._defaultTimeoutSeconds ?? 0,
 			graceTurns: this._graceTurns,
 			...(Object.keys(this._modelTiers).length > 0 ? { modelTiers: { ...this._modelTiers } } : {}),
 		};
@@ -143,6 +170,16 @@ export class SettingsManager {
 		this.defaultMaxTurns = n === 0 ? undefined : n; // setter normalizes further
 		const label = this.defaultMaxTurns == null ? "unlimited" : String(this.defaultMaxTurns);
 		return this.saveAndNotify(`Default max turns set to ${label}`);
+	}
+
+	/**
+	 * Set defaultTimeoutSeconds, persist, and return the toast.
+	 * Pass 0 for unlimited (maps to undefined internally).
+	 */
+	applyDefaultTimeoutSeconds(n: number): { message: string; level: "info" | "warning" } {
+		this.defaultTimeoutSeconds = n === 0 ? undefined : n; // setter normalizes further
+		const label = this.defaultTimeoutSeconds == null ? "unlimited" : `${this.defaultTimeoutSeconds}s`;
+		return this.saveAndNotify(`Default timeout set to ${label}`);
 	}
 
 	/**
@@ -170,6 +207,7 @@ export class SettingsManager {
 // that any realistic power-user setting passes through.
 const MAX_CONCURRENT_CEILING = 1024;
 const MAX_TURNS_CEILING = 10_000;
+const MAX_TIMEOUT_SECONDS_CEILING = 86_400;
 const GRACE_TURNS_CEILING = 1_000;
 
 /** Drop fields that don't match the expected shape. Silent — garbage becomes absent. */
@@ -190,6 +228,13 @@ function sanitize(raw: unknown): SubagentsSettings {
 		(r.defaultMaxTurns as number) <= MAX_TURNS_CEILING
 	) {
 		out.defaultMaxTurns = r.defaultMaxTurns as number;
+	}
+	if (
+		Number.isInteger(r.defaultTimeoutSeconds) &&
+		(r.defaultTimeoutSeconds as number) >= 0 &&
+		(r.defaultTimeoutSeconds as number) <= MAX_TIMEOUT_SECONDS_CEILING
+	) {
+		out.defaultTimeoutSeconds = r.defaultTimeoutSeconds as number;
 	}
 	if (
 		Number.isInteger(r.graceTurns) &&

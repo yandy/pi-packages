@@ -74,6 +74,7 @@ export async function runForeground(
 			description: execution.description,
 			model: execution.model,
 			maxTurns: execution.effectiveMaxTurns,
+			timeoutSeconds: execution.effectiveTimeoutSeconds,
 			inheritContext: execution.inheritContext,
 			thinkingLevel: execution.thinking,
 			invocation: execution.agentInvocation,

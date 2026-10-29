@@ -52,7 +52,11 @@ export function createToolDeps(overrides: Partial<AgentToolFixture> = {}): Agent
 			getRecord: vi.fn().mockReturnValue(createTestSubagent()),
 		},
 		runtime,
-		settings: { defaultMaxTurns: undefined as number | undefined, maxConcurrent: 4 },
+		settings: {
+			defaultMaxTurns: undefined as number | undefined,
+			defaultTimeoutSeconds: undefined as number | undefined,
+			maxConcurrent: 4,
+		},
 		registry: defaultRegistry,
 		agentDir: "/home/user/.pi",
 		...overrides,

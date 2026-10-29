@@ -6,6 +6,7 @@ function makeSettings() {
 	return {
 		maxConcurrent: 4,
 		defaultMaxTurns: undefined as number | undefined,
+		defaultTimeoutSeconds: undefined as number | undefined,
 		graceTurns: 5,
 		applyMaxConcurrent: vi.fn((): { message: string; level: "info" | "warning" } => ({
 			message: "Max concurrency set to 8",
@@ -13,6 +14,10 @@ function makeSettings() {
 		})),
 		applyDefaultMaxTurns: vi.fn((): { message: string; level: "info" | "warning" } => ({
 			message: "Default max turns set to unlimited",
+			level: "info",
+		})),
+		applyDefaultTimeoutSeconds: vi.fn((): { message: string; level: "info" | "warning" } => ({
+			message: "Default timeout set to unlimited",
 			level: "info",
 		})),
 		applyGraceTurns: vi.fn((): { message: string; level: "info" | "warning" } => ({
@@ -40,6 +45,7 @@ describe("SubagentsSettingsHandler", () => {
 		expect(options).toEqual([
 			"Max concurrency (current: 4)",
 			"Default max turns (current: unlimited)",
+			"Default timeout (current: unlimited)",
 			"Grace turns (current: 5)",
 		]);
 	});
@@ -107,6 +113,34 @@ describe("SubagentsSettingsHandler — default max turns", () => {
 		ui.input = vi.fn().mockResolvedValue("-1");
 		await handler.handle({ ui });
 		expect(settings.applyDefaultMaxTurns).not.toHaveBeenCalled();
+		expect(ui.notify).toHaveBeenCalledWith("Must be 0 (unlimited) or a positive integer.", "warning");
+	});
+});
+
+describe("SubagentsSettingsHandler — default timeout", () => {
+	it("delegates a positive value to applyDefaultTimeoutSeconds", async () => {
+		const { handler, settings } = makeHandler();
+		const ui = makeMenuUI(["Default timeout (current: unlimited)"]);
+		ui.input = vi.fn().mockResolvedValue("300");
+		await handler.handle({ ui });
+		expect(settings.applyDefaultTimeoutSeconds).toHaveBeenCalledWith(300);
+		expect(ui.notify).toHaveBeenCalledWith("Default timeout set to unlimited", "info");
+	});
+
+	it("delegates 0 (unlimited) to applyDefaultTimeoutSeconds", async () => {
+		const { handler, settings } = makeHandler();
+		const ui = makeMenuUI(["Default timeout (current: unlimited)"]);
+		ui.input = vi.fn().mockResolvedValue("0");
+		await handler.handle({ ui });
+		expect(settings.applyDefaultTimeoutSeconds).toHaveBeenCalledWith(0);
+	});
+
+	it("rejects a negative value with a warning and does not apply", async () => {
+		const { handler, settings } = makeHandler();
+		const ui = makeMenuUI(["Default timeout (current: unlimited)"]);
+		ui.input = vi.fn().mockResolvedValue("-1");
+		await handler.handle({ ui });
+		expect(settings.applyDefaultTimeoutSeconds).not.toHaveBeenCalled();
 		expect(ui.notify).toHaveBeenCalledWith("Must be 0 (unlimited) or a positive integer.", "warning");
 	});
 });

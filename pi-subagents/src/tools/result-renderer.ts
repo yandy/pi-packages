@@ -85,7 +85,7 @@ export function renderFailed(details: AgentDetails, theme: Theme): string {
 	if (details.status === "error") {
 		line += `\n${theme.fg("error", `  \u23BF  Error: ${details.error ?? "unknown"}`)}`;
 	} else {
-		line += `\n${theme.fg("warning", "  \u23BF  Aborted (max turns exceeded)")}`;
+		line += `\n${theme.fg("warning", "  \u23BF  Aborted (hard limit exceeded)")}`;
 	}
 	return line;
 }

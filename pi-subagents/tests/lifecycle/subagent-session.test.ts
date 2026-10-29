@@ -202,6 +202,85 @@ describe("SubagentSession — runTurnLoop parent abort signal", () => {
 		expect(session.abort).toHaveBeenCalled();
 	});
 
+	it("reports aborted=true when the signal fires mid-prompt (no turn-limit watcher)", async () => {
+		const controller = new AbortController();
+		const { session } = createSession("X");
+		session.prompt = vi.fn(
+			() =>
+				new Promise<void>((resolve) => {
+					controller.signal.addEventListener("abort", () => resolve(), { once: true });
+				}),
+		);
+		const { sub } = makeSubagentSession(session);
+		const promise = sub.runTurnLoop("go", { signal: controller.signal });
+		controller.abort();
+		const result = await promise;
+		expect(session.abort).toHaveBeenCalled();
+		expect(result.aborted).toBe(true);
+	});
+
+	it("never starts the prompt when the signal is already aborted (abort on an idle session is a no-op)", async () => {
+		const controller = new AbortController();
+		controller.abort();
+		const { session } = createSession("X");
+		const { sub } = makeSubagentSession(session);
+		const result = await sub.runTurnLoop("go", { signal: controller.signal });
+		// Agent.abort() only reaches an in-flight run, and prompt() starts a fresh
+		// controller, so aborting an idle session cannot stop the run that follows.
+		expect(session.prompt).not.toHaveBeenCalled();
+		expect(result.aborted).toBe(true);
+	});
+
+	it("does not start a resumed prompt when the signal is already aborted", async () => {
+		const controller = new AbortController();
+		controller.abort();
+		const { session } = createSession("X");
+		const { sub } = makeSubagentSession(session);
+		await sub.resumeTurnLoop("more", controller.signal);
+		expect(session.prompt).not.toHaveBeenCalled();
+	});
+
+	it("re-asserts the abort on later session events when the first abort landed while no run was active", async () => {
+		const controller = new AbortController();
+		const { session, listeners } = createSession("X");
+		// Model pi: abort() only kills an in-flight run. The prompt spends a
+		// preamble phase with no active run, then runs — so the first abort is
+		// dropped and only a later re-assertion (on a session event) can kill it.
+		let inFlight = false;
+		let finished = false;
+		const finish = () => {
+			if (finished) return;
+			finished = true;
+			inFlight = false;
+			session.messages.push({ role: "assistant", content: [{ type: "text", text: "was killed" }] });
+			resolvePrompt();
+		};
+		let resolvePrompt: () => void = () => {};
+		session.abort = vi.fn(() => {
+			if (inFlight) finish();
+		});
+		session.prompt = vi.fn(
+			() =>
+				new Promise<void>((resolve) => {
+					resolvePrompt = resolve;
+					// preamble: no active run yet — an abort here is a no-op
+					setTimeout(() => {
+						inFlight = true;
+						// after the preamble the run becomes active and a session
+						// event arrives; the re-assertion must kill it here.
+						emitTurnEnd(listeners);
+					}, 1);
+				}),
+		);
+		const { sub } = makeSubagentSession(session);
+		const promise = sub.runTurnLoop("go", { signal: controller.signal });
+		controller.abort(); // lands in the preamble window → dropped
+		await new Promise((r) => setTimeout(r, 5));
+		const result = await promise;
+		expect(result.aborted).toBe(true);
+		expect(result.responseText).toBe("was killed");
+	});
+
 	it("does not abort the session when the parent signal never fires", async () => {
 		const controller = new AbortController();
 		const { session } = createSession("X");
