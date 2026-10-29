@@ -77,23 +77,52 @@ describe("AgentTool — model tier guidance", () => {
 
 	it("omits the tier guideline when no tiers are configured", () => {
 		const def = makeTool(createToolDeps()).toToolDefinition();
-		expect(def.promptGuidelines ?? []).toEqual([]);
+		// 行为纪律现在恒在 promptGuidelines 里（spec 2026-10-30 D1），只要求不出现 tier 映射。
+		const guidelines = (def.promptGuidelines ?? []).join("\n");
+		expect(guidelines).not.toContain("subagent model tiers");
+		expect(guidelines).toContain("Use subagent for work that needs its own context");
+	});
+});
+
+describe("AgentTool — 行为纪律的位置（spec 2026-10-30 D1）", () => {
+	it("把纪律放 promptGuidelines，不内联在 description 里", () => {
+		const def = makeTool(createToolDeps()).toToolDefinition();
+		expect(def.description).not.toContain("Guidelines:");
+		const guidelines = def.promptGuidelines ?? [];
+		expect(guidelines.length).toBeGreaterThanOrEqual(5);
+		// 并行的真相：同一 message 里的前台兄弟调用并发，且绕过并发上限（旧文案说“串行”）。
+		const parallel = guidelines.find((g) => g.includes("run_in_background"));
+		expect(parallel).toContain("run concurrently");
+		expect(parallel).not.toContain("Foreground calls run sequentially");
+	});
+
+	it("不再复述参数描述（6 条重复已删）", () => {
+		const def = makeTool(createToolDeps()).toToolDefinition();
+		const guidelines = (def.promptGuidelines ?? []).join("\n");
+		for (const repeated of [
+			"Use resume with an agent ID",
+			"Use thinking to control extended thinking level",
+			"Use inherit_context if the agent needs",
+			"Use model to specify a different model",
+		]) {
+			expect(guidelines).not.toContain(repeated);
+		}
 	});
 });
 
 describe("AgentTool — timeout parameter", () => {
 	it("exposes an optional timeout parameter described as a hard safety net", () => {
 		const def = makeTool(createToolDeps()).toToolDefinition();
-		const props = (def.parameters as { properties: Record<string, unknown> }).properties;
+		const props = (def.parameters as { properties: Record<string, { description?: string }> }).properties;
 		expect(props.timeout).toBeDefined();
-		expect(def.description).toContain("hard safety net");
+		// 该说明只留在参数描述里（D1：description 不再内联纪律）。
+		expect(props.timeout?.description).toContain("safety net");
 	});
 
-	it("tells the agent in its guidelines that timeout kills the agent at the deadline", () => {
+	it("thinking 参数是枚举，非法值不被静默放行", () => {
 		const def = makeTool(createToolDeps()).toToolDefinition();
-		// The tool's "Guidelines:" list lives in the description text; promptGuidelines
-		// is reserved for the user-configured model-tier mapping.
-		expect(def.description).toContain("Use timeout (seconds) as a hard safety net");
+		const props = (def.parameters as { properties: Record<string, { enum?: string[] }> }).properties;
+		expect(props.thinking?.enum).toEqual(["off", "minimal", "low", "medium", "high", "xhigh"]);
 	});
 });
 

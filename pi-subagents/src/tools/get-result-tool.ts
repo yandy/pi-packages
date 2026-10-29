@@ -90,9 +90,9 @@ export class GetResultTool {
 		return defineTool({
 			name: "get_subagent_result" as const,
 			label: "Get Agent Result",
-			promptSnippet: "get_subagent_result: Check status and retrieve results from a background agent.",
+			promptSnippet: "Check status and retrieve a background subagent's result",
 			description:
-				"Check status and retrieve results from a background agent. Use the agent ID returned by Agent with run_in_background.",
+				"Check status and retrieve the result of a background subagent (agent_id comes from the subagent tool).",
 			parameters: Type.Object({
 				agent_id: Type.String({
 					description: "The agent ID to check.",
