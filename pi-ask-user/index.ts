@@ -32,29 +32,11 @@ import {
 	truncateToWidth,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { type TUnsafe, Type } from "typebox";
+import { Type } from "typebox";
 import { type QuestionOption, renderSingleSelectRows } from "./src/single-select-layout.js";
 
 const _require = createRequire(import.meta.url);
 const ASK_USER_VERSION: string = (_require("./package.json") as { version: string }).version;
-
-/**
- * Emit a flat `{ type: "string", enum: [...] }` JSON Schema instead of the
- * `anyOf`/`oneOf` shape that `Type.Union([Type.Literal()])` produces. Google's
- * function-calling API rejects the union form. Local copy of pi-ai's StringEnum
- * to avoid a peer dependency for one helper.
- */
-function StringEnum<const T extends readonly string[]>(
-	values: T,
-	options?: { description?: string; default?: T[number] },
-): TUnsafe<T[number]> {
-	return Type.Unsafe<T[number]>({
-		type: "string",
-		enum: [...values],
-		...(options?.description ? { description: options.description } : {}),
-		...(options?.default !== undefined ? { default: options.default } : {}),
-	});
-}
 
 /**
  * `getMarkdownTheme()` returns a bag of closures that read through a Proxy
@@ -1534,15 +1516,12 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "ask_user",
 		label: "Ask User",
-		description:
-			"Ask the user a question with optional multiple-choice answers. Use this to gather information interactively. Ask exactly one focused question per call. Before calling, gather context with tools (read/web/ref) and pass a short summary via the context field.",
-		promptSnippet:
-			"Ask the user one focused question with optional multiple-choice answers to gather information interactively",
+		description: "Ask the user one focused question with optional multiple-choice answers.",
+		promptSnippet: "Ask the user one focused question with optional multiple-choice answers",
 		promptGuidelines: [
-			"Before calling ask_user, gather context with tools (read/web/ref) and pass a short summary via the context field.",
+			"Before calling ask_user, gather context with your read/search/web tools and pass a short summary via the context field.",
 			"Use ask_user when the user's intent is ambiguous, when a decision requires explicit user input, or when multiple valid options exist.",
-			"Ask exactly one focused question per ask_user call.",
-			"Do not combine multiple numbered, multipart, or unrelated questions into one ask_user prompt.",
+			"Ask exactly one focused question per ask_user call — never combine multiple, numbered, or unrelated questions in one prompt.",
 		],
 		// Block other tool calls in the same assistant turn until the user answers,
 		// so the model can't batch ask_user with bash/edit/write and let those run
@@ -1572,26 +1551,12 @@ export default function (pi: ExtensionAPI) {
 			allowComment: Type.Optional(
 				Type.Boolean({ description: "Collect an optional comment after selecting one or more options. Default: true" }),
 			),
-			displayMode: Type.Optional(
-				StringEnum(["overlay", "inline"] as const, {
-					description:
-						"UI rendering mode. 'overlay' shows a centered modal, 'inline' renders in-place. Default: PI_ASK_USER_DISPLAY_MODE env var if set, otherwise 'overlay'. Omit to respect the user's configured preference.",
-				}),
-			),
-			overlayToggleKey: Type.Optional(
-				Type.String({
-					description:
-						"Shortcut for hiding/showing the overlay popup (overlay mode only), e.g. 'alt+o' or 'ctrl+shift+h'. Pass 'off' to disable. Default: PI_ASK_USER_OVERLAY_TOGGLE_KEY env var if set, otherwise 'alt+o'.",
-				}),
-			),
-			commentToggleKey: Type.Optional(
-				Type.String({
-					description:
-						"Shortcut for toggling the optional comment/extra-context row when allowComment is true, e.g. 'ctrl+g'. Pass 'off' to disable. Default: PI_ASK_USER_COMMENT_TOGGLE_KEY env var if set, otherwise 'ctrl+g'.",
-				}),
-			),
+			// 外观类选项（displayMode / overlayToggleKey / commentToggleKey）不再暴露给模型：
+			// 它们是**用户偏好**，优先级为 模型参数 > env > ask-user.json > 默认值，模型能直接
+			// 盖掉用户的设置，且占了 782 字符的 schema。取值改由 env（PI_ASK_USER_DISPLAY_MODE 等）
+			// 与 ask-user.json 提供，内部解析链与 `AskParams` 类型保留（SDK/内部调用仍可传）。
 			timeout: Type.Optional(
-				Type.Number({ description: "Auto-dismiss after N milliseconds. Returns null (cancelled) when expired." }),
+				Type.Number({ description: "Auto-dismiss after N ms; returns null when expired." }),
 			),
 		}),
 

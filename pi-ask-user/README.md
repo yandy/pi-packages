@@ -11,7 +11,7 @@ A Pi package that adds an interactive `ask_user` tool for collecting user decisi
 - User-toggleable extra context on structured selections
 - Context display support
 - Configurable display mode: `overlay` (modal, default) or `inline` (rendered directly in the flow)
-- Runtime overlay toggle: press the configured overlay-toggle key (`alt+o` by default, configurable per call or via env var) while the prompt is open to temporarily hide/show the popup so you can read prior agent output, then press it again to bring it back
+- Runtime overlay toggle: press the configured overlay-toggle key (`alt+o` by default, configurable via env var or `ask-user.json`) while the prompt is open to temporarily hide/show the popup so you can read prior agent output, then press it again to bring it back
 - Pi-TUI-aligned keybinding and editor behavior
 - Custom TUI rendering for tool calls and results
 - System prompt integration via `promptSnippet` and `promptGuidelines`
@@ -59,10 +59,9 @@ The registered tool name is:
 | `allowMultiple` | `boolean?` | `false` | Enable multi-select mode |
 | `allowFreeform` | `boolean?` | `true` | Add a "Type something" freeform option |
 | `allowComment` | `boolean?` | `true` | Expose a user-toggleable extra-context option in the custom UI (`ctrl+g` or the toggle row) and collect an optional comment in fallback dialogs |
-| `displayMode` | `"overlay" \| "inline"?` | env var or `"overlay"` | Controls custom UI rendering: `overlay` shows the centered modal (current behavior), `inline` renders without overlay framing |
-| `overlayToggleKey` | `string?` | env var or `"alt+o"` | Shortcut for hiding/showing the overlay popup (overlay mode only). Pi-TUI key spec, e.g. `"alt+o"`, `"ctrl+shift+h"`. Pass `"off"` to disable. |
-| `commentToggleKey` | `string?` | env var or `"ctrl+g"` | Shortcut for toggling the optional comment/extra-context row when `allowComment: true`. Pass `"off"` to disable. |
 | `timeout` | `number?` | — | Auto-dismiss after N ms and return `null` if the prompt times out |
+
+Appearance options (`displayMode`, `overlayToggleKey`, `commentToggleKey`) are **not** model-visible parameters. They are user preferences resolved from env vars and `ask-user.json` — see [Display mode](#display-mode) and [Shortcuts](#shortcuts). They remain accepted by the internal `AskParams` type for SDK/direct callers, but an LLM tool call cannot set them.
 
 ## Example usage shape
 
@@ -76,8 +75,7 @@ The registered tool name is:
   ],
   "allowMultiple": false,
   "allowFreeform": true,
-  "allowComment": true,
-  "displayMode": "inline"
+  "allowComment": true
 }
 ```
 
@@ -95,11 +93,12 @@ export PI_ASK_USER_COMMENT_TOGGLE_KEY=alt+c
 
 Effective order:
 
-1. Per-call `displayMode` parameter (if provided)
-2. `PI_ASK_USER_DISPLAY_MODE` (if set to `"overlay"` or `"inline"`)
-3. Project config file `.pi/ask-user.json` `displayMode` field (if exists)
-4. User config file `~/.pi/agent/ask-user.json` `displayMode` field (if exists)
-5. Fallback default: `"overlay"`
+1. `PI_ASK_USER_DISPLAY_MODE` (if set to `"overlay"` or `"inline"`)
+2. Project config file `.pi/ask-user.json` `displayMode` field (if exists)
+3. User config file `~/.pi/agent/ask-user.json` `displayMode` field (if exists)
+4. Fallback default: `"overlay"`
+
+(A per-call `displayMode` still wins over all of the above for SDK/direct callers, but the field is no longer part of the model-visible tool schema.)
 
 Unrecognised values are silently ignored and fall back to `"overlay"`.
 
@@ -111,7 +110,7 @@ In addition to environment variables, you can use JSON config files:
 - User-level (global): `~/.pi/agent/ask-user.json`
 - Project-level: `.pi/ask-user.json`
 
-Fields in the project-level file override same-named fields in the user-level file. Priority: call param > env var > project config > user config > default.
+Fields in the project-level file override same-named fields in the user-level file. Priority: env var > project config > user config > default.
 
 **Example `~/.pi/agent/ask-user.json`:**
 
@@ -129,11 +128,12 @@ All fields are optional. Missing files or malformed JSON are silently ignored, e
 
 Effective order for both `overlayToggleKey` and `commentToggleKey`:
 
-1. Per-call parameter (if provided)
-2. Matching env var (`PI_ASK_USER_OVERLAY_TOGGLE_KEY` / `PI_ASK_USER_COMMENT_TOGGLE_KEY`)
-3. Project config file `.pi/ask-user.json` (if exists)
-4. User config file `~/.pi/agent/ask-user.json` (if exists)
-5. Built-in defaults: `alt+o` and `ctrl+g`
+1. Matching env var (`PI_ASK_USER_OVERLAY_TOGGLE_KEY` / `PI_ASK_USER_COMMENT_TOGGLE_KEY`)
+2. Project config file `.pi/ask-user.json` (if exists)
+3. User config file `~/.pi/agent/ask-user.json` (if exists)
+4. Built-in defaults: `alt+o` and `ctrl+g`
+
+(A per-call parameter still wins for SDK/direct callers, but these fields are no longer part of the model-visible tool schema.)
 
 Pass `"off"`, `"none"`, or `"disabled"` (at any level) to disable the shortcut entirely. Invalid specs are silently dropped and the next source is used. Specs follow the Pi-TUI [`KeyId`](https://github.com/earendil-works/pi-mono/blob/main/packages/tui/src/keys.ts) format: `[mod+]...key` where modifiers are `ctrl`, `shift`, `alt`, `super`, in any order, joined by `+` (e.g. `ctrl+g`, `alt+shift+x`, `escape`, `tab`).
 
@@ -149,7 +149,7 @@ While an `ask_user` prompt is open:
 | `esc` | Clear the search filter, exit freeform/comment mode, or cancel the prompt. |
 | `↑` / `↓`, `ctrl+k` / `ctrl+j` | Navigate options. `ctrl+k` / `ctrl+j` (vim-style) work while typing in searchable prompts without disturbing the filter. |
 
-If you prefer never to see the overlay, set `displayMode: "inline"` per call or `PI_ASK_USER_DISPLAY_MODE=inline` globally.
+If you prefer never to see the overlay, set `PI_ASK_USER_DISPLAY_MODE=inline` globally or `"displayMode": "inline"` in `ask-user.json`.
 
 ## Result details
 

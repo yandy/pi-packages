@@ -1,9 +1,13 @@
 import { resolve } from "node:path";
 import {
 	createBashTool,
+	createBashToolDefinition,
 	createEditTool,
+	createEditToolDefinition,
 	createReadTool,
+	createReadToolDefinition,
 	createWriteTool,
+	createWriteToolDefinition,
 	type ExtensionAPI,
 	type ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
@@ -48,10 +52,16 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	const localCwd = process.cwd();
-	const localRead = createReadTool(localCwd);
-	const localWrite = createWriteTool(localCwd);
-	const localEdit = createEditTool(localCwd);
-	const localBash = createBashTool(localCwd);
+	// 必须以 **definition** 工厂为 base：`create*Tool()` 返回的 AgentTool 经
+	// `wrapToolDefinition()` 只透传 name/label/description/parameters/prepareArguments/executionMode，
+	// **不透传 promptSnippet / promptGuidelines**；而宿主按名字覆盖后只从覆盖后的定义读提示词元数据
+	// （pi 1.x `agent-session.js` 的 `_refreshToolRegistry`），没有回落到内置定义。
+	// 用 create*Tool 会让 read/write/edit/bash 从 system prompt 的 "Available tools" 里整体消失，
+	// 并吞掉内置 edit 的 4 条纪律（约 780 字符）。与 pi-sandbox 的 Ruling 15 同一处置。
+	const localRead = createReadToolDefinition(localCwd);
+	const localWrite = createWriteToolDefinition(localCwd);
+	const localEdit = createEditToolDefinition(localCwd);
+	const localBash = createBashToolDefinition(localCwd);
 	let hostBashTool: ReturnType<typeof createBashTool> | null = null;
 
 	const pathApprovals = new PathApprovalStore(localCwd);
@@ -76,10 +86,10 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerTool({
 		...localRead,
-		async execute(id, params, signal, onUpdate, _ctx) {
+		async execute(id, params, signal, onUpdate, ctx) {
 			const sbx = getSbx();
-			if (!sbx) return localRead.execute(id, params, signal, onUpdate);
-			await guardExternalRead(params.path, sbx, _ctx);
+			if (!sbx) return localRead.execute(id, params, signal, onUpdate, ctx);
+			await guardExternalRead(params.path, sbx, ctx);
 			const tool = createReadTool(localCwd, { operations: createReadOps({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }) });
 			return tool.execute(id, params, signal, onUpdate);
 		},
@@ -87,9 +97,9 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerTool({
 		...localWrite,
-		async execute(id, params, signal, onUpdate, _ctx) {
+		async execute(id, params, signal, onUpdate, ctx) {
 			const sbx = getSbx();
-			if (!sbx) return localWrite.execute(id, params, signal, onUpdate);
+			if (!sbx) return localWrite.execute(id, params, signal, onUpdate, ctx);
 			const tool = createWriteTool(localCwd, { operations: createWriteOps({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }) });
 			return tool.execute(id, params, signal, onUpdate);
 		},
@@ -97,9 +107,9 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerTool({
 		...localEdit,
-		async execute(id, params, signal, onUpdate, _ctx) {
+		async execute(id, params, signal, onUpdate, ctx) {
 			const sbx = getSbx();
-			if (!sbx) return localEdit.execute(id, params, signal, onUpdate);
+			if (!sbx) return localEdit.execute(id, params, signal, onUpdate, ctx);
 			const tool = createEditTool(localCwd, { operations: createEditOps({ ...sbx, mounts: [...sbx.skillMounts, ...sbx.userMounts] }) });
 			return tool.execute(id, params, signal, onUpdate);
 		},
@@ -108,9 +118,9 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		...localBash,
 		label: "bash (sandboxed)",
-		async execute(id, params, signal, onUpdate, _ctx) {
+		async execute(id, params, signal, onUpdate, ctx) {
 			const sbx = getSbx();
-			if (!sbx) return localBash.execute(id, params, signal, onUpdate);
+			if (!sbx) return localBash.execute(id, params, signal, onUpdate, ctx);
 
 			const hostCommands = sbx.config.host.commands ?? [];
 			const cmdName = extractCommandName(params.command);
