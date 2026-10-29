@@ -15,7 +15,6 @@ import type { ParentSnapshot } from "../lifecycle/parent-snapshot";
 import { Subagent, type SubagentLifecycleObserver } from "../lifecycle/subagent";
 import type { SubagentSession } from "../lifecycle/subagent-session";
 import { SubagentState, type SubagentStatus } from "../lifecycle/subagent-state";
-import type { WorkspaceProvider } from "../lifecycle/workspace";
 
 import type { RunConfig } from "../runtime";
 import type { AgentInvocation, CompactionInfo, ParentSessionInfo, SubagentType, ThinkingLevel } from "../types";
@@ -98,13 +97,6 @@ export class SubagentManager {
 	private readonly limiter: ConcurrencyLimiter;
 	private readonly baseCwd: string;
 	private getRunConfig?: () => RunConfig;
-	private _workspaceProvider?: WorkspaceProvider;
-
-	/** The registered workspace provider, or undefined when none is registered. */
-	get workspaceProvider(): WorkspaceProvider | undefined {
-		return this._workspaceProvider;
-	}
-
 	constructor(options: SubagentManagerOptions) {
 		this.createSubagentSession = options.createSubagentSession;
 		this.limiter = options.limiter;
@@ -114,21 +106,6 @@ export class SubagentManager {
 		// Cleanup completed agents after 10 minutes (but keep sessions for resume)
 		this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
 		this.cleanupInterval.unref();
-	}
-
-	/**
-	 * Register the single workspace provider. Throws if one is already
-	 * registered (chaining is out of scope — see ADR 0002). Returns a disposer
-	 * that clears the slot only if this provider is still the active one.
-	 */
-	registerWorkspaceProvider(provider: WorkspaceProvider): () => void {
-		if (this._workspaceProvider) {
-			throw new Error("A WorkspaceProvider is already registered; only one is supported.");
-		}
-		this._workspaceProvider = provider;
-		return () => {
-			if (this._workspaceProvider === provider) this._workspaceProvider = undefined;
-		};
 	}
 
 	/** Compose a per-agent lifecycle observer from manager and spawn-config concerns. */
@@ -177,7 +154,6 @@ export class SubagentManager {
 				baseCwd: this.baseCwd,
 				observer: this.buildObserver(options),
 				getRunConfig: this.getRunConfig,
-				getWorkspaceProvider: () => this._workspaceProvider,
 				model: options.model,
 				maxTurns: options.maxTurns,
 				timeoutSeconds: options.timeoutSeconds,
