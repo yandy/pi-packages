@@ -36,7 +36,7 @@ import { SubagentsServiceAdapter } from "./service/service-adapter";
 import { detectEnv } from "./session/env";
 
 import { resolveModel } from "./session/model-resolver";
-import { buildAgentPrompt } from "./session/prompts";
+import { buildAppendSection, buildReplacePrompt } from "./session/prompts";
 import { recoverEvictedSubagents } from "./session/recover-subagents";
 import { deriveSubagentSessionDir } from "./session/session-dir";
 import { SettingsManager } from "./settings";
@@ -95,7 +95,8 @@ export default function (pi: ExtensionAPI) {
 			createSettingsManager: (cwd, dir) => SdkSettingsManager.create(cwd, dir),
 			createSession: (opts) => createAgentSession(opts as any),
 			assemblerIO: {
-				buildAgentPrompt,
+				buildReplacePrompt,
+				buildAppendSection,
 			},
 		},
 		exec: (cmd, args, opts) => pi.exec(cmd, args, opts),

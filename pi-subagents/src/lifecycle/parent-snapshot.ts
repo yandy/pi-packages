@@ -12,8 +12,6 @@ import type { SessionContext } from "../types";
 export interface ParentSnapshot {
 	/** Parent working directory. */
 	cwd: string;
-	/** Parent's effective system prompt (for append-mode agents). */
-	systemPrompt: string;
 	/** Parent's current model instance (fallback when agent config has no model). */
 	model: unknown;
 	/** Model registry for resolving config.model strings and creating sessions. */
@@ -35,7 +33,6 @@ export function buildParentSnapshot(ctx: SessionContext, inheritContext?: boolea
 	const parentContext = inheritContext ? buildParentContext(ctx) : undefined;
 	return {
 		cwd: ctx.cwd,
-		systemPrompt: ctx.getSystemPrompt(),
 		model: ctx.model,
 
 		modelRegistry: ctx.modelRegistry!,

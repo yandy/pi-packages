@@ -14,7 +14,6 @@ import { buildParentSnapshot } from "../../src/lifecycle/parent-snapshot";
 function makeCtx(overrides: Record<string, unknown> = {}) {
 	return {
 		cwd: "/test/project",
-		getSystemPrompt: () => "parent system prompt",
 		model: { id: "claude-sonnet" },
 		modelRegistry: { find: vi.fn(), getAvailable: vi.fn(() => []) },
 		sessionManager: { getBranch: vi.fn(() => []) },
@@ -28,9 +27,9 @@ describe("buildParentSnapshot", () => {
 		expect(snapshot.cwd).toBe("/custom/path");
 	});
 
-	it("captures systemPrompt from ctx.getSystemPrompt()", () => {
-		const snapshot = buildParentSnapshot(makeCtx({ getSystemPrompt: () => "my prompt" }));
-		expect(snapshot.systemPrompt).toBe("my prompt");
+	it("does not capture the parent system prompt", () => {
+		const snapshot = buildParentSnapshot(makeCtx());
+		expect(snapshot).not.toHaveProperty("systemPrompt");
 	});
 
 	it("captures model from ctx", () => {

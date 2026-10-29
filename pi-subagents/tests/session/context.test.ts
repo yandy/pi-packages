@@ -7,7 +7,6 @@ function makeCtx(entries: unknown[]): SessionContext {
 		cwd: "/",
 		model: undefined,
 		modelRegistry: undefined,
-		getSystemPrompt: () => "",
 		sessionManager: {
 			getSessionFile: () => undefined,
 			getSessionId: () => "test",

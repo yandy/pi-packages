@@ -43,8 +43,8 @@ Foreground agents block until complete. Background agents return an ID immediate
 
 | Type | Tools | Model | Description |
 |------|-------|-------|-------------|
-| `general-purpose` | all | inherit | Full parent system prompt — same rules, same conventions |
-| `Explore` | read, bash, grep, find, ls | haiku (fallback: inherit) | Fast codebase exploration (read-only) |
+| `general-purpose` | all | inherit | Harness-rendered prompt for the child's own tool set — same conventions, plus the sub-agent bridge |
+| `Explore` | read, bash, grep, find, ls | `deepseek/deepseek-v4-flash` (falls back to the parent model when unavailable) | Fast codebase exploration (read-only) |
 
 ## Custom Agents
 
@@ -66,6 +66,19 @@ You are a security auditor. Review code for vulnerabilities...
 Agents are discovered from `.pi/agents/<name>.md` (project) and `~/.pi/agent/agents/<name>.md` (global). Project-level overrides global.
 
 `max_turns` and `timeout` (wall-clock seconds, `0` = unlimited) lock their limits for the agent type: a frontmatter value wins over the per-call parameter.
+
+### Prompt mode
+
+`prompt_mode` decides how the agent body relates to the system prompt of the agent that invokes it:
+
+| Value | Assembled system prompt | Use when |
+|-------|------------------------|----------|
+| `append` (default) | Harness-rendered prompt for the child's own tool set — which honors `SYSTEM.md` as the base and keeps `APPEND_SYSTEM.md` ahead of our section, and loads `AGENTS.md` — plus `bridge + <active_agent> + environment` + body wrapped in `<agent_instructions>` | The agent should keep the caller's conventions and only add a role on top |
+| `replace` | `<active_agent>` + environment + your body, nothing else — the caller's rendered prompt is never reused (an empty body falls back to a minimal, capability-neutral prompt), but the harness still appends the skills index, the date, and the child's own working directory | The agent needs a self-contained spec: read-only auditors, evaluators, non-coding roles |
+
+`replace` is a clean room on purpose: nothing rendered for the caller reaches the agent — not its prompt, tool list or tool guidelines, not the project context files (`AGENTS.md`), not `SYSTEM.md` / `APPEND_SYSTEM.md` — because those describe a different toolset and role. It gets no tool list of its own either: the prompt carries no tool list and no tool guidelines, while the harness still passes the agent's tools to the model directly. That is why prompt mode never widens or narrows capabilities: only the `tools` allowlist does that. Anything the agent needs — including house rules such as language or tool preferences, and tool-usage conventions — must be restated in its body.
+
+`append` is the other side of that line: neither mode inherits the caller's tool list. `append` gets the base prompt the harness renders from the agent's **own** tool set (its own tools and guidelines), then the bridge and your body are appended.
 
 ## Tools
 

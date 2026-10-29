@@ -64,7 +64,6 @@ function makeHeadlessCtx() {
 			getSessionFile: vi.fn(() => "/sessions/parent.jsonl"),
 			getBranch: vi.fn(() => []),
 		},
-		getSystemPrompt: vi.fn(() => "parent prompt"),
 	} as any;
 }
 

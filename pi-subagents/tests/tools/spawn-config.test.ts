@@ -304,7 +304,7 @@ describe("resolveSpawnConfig — detailBase and tags", () => {
 		expect(result.presentation.detailBase.tags).toBeUndefined();
 	});
 
-	it("includes twin tag for append-mode agents like general-purpose", () => {
+	it("includes append tag for append-mode agents like general-purpose", () => {
 		const result = resolveSpawnConfig(
 			{ subagent_type: "general-purpose", prompt: "test", description: "d" },
 			testRegistry,
@@ -312,8 +312,8 @@ describe("resolveSpawnConfig — detailBase and tags", () => {
 			defaultSettings,
 		);
 		if ("error" in result) return;
-		// general-purpose has promptMode: "append" → gets "twin" label
-		expect(result.presentation.agentTags).toContain("twin");
+		// general-purpose has promptMode: "append" → gets the "append" label
+		expect(result.presentation.agentTags).toContain("append");
 	});
 });
 

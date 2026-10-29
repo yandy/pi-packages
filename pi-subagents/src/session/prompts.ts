@@ -1,50 +1,65 @@
 /**
- * prompts.ts — System prompt builder for agents.
+ * prompts.ts — System prompt assembly for agents.
+ *
+ * Two shapes, one per `prompt_mode`:
+ *
+ * - "append": the harness renders the base system prompt for the child's OWN
+ *   tool set (tool list, guidelines, skills, AGENTS.md, SYSTEM.md, date/cwd)
+ *   and this module only contributes a section appended to it.
+ * - "replace": this module owns the whole prompt. The caller's rendered prompt
+ *   is deliberately NOT reused — it carries the caller's tool list and
+ *   guidelines, its cwd/date, and project context the child suppresses.
+ *
+ * Both shapes emit an `<active_agent name="..."/>` tag so downstream extensions
+ * can resolve per-agent policy by parsing the child's system prompt.
  */
 
 import type { EnvInfo } from "../session/env";
 import type { AgentPromptConfig } from "../types";
 
 /**
- * Build the system prompt for an agent from its config.
- *
- * Both modes place the shared/stable parent prompt (or `genericBase` when no
- * parent is available) first so the LLM's KV cache can reuse the inherited
- * prefix across all subagent invocations.
- *
- * - "replace" mode: parent/genericBase + active_agent tag + env header +
- *   config.systemPrompt.  No `<sub_agent_context>` bridge and no
- *   `<agent_instructions>` wrapper — the custom prompt has full control and
- *   the final say.
- * - "append" mode: parent/genericBase + sub-agent context bridge +
- *   active_agent tag + env header + config.systemPrompt (wrapped in
- *   `<agent_instructions>` when non-empty).
- * - "append" with empty systemPrompt: pure parent clone.
- *
- * Both modes include an `<active_agent name="${config.name}"/>` tag so
- * downstream extensions can resolve per-agent policy inside the child session
- * by parsing the system prompt.
- * The tag follows the cacheable parent prefix in both modes.
- *
- * @param parentSystemPrompt  The parent agent's effective system prompt.
+ * Fallback prompt for a replace agent whose body is empty — nothing else uses
+ * it. It asserts no role and no capability: in replace mode the body IS the
+ * spec, and a generic persona prepended to it would mislabel read-only or
+ * non-coding agents (and is the only capability text the model would see, since
+ * replace mode renders no tool list). Only the `tools` allowlist grants abilities.
  */
-export function buildAgentPrompt(
-	config: AgentPromptConfig,
-	cwd: string,
-	env: EnvInfo,
-	parentSystemPrompt?: string,
-): string {
-	const activeAgentTag = `<active_agent name="${config.name}"/>\n\n`;
+const emptyBodyFallback = `# Role
+Your role is defined by the instructions below.
+Your available tools are the ones exposed to you in this session; respect any restrictions stated below.
+Do what has been asked; nothing more, nothing less.`;
 
-	const envBlock = `# Environment
-Working directory: ${cwd}
+/** Environment header shared by both modes. cwd and date are rendered by the harness. */
+function environmentBlock(env: EnvInfo): string {
+	return `# Environment
 ${env.isGitRepo ? `Git repository: yes\nBranch: ${env.branch}` : "Not a git repository"}
 Platform: ${env.platform}`;
+}
 
-	const identity = parentSystemPrompt ?? genericBase;
+/**
+ * Build the complete system prompt for a "replace" agent:
+ * active_agent tag → env header → the agent body verbatim.
+ *
+ * Only an empty body gets `emptyBodyFallback` in front of it; a non-empty body is the
+ * agent's whole spec, so nothing generic is prepended. No `<sub_agent_context>`
+ * bridge and no `<agent_instructions>` wrapper either: this is not an addendum
+ * to someone else's prompt.
+ */
+export function buildReplacePrompt(config: AgentPromptConfig, env: EnvInfo): string {
+	const identity = config.systemPrompt.trim() ? "" : `${emptyBodyFallback}\n\n`;
+	return `${identity}<active_agent name="${config.name}"/>\n\n${environmentBlock(env)}\n\n${config.systemPrompt}`;
+}
 
-	if (config.promptMode === "append") {
-		const bridge = `<sub_agent_context>
+/**
+ * Build the section appended to the harness-rendered base prompt for an
+ * "append" agent: sub-agent bridge → active_agent tag → env header → the agent
+ * body wrapped in `<agent_instructions>` (omitted when the body is empty).
+ *
+ * Carries no leading separator: the harness joins it onto the base prompt with
+ * its own blank line, so adding one here would stack into extra empty lines.
+ */
+export function buildAppendSection(config: AgentPromptConfig, env: EnvInfo): string {
+	const bridge = `<sub_agent_context>
 You are operating as a sub-agent invoked to handle a specific task.
 - Make independent tool calls in parallel
 - Use absolute file paths
@@ -52,27 +67,9 @@ You are operating as a sub-agent invoked to handle a specific task.
 - Be concise but complete
 </sub_agent_context>`;
 
-		const customSection = config.systemPrompt.trim()
-			? `\n\n<agent_instructions>\n${config.systemPrompt}\n</agent_instructions>`
-			: "";
+	const customSection = config.systemPrompt.trim()
+		? `\n\n<agent_instructions>\n${config.systemPrompt}\n</agent_instructions>`
+		: "";
 
-		// Place shared/stable content first so the LLM's KV cache can reuse the
-		// inherited prefix across all subagent invocations. The parent prompt is
-		// placed verbatim (no wrapper tag) so it forms an identical byte prefix
-		// with the parent session, maximising KV cache hits. The <active_agent>
-		// tag and env block vary per call and are placed after the cached prefix.
-		return `${identity}\n\n${bridge}\n\n${activeAgentTag}${envBlock}${customSection}`;
-	}
-
-	// "replace" mode — parent/genericBase prefix first for KV cache reuse, then
-	// the active_agent tag, env block, and the config's full system prompt.
-	// Unlike append mode, no <sub_agent_context> bridge or <agent_instructions>
-	// wrapper is injected — the custom prompt retains full control.
-	return `${identity}\n\n${activeAgentTag}${envBlock}\n\n${config.systemPrompt}`;
+	return `${bridge}\n\n<active_agent name="${config.name}"/>\n\n${environmentBlock(env)}${customSection}`;
 }
-
-/** Fallback base prompt when parent system prompt is unavailable (both modes). */
-const genericBase = `# Role
-You are a general-purpose coding agent for complex, multi-step tasks.
-You have full access to read, write, edit files, and execute commands.
-Do what has been asked; nothing more, nothing less.`;

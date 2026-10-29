@@ -43,8 +43,8 @@ subagent({
 
 | 类型 | 工具 | 模型 | 描述 |
 |------|------|------|------|
-| `general-purpose` | 全部 | 继承父级 | 完整父级系统提示词——相同规则、相同约定 |
-| `Explore` | read, bash, grep, find, ls | haiku（回退：继承） | 快速代码库探索（只读） |
+| `general-purpose` | 全部 | 继承父级 | harness 按子代理自身工具集渲染的提示词——沿用相同约定，外加子代理桥接段 |
+| `Explore` | read, bash, grep, find, ls | `deepseek/deepseek-v4-flash`（不可用时回退父级模型） | 快速代码库探索（只读） |
 
 ## 自定义代理
 
@@ -57,12 +57,28 @@ tools: read, grep, find, bash
 model: anthropic/claude-opus-4-6
 thinking: high
 max_turns: 30
+timeout: 300
 ---
 
 你是一名安全审计员。审查代码漏洞...
 ```
 
 代理从 `.pi/agents/<name>.md`（项目级）和 `~/.pi/agent/agents/<name>.md`（全局）发现。项目级覆盖全局。
+
+`max_turns` 与 `timeout`（墙钟秒数，`0` = 无限制）会锁定该代理类型的上限：frontmatter 中的值优先于每次调用传入的参数。
+
+### 提示词模式
+
+`prompt_mode` 决定代理正文与“调用它的代理的系统提示词”之间的关系：
+
+| 取值 | 组装出的系统提示词 | 适用场景 |
+|------|--------------------|----------|
+| `append`（默认） | harness 按子代理自身工具集渲染的基础提示词（以 `SYSTEM.md` 为基底、把 `APPEND_SYSTEM.md` 保留在我们的追加段之前，并加载 `AGENTS.md`）+ `桥接 + <active_agent> + 环境` + 用 `<agent_instructions>` 包裹的正文 | 代理应沿用调用方的约定，只在其上增加一层角色 |
+| `replace` | `<active_agent>` + 环境 + 你的正文，别无他物——完全不沿用调用方的渲染产物（空正文时回落到一段极简的中性提示词），但 harness 仍会追加 skills 索引、日期与子代理自身的工作目录 | 代理需要一套自洽的规范：只读审计、评估、非编程角色 |
+
+`replace` 是刻意的“干净房间”：凡是为调用方渲染的东西都进不来——调用方的提示词、工具清单与工具指引，项目上下文文件（`AGENTS.md`），`SYSTEM.md` / `APPEND_SYSTEM.md`，因为那些描述的是另一套工具集和角色。它也没有属于自己的工具清单：提示词里既没有工具清单也没有工具指引，而工具本身仍由 harness 直接交给模型。正因如此，提示词模式不会增删能力：能做什么只由 `tools` 白名单决定。代理需要的一切——语言、工具偏好这类内部规则，以及工具使用约定——都必须在自己的正文里重申。
+
+`append` 是这条线的另一侧：两种模式都不继承调用方的工具清单。`append` 拿到的是 harness 按代理**自身**工具集渲染的基础提示词（自己的工具与指引），随后再追加桥接段与你的正文。
 
 ## 工具
 
@@ -78,6 +94,7 @@ max_turns: 30
 | `model` | string | 否 | 模型覆盖（`provider/modelId` 或模糊名称） |
 | `thinking` | string | 否 | off / minimal / low / medium / high / xhigh |
 | `max_turns` | number | 否 | 最大代理轮次（默认无限制） |
+| `timeout` | number | 否 | 墙钟硬性时限（秒）；到点即终止代理并返回已产出的部分输出（默认无限制） |
 | `run_in_background` | boolean | 否 | 后台运行不阻塞 |
 | `resume` | string | 否 | 恢复之前会话的代理 ID |
 | `inherit_context` | boolean | 否 | 将父对话分叉给子代理 |
@@ -134,7 +151,7 @@ max_turns: 30
 
 | 命令 | 描述 |
 |------|------|
-| `/subagents:settings` | 配置并发数、轮次限制 |
+| `/subagents:settings` | 配置并发数、轮次限制、超时 |
 | `/subagents:sessions` | 查看子代理的会话记录 |
 
 会话查看器以只读方式复用 Pi 自身的逐条消息组件渲染会话记录，并实时跟随运行中的代理。
@@ -154,6 +171,15 @@ max_turns: 30
 ## 持久化设置
 
 通过 `/subagents:settings` 设置的参数持久化到 `<cwd>/.pi/subagents.json`（项目级），也可在 `~/.pi/agent/subagents.json` 中设置全局默认值。同一批文件也保存 [`modelTiers`](#模型分层) 映射；保存其他设置时会保留它。
+
+| 设置 | 含义 |
+|------|------|
+| `maxConcurrent` | 允许同时运行的后台代理数 |
+| `defaultMaxTurns` | 默认最大代理轮次（`0` = 无限制） |
+| `defaultTimeoutSeconds` | 默认墙钟硬性超时秒数（`0` = 无限制，最大 `86400`） |
+| `graceTurns` | 收到"收尾"转向后仍允许的轮次 |
+
+`defaultMaxTurns` / `defaultTimeoutSeconds` 位于优先级链最末端：代理 frontmatter 优先于每次调用参数，每次调用参数又优先于这两个默认值。
 
 ## 事件
 
