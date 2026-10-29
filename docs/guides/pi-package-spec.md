@@ -228,6 +228,27 @@ export default function (pi: ExtensionAPI) {
 - 类型导入使用 `import type`，避免运行时依赖
 - 源码放在 `src/`，按模块拆分
 
+### 工具提示词（三通道）
+
+`registerTool()` 有三处内容会进模型上下文，性质不同。写之前先确认内容落在对的那一处（详见 `docs/superpowers/specs/2026-10-30-tool-prompt-audit-and-remediation-design.md`）：
+
+| 通道 | 宿主落点 | 成本形态 | 写什么 |
+|---|---|---|---|
+| `description` | 工具 schema（每请求 × 每工具） | 不跨工具去重 | 工具做什么、语法、允许值、默认值、返回值 |
+| `promptSnippet` | system prompt 的 `Available tools`，渲染成 `- <name>: <snippet>` | 每请求一份 | 一行目录：≤100 字符、不写工具名、不写指令、不加句号 |
+| `promptGuidelines` | system prompt 的 `Guidelines`，扁平追加 | **按精确字符串去重** | 行为纪律：何时用 A 而不是 B、必须遵守的流程 |
+
+硬规则：
+
+- **description 只写事实**：不写“何时该用”，不写跨工具策略，不写面向用户的说明；不复述参数（参数级细节放参数描述）。
+- **guidelines 不写参数细节与工具语法**；同一句话不得同时出现在 description 与 guideline（两处各付一份，且把两处绑死）。
+- **跨工具共享的规则必须来自同一字符串常量**：pi 只按精确字符串去重，换个措辞就等于付两份。参考 `pi-sandbox/src/tools.ts` 的 `ENV_REDIRECT_GUIDELINE`、`pi-coding-tools/src/tools/lsp-tools.ts` 的 `LSP_LANGUAGE_SERVER_GUIDELINE`。
+- **覆盖内置工具必须用 `create*ToolDefinition`**：`create*Tool()` 返回的是 `AgentTool`，经 `wrapToolDefinition()` 只透传 `name/label/description/parameters/prepareArguments/executionMode`，**不透传 `promptSnippet` / `promptGuidelines`**；而宿主按名字覆盖后只从覆盖后的定义读提示词，不会回落到内置定义。用错会让内置工具从 `Available tools` 消失、内置纪律全部静默丢失（`pi-container-sandbox` 曾因此丢 779 字符）。
+- **`label` / `renderCall` / `renderResult` / 返回值 `details` 不进 LLM**：不要往那里搬提示词内容，也不要为了“省 token”去优化它们。
+- **注意宿主限制**：用自定义 system prompt（`SYSTEM.md` / `--system-prompt`）时 `promptSnippet` 与 `promptGuidelines` 会被整体丢弃，只有 `description` 存活。所以硬约束不能只押在 guidelines 上。
+
+回归闸门：每个 Extension 包写一个 `tests/prompt-meta.test.ts`，调用仓库根 `scripts/prompt-hygiene.ts` 的 `assertPromptHygiene({ pkg, budget, tools, authored })`。它检查 snippet 长度/前缀/标点/祈使句、单条 guideline 长度与逐字重复、以及包内三通道合计预算（去重后）。`budget` 用该包当前实测值向上取整，防漂移。
+
 ### 测试
 
 - 文件放在 `tests/`，命名为 `<module>.test.ts`

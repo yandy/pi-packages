@@ -83,7 +83,7 @@ export default function (pi: ExtensionAPI) {
 			'"update" changes one task by its exact id (status / title / blockedBy) and returns progress, the next task, and any other tasks still in flight.\n' +
 			'"list" returns the current list.\n' +
 			"blockedBy gates tasks: next in the ack skips them and marks (blocked by #x).",
-		promptSnippet: "Track a task list (set/update/list); keep statuses current.",
+		promptSnippet: "Track a task list (set/update/list); keep statuses current",
 		promptGuidelines: [
 			'Use todo to plan multi-step work: action "set" lists all tasks up front.',
 			"Mark a task in_progress before starting it; keep exactly one in_progress unless tasks really run concurrently (e.g. one per dispatched subagent).",
