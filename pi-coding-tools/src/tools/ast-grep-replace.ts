@@ -6,6 +6,7 @@ import { inferLangFromPath } from "../ast-grep/search";
 import type { CliLanguage, CliRewriteMatch } from "../ast-grep/types";
 import { formatRewriteResult } from "../formatters";
 import { AST_GREP_LANGUAGES } from "./ast-grep-search";
+import { AST_LANG_DESCRIPTION, AST_PATTERN_DESCRIPTION } from "./shared-params";
 
 const defineTool = ((t) => t) as typeof DefineToolType;
 
@@ -14,19 +15,12 @@ function isCliLanguage(v: unknown): v is CliLanguage {
 }
 
 const ReplaceParams = Type.Object({
-	pattern: Type.String({
-		description:
-			"AST pattern with $VAR (single node) and $$$ (zero-or-more nodes). NOT regex. Must be a complete AST node.",
-	}),
+	pattern: Type.String({ description: AST_PATTERN_DESCRIPTION }),
 	rewrite: Type.String({
 		description:
 			"Replacement string. Reference captured meta-variables, e.g. 'logger.info($MSG)'. The same $VAR/$$$ syntax as the pattern.",
 	}),
-	lang: Type.Optional(
-		Type.String({
-			description: "Language: typescript/tsx/javascript/python/java/kotlin/c/cpp. Omit to infer from path extension.",
-		}),
-	),
+	lang: Type.Optional(Type.String({ description: AST_LANG_DESCRIPTION })),
 	path: Type.Optional(Type.String({ description: "File or directory to rewrite (default: cwd)" })),
 	apply: Type.Optional(
 		Type.Boolean({
@@ -56,10 +50,8 @@ export const ast_grep_replace = defineTool({
 		"Set apply=true to write changes to disk. Patterns use $VAR (single node) and $$$ (zero-or-more nodes) — NOT regex.",
 	promptSnippet: "AST-aware rewrite (dry-run by default; apply=true to write)",
 	promptGuidelines: [
-		"Use ast_grep_replace for structural code changes. It is dry-run by default — call with apply=true only after reviewing the preview.",
-		"Patterns are AST nodes, not regex. Use $VAR (e.g. $MSG) to capture a node and reference it in rewrite, $$$ for zero-or-more nodes. Example: pattern 'console.log($MSG)', rewrite 'logger.info($MSG)'.",
-		"Always dry-run first (omit apply) to preview before→after, then call again with apply=true to write. Do NOT use regex constructs (\\w, .*, |).",
-		"Every $VAR used in rewrite must be captured in the pattern — ast-grep substitutes empty for unbound meta-variables, so a typo'd $VAR silently vanishes from the output.",
+		"Use ast_grep_replace for structural rewrites (same $VAR/$$$ pattern rules as ast_grep_search).",
+		"Every $VAR used in rewrite must be captured by the pattern — unbound ones substitute to empty and vanish silently.",
 	],
 	parameters: ReplaceParams,
 	async execute(_toolCallId, params, _signal, _onUpdate, ctx) {

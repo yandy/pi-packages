@@ -4,6 +4,7 @@ import { getPatternHint } from "../ast-grep/pattern-hints";
 import { inferLangFromPath, runAstGrep } from "../ast-grep/search";
 import type { CliLanguage, SgResult } from "../ast-grep/types";
 import { formatSearchResult } from "../formatters";
+import { AST_LANG_DESCRIPTION, AST_PATTERN_DESCRIPTION } from "./shared-params";
 
 const defineTool = ((t) => t) as typeof DefineToolType;
 
@@ -14,15 +15,8 @@ function isCliLanguage(v: unknown): v is CliLanguage {
 }
 
 const SearchParams = Type.Object({
-	pattern: Type.String({
-		description:
-			"AST pattern with $VAR (single node) and $$$ (zero-or-more nodes). NOT regex. Must be a complete AST node.",
-	}),
-	lang: Type.Optional(
-		Type.String({
-			description: "Language: typescript/tsx/javascript/python/java/kotlin/c/cpp. Omit to infer from path extension.",
-		}),
-	),
+	pattern: Type.String({ description: AST_PATTERN_DESCRIPTION }),
+	lang: Type.Optional(Type.String({ description: AST_LANG_DESCRIPTION })),
 	path: Type.Optional(Type.String({ description: "File or directory to search (default: cwd)" })),
 });
 
@@ -45,10 +39,9 @@ export const ast_grep_search = defineTool({
 		"Patterns are AST nodes using $VAR (single node) and $$$ (zero-or-more nodes) — NOT regex.",
 	promptSnippet: "Search code by AST structure (more precise than grep; ignores comments/strings)",
 	promptGuidelines: [
-		"Use ast_grep_search to find code by syntax structure. It ignores comments and string literals and handles cross-line patterns — use built-in grep only for plain text or comments.",
-		"Patterns are AST nodes, not regex. Use $VAR (e.g. $X, $NAME) for a single node wildcard, $$$ for zero-or-more nodes. Example: 'console.log($MSG)' matches any console.log call.",
-		"Do NOT use regex constructs (\\w, .*, |, [a-z], trailing ':') — they will not match. The tool returns a hint if it detects regex-style patterns.",
-		"To find definitions: 'function $NAME($$$) { $$$ }' (ts/js), 'def $NAME($$$)' (py). Always pass lang when the project mixes languages.",
+		"Use ast_grep_search to find code by syntax structure — it ignores comments/strings and matches across lines. For plain text use grep (or rg via bash).",
+		"Patterns are AST nodes, not regex: \\w, .*, [a-z], a bare alternation bar, and a trailing ':' never match; the tool returns a hint when it detects them.",
+		"Definitions: 'function $NAME($$$) { $$$ }' (ts/js), 'def $NAME($$$)' (py). Pass lang in mixed-language repos.",
 	],
 	parameters: SearchParams,
 	async execute(_toolCallId, params, _signal, _onUpdate, ctx) {

@@ -19,17 +19,26 @@ export interface LspTools {
 	lsp_navigate: ReturnType<typeof defineTool>;
 }
 
+/**
+ * 三个 LSP 工具共用的「需要 language server」声明。
+ *
+ * 同一字符串注入三个工具后，pi 会按精确字符串去重 → system prompt 里只付 1 份（R6）。
+ * 此前这条事实在 3 个 description 各写一次、又在 2 个 guideline 里换成不同措辞各写一次，
+ * 既重复又因措辞漂移而去重失败。
+ */
+const LSP_LANGUAGE_SERVER_GUIDELINE =
+	"lsp_symbols, lsp_hover and lsp_navigate need a language server; without one they return an install hint.";
+
 export function createLspTools(manager: LspManager, getConfig: (cwd: string) => CodingToolsConfig): LspTools {
 	const lsp_symbols = defineTool({
 		name: "lsp_symbols",
 		label: "LSP Symbols",
 		description:
-			"Get a file's symbol outline (classes, functions, methods, etc.) via LSP. ~95% fewer tokens than reading the whole file. Requires a language server for the file's language.",
+			"Get a file's symbol outline (classes, functions, methods, etc.) via LSP. ~95% fewer tokens than reading the whole file.",
 		promptSnippet: "File skeleton outline via LSP (saves ~95% tokens vs full read)",
 		promptGuidelines: [
 			"Use lsp_symbols to skim an unfamiliar file's structure before reading details — far cheaper than read.",
-			"lsp_symbols needs a language server installed. If none is installed, it returns an install hint.",
-			"For a textual pattern across files, use grep instead. For exact cross-file resolution, use lsp_navigate.",
+			LSP_LANGUAGE_SERVER_GUIDELINE,
 		],
 		parameters: Type.Object({ path: Type.String({ description: "File path" }) }),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
@@ -59,12 +68,11 @@ export function createLspTools(manager: LspManager, getConfig: (cwd: string) => 
 		name: "lsp_hover",
 		label: "LSP Hover",
 		description:
-			"Query the type/documentation of the symbol at a position via LSP. The only tool that answers 'what type is this expression'. Requires a language server.",
+			"Query the type/documentation of the symbol at a position via LSP. The only tool that answers 'what type is this expression'.",
 		promptSnippet: "Type/docs query at a position via LSP (what type is this)",
 		promptGuidelines: [
-			"Use lsp_hover to learn a symbol's type or docs without reading surrounding code.",
-			"Position is line (1-based) and character (0-based column).",
-			"Needs a language server installed; returns an install hint otherwise.",
+			"Use lsp_hover to get a symbol's type or docs without reading surrounding code.",
+			LSP_LANGUAGE_SERVER_GUIDELINE,
 		],
 		parameters: Type.Object({
 			path: Type.String({ description: "File path" }),
@@ -98,12 +106,11 @@ export function createLspTools(manager: LspManager, getConfig: (cwd: string) => 
 		name: "lsp_navigate",
 		label: "LSP Navigate",
 		description:
-			"Semantic navigation: jump to a symbol's definition, or find all its references, via LSP. More precise than ast_grep_search (resolves overloads, inheritance, node_modules type defs; no same-name false positives). Requires a language server.",
+			"Semantic navigation: jump to a symbol's definition, or find all its references, via LSP. More precise than ast_grep_search (resolves overloads, inheritance, node_modules type defs; no same-name false positives).",
 		promptSnippet: "Semantic goto-definition / find-references via LSP (precise, not textual)",
 		promptGuidelines: [
-			"Use lsp_navigate with operation='definition' to find where a symbol is truly defined (resolves inheritance/overloads/type defs that ast_grep_search cannot).",
-			"Use operation='references' to find all real usages of a symbol (no same-name false positives, unlike ast_grep_search).",
-			"Position is line (1-based) and character (0-based). Needs a language server installed.",
+			"Use lsp_navigate with operation='definition'/'references' for exact cross-file resolution (resolves overloads/inheritance/typedefs; no same-name false positives).",
+			LSP_LANGUAGE_SERVER_GUIDELINE,
 		],
 		parameters: Type.Object({
 			path: Type.String({ description: "File path" }),
