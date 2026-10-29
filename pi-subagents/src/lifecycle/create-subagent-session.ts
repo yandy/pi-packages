@@ -170,19 +170,21 @@ export async function createSubagentSession(
 	const agentDir = deps.io.getAgentDir();
 
 	// Children always load the parent's extensions and skills.
-	// Suppress AGENTS.md/CLAUDE.md and APPEND_SYSTEM.md - upstream's
-	// buildSystemPrompt() re-appends both AFTER systemPromptOverride, which
-	// would defeat prompt_mode: replace. Parent context, if wanted, reaches the
-	// subagent via prompt_mode: append (parentSystemPrompt is embedded in
-	// systemPromptOverride) or inherit_context (conversation).
+	//
+	// "append" lets the harness render the base prompt for the child's own tool
+	// set (tool list, tool guidelines, skills, AGENTS.md, SYSTEM.md, date/cwd)
+	// and appends our section to it. "replace" owns the whole prompt, so context
+	// files and the append file are suppressed.
+	const isReplace = cfg.promptMode === "replace";
 	const loader = deps.io.createResourceLoader({
 		cwd: cfg.effectiveCwd,
 		agentDir,
 		noPromptTemplates: true,
 		noThemes: true,
-		noContextFiles: true,
-		systemPromptOverride: () => cfg.systemPrompt,
-		appendSystemPromptOverride: () => [],
+		noContextFiles: isReplace,
+		...(isReplace
+			? { systemPromptOverride: () => cfg.promptSection, appendSystemPromptOverride: () => [] }
+			: { appendSystemPromptOverride: (base: string[]) => [...base, cfg.promptSection] }),
 	});
 	await loader.reload();
 

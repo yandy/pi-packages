@@ -43,7 +43,8 @@ export function createSubagentSessionIO() {
 		createSettingsManager: vi.fn().mockReturnValue({}),
 		createSession: vi.fn(),
 		assemblerIO: {
-			buildAgentPrompt: vi.fn((..._args: unknown[]): string => "system prompt"),
+			buildAgentPrompt: vi.fn((..._args: unknown[]): string => "assembled system prompt"),
+			buildAppendSection: vi.fn((..._args: unknown[]): string => "append section"),
 		},
 	};
 }

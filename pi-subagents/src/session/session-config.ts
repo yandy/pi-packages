@@ -26,6 +26,7 @@ import type { AgentPromptConfig, SubagentType, ThinkingLevel } from "../types";
  */
 export interface AssemblerIO {
 	buildAgentPrompt: (config: AgentPromptConfig, cwd: string, env: EnvInfo, parentPrompt?: string) => string;
+	buildAppendSection: (config: AgentPromptConfig, env: EnvInfo) => string;
 }
 
 /**
@@ -72,8 +73,10 @@ export interface AssemblerOptions {
 export interface SessionConfig {
 	/** Resolved working directory (`options.cwd ?? ctx.cwd`). */
 	effectiveCwd: string;
-	/** Fully-assembled system prompt string (ready for `systemPromptOverride`). */
-	systemPrompt: string;
+	/** Prompt mode declared by the agent; decides how the caller wires the resource loader. */
+	promptMode: "replace" | "append";
+	/** Mode-specific text: the complete system prompt for "replace", the appended section for "append". */
+	promptSection: string;
 	/** Built-in tool name allowlist for this agent type. */
 	toolNames: string[];
 	/**
@@ -149,8 +152,12 @@ export function assembleSessionConfig(
 
 	const toolNames = registry.getToolNamesForType(type);
 
-	// Build system prompt from the resolved agent config
-	const systemPrompt = io.buildAgentPrompt(agentConfig, effectiveCwd, env, ctx.parentSystemPrompt);
+	// Assemble the prompt text: "replace" owns the whole prompt, "append" only
+	// contributes a section on top of the harness-rendered base prompt.
+	const promptSection =
+		agentConfig.promptMode === "replace"
+			? io.buildAgentPrompt(agentConfig, effectiveCwd, env, ctx.parentSystemPrompt)
+			: io.buildAppendSection(agentConfig, env);
 
 	// Model resolution: explicit option > config model string > parent model
 	const model = options.model ?? resolveDefaultModel(ctx.parentModel, ctx.modelRegistry, agentConfig.model);
@@ -163,7 +170,8 @@ export function assembleSessionConfig(
 
 	return {
 		effectiveCwd,
-		systemPrompt,
+		promptMode: agentConfig.promptMode,
+		promptSection,
 		toolNames,
 		model,
 		thinkingLevel,

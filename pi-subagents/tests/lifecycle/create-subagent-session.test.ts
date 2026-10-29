@@ -87,20 +87,30 @@ describe("createSubagentSession — assembly", () => {
 		);
 	});
 
-	it("suppresses AGENTS.md/CLAUDE.md/APPEND_SYSTEM.md for subagents", async () => {
+	it("replace agents override the system prompt and suppress context/append files", async () => {
 		await createSubagentSession(
 			{ snapshot: STUB_SNAPSHOT, type: "Explore" },
 			createSubagentSessionDeps({ io, exec, registry: mockAgentLookup }),
 		);
 
-		expect(io.createResourceLoader).toHaveBeenCalledWith(
-			expect.objectContaining({
-				noContextFiles: true,
-				appendSystemPromptOverride: expect.any(Function),
-			}),
-		);
 		const loaderOpts = io.createResourceLoader.mock.calls[0][0];
-		expect(loaderOpts.appendSystemPromptOverride()).toEqual([]);
+		expect(loaderOpts.noContextFiles).toBe(true);
+		expect(loaderOpts.systemPromptOverride?.()).toBe("assembled system prompt");
+		expect(loaderOpts.appendSystemPromptOverride?.([])).toEqual([]);
+	});
+
+	it("append agents let the harness render the base prompt and only append their section", async () => {
+		const registry = createAgentLookup({ promptMode: "append" });
+		await createSubagentSession(
+			{ snapshot: STUB_SNAPSHOT, type: "Explore" },
+			createSubagentSessionDeps({ io, exec, registry }),
+		);
+
+		const loaderOpts = io.createResourceLoader.mock.calls[0][0];
+		expect(loaderOpts.noContextFiles).toBe(false);
+		expect(loaderOpts.systemPromptOverride).toBeUndefined();
+		expect(loaderOpts.appendSystemPromptOverride?.([])).toEqual(["append section"]);
+		expect(loaderOpts.appendSystemPromptOverride?.(["user append"])).toEqual(["user append", "append section"]);
 	});
 
 	it("calls newSession with parentSession when parentSessionId is provided", async () => {

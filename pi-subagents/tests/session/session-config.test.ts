@@ -14,6 +14,7 @@ const mockResolveAgentConfig = vi.fn(
 );
 const mockGetToolNamesForType = vi.fn((): string[] => ["read"]);
 const mockBuildAgentPrompt: Mock<AssemblerIO["buildAgentPrompt"]> = vi.fn(() => "assembled system prompt");
+const mockBuildAppendSection: Mock<AssemblerIO["buildAppendSection"]> = vi.fn(() => "append section");
 
 /** Mock registry injected into assembleSessionConfig instead of module-level free functions. */
 const mockAgentLookup: AgentConfigLookup = {
@@ -39,6 +40,7 @@ const ctx = {
 /** IO stubs injected into assembleSessionConfig in place of module-level imports. */
 const mockIO = {
 	buildAgentPrompt: mockBuildAgentPrompt,
+	buildAppendSection: mockBuildAppendSection,
 };
 
 /** The Explore agent config used across the model/thinking resolution tests. */
@@ -50,6 +52,7 @@ beforeEach(() => {
 	mockResolveAgentConfig.mockClear();
 	mockGetToolNamesForType.mockClear();
 	mockBuildAgentPrompt.mockClear();
+	mockBuildAppendSection.mockClear();
 	mockRegistry.find.mockReset();
 	mockRegistry.getAvailable.mockClear();
 });
@@ -59,7 +62,8 @@ describe("assembleSessionConfig — default agent shape", () => {
 		const result = assembleSessionConfig("Explore", ctx, {}, mockEnv, mockAgentLookup, mockIO);
 
 		expect(result.effectiveCwd).toBe("/tmp");
-		expect(result.systemPrompt).toBe("assembled system prompt");
+		expect(result.promptMode).toBe("replace");
+		expect(result.promptSection).toBe("assembled system prompt");
 		expect(result.toolNames).toEqual(["read"]);
 		expect(result.model).toBeUndefined();
 		expect(result.thinkingLevel).toBeUndefined();
@@ -71,12 +75,25 @@ describe("assembleSessionConfig — default agent shape", () => {
 		expect(result.effectiveCwd).toBe("/tmp/worktree");
 	});
 
-	it("systemPrompt reflects the parentSystemPrompt passed to buildAgentPrompt", () => {
-		mockBuildAgentPrompt.mockImplementationOnce((_config, _cwd, _env, parentPrompt) => `assembled:${parentPrompt}`);
+	it("replace agents route to buildAgentPrompt and report mode + section", () => {
+		mockBuildAgentPrompt.mockImplementationOnce((config) => `replace:${config.name}`);
 
 		const result = assembleSessionConfig("Explore", ctx, {}, mockEnv, mockAgentLookup, mockIO);
 
-		expect(result.systemPrompt).toBe("assembled:parent prompt");
+		expect(result.promptMode).toBe("replace");
+		expect(result.promptSection).toBe("replace:Explore");
+		expect(mockBuildAppendSection).not.toHaveBeenCalled();
+	});
+
+	it("append agents route to buildAppendSection and report mode + section", () => {
+		mockResolveAgentConfig.mockReturnValueOnce(exploreConfig({ promptMode: "append" }));
+		mockBuildAppendSection.mockImplementationOnce((config) => `append:${config.name}`);
+
+		const result = assembleSessionConfig("Explore", ctx, {}, mockEnv, mockAgentLookup, mockIO);
+
+		expect(result.promptMode).toBe("append");
+		expect(result.promptSection).toBe("append:Explore");
+		expect(mockBuildAgentPrompt).not.toHaveBeenCalled();
 	});
 });
 
@@ -152,7 +169,7 @@ describe("assembleSessionConfig — model resolution", () => {
 });
 
 describe("assembleSessionConfig — unknown type fallback", () => {
-	it("passes resolved config directly to buildAgentPrompt", () => {
+	it("passes resolved config directly to the prompt builder", () => {
 		// resolveAgentConfig handles the fallback internally —
 		// session-config just forwards whatever it returns
 		mockResolveAgentConfig.mockReturnValueOnce({
@@ -162,11 +179,12 @@ describe("assembleSessionConfig — unknown type fallback", () => {
 			promptMode: "append" as const,
 		});
 
-		mockBuildAgentPrompt.mockImplementationOnce((config: { name: string }) => `resolved:${config.name}`);
+		mockBuildAppendSection.mockImplementationOnce((config: { name: string }) => `resolved:${config.name}`);
 
 		const result = assembleSessionConfig("unknown-custom-agent", ctx, {}, mockEnv, mockAgentLookup, mockIO);
 
-		expect(result.systemPrompt).toBe("resolved:general-purpose");
+		expect(result.promptMode).toBe("append");
+		expect(result.promptSection).toBe("resolved:general-purpose");
 	});
 });
 
