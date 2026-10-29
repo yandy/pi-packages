@@ -39,7 +39,7 @@ pi 的自定义 tool 有三处内容会进模型上下文，性质完全不同�
 
 - 修掉 1 个真实缺陷（`pi-container-sandbox` 静默吞掉 4 个工具的提示词元数据）；
 - 修掉 8 处会误导模型的事实错误；
-- 在不削弱行为约束的前提下回收 **≈3.1k 字符/请求（-12.5%）**；
+- 在不削弱行为约束的前提下回收 **≈3.0k 字符/请求（-11.9%）**；
 - 把三通道分工与预算写成可执行的约定，并加回归闸门防止再次腐烂。
 
 **非目标**
@@ -85,7 +85,7 @@ pi 的自定义 tool 有三处内容会进模型上下文，性质完全不同�
 
 | 位置 | 现状 | 违反 |
 |---|---|---|
-| `pi-subagents/src/tools/agent-tool.ts:143-153` | 893 字符的 `Guidelines:` 块（9 条）内联在 `description` 里 | R1 / R3 语义（应为 guidelines）+ R2（其中 6 条被参数描述完全覆盖，656 字符） |
+| `pi-subagents/src/tools/agent-tool.ts:143-153` | 893 字符的 `Guidelines:` 块（**10 条**）内联在 `description` 里 | R1 / R3 语义（应为 guidelines）+ R2（其中 **6 条被参数描述完全覆盖，516 字符**） |
 | `agent-tool.ts:138-139` | "Launch a new agent…" 与 "The subagent tool launches specialized agents…" 同义反复 | R2 |
 | `pi-ask-user/index.ts:1538` | description 尾部两句与 guideline[0]/[2] **逐字相同**（6-gram 重合 75% / 33%，164 字符） | R5 |
 | `pi-ask-user/index.ts:1545-1546` | 两条 guideline 表达同一条规则（"一问一题"） | R6 |
@@ -120,8 +120,8 @@ pi 的自定义 tool 有三处内容会进模型上下文，性质完全不同�
 
 | # | 项 | 位置 | 现状 | 回收 |
 |---|---|---|---|---|
-| 1 | 6 条 bullet 被参数描述完全覆盖 | `agent-tool.ts:145-153` | 656 | **656** |
-| 2 | preamble 两处冗余（同义反复句 + 面向用户的 override 说明） | `agent-tool.ts:138-141` | ~285 | ~270 |
+| 1 | description 内 Guidelines 块：6 条完全被参数描述覆盖（删）+ 4 条独有信息迁往 guidelines（无净变化）+ “Guidelines:” 标题 | `agent-tool.ts:143-153` | 1485→~690 | 780 |
+| 2 | preamble 同义反复句 + 面向用户的 override 说明 | `agent-tool.ts:138-141` | ~285 | （已计入上行） |
 | 3 | description 尾部两句与 guidelines 逐字重复 | `pi-ask-user/index.ts:1538` | 256→72 | 184 |
 | 4 | 两条"一问一题" guideline 合并 | `index.ts:1545-1546` | 144→128 | 16 |
 | 5 | 4 个 UI 旋钮描述（模型不该填） | `index.ts:1546-1560` | 670→200 | 470 |
@@ -142,11 +142,11 @@ pi 的自定义 tool 有三处内容会进模型上下文，性质完全不同�
 | 20 | 三工具重复句合并 + 删 3× "Requires a language server." | `lsp-tools.ts`（desc 562 / guidelines 875） | 1437→997 | 440 |
 | 21 | SANDBOX_NOTE ×3（缩短 + 修 /tmp 措辞） | `pi-sandbox/src/tools.ts:293` | 156×3→130×3 | 78 |
 
-毛回收 **3744 字符/请求（-15.0%）**。为正确性必须**新增**的内容：todo 参数描述 +180、`lang` 静默默认说明 +120×2 = +240、`thinking` 枚举 +30、ask_user "别设 UI 旋钮" guideline +130、vision `thinkLevel` 默认值说明 +43 = **+623**。
+毛回收 **3598 字符/请求（-14.4%）**。为正确性必须**新增**的内容：todo 参数描述 +180、`lang` 静默默认说明 +120×2 = +240、`thinking` 枚举 +30、ask_user “别设 UI 旋钮” guideline +130、vision `thinkLevel` 默认值说明 +43 = **+623**。
 
-**净回收 3121 字符/请求（-12.5%，≈780 tokens）**；另 `pi-container-sandbox` 需**加回** 779 字符（185 snippet + 594 guidelines，修缺陷，非浪费）。
+**净回收 2975 字符/请求（-11.9%，≈740 tokens）**；另 `pi-container-sandbox` 需**加回** 779 字符（185 snippet + 594 guidelines，修缺陷，非浪费）。
 
-口径说明：第 2 项的 285 含运行时路径（随 `agentDir` 长度浮动），故按 ~270 计；其余均为逐字符实测。
+口径说明：第 1 项的 780 = 删掉 6 条完全重复的 516 + 迁移后 preamble 冗余 270 + 标题 12 − 重写并行条目 +24；迁移到 guidelines 的 4 条不产生净变化，故不计入毛回收。第 2 项并入第 1 项（preamble 冗余即 270）。
 
 ## 5. 整改方案（按波次）
 
@@ -162,7 +162,7 @@ pi 的自定义 tool 有三处内容会进模型上下文，性质完全不同�
 
 ### W3 需拍板（见 §8）
 
-- D1：`subagent` 的 Guidelines 块迁到 `promptGuidelines`（省 656 + 修错配，但自定义 system prompt 下会整体失效）；
+- D1：`subagent` 的 Guidelines 块迁到 `promptGuidelines`（净省 ~780 + 修错配，但自定义 system prompt 下会整体失效）；
 - D2：`ask_user` 的 4 个 UI 旋钮——缩短描述 + 一句"别设"（推荐）还是从模型可见 schema 移除。
 
 ### W4 约定与闸门
@@ -195,7 +195,8 @@ pi.registerTool({ ...localRead, async execute(id, params, signal, onUpdate, ctx)
 
 | 位置 | 现在 | 改成 |
 |---|---|---|
-| `agent-tool.ts:136-153` | 1485 字符（含 893 字符 Guidelines 块 + 同义反复） | `Launch a subagent that works autonomously on a task.\n\nAvailable agent types:\n<typeList>\n\nCustom agents live in .pi/agents/<name>.md (project) or <agentDir>/agents/<name>.md (global); a file with a default agent's name overrides it.`（~330） |
+| `agent-tool.ts:136-153` | 1485 字符（含 893 字符 Guidelines 块：10 条） | ①**删** 6 条完全被参数描述覆盖的（`run_in_background` 通知、`resume`、`model`、`thinking`、`timeout`、`inherit_context`，共 516 字符）；②**迁** 4 条独有的到 `promptGuidelines`（见下）；③删 preamble 的同义反复句与 override 说明 |
+| 新 description（整段替换后） | —— | `Launch a subagent that works autonomously on a task.\n\nAvailable agent types:\n<typeList>\n\nCustom agents live in .pi/agents/<name>.md (project) or <agentDir>/agents/<name>.md (global); a file with a default agent's name overrides it.`（~350，随 agent 类型数量浮动） |
 | `promptGuidelines`（W3/D1） | 仅动态 tier 一条 | 追加 5 条：①`Use subagent for work that needs its own context or a different model; finish inline work yourself.` ②`For parallel work set run_in_background: true on each agent — sibling foreground calls run concurrently anyway, but they block the current turn and bypass the concurrency limit.` ③`Give each subagent a self-contained prompt; it cannot see the parent conversation unless inherit_context is true.` ④`Subagent results come back as text — summarize them for the user.` ⑤`Use steer_subagent to redirect a running background agent, and get_subagent_result with wait: true to block for one result.` |
 | `thinking` 参数 | `Type.String({description: "Thinking level: off, minimal, low, medium, high, xhigh. Overrides agent default."})` | 加 `StringEnum(["off","minimal","low","medium","high","xhigh"] as const)`，描述改为 `Thinking level override. Default: inherit the agent type's setting.` |
 | `get-result-tool.ts:94-95` | "…from a background agent. Use the agent ID returned by Agent with run_in_background." | `Check status and retrieve the result of a background subagent (agent_id comes from the subagent tool).` |
@@ -291,7 +292,7 @@ pi.registerTool({ ...localRead, async execute(id, params, signal, onUpdate, ctx)
 
 | # | 问题 | 推荐 | 若不同意的退路 |
 |---|---|---|---|
-| **D1** | `subagent` 的 Guidelines 块是否迁到 `promptGuidelines`？ | **迁**（修 R1 错配、回收 656） | 留在 description，仅删与参数重复的 6 条（回收 656 不变，但错配保留）；副作用都是"自定义 system prompt 下该文本消失"——迁走后消失得更彻底，需你确认可接受 |
+| **D1** | `subagent` 的 Guidelines 块是否迁到 `promptGuidelines`？ | **迁**（修 R1 错配、净省 ~780） | 留在 description，仅删 6 条与参数重复的（净省 516，错配保留）；两种选择的共同副作用是“自定义 system prompt 下不再可见”，迁走后不再可见的范围更大，需你确认可接受 |
 | **D2** | `ask_user` 的 4 个 UI 旋钮 | **留参数、缩短描述 + 加一句"别设"**（回收 ~470） | 从模型可见 schema 移除、只读 env/config（回收 ~900，但去掉模型显式覆盖的能力） |
 | **D3** | 是否顺带做 memory 的 extract 子会话精简（旧 spec 方案 1） | **本轮不做** | 单开一轮，先按旧 spec §5 重建量取脚本 |
 | **D4** | 是否加 per-package 预算测试 | **加**（W4） | 只写约定、不加闸门（漂移风险回到现状） |
@@ -334,5 +335,5 @@ pi.registerTool({ ...localRead, async execute(id, params, signal, onUpdate, ctx)
 | pi-web-tools | 2 | 532 | 1290 | 250 | 304 | 2376 | 2150 |
 | pi-todo | 1 | 437 | 527 | 59 | 422 | 1445 | 1700 |
 | pi-vision-tools | 1 | 357 | 542 | 82 | 295 | 1276 | 1150 |
-| **合计** | 17 | 6114 | 11218 | 1371 | 6233 | **24936** | **21815** |
+| **合计** | 17 | 6114 | 11218 | 1371 | 6233 | **24936** | **21961** |
 | pi-container-sandbox（单独装配，W1 修复后） | 4 | 999 | 1580 | 0→**185** | 0→**594** | 2579→**3358** | 3500 |
