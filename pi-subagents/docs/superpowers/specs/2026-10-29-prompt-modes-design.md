@@ -1,7 +1,7 @@
 # pi-subagents 提示词模式（prompt_mode）设计
 
 日期：2026-10-29
-状态：待批准
+状态：已批准，已实现（pi-subagents 0.8.0）
 
 ## 意图
 

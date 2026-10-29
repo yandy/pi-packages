@@ -49,12 +49,12 @@ describe("getDisplayName", () => {
 });
 
 describe("getPromptModeLabel", () => {
-	it("returns 'twin' for append promptMode", () => {
+	it("returns 'append' for append promptMode", () => {
 		const customAgents = new Map<string, AgentConfig>([
 			[
-				"twin-agent",
+				"append-agent",
 				{
-					name: "twin-agent",
+					name: "append-agent",
 					description: "test",
 					systemPrompt: "",
 					promptMode: "append",
@@ -62,7 +62,7 @@ describe("getPromptModeLabel", () => {
 			],
 		]);
 		const registry = new AgentTypeRegistry(() => customAgents);
-		expect(getPromptModeLabel("twin-agent", registry)).toBe("twin");
+		expect(getPromptModeLabel("append-agent", registry)).toBe("append");
 	});
 
 	it("returns undefined for replace promptMode", () => {

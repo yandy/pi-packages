@@ -87,7 +87,6 @@ export interface SessionContext {
 	readonly cwd: string;
 	readonly model: unknown;
 	readonly modelRegistry: ModelRegistry | undefined;
-	getSystemPrompt(): string;
 	readonly sessionManager: {
 		getSessionFile(): string | undefined;
 		getSessionId(): string;

@@ -95,8 +95,10 @@ describe("buildReplacePrompt", () => {
 });
 
 describe("buildAppendSection", () => {
-	it("starts with a blank-line separator so it can follow a base prompt", () => {
-		expect(buildAppendSection(agent(), env).startsWith("\n\n")).toBe(true);
+	it("starts directly with the bridge: the harness owns the separation from the base prompt", () => {
+		// DefaultResourceLoader joins with "\n\n", so a leading blank line here would
+		// stack into extra empty lines in the final system prompt.
+		expect(buildAppendSection(agent(), env).startsWith("<sub_agent_context>")).toBe(true);
 	});
 
 	it("includes the sub-agent bridge without per-tool reminders", () => {
@@ -114,17 +116,22 @@ describe("buildAppendSection", () => {
 		expect(section).toContain("<agent_instructions>\nExtra instructions.\n</agent_instructions>");
 	});
 
-	it("omits <agent_instructions> for an empty body", () => {
+	it("emits bridge, tag and env but no <agent_instructions> for an empty body", () => {
 		const section = buildAppendSection(agent({ systemPrompt: "" }), env);
+		expect(section).toContain("<sub_agent_context>");
+		expect(section).toContain('<active_agent name="test-agent"/>');
+		expect(section).toContain("Branch: main");
 		expect(section).not.toContain("<agent_instructions>");
 	});
 
 	it("renders git branch and platform but never the working directory", () => {
+		// The builder has no cwd parameter at all — EnvInfo carries no cwd, and cwd
+		// is rendered by the harness from the child's own effectiveCwd. This test
+		// guards the text; the signature guards the plumbing.
 		const section = buildAppendSection(agent(), env);
 		expect(section).toContain("Branch: main");
 		expect(section).toContain("Platform: darwin");
 		expect(section).not.toContain("Working directory:");
-		expect(section).not.toContain("/workspace");
 	});
 
 	it("renders 'Not a git repository' without a branch line", () => {
@@ -133,10 +140,10 @@ describe("buildAppendSection", () => {
 		expect(section).not.toContain("Branch:");
 	});
 
-	it("carries the built-in read-only Explore body", () => {
-		const section = buildAppendSection(getDefaultConfig("Explore"), env);
-		expect(section).toContain("READ-ONLY");
-		expect(section).toContain("file search specialist");
+	it("carries a non-empty body verbatim, without mangling it", () => {
+		const body = "# CRITICAL: READ-ONLY MODE\nYou are a file search specialist.";
+		const section = buildAppendSection(agent({ systemPrompt: body }), env);
+		expect(section).toContain(`<agent_instructions>\n${body}\n</agent_instructions>`);
 	});
 });
 

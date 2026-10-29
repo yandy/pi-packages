@@ -117,10 +117,10 @@ export function getDisplayName(type: SubagentType, registry: AgentConfigLookup):
 	return config.displayName ?? config.name;
 }
 
-/** Short label for prompt mode: "twin" for append, nothing for replace (the default). */
+/** Short label for prompt mode: "append" for append, nothing for replace (the default). */
 export function getPromptModeLabel(type: SubagentType, registry: AgentConfigLookup): string | undefined {
 	const config = registry.resolveAgentConfig(type);
-	return config.promptMode === "append" ? "twin" : undefined;
+	return config.promptMode === "append" ? "append" : undefined;
 }
 
 /** Mode label is not included — callers add it where they want it. */

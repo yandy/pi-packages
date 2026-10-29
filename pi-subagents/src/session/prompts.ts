@@ -55,7 +55,8 @@ export function buildReplacePrompt(config: AgentPromptConfig, env: EnvInfo): str
  * "append" agent: sub-agent bridge → active_agent tag → env header → the agent
  * body wrapped in `<agent_instructions>` (omitted when the body is empty).
  *
- * Starts with a blank line so it can be concatenated after the base prompt.
+ * Carries no leading separator: the harness joins it onto the base prompt with
+ * its own blank line, so adding one here would stack into extra empty lines.
  */
 export function buildAppendSection(config: AgentPromptConfig, env: EnvInfo): string {
 	const bridge = `<sub_agent_context>
@@ -70,5 +71,5 @@ You are operating as a sub-agent invoked to handle a specific task.
 		? `\n\n<agent_instructions>\n${config.systemPrompt}\n</agent_instructions>`
 		: "";
 
-	return `\n\n${bridge}\n\n<active_agent name="${config.name}"/>\n\n${environmentBlock(env)}${customSection}`;
+	return `${bridge}\n\n<active_agent name="${config.name}"/>\n\n${environmentBlock(env)}${customSection}`;
 }
