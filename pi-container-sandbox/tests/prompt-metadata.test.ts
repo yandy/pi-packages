@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { assertPromptHygiene } from "../../scripts/prompt-hygiene";
 import register from "../index";
 
 /**
@@ -79,5 +80,10 @@ describe("注册的 read/write/edit/bash 保留提示词元数据（spec 2026-10
 	it("description 仍是内置描述（本包不额外追加提示词）", () => {
 		expect(byName.get("read")?.description).toContain("Read the contents of a file");
 		expect(byName.get("bash")?.description).toContain("Execute a bash command");
+	});
+
+	it("三通道合计不超预算（spec 2026-10-30 §10）", () => {
+		// 修补前为 2579（snippet/guidelines 全丢），修补后回收 779 字符 → 约 3358。
+		assertPromptHygiene({ pkg: "pi-container-sandbox", budget: 3500, tools, authored: [] });
 	});
 });
