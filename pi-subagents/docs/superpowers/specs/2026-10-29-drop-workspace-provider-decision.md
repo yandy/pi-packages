@@ -16,7 +16,7 @@
 - `CreateSubagentSessionParams.cwd`、`AssemblerOptions.cwd`
 - 对应测试（`tests/lifecycle/workspace-bracket.test.ts` 及三处 describe）
 
-现在子代理**永远**运行在父会话的 cwd：`effectiveCwd = snapshot.cwd`。
+现在子代理**永远**运行在父会话的 cwd：`SessionConfig.cwd = snapshot.cwd`。字段原名 `effectiveCwd`——既然已不存在其它来源，那个前缀只会误导，于 2026-10-29 随本次删除一并改回 `cwd`。
 
 ## 为什么
 

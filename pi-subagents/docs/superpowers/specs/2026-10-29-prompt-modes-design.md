@@ -100,7 +100,7 @@ snapshot 拿到这些规则。
 3. **`SessionConfig.systemPrompt` 改名为 `promptMode` + `promptSection`**：append 下这段文本
    是"追加段"而非完整提示词，旧名会误导读调用方。
 4. **envBlock 去掉 cwd，只保留 git branch/platform。** 两种模式下 harness 都会在提示词渲染
-   `Current working directory: <effectiveCwd>`（`dist/core/system-prompt.js:44-45`），envBlock
+   `Current working directory: <会话 cwd>`（`dist/core/system-prompt.js:44-45`），envBlock
    再写一遍是重复；而"同源却写两遍"正是本次要消除的味道。分支与平台 harness 不渲染，
    保留。
 5. **不改 `README.zh.md` 的其它漂移**，只同步本次新增的 `prompt_mode` 章节。
