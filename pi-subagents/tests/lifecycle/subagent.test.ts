@@ -3,7 +3,6 @@ import type { CreateSubagentSessionParams } from "../../src/lifecycle/create-sub
 import { Subagent, type SubagentExecution, type SubagentLifecycleObserver } from "../../src/lifecycle/subagent";
 import type { SubagentSession, TurnLoopResult } from "../../src/lifecycle/subagent-session";
 import { SubagentState, type SubagentStateInit } from "../../src/lifecycle/subagent-state";
-import type { Workspace, WorkspaceProvider } from "../../src/lifecycle/workspace";
 import type { AgentInvocation, CompactionInfo, SubagentType } from "../../src/types";
 import { makeStubExecution } from "../helpers/make-subagent";
 import {
@@ -421,13 +420,10 @@ function createRunnableAgent(overrides?: {
 	getRunConfig?: () => { defaultMaxTurns: number | undefined; graceTurns: number };
 	parentSession?: { toolCallId?: string; parentSessionFile?: string; parentSessionId?: string };
 	signal?: AbortSignal;
-	baseCwd?: string;
-	workspaceProvider?: WorkspaceProvider;
 	timeoutSeconds?: number;
 }) {
 	const createSubagentSession = overrides?.createSubagentSession ?? defaultFactory();
 	const observer = overrides?.observer ?? {};
-	const provider = overrides?.workspaceProvider;
 	return new Subagent({
 		id: "run-1",
 		type: "general-purpose",
@@ -440,21 +436,9 @@ function createRunnableAgent(overrides?: {
 			getRunConfig: overrides?.getRunConfig,
 			parentSession: overrides?.parentSession,
 			signal: overrides?.signal,
-			baseCwd: overrides?.baseCwd ?? "/base",
-			getWorkspaceProvider: provider ? () => provider : undefined,
 			timeoutSeconds: overrides?.timeoutSeconds,
 		},
 	});
-}
-
-/** Build a Workspace with a recorded dispose. */
-function makeWorkspace(cwd: string, disposeResult?: { resultAddendum?: string }): Workspace {
-	return { cwd, dispose: vi.fn(() => disposeResult) };
-}
-
-/** Build a WorkspaceProvider whose prepare resolves to the given workspace. */
-function makeWorkspaceProvider(workspace: Workspace | undefined): WorkspaceProvider {
-	return { prepare: vi.fn(async () => workspace) };
 }
 
 describe("Subagent.run() — happy path", () => {
@@ -490,71 +474,6 @@ describe("Subagent.run() — happy path", () => {
 		expect(agent.pendingSteerCount).toBe(1);
 		await agent.run();
 		expect(agent.pendingSteerCount).toBe(0);
-	});
-});
-
-describe("Subagent.run() — workspace provider", () => {
-	it("prepares the workspace and threads its cwd into the factory params", async () => {
-		const { factory } = createFactory();
-		const provider = makeWorkspaceProvider(makeWorkspace("/ws/dir"));
-		const agent = createRunnableAgent({ createSubagentSession: factory, workspaceProvider: provider });
-		await agent.run();
-		const params = (factory as ReturnType<typeof vi.fn>).mock.calls[0][0];
-		expect(params.cwd).toBe("/ws/dir");
-	});
-
-	it("calls prepare with the run-start context", async () => {
-		const provider = makeWorkspaceProvider(makeWorkspace("/ws/dir"));
-		const agent = createRunnableAgent({ workspaceProvider: provider, baseCwd: "/parent" });
-		await agent.run();
-		expect(provider.prepare).toHaveBeenCalledWith({
-			agentId: "run-1",
-			agentType: "general-purpose",
-			baseCwd: "/parent",
-			invocation: undefined,
-		});
-	});
-
-	it("appends the dispose resultAddendum to the result", async () => {
-		const workspace = makeWorkspace("/ws/dir", { resultAddendum: "\n\n---\nsaved to branch foo" });
-		const agent = createRunnableAgent({ workspaceProvider: makeWorkspaceProvider(workspace) });
-		await agent.run();
-		expect(agent.result).toBe("done\n\n---\nsaved to branch foo");
-		expect(workspace.dispose).toHaveBeenCalledWith({ status: "completed", description: "run test" });
-	});
-
-	it("falls back to baseCwd (cwd undefined) when prepare returns undefined", async () => {
-		const { factory } = createFactory();
-		const provider = makeWorkspaceProvider(undefined);
-		const agent = createRunnableAgent({ createSubagentSession: factory, workspaceProvider: provider });
-		await agent.run();
-		const params = (factory as ReturnType<typeof vi.fn>).mock.calls[0][0];
-		expect(params.cwd).toBeUndefined();
-		expect(agent.status).toBe("completed");
-	});
-
-	it("marks error and fires onRunFinished when prepare rejects", async () => {
-		const onRunFinished = vi.fn();
-		const provider: WorkspaceProvider = { prepare: vi.fn(() => Promise.reject(new Error("prepare failed"))) };
-		const agent = createRunnableAgent({ workspaceProvider: provider, observer: { onRunFinished } });
-		await agent.run();
-		expect(agent.status).toBe("error");
-		expect(agent.error).toBe("prepare failed");
-		expect(onRunFinished).toHaveBeenCalledOnce();
-	});
-
-	it("disposes with status error when the turn loop throws", async () => {
-		const { factory, stub } = createFactory();
-		stub.runTurnLoop.mockRejectedValue(new Error("turn loop exploded"));
-		const workspace = makeWorkspace("/ws/dir", { resultAddendum: "\nshould be discarded" });
-		const agent = createRunnableAgent({
-			createSubagentSession: factory,
-			workspaceProvider: makeWorkspaceProvider(workspace),
-		});
-		await agent.run();
-		expect(agent.status).toBe("error");
-		expect(workspace.dispose).toHaveBeenCalledWith({ status: "error", description: "run test" });
-		expect(agent.result).toBeUndefined();
 	});
 });
 

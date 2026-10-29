@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ParentSnapshot } from "../../src/lifecycle/parent-snapshot";
-import type { WorkspaceProvider } from "../../src/lifecycle/workspace";
 import type { SubagentsService } from "../../src/service/service";
 import type { ServiceRuntimeLike, SubagentManagerLike } from "../../src/service/service-adapter";
 import { SubagentsServiceAdapter, toSubagentRecord } from "../../src/service/service-adapter";
@@ -134,7 +133,6 @@ function createManagerStub() {
 		abort: vi.fn<SubagentManagerLike["abort"]>(() => true),
 		waitForAll: vi.fn<SubagentManagerLike["waitForAll"]>(async () => {}),
 		hasRunning: vi.fn<SubagentManagerLike["hasRunning"]>(() => false),
-		registerWorkspaceProvider: vi.fn<SubagentManagerLike["registerWorkspaceProvider"]>(() => () => {}),
 	};
 }
 
@@ -397,20 +395,5 @@ describe("SubagentsServiceAdapter — steer, abort, waitForAll, hasRunning", () 
 			expect(await svc.steer("a-1", "focus on tests")).toBe(true);
 			expect(mockSteer).toHaveBeenCalledWith("focus on tests");
 		});
-	});
-});
-
-describe("SubagentsServiceAdapter — registerWorkspaceProvider", () => {
-	it("delegates to manager.registerWorkspaceProvider and returns its disposer", () => {
-		const disposer = vi.fn();
-		const mgr = createManagerStub();
-		mgr.registerWorkspaceProvider.mockReturnValue(disposer);
-		const svc = new SubagentsServiceAdapter(mgr, vi.fn(), makeRuntimeStub());
-		const provider: WorkspaceProvider = { prepare: vi.fn(async () => undefined) };
-
-		const result = svc.registerWorkspaceProvider(provider);
-
-		expect(mgr.registerWorkspaceProvider).toHaveBeenCalledWith(provider);
-		expect(result).toBe(disposer);
 	});
 });

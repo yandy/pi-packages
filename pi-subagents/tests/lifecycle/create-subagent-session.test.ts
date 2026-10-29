@@ -70,20 +70,20 @@ describe("createSubagentSession — assembly", () => {
 		expect(session.bindExtensions).toHaveBeenCalledWith({});
 	});
 
-	it("passes the effective cwd and agentDir to the loader, settings, and session", async () => {
+	it("passes the parent cwd and agentDir to the loader, settings, and session", async () => {
 		await createSubagentSession(
-			{ snapshot: STUB_SNAPSHOT, type: "Explore", cwd: "/tmp/worktree" },
+			{ snapshot: STUB_SNAPSHOT, type: "Explore" },
 			createSubagentSessionDeps({ io, exec, registry: mockAgentLookup }),
 		);
 
 		expect(io.getAgentDir).toHaveBeenCalledTimes(1);
 		expect(io.createResourceLoader).toHaveBeenCalledWith(
-			expect.objectContaining({ cwd: "/tmp/worktree", agentDir: "/mock/agent-dir" }),
+			expect.objectContaining({ cwd: STUB_SNAPSHOT.cwd, agentDir: "/mock/agent-dir" }),
 		);
-		expect(io.createSettingsManager).toHaveBeenCalledWith("/tmp/worktree", "/mock/agent-dir");
-		expect(io.createSessionManager).toHaveBeenCalledWith("/tmp/worktree", "/mock/session-dir/tasks");
+		expect(io.createSettingsManager).toHaveBeenCalledWith(STUB_SNAPSHOT.cwd, "/mock/agent-dir");
+		expect(io.createSessionManager).toHaveBeenCalledWith(STUB_SNAPSHOT.cwd, "/mock/session-dir/tasks");
 		expect(io.createSession).toHaveBeenCalledWith(
-			expect.objectContaining({ cwd: "/tmp/worktree", agentDir: "/mock/agent-dir" }),
+			expect.objectContaining({ cwd: STUB_SNAPSHOT.cwd, agentDir: "/mock/agent-dir" }),
 		);
 	});
 

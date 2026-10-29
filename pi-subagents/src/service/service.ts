@@ -11,29 +11,11 @@
 
 import type { SubagentStatus } from "../lifecycle/subagent";
 import type { LifetimeUsage } from "../lifecycle/usage";
-import type {
-	Workspace,
-	WorkspaceDisposeOutcome,
-	WorkspaceDisposeResult,
-	WorkspacePrepareContext,
-	WorkspaceProvider,
-} from "../lifecycle/workspace";
 
 // SubagentStatus is defined in the lifecycle layer (single home) and re-exported
-// here for the public API surface — mirrors the LifetimeUsage / workspace pattern.
+// here for the public API surface — mirrors the LifetimeUsage pattern.
 export type { SubagentStatus } from "../lifecycle/subagent";
-// Generative extension seam (ADR 0002, Phase 16 Step 2). The provider type
-// and all four collaborator types it references are re-exported by name so
-// consumers can import them directly rather than recovering them via
-// indexed-access inference (e.g. `Parameters<WorkspaceProvider["prepare"]>[0]`).
-export type {
-	LifetimeUsage,
-	Workspace,
-	WorkspaceDisposeOutcome,
-	WorkspaceDisposeResult,
-	WorkspacePrepareContext,
-	WorkspaceProvider,
-};
+export type { LifetimeUsage };
 
 /** Serializable snapshot of an agent's state — no live session objects. */
 export interface SubagentRecord {
@@ -88,12 +70,6 @@ export interface SubagentsService {
 	/** Whether any agents are running or queued. */
 	hasRunning(): boolean;
 
-	/**
-	 * Register the single workspace provider that supplies a child's working
-	 * directory plus bracketed setup/teardown. Throws if one is already
-	 * registered. Returns a disposer that unregisters the provider.
-	 */
-	registerWorkspaceProvider(provider: WorkspaceProvider): () => void;
 }
 
 /** Event channel constants for pi.events subscriptions. */

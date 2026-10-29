@@ -126,7 +126,7 @@ describe("buildAppendSection", () => {
 
 	it("renders git branch and platform but never the working directory", () => {
 		// The builder has no cwd parameter at all — EnvInfo carries no cwd, and cwd
-		// is rendered by the harness from the child's own effectiveCwd. This test
+		// is rendered by the harness from the child's own cwd. This test
 		// guards the text; the signature guards the plumbing.
 		const section = buildAppendSection(agent(), env);
 		expect(section).toContain("Branch: main");

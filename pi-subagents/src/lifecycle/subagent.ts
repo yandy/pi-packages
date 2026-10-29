@@ -2,21 +2,18 @@
  * subagent.ts — Subagent class: identity, lifecycle status, and per-subagent behavior.
  *
  * Status/stats are delegated to the SubagentState value object; listener
- * lifecycle to RunListeners; workspace prepare/dispose to WorkspaceBracket.
+ * lifecycle to RunListeners.
  * Behavior (abort, steer buffering) lives here rather than on SubagentManager.
  */
 
 import type { Model } from "@earendil-works/pi-ai";
 import type { AgentSessionEvent, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { debugLog } from "../debug";
 import type { CreateSubagentSessionParams } from "../lifecycle/create-subagent-session";
 import type { ParentSnapshot } from "../lifecycle/parent-snapshot";
 import { RunListeners } from "../lifecycle/run-listeners";
 import type { SubagentSession, TurnLoopResult } from "../lifecycle/subagent-session";
 import { SubagentState, type SubagentStatus } from "../lifecycle/subagent-state";
 import type { LifetimeUsage } from "../lifecycle/usage";
-import type { WorkspaceProvider } from "../lifecycle/workspace";
-import { WorkspaceBracket } from "../lifecycle/workspace-bracket";
 import { NotificationState } from "../observation/notification-state";
 import { subscribeSubagentObserver } from "../observation/record-observer";
 import type { RunConfig } from "../runtime";
@@ -56,12 +53,8 @@ export interface SubagentExecution {
 	snapshot: ParentSnapshot;
 	/** Initial prompt for the turn loop. */
 	prompt: string;
-	/** Parent working directory handed to a workspace provider's prepare(). */
-	baseCwd: string;
 	observer?: SubagentLifecycleObserver;
 	getRunConfig?: () => RunConfig;
-	/** Resolves the registered workspace provider (if any) at run-start. */
-	getWorkspaceProvider?: () => WorkspaceProvider | undefined;
 	model?: Model<any>;
 	maxTurns?: number;
 	/** Hard wall-clock timeout in seconds (already normalized; undefined = unlimited). */
@@ -152,7 +145,6 @@ export class Subagent {
 
 	private readonly execution: SubagentExecution;
 	private readonly listeners = new RunListeners();
-	private readonly workspaceBracket: WorkspaceBracket;
 
 	subagentSession?: SubagentSession;
 	private _notification?: NotificationState;
@@ -239,9 +231,6 @@ export class Subagent {
 		// Execution machinery — a single mandatory collaborator
 		this.execution = init.execution;
 
-		// Per-run lifecycle collaborators
-		this.workspaceBracket = new WorkspaceBracket(this.execution.getWorkspaceProvider ?? (() => undefined));
-
 		// Notification state — created from parentSession.toolCallId if present
 		const toolCallId = init.execution.parentSession?.toolCallId;
 		if (toolCallId) {
@@ -250,9 +239,8 @@ export class Subagent {
 	}
 
 	/**
-	 * Execute the full agent lifecycle: workspace preparation, session creation
-	 * via the factory, observer wiring, the turn loop, workspace disposal, and
-	 * status transitions.
+	 * Execute the full agent lifecycle: session creation via the factory,
+	 * observer wiring, the turn loop, and status transitions.
 	 *
 	 * Execution is supplied at construction (mandatory), so run() needs no
 	 * "not configured" guards. The returned promise always resolves (errors are
@@ -264,32 +252,10 @@ export class Subagent {
 		this.listeners.wireSignal(this.execution.signal, () => this.abort());
 		this.startTimeoutGuard();
 
-		// Guard the await so the no-provider path stays synchronous, preserving
-		// the original run() timing: the factory is called in the same turn as
-		// spawn() when no workspace provider is registered.
-		let cwd: string | undefined;
-		if (this.workspaceBracket.hasProvider()) {
-			try {
-				cwd = await this.workspaceBracket.prepare({
-					agentId: this.id,
-					agentType: this.type,
-					baseCwd: this.execution.baseCwd,
-					invocation: this.invocation,
-				});
-			} catch (err) {
-				this.clearTimeoutGuard();
-				this.markError(err);
-				this.listeners.release();
-				this.execution.observer?.onRunFinished?.(this);
-				return;
-			}
-		}
-
 		try {
 			this.subagentSession = await this.execution.createSubagentSession({
 				snapshot: this.execution.snapshot,
 				type: this.type,
-				cwd,
 				parentSession: this.execution.parentSession,
 				model: this.execution.model,
 				thinkingLevel: this.execution.thinkingLevel,
@@ -513,7 +479,7 @@ export class Subagent {
 		this.listeners.release();
 	}
 
-	/** Complete a run: release listeners, dispose the workspace, status transition, notify observer. */
+	/** Complete a run: release listeners, status transition, notify observer. */
 	completeRun(result: TurnLoopResult): void {
 		this.clearTimeoutGuard();
 		this.listeners.release();
@@ -524,8 +490,7 @@ export class Subagent {
 			this._timedOut && finalStatus === "aborted"
 				? `⏱ Timed out after ${this.execution.timeoutSeconds}s — output may be truncated.\n\n`
 				: "";
-		const finalResult =
-			timeoutNote + responseText + this.workspaceBracket.dispose({ status: finalStatus, description: this.description });
+		const finalResult = timeoutNote + responseText;
 
 		if (result.aborted) this.markAborted(finalResult);
 		else if (result.steered) this.markSteered(finalResult);
@@ -539,17 +504,11 @@ export class Subagent {
 		this.subagentSession?.dispose();
 	}
 
-	/** Fail a run: mark error, release listeners, best-effort workspace dispose, notify observer. */
+	/** Fail a run: mark error, release listeners, notify observer. */
 	failRun(err: unknown): void {
 		this.clearTimeoutGuard();
 		this.markError(err);
 		this.listeners.release();
-
-		try {
-			this.workspaceBracket.dispose({ status: "error", description: this.description });
-		} catch (cleanupErr) {
-			debugLog("workspace dispose on agent error", cleanupErr);
-		}
 
 		this.execution.observer?.onRunFinished?.(this);
 	}

@@ -50,12 +50,13 @@
    因此标签放进 append 段仍然可见。
 5. 父级渲染产物里的工具清单/guidelines 是**位置相关、由工具集推导**的文本，无法用字符串
    后处理安全改写——只能在组装层解决。
-6. **cwd 可以被改变，但不是工具参数。** `subagent` 工具没有 `cwd` 参数；唯一的途径是另一个
-   扩展通过 `getSubagentsService().registerWorkspaceProvider()` 注入 `Workspace { cwd }`
-   （`src/lifecycle/workspace.ts:41-46`，单例，晚注册会抛错
-   `src/lifecycle/subagent-manager.ts:124-131`），由 `Subagent` 在 run-start 传入
-   （`src/lifecycle/subagent.ts:270-296`），最终成为 `cfg.effectiveCwd`。本仓当前没有包注册
-   provider。因此"子代理在 worktree、父级在主干"是一个**真实可发生**的组合。
+6. **cwd 那时可以被改变，但不是工具参数。** `subagent` 工具从来就没有 `cwd` 参数；当时唯一的
+   途径是另一个扩展注册 `WorkspaceProvider` 注入 `Workspace { cwd }`，最终成为
+   `cfg.effectiveCwd`。"子代理在 worktree、父级在主干"因此曾经是**真实可发生**的组合——
+   这正是本节要消除的多源 cwd。
+   （2026-10-29 后续：该 provider 接缝随后被整体删除，见
+   `2026-10-29-drop-workspace-provider-decision.md`。现在子代理永远跑在父级 cwd，
+   多源 cwd 在结构上不再可能出现。）
 
 ## 方案
 
@@ -99,7 +100,7 @@ snapshot 拿到这些规则。
 3. **`SessionConfig.systemPrompt` 改名为 `promptMode` + `promptSection`**：append 下这段文本
    是"追加段"而非完整提示词，旧名会误导读调用方。
 4. **envBlock 去掉 cwd，只保留 git branch/platform。** 两种模式下 harness 都会在提示词渲染
-   `Current working directory: <effectiveCwd>`（`dist/core/system-prompt.js:44-45`），envBlock
+   `Current working directory: <会话 cwd>`（`dist/core/system-prompt.js:44-45`），envBlock
    再写一遍是重复；而"同源却写两遍"正是本次要消除的味道。分支与平台 harness 不渲染，
    保留。
 5. **不改 `README.zh.md` 的其它漂移**，只同步本次新增的 `prompt_mode` 章节。
