@@ -60,14 +60,17 @@ export default function (pi: ExtensionAPI) {
 				Type.Object({
 					title: Type.String(),
 					status: Type.String({ enum: ["pending", "in_progress", "done"] }),
-					blockedBy: Type.Optional(Type.Array(Type.String())),
+					blockedBy: Type.Optional(Type.Array(Type.String(), { description: "Ids that must be done first." })),
 				}),
 			),
 		),
-		id: Type.Optional(Type.String()),
+		// 只给「不显而易见」的字段写描述（R2/R5）：其余靠名字与 enum 自明，再写就是重复付费。
+		id: Type.Optional(Type.String({ description: "Exact task id as shown by list/set (e.g. 3 — not a title)." })),
 		status: Type.Optional(Type.String({ enum: ["pending", "in_progress", "done"] })),
 		title: Type.Optional(Type.String()),
-		blockedBy: Type.Optional(Type.Array(Type.String())),
+		blockedBy: Type.Optional(
+			Type.Array(Type.String(), { description: "Ids that must be done first (replaces the list)." }),
+		),
 	});
 
 	pi.registerTool({
@@ -76,9 +79,10 @@ export default function (pi: ExtensionAPI) {
 		description:
 			"Track a task list for the current session.\n" +
 			'"set" replaces the whole list with items {title, status: pending|in_progress|done, blockedBy?: ids} and returns it. ' +
-			"The tool owns ids: it assigns 1..n by position and renumbers them on every set, so never pass an id.\n" +
+			"The tool owns ids: it assigns 1..n by position and renumbers them on every set, so never include an id in set's items.\n" +
 			'"update" changes one task by its exact id (status / title / blockedBy) and returns progress, the next task, and any other tasks still in flight.\n' +
-			'"list" returns the current list.',
+			'"list" returns the current list.\n' +
+			"blockedBy gates tasks: next in the ack skips them and marks (blocked by #x).",
 		promptSnippet: "Track a task list (set/update/list); keep statuses current.",
 		promptGuidelines: [
 			'Use todo to plan multi-step work: action "set" lists all tasks up front.',
