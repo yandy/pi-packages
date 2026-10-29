@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AgentTypeRegistry } from "../src/config/agent-types";
 import type { AgentConfig } from "../src/types";
-import { formatSessionTokens, getDisplayName, getPromptModeLabel } from "../src/ui/display";
+import { buildInvocationTags, formatSessionTokens, getDisplayName, getPromptModeLabel } from "../src/ui/display";
 
 const testRegistry = new AgentTypeRegistry(() => new Map());
 
@@ -95,5 +95,17 @@ describe("formatSessionTokens", () => {
 		);
 		// compactions=0 omitted
 		expect(formatSessionTokens(1234, 45, theme, 0)).toBe("1.2k token <dim>(</dim><dim>45%</dim><dim>)</dim>");
+	});
+});
+
+describe("buildInvocationTags", () => {
+	it("appends the timeout tag in seconds when set", () => {
+		const { tags } = buildInvocationTags({ timeout: 300 });
+		expect(tags).toContain("timeout: 300s");
+	});
+
+	it("omits the timeout tag when unset", () => {
+		const { tags } = buildInvocationTags({});
+		expect(tags.some((t) => t.startsWith("timeout:"))).toBe(false);
 	});
 });

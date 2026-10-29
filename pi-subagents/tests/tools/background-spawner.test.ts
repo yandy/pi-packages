@@ -34,6 +34,13 @@ describe("spawnBackground", () => {
 		expect(spawnOpts.parentSession?.toolCallId).toBe("tc-99");
 	});
 
+	it("threads effectiveTimeoutSeconds into spawn opts", () => {
+		const { manager } = createToolDeps();
+		spawnBackground(manager, makeParams({ config: makeConfig({ timeout: 300 }) }));
+		const spawnOpts = (manager.spawn as ReturnType<typeof vi.fn>).mock.calls[0][3];
+		expect(spawnOpts.timeoutSeconds).toBe(300);
+	});
+
 	it("returns text result with agent ID and description", () => {
 		const { manager } = createToolDeps();
 		const result = spawnBackground(

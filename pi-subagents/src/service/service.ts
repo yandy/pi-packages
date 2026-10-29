@@ -57,6 +57,8 @@ export interface SpawnOptions {
 	description?: string;
 	model?: string;
 	maxTurns?: number;
+	/** Hard wall-clock timeout in seconds (0/undefined = unlimited). Normalize before passing, or pass an already-normalized value. */
+	timeoutSeconds?: number;
 	thinkingLevel?: string;
 	inheritContext?: boolean;
 	foreground?: boolean;

@@ -131,6 +131,7 @@ export function buildInvocationTags(invocation: AgentInvocation | undefined): { 
 	if (invocation.inheritContext) tags.push("inherit context");
 	if (invocation.runInBackground) tags.push("background");
 	if (invocation.maxTurns != null) tags.push(`max turns: ${invocation.maxTurns}`);
+	if (invocation.timeout != null) tags.push(`timeout: ${invocation.timeout}s`);
 	return { modelName: invocation.modelName, tags };
 }
 
