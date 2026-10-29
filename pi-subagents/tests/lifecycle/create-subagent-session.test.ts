@@ -95,7 +95,7 @@ describe("createSubagentSession — assembly", () => {
 
 		const loaderOpts = io.createResourceLoader.mock.calls[0][0];
 		expect(loaderOpts.noContextFiles).toBe(true);
-		expect(loaderOpts.systemPromptOverride?.()).toBe("assembled system prompt");
+		expect(loaderOpts.systemPromptOverride?.()).toBe("replace prompt");
 		expect(loaderOpts.appendSystemPromptOverride?.([])).toEqual([]);
 	});
 

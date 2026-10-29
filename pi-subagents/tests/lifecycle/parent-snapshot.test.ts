@@ -28,9 +28,9 @@ describe("buildParentSnapshot", () => {
 		expect(snapshot.cwd).toBe("/custom/path");
 	});
 
-	it("captures systemPrompt from ctx.getSystemPrompt()", () => {
+	it("does not capture the parent system prompt", () => {
 		const snapshot = buildParentSnapshot(makeCtx({ getSystemPrompt: () => "my prompt" }));
-		expect(snapshot.systemPrompt).toBe("my prompt");
+		expect(snapshot).not.toHaveProperty("systemPrompt");
 	});
 
 	it("captures model from ctx", () => {

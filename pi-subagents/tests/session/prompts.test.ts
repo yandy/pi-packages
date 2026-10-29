@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AgentTypeRegistry } from "../../src/config/agent-types";
 import type { EnvInfo } from "../../src/session/env";
-import { buildAgentPrompt, buildAppendSection } from "../../src/session/prompts";
+import { buildAppendSection, buildReplacePrompt } from "../../src/session/prompts";
 import type { AgentConfig } from "../../src/types";
 
 const testRegistry = new AgentTypeRegistry(() => new Map());
@@ -33,28 +33,39 @@ function agent(overrides: Partial<AgentConfig> = {}): AgentConfig {
 	};
 }
 
-describe("buildAgentPrompt", () => {
-	it("replace mode includes parent prompt as base (no bridge/wrapper)", () => {
+describe("buildReplacePrompt", () => {
+	it("never reuses the caller's prompt (clean room)", () => {
 		const config = agent({ name: "standalone", systemPrompt: "You are a standalone agent.", promptMode: "replace" });
-		const prompt = buildAgentPrompt(config, "/workspace", env, "PARENT parent prompt content");
+		const prompt = buildReplacePrompt(config, env);
 		expect(prompt).toContain("You are a standalone agent.");
-		expect(prompt).toContain("PARENT parent prompt content");
+		expect(prompt).toContain("general-purpose coding agent");
 		expect(prompt).not.toContain("<sub_agent_context>");
 		expect(prompt).not.toContain("<agent_instructions>");
 	});
 
-	it("replace mode falls back to genericBase when no parent supplied", () => {
-		const config = agent({ promptMode: "replace", systemPrompt: "Custom standalone instructions." });
-		const prompt = buildAgentPrompt(config, "/workspace", env);
-		expect(prompt).toContain("general-purpose coding agent");
-		expect(prompt).not.toContain("You are a pi coding agent sub-agent");
-		expect(prompt).toContain("Custom standalone instructions.");
+	it("renders git branch and platform but never the working directory", () => {
+		const prompt = buildReplacePrompt(agent({ promptMode: "replace" }), env);
+		expect(prompt).toContain("Branch: main");
+		expect(prompt).toContain("Platform: darwin");
+		expect(prompt).not.toContain("Working directory:");
 	});
 
-	it("replace mode orders: identity → active_agent → env → config.systemPrompt", () => {
+	it("renders 'Not a git repository' without a branch line", () => {
+		const prompt = buildReplacePrompt(agent({ promptMode: "replace" }), envNoGit);
+		expect(prompt).toContain("Not a git repository");
+		expect(prompt).not.toContain("Branch:");
+	});
+
+	it("keeps a valid prompt when the body is empty", () => {
+		const prompt = buildReplacePrompt(agent({ promptMode: "replace", systemPrompt: "" }), env);
+		expect(prompt).toContain("general-purpose coding agent");
+		expect(prompt).toContain('<active_agent name="test-agent"/>');
+	});
+
+	it("orders: genericBase → active_agent → env → body", () => {
 		const config = agent({ name: "ordered", promptMode: "replace", systemPrompt: "Final custom instructions." });
-		const prompt = buildAgentPrompt(config, "/workspace", env, "IDENTITY parent content");
-		const idxIdentity = prompt.indexOf("IDENTITY parent content");
+		const prompt = buildReplacePrompt(config, env);
+		const idxIdentity = prompt.indexOf("general-purpose coding agent");
 		const idxTag = prompt.indexOf('<active_agent name="ordered"/>');
 		const idxEnv = prompt.indexOf("# Environment");
 		const idxCustom = prompt.indexOf("Final custom instructions.");
@@ -124,7 +135,7 @@ describe("active_agent tag injection", () => {
 	});
 
 	it("replace prompt places the tag before the env block", () => {
-		const prompt = buildAgentPrompt(agent({ name: "agent-a", promptMode: "replace" }), "/workspace", env);
+		const prompt = buildReplacePrompt(agent({ name: "agent-a", promptMode: "replace" }), env);
 		const tagIdx = prompt.indexOf('<active_agent name="agent-a"/>');
 		const envIdx = prompt.indexOf("# Environment");
 		expect(tagIdx).toBeGreaterThan(0);

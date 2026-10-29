@@ -13,7 +13,7 @@ const mockResolveAgentConfig = vi.fn(
 	}),
 );
 const mockGetToolNamesForType = vi.fn((): string[] => ["read"]);
-const mockBuildAgentPrompt: Mock<AssemblerIO["buildAgentPrompt"]> = vi.fn(() => "assembled system prompt");
+const mockBuildReplacePrompt: Mock<AssemblerIO["buildReplacePrompt"]> = vi.fn(() => "replace prompt");
 const mockBuildAppendSection: Mock<AssemblerIO["buildAppendSection"]> = vi.fn(() => "append section");
 
 /** Mock registry injected into assembleSessionConfig instead of module-level free functions. */
@@ -33,13 +33,12 @@ const mockRegistry = {
 
 const ctx = {
 	cwd: "/tmp",
-	parentSystemPrompt: "parent prompt",
 	modelRegistry: mockRegistry,
 };
 
 /** IO stubs injected into assembleSessionConfig in place of module-level imports. */
 const mockIO = {
-	buildAgentPrompt: mockBuildAgentPrompt,
+	buildReplacePrompt: mockBuildReplacePrompt,
 	buildAppendSection: mockBuildAppendSection,
 };
 
@@ -51,7 +50,7 @@ function exploreConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
 beforeEach(() => {
 	mockResolveAgentConfig.mockClear();
 	mockGetToolNamesForType.mockClear();
-	mockBuildAgentPrompt.mockClear();
+	mockBuildReplacePrompt.mockClear();
 	mockBuildAppendSection.mockClear();
 	mockRegistry.find.mockReset();
 	mockRegistry.getAvailable.mockClear();
@@ -63,7 +62,7 @@ describe("assembleSessionConfig — default agent shape", () => {
 
 		expect(result.effectiveCwd).toBe("/tmp");
 		expect(result.promptMode).toBe("replace");
-		expect(result.promptSection).toBe("assembled system prompt");
+		expect(result.promptSection).toBe("replace prompt");
 		expect(result.toolNames).toEqual(["read"]);
 		expect(result.model).toBeUndefined();
 		expect(result.thinkingLevel).toBeUndefined();
@@ -75,8 +74,8 @@ describe("assembleSessionConfig — default agent shape", () => {
 		expect(result.effectiveCwd).toBe("/tmp/worktree");
 	});
 
-	it("replace agents route to buildAgentPrompt and report mode + section", () => {
-		mockBuildAgentPrompt.mockImplementationOnce((config) => `replace:${config.name}`);
+	it("replace agents route to buildReplacePrompt and report mode + section", () => {
+		mockBuildReplacePrompt.mockImplementationOnce((config) => `replace:${config.name}`);
 
 		const result = assembleSessionConfig("Explore", ctx, {}, mockEnv, mockAgentLookup, mockIO);
 
@@ -93,7 +92,7 @@ describe("assembleSessionConfig — default agent shape", () => {
 
 		expect(result.promptMode).toBe("append");
 		expect(result.promptSection).toBe("append:Explore");
-		expect(mockBuildAgentPrompt).not.toHaveBeenCalled();
+		expect(mockBuildReplacePrompt).not.toHaveBeenCalled();
 	});
 });
 

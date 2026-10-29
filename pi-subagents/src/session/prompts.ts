@@ -1,57 +1,44 @@
 /**
- * prompts.ts — System prompt builder for agents.
+ * prompts.ts — System prompt assembly for agents.
+ *
+ * Two shapes, one per `prompt_mode`:
+ *
+ * - "append": the harness renders the base system prompt for the child's OWN
+ *   tool set (tool list, guidelines, skills, AGENTS.md, SYSTEM.md, date/cwd)
+ *   and this module only contributes a section appended to it.
+ * - "replace": this module owns the whole prompt. The caller's rendered prompt
+ *   is deliberately NOT reused — it carries the caller's tool list and
+ *   guidelines, its cwd/date, and project context the child suppresses.
+ *
+ * Both shapes emit an `<active_agent name="..."/>` tag so downstream extensions
+ * can resolve per-agent policy by parsing the child's system prompt.
  */
 
 import type { EnvInfo } from "../session/env";
 import type { AgentPromptConfig } from "../types";
 
-/**
- * Build the system prompt for an agent from its config.
- *
- * Both modes place the shared/stable parent prompt (or `genericBase` when no
- * parent is available) first so the LLM's KV cache can reuse the inherited
- * prefix across all subagent invocations.
- *
- * - "replace" mode: parent/genericBase + active_agent tag + env header +
- *   config.systemPrompt.  No `<sub_agent_context>` bridge and no
- *   `<agent_instructions>` wrapper — the custom prompt has full control and
- *   the final say.
- * - "append" mode: parent/genericBase + sub-agent context bridge +
- *   active_agent tag + env header + config.systemPrompt (wrapped in
- *   `<agent_instructions>` when non-empty).
- * - "append" with empty systemPrompt: pure parent clone.
- *
- * Both modes include an `<active_agent name="${config.name}"/>` tag so
- * downstream extensions can resolve per-agent policy inside the child session
- * by parsing the system prompt.
- * The tag follows the cacheable parent prefix in both modes.
- *
- * @param parentSystemPrompt  The parent agent's effective system prompt.
- */
-export function buildAgentPrompt(
-	config: AgentPromptConfig,
-	cwd: string,
-	env: EnvInfo,
-	parentSystemPrompt?: string,
-): string {
-	const activeAgentTag = `<active_agent name="${config.name}"/>\n\n`;
+/** Base persona for replace-mode agents. */
+const genericBase = `# Role
+You are a general-purpose coding agent for complex, multi-step tasks.
+You have full access to read, write, edit files, and execute commands.
+Do what has been asked; nothing more, nothing less.`;
 
-	const envBlock = `# Environment
-Working directory: ${cwd}
-${env.isGitRepo ? `Git repository: yes\nBranch: ${env.branch}` : "Not a git repository"}
-Platform: ${env.platform}`;
-
-	const identity = parentSystemPrompt ?? genericBase;
-
-	// Only "replace" reaches this builder; Task 2 removes the parent-prompt prefix.
-	return `${identity}\n\n${activeAgentTag}${envBlock}\n\n${config.systemPrompt}`;
-}
-
-/** Environment header shared by both modes. cwd/date are rendered by the harness. */
+/** Environment header shared by both modes. cwd and date are rendered by the harness. */
 function environmentBlock(env: EnvInfo): string {
 	return `# Environment
 ${env.isGitRepo ? `Git repository: yes\nBranch: ${env.branch}` : "Not a git repository"}
 Platform: ${env.platform}`;
+}
+
+/**
+ * Build the complete system prompt for a "replace" agent:
+ * genericBase → active_agent tag → env header → the agent body verbatim.
+ *
+ * No `<sub_agent_context>` bridge and no `<agent_instructions>` wrapper: the
+ * body is the agent's own top-level spec, not an addendum to someone else's.
+ */
+export function buildReplacePrompt(config: AgentPromptConfig, env: EnvInfo): string {
+	return `${genericBase}\n\n<active_agent name="${config.name}"/>\n\n${environmentBlock(env)}\n\n${config.systemPrompt}`;
 }
 
 /**
@@ -76,9 +63,3 @@ You are operating as a sub-agent invoked to handle a specific task.
 
 	return `\n\n${bridge}\n\n<active_agent name="${config.name}"/>\n\n${environmentBlock(env)}${customSection}`;
 }
-
-/** Fallback base prompt when parent system prompt is unavailable (both modes). */
-const genericBase = `# Role
-You are a general-purpose coding agent for complex, multi-step tasks.
-You have full access to read, write, edit files, and execute commands.
-Do what has been asked; nothing more, nothing less.`;

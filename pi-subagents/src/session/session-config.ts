@@ -25,7 +25,7 @@ import type { AgentPromptConfig, SubagentType, ThinkingLevel } from "../types";
  * at the edge (`create-subagent-session.ts`) or stubs in tests.
  */
 export interface AssemblerIO {
-	buildAgentPrompt: (config: AgentPromptConfig, cwd: string, env: EnvInfo, parentPrompt?: string) => string;
+	buildReplacePrompt: (config: AgentPromptConfig, env: EnvInfo) => string;
 	buildAppendSection: (config: AgentPromptConfig, env: EnvInfo) => string;
 }
 
@@ -41,8 +41,6 @@ export interface AssemblerIO {
 export interface AssemblerContext {
 	/** Parent working directory (overridable via options.cwd). */
 	cwd: string;
-	/** Parent's effective system prompt (for append-mode agents). */
-	parentSystemPrompt: string;
 	/** Parent's current model instance (fallback when agent config has no model). */
 	parentModel?: unknown;
 	/** Model registry for resolving config.model strings. */
@@ -156,7 +154,7 @@ export function assembleSessionConfig(
 	// contributes a section on top of the harness-rendered base prompt.
 	const promptSection =
 		agentConfig.promptMode === "replace"
-			? io.buildAgentPrompt(agentConfig, effectiveCwd, env, ctx.parentSystemPrompt)
+			? io.buildReplacePrompt(agentConfig, env)
 			: io.buildAppendSection(agentConfig, env);
 
 	// Model resolution: explicit option > config model string > parent model

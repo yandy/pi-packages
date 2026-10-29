@@ -27,7 +27,7 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
  *
  * To customize assemblerIO methods after creation, configure the returned Mock:
  *   const io = createSubagentSessionIO();
- *   io.assemblerIO.buildAgentPrompt.mockReturnValue("custom");
+ *   io.assemblerIO.buildReplacePrompt.mockReturnValue("custom");
  */
 export function createSubagentSessionIO() {
 	return {
@@ -43,7 +43,7 @@ export function createSubagentSessionIO() {
 		createSettingsManager: vi.fn().mockReturnValue({}),
 		createSession: vi.fn(),
 		assemblerIO: {
-			buildAgentPrompt: vi.fn((..._args: unknown[]): string => "assembled system prompt"),
+			buildReplacePrompt: vi.fn((..._args: unknown[]): string => "replace prompt"),
 			buildAppendSection: vi.fn((..._args: unknown[]): string => "append section"),
 		},
 	};
