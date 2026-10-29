@@ -9,6 +9,7 @@ import type { ParentSnapshot } from "../lifecycle/parent-snapshot";
 import type { WorkspaceProvider } from "../lifecycle/workspace";
 import type { SpawnOptions, SubagentRecord, SubagentsService } from "../service/service";
 import type { ModelRegistry } from "../session/model-resolver";
+import { normalizeTimeoutSeconds } from "../lifecycle/turn-limits";
 import { resolveModelName } from "../tools/spawn-config";
 import type { SessionContext, Subagent, ThinkingLevel, AgentInvocation } from "../types";
 
@@ -76,7 +77,9 @@ export class SubagentsServiceAdapter implements SubagentsService {
 			description,
 			model,
 			maxTurns: options?.maxTurns,
-			timeoutSeconds: options?.timeoutSeconds,
+			// Normalize at the boundary: the documented 0/undefined = unlimited contract
+			// must hold for cross-extension callers that skip the tool path.
+			timeoutSeconds: normalizeTimeoutSeconds(options?.timeoutSeconds),
 			thinkingLevel: options?.thinkingLevel,
 			inheritContext: options?.inheritContext,
 			bypassQueue: options?.bypassQueue,

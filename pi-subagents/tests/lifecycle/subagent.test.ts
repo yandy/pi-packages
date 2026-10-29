@@ -675,6 +675,56 @@ describe("Subagent.run() — timeout guard", () => {
 		expect(stub.dispose).toHaveBeenCalled();
 	});
 
+	it("does not stamp a timeout note when the timer fires while a manual abort is unwinding", async () => {
+		vi.useFakeTimers();
+		const stub = createSubagentSessionStub();
+		const slowUnwind = () =>
+			new Promise<TurnLoopResult>((resolve) => {
+				// Unwinding takes longer than the remaining budget: the kill lands
+				// well before the deadline, the loop only settles 6s later.
+				setTimeout(() => resolve({ responseText: "partial", aborted: true, steered: false }), 6000);
+			});
+		stub.runTurnLoop.mockImplementation(
+			(_prompt: string, opts: { signal?: AbortSignal }) =>
+				opts.signal?.aborted
+					? slowUnwind()
+					: new Promise<TurnLoopResult>((resolve) => {
+							opts.signal?.addEventListener("abort", () => resolve(slowUnwind()), { once: true });
+						}),
+		);
+		const agent = createRunnableAgent({
+			createSubagentSession: async () => toSubagentSession(stub),
+			timeoutSeconds: 5,
+		});
+		const done = agent.run();
+		agent.abort();
+		await vi.advanceTimersByTimeAsync(10_000);
+		await done;
+		expect(agent.status).toBe("stopped");
+		expect(agent.result).not.toContain("Timed out");
+	});
+
+	it("never arms a timer for a non-positive timeout", async () => {
+		vi.useFakeTimers();
+		const stub = createSubagentSessionStub();
+		// A run that takes well past t=0: a timer armed at 0 would kill it instantly.
+		stub.runTurnLoop.mockImplementation(
+			() =>
+				new Promise<TurnLoopResult>((resolve) => {
+					setTimeout(() => resolve({ responseText: "finished", aborted: false, steered: false }), 30_000);
+				}),
+		);
+		const agent = createRunnableAgent({
+			createSubagentSession: async () => toSubagentSession(stub),
+			timeoutSeconds: 0,
+		});
+		const done = agent.run();
+		await vi.advanceTimersByTimeAsync(60_000);
+		await done;
+		expect(agent.abortController.signal.aborted).toBe(false);
+		expect(agent.status).toBe("completed");
+	});
+
 	it("manual abort before the deadline wins; timer never fires afterwards", async () => {
 		vi.useFakeTimers();
 		const stub = createSubagentSessionStub();

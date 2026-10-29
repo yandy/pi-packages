@@ -119,9 +119,7 @@ export function resolveSpawnConfig(
 	const modelName = resolveModelName(model ?? modelInfo.parentModel);
 
 	const effectiveMaxTurns = normalizeMaxTurns(resolvedConfig.maxTurns ?? settings.defaultMaxTurns);
-	const effectiveTimeoutSeconds = normalizeTimeoutSeconds(
-		resolvedConfig.timeout ?? settings.defaultTimeoutSeconds,
-	);
+	const effectiveTimeoutSeconds = normalizeTimeoutSeconds(resolvedConfig.timeout ?? settings.defaultTimeoutSeconds);
 
 	const agentInvocation: AgentInvocation = {
 		modelName,

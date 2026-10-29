@@ -457,6 +457,9 @@ export class Subagent {
 	 */
 	abort(): boolean {
 		if (this.status !== "running") return false;
+		// A stopped run has no use for a deadline: without this, a timer firing
+		// during the abort unwind would stamp a timeout note on a user-stopped run.
+		this.clearTimeoutGuard();
 		this.abortController.abort();
 		this.markStopped();
 		return true;
@@ -464,14 +467,16 @@ export class Subagent {
 
 	/** Start the wall-clock timeout guard (no-op when no timeout is configured). */
 	private startTimeoutGuard(): void {
-		if (this.execution.timeoutSeconds == null) return;
+		// Guard on > 0 so an unnormalized 0/negative/NaN can never arm a timer.
+		const seconds = Number(this.execution.timeoutSeconds);
+		if (!(seconds > 0)) return;
 		this._timeoutHandle = setTimeout(() => {
 			// Fire the controller without markStopped(): the abort flows through
 			// forwardAbortSignal into session.abort(), and the turn loop settles
 			// through the aborted path (status "aborted", not "stopped").
 			this._timedOut = true;
 			this.abortController.abort();
-		}, this.execution.timeoutSeconds * 1000);
+		}, seconds * 1000);
 		this._timeoutHandle.unref();
 	}
 
@@ -515,9 +520,10 @@ export class Subagent {
 
 		const finalStatus: SubagentStatus = result.aborted ? "aborted" : result.steered ? "steered" : "completed";
 		const responseText = result.responseText;
-		const timeoutNote = this._timedOut
-			? `⏱ Timed out after ${this.execution.timeoutSeconds}s — output may be truncated.\n\n`
-			: "";
+		const timeoutNote =
+			this._timedOut && finalStatus === "aborted"
+				? `⏱ Timed out after ${this.execution.timeoutSeconds}s — output may be truncated.\n\n`
+				: "";
 		const finalResult =
 			timeoutNote + responseText + this.workspaceBracket.dispose({ status: finalStatus, description: this.description });
 

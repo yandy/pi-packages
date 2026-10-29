@@ -231,6 +231,18 @@ describe("SubagentsServiceAdapter — spawn", () => {
 		expect(() => svc.spawn("Explore", "task", { model: "bad-model" })).toThrow(/Model not found/);
 	});
 
+	it("normalizes timeoutSeconds at the boundary so 0 means unlimited", () => {
+		const mgr = createManagerStub();
+		const svc = new SubagentsServiceAdapter(mgr, () => ({ id: "m", provider: "p", name: "M" }), makeRuntimeStub());
+		svc.spawn("Explore", "task", { timeoutSeconds: 0 });
+		expect(mgr.spawn).toHaveBeenCalledWith(
+			expect.anything(),
+			"Explore",
+			"task",
+			expect.objectContaining({ timeoutSeconds: undefined }),
+		);
+	});
+
 	it("passes timeoutSeconds through to manager.spawn", () => {
 		const mgr = createManagerStub();
 		const svc = new SubagentsServiceAdapter(mgr, () => ({ id: "m", provider: "p", name: "M" }), makeRuntimeStub());
