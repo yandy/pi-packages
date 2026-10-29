@@ -120,7 +120,7 @@ function buildParameters(actions: readonly MemoryAction[]) {
 		description: Type.Optional(
 			Type.String({
 				description:
-					"One self-contained line describing this memory. Future sessions pick memories from descriptions alone, so it must make sense without the body. Defaults to the first sentence of content.",
+					"One self-contained line; future sessions select memories from it. Defaults to the first sentence of content.",
 			}),
 		),
 		type: Type.Optional(StringEnum(TYPE_VALUES, { description: "Memory type. Defaults to feedback." })),
@@ -169,8 +169,7 @@ export function createMemoryTool(deps: MemoryToolDeps, options: MemoryToolOption
 		label: "Memory",
 		description:
 			"Read/write persistent project memory. One memory = one file, and MEMORY.md holds exactly one index line per memory. action 'add' creates a memory, or overwrites the one whose name matches exactly; 'replace' rewrites an existing memory's content/description/type; 'remove' deletes it; 'list' shows every memory; 'search' queries memory entries (scope='memory', default) or past sessions (scope='sessions'). A memory's description is the only text a future session sees when deciding relevance, so it must be self-contained.",
-		promptSnippet:
-			"Read/write persistent project memory (one memory per file). Make every description self-contained — it is the only relevance signal future sessions get.",
+		promptSnippet: "Read/write persistent project memory (one memory per file)",
 		promptGuidelines: [
 			"Use memory to persist project facts, user preferences, and lessons learned across sessions. Each memory lives in its own file and occupies exactly one line of the MEMORY.md index.",
 			"Always pass a description with action 'add' and 'replace'. It must be self-contained and specific (what, where, which value), because future sessions select memories from descriptions alone. Bad: \"Debugging tips\". Good: \"staging SSH listens on 2222, not 22\".",
