@@ -25,7 +25,7 @@
 - 不改 `inherit_context`（对话分叉）语义。
 - 不改 `tools:` 白名单与递归守卫（移除 subagent 系列工具）。
 - 不改 skills 注入行为（replace 仍由 harness 追加 skills 索引）。
-- 不修 `README.zh.md` 已有的其它漂移（缺 `timeout` 参数行与 `max_turns`/`timeout` 段落）。
+- ~~不修 `README.zh.md` 已有的其它漂移~~（2026-10-29 修订：改为**修**。逐节核对后发现中文版因 #209 只改英文而缺 5 处：示例缺 `timeout: 300`、缺 `max_turns`/`timeout` 优先级段落、`subagent` 表缺 `timeout` 行、`/subagents:settings` 描述缺超时、`持久化设置` 整节缺表格与优先级段落。同时修正两语皆错的 `Explore` 模型行（`haiku` → `deepseek/deepseek-v4-flash`，不可用时回退父级）。EN+ZH 必须同步是本仓约定。）
 - 不做任何 KV cache 优化；本次只是**移除**一个不成立的 cache 理由。
 
 ## 反目标

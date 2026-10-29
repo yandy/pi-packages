@@ -44,7 +44,7 @@ Foreground agents block until complete. Background agents return an ID immediate
 | Type | Tools | Model | Description |
 |------|-------|-------|-------------|
 | `general-purpose` | all | inherit | Harness-rendered prompt for the child's own tool set — same conventions, plus the sub-agent bridge |
-| `Explore` | read, bash, grep, find, ls | haiku (fallback: inherit) | Fast codebase exploration (read-only) |
+| `Explore` | read, bash, grep, find, ls | `deepseek/deepseek-v4-flash` (falls back to the parent model when unavailable) | Fast codebase exploration (read-only) |
 
 ## Custom Agents
 

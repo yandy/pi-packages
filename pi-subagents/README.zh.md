@@ -44,7 +44,7 @@ subagent({
 | 类型 | 工具 | 模型 | 描述 |
 |------|------|------|------|
 | `general-purpose` | 全部 | 继承父级 | harness 按子代理自身工具集渲染的提示词——沿用相同约定，外加子代理桥接段 |
-| `Explore` | read, bash, grep, find, ls | haiku（回退：继承） | 快速代码库探索（只读） |
+| `Explore` | read, bash, grep, find, ls | `deepseek/deepseek-v4-flash`（不可用时回退父级模型） | 快速代码库探索（只读） |
 
 ## 自定义代理
 
@@ -57,12 +57,15 @@ tools: read, grep, find, bash
 model: anthropic/claude-opus-4-6
 thinking: high
 max_turns: 30
+timeout: 300
 ---
 
 你是一名安全审计员。审查代码漏洞...
 ```
 
 代理从 `.pi/agents/<name>.md`（项目级）和 `~/.pi/agent/agents/<name>.md`（全局）发现。项目级覆盖全局。
+
+`max_turns` 与 `timeout`（墙钟秒数，`0` = 无限制）会锁定该代理类型的上限：frontmatter 中的值优先于每次调用传入的参数。
 
 ### 提示词模式
 
@@ -91,6 +94,7 @@ max_turns: 30
 | `model` | string | 否 | 模型覆盖（`provider/modelId` 或模糊名称） |
 | `thinking` | string | 否 | off / minimal / low / medium / high / xhigh |
 | `max_turns` | number | 否 | 最大代理轮次（默认无限制） |
+| `timeout` | number | 否 | 墙钟硬性时限（秒）；到点即终止代理并返回已产出的部分输出（默认无限制） |
 | `run_in_background` | boolean | 否 | 后台运行不阻塞 |
 | `resume` | string | 否 | 恢复之前会话的代理 ID |
 | `inherit_context` | boolean | 否 | 将父对话分叉给子代理 |
@@ -147,7 +151,7 @@ max_turns: 30
 
 | 命令 | 描述 |
 |------|------|
-| `/subagents:settings` | 配置并发数、轮次限制 |
+| `/subagents:settings` | 配置并发数、轮次限制、超时 |
 | `/subagents:sessions` | 查看子代理的会话记录 |
 
 会话查看器以只读方式复用 Pi 自身的逐条消息组件渲染会话记录，并实时跟随运行中的代理。
@@ -167,6 +171,15 @@ max_turns: 30
 ## 持久化设置
 
 通过 `/subagents:settings` 设置的参数持久化到 `<cwd>/.pi/subagents.json`（项目级），也可在 `~/.pi/agent/subagents.json` 中设置全局默认值。同一批文件也保存 [`modelTiers`](#模型分层) 映射；保存其他设置时会保留它。
+
+| 设置 | 含义 |
+|------|------|
+| `maxConcurrent` | 允许同时运行的后台代理数 |
+| `defaultMaxTurns` | 默认最大代理轮次（`0` = 无限制） |
+| `defaultTimeoutSeconds` | 默认墙钟硬性超时秒数（`0` = 无限制，最大 `86400`） |
+| `graceTurns` | 收到"收尾"转向后仍允许的轮次 |
+
+`defaultMaxTurns` / `defaultTimeoutSeconds` 位于优先级链最末端：代理 frontmatter 优先于每次调用参数，每次调用参数又优先于这两个默认值。
 
 ## 事件
 
