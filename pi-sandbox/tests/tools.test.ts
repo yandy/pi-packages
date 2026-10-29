@@ -123,8 +123,10 @@ describe("createSandboxTools schemas", () => {
 		// 跨工具规则只留一句：不提权时省略或传 JSON null，且非拒绝重试的提权会被忽略。
 		// （2026-10-02 二次修订：负向子句 `— never the string "null"` 移除，只留正向表述。）
 		for (const tool of [bash, write, edit]) {
-			expect(tool.description).toContain("Unless retrying a denial, omit these fields or send JSON null.");
-			expect(tool.description).toContain("workspace-write already allows the workspace and /tmp");
+			expect(tool.description).toContain("omit (or JSON null) unless retrying a denial");
+			// tmp 根：win32 只有 os.tmpdir()，没有 /tmp（fence.ts 的 defaultTmpRoots）。
+			expect(tool.description).toContain("the OS temp dir");
+			expect(tool.description).not.toContain("/tmp");
 			// 旧版把这套协议写进每个 description（×3 重复）：不许回潮。
 			expect(tool.description).not.toContain("Writes outside the permitted roots are denied");
 			expect(tool.description).not.toContain("Pass justification:");
