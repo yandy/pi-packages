@@ -1,7 +1,7 @@
 # pi-packages 工具提示词整改设计（三通道定位 · 去重 · 预算闸门）
 
 日期：2026-10-30
-状态：**已定稿，待实施**（D1/D2/D2a/D3 已于 2026-10-30 全部拍板；W1–W3 均可开工）
+状态：**已实现**（D1/D2/D2a/D3 已于 2026-10-30 拍板；W1–W4 全部落地，实测结果见 §11）
 范围：`pi-coding-tools`、`pi-sandbox`、`pi-container-sandbox`、`pi-subagents`、`pi-memory`、`pi-ask-user`、`pi-web-tools`、`pi-todo`、`pi-vision-tools`（`pi-superpowers` 不注册工具，仅注入 skills，不在范围内）
 落点：上述包的 tool 定义文件 + 各包 `tests/` + `docs/guides/pi-package-spec.md`
 
@@ -333,11 +333,46 @@ pi.registerTool({ ...localRead, async execute(id, params, signal, onUpdate, ctx)
 |---|---|---|---|---|---|---|---|
 | pi-coding-tools | 5 | 1008 | 1927 | 330 | 2134 | 5399 | 4700 |
 | pi-sandbox | 3 | 1175 | 1885 | 167 | 1551 | 4778 | 4800 |
-| pi-subagents | 3 | 1827 | 2198 | 224 | 0 | 4249 | 3300 |
+| pi-subagents | 3 | 1827 | 2198 | 224 | 0 | 4249 | 3600 |
 | pi-memory | 1 | 522 | 1003 | 152 | 1137 | 2814 | 2750 |
 | pi-ask-user | 1 | 256 | 1846 | 107 | 390 | 2599 | 1650 |
 | pi-web-tools | 2 | 532 | 1290 | 250 | 304 | 2376 | 2150 |
-| pi-todo | 1 | 437 | 527 | 59 | 422 | 1445 | 1700 |
+| pi-todo | 1 | 437 | 527 | 59 | 422 | 1445 | 1800 |
 | pi-vision-tools | 1 | 357 | 542 | 82 | 295 | 1276 | 1150 |
-| **合计** | 17 | 6114 | 11218 | 1371 | 6233 | **24936** | **21519** |
+| **合计** | 17 | 6114 | 11218 | 1371 | 6233 | **24936** | **21631**（实测） |
 | pi-container-sandbox（单独装配，W1 修复后） | 4 | 999 | 1580 | 0→**185** | 0→**594** | 2579→**3358** | 3500 |
+
+## 11. 实施结果（2026-10-30）
+
+全部 9 个包的提示词已按 §6 整改，`npm run typecheck` / `npm run lint` 通过，逐包测试通过（`pi-container-sandbox` 仅剩本机既有的 1 条环境性失败：无 podman/docker）。
+
+### 11.1 实测（sandbox 装配，每请求字符）
+
+| 包 | desc | params | snippet | guidelines(去重) | 合计 | 改前 | Δ |
+|---|---|---|---|---|---|---|---|
+| pi-sandbox | 1097 | 1885 | 167 | 1551 | 4700 | 4778 | -78 |
+| pi-coding-tools | 900 | 2145 | 330 | 1064 | 4439 | 5399 | -960 |
+| pi-subagents | 463 | 2240 | 165 | 577 | 3445 | 4249 | -804 |
+| pi-memory | 522 | 926 | 58 | 1137 | 2643 | 2814 | -171 |
+| pi-web-tools | 532 | 1119 | 123 | 304 | 2078 | 2376 | -298 |
+| pi-todo | 532 | 712 | 58 | 422 | 1724 | 1445 | **+279** |
+| pi-ask-user | 72 | 1042 | 71 | 376 | 1561 | 2599 | -1038 |
+| pi-vision-tools | 106 | 576 | 64 | 295 | 1041 | 1276 | -235 |
+| **合计** | | | | | **21631** | **24936** | **-3305（-13.3%）** |
+| pi-container-sandbox（单独装配） | 999 | 1580 | 185 | 591 | 3355 | 2579 | **+776**（修缺陷） |
+
+### 11.2 与计划的偏差（均已确认）
+
+| 项 | 计划 | 实际 | 原因 |
+|---|---|---|---|
+| pi-ask-user | -982 | **-1038** | D2 方案 B 直接删 schema 键（-804）比压缩描述（-470）更彻底；合并两条规则又省 16 |
+| pi-todo | +180 | **+279** | 初稿给 7 个参数都写了描述（+672，超预算），按 R2 收敛为只写 `id` 与两处 `blockedBy` |
+| pi-subagents 预算 | 3300 | **3600** | 5 条迁移后的纪律实际 577 字符（估 411）；且 agent 类型清单随安装的 agent 变化，预算需留余量（测试用固定 registry 实测 3528，真实 registry 3445） |
+| pi-coding-tools | -849 | **-960** | 删除的重复条目比估算多；`lang` 兜底说明 +109×2 已计入 |
+| 总账 | 21519 | **21631** | 上述几项相互抵消 |
+
+### 11.3 新增的回归闸门
+
+- `scripts/prompt-hygiene.ts` + 每包 `tests/prompt-meta.test.ts`：snippet 长度/前缀/标点/祈使句、单条 guideline 长度与逐字重复、包内三通道合计预算（guidelines 按宿主去重口径计）。
+- `pi-container-sandbox/tests/prompt-metadata.test.ts`：钉住 read/write/edit/bash 的 `promptSnippet` 与内置纪律存在，防止再次退回 `create*Tool`。
+- `pi-todo`、`pi-subagents` 的既有测试同步改为钉住新结构（纪律在 guidelines 而非 description；并行语义；`thinking` 枚举）。
