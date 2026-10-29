@@ -215,7 +215,7 @@ describe("renderFailed", () => {
 
 	it("shows aborted message with warning color for aborted status", () => {
 		const details = makeDetails({ status: "aborted" });
-		expect(renderFailed(details, theme)).toContain("[warning:  \u23BF  Aborted (max turns exceeded)]");
+		expect(renderFailed(details, theme)).toContain("[warning:  \u23BF  Aborted (hard limit exceeded)]");
 	});
 });
 

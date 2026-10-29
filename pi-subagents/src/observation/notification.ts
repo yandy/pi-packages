@@ -32,7 +32,7 @@ export function getStatusLabel(status: string, error?: string): string {
 		case "error":
 			return `Error: ${error ?? "unknown"}`;
 		case "aborted":
-			return "Aborted (max turns exceeded)";
+			return "Aborted (hard limit exceeded)";
 		case "steered":
 			return "Wrapped up (turn limit)";
 		case "stopped":
