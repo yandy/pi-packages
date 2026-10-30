@@ -111,5 +111,5 @@ Guidelines list gains one line: `Use timeout (seconds) as a hard safety net for 
 
 None from the behavior contract. Two implementation notes:
 
-- The tool's "Guidelines:" text lives in the tool `description`; `promptGuidelines` stays reserved for the user-configured model-tier mapping. The new timeout guidance line therefore appears in the description, alongside the other guidelines.
+- The tool's "Guidelines:" text lives in the tool `description`; `promptGuidelines` stays reserved for the user-configured model-tier mapping. The new timeout guidance line therefore appears in the description, alongside the other guidelines. (2026-10-30 后续：三通道布局已被 `docs/superpowers/specs/2026-10-30-tool-prompt-audit-and-remediation-design.md` 整改；同日又改为 tier 映射表进 `model` 参数描述、guidelines 只留一条选档纪律——guidelines 在自定义 system prompt 下会被整体丢弃，映射不能只押在那里。)
 - No new lifecycle status was added; a timed-out run ends `"aborted"` and is distinguished by the `⏱ Timed out after Ns` result prefix.

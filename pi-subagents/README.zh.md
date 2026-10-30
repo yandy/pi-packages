@@ -120,9 +120,9 @@ timeout: 300
 
 ## 模型分层
 
-除了直接写模型 ID，还可以在 `subagents.json` 中把能力档位映射到真实模型。映射会生成
-`subagent` 工具的 prompt guidelines，告诉代理每个档位应通过 `model` 参数传哪个模型——
-不存在 `model_tier` 工具参数。
+除了直接写模型 ID，还可以在 `subagents.json` 中把能力档位映射到真实模型。映射表会列在
+`subagent` 工具的 `model` 参数描述里，同时有一条 prompt guideline 提醒代理在任务需要
+特定成本/能力档位时选用对应配置模型——不存在 `model_tier` 工具参数。
 
 | 档位 | 定位 |
 |------|------|
@@ -144,8 +144,8 @@ timeout: 300
 ```
 
 代理会把映射值复制到 `model`，因此与普通 `model` 值走同一套解析：`provider/modelId` 与
-模糊名称（如 `"haiku"`）都可以。未配置的档位不会出现在提示里——不会有其他模型被静默
-顶替。若代理类型的 frontmatter 固定了 `model`，该模型始终优先。
+模糊名称（如 `"haiku"`）都可以。未配置的档位不会出现在参数描述与提示里——不会有其他
+模型被静默顶替。若代理类型的 frontmatter 固定了 `model`，该模型始终优先。
 
 ## 命令
 
