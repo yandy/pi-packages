@@ -291,7 +291,7 @@ function withPlaceholderStripping<T>(base: ((args: unknown) => T) | undefined): 
  * （denial hint / 校验错误 / 批准后标记）。
  */
 const SANDBOX_NOTE =
-	"Sandbox: confined to the current mode; workspace-write already allows the workspace and /tmp. Unless retrying a denial, omit these fields or send JSON null.";
+	"Sandbox: escalation only — omit (or JSON null) unless retrying a denial; workspace-write covers the workspace and the OS temp dir.";
 
 function escalationDescription(base: string): string {
 	return [base, "", SANDBOX_NOTE].join("\n");

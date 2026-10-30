@@ -11,7 +11,7 @@
 - 选择后可切换添加额外上下文（可选注释）
 - 上下文展示支持
 - 可配置的显示模式：`overlay`（模态，默认）或 `inline`（直接内联渲染）
-- 运行时浮层切换：当提示窗口打开时，按下配置的叠加层切换键（默认 `alt+o`，可每次调用配置或通过环境变量设置）临时隐藏/显示弹窗，以便阅读之前的 Agent 输出
+- 运行时浮层切换：当提示窗口打开时，按下配置的叠加层切换键（默认 `alt+o`，可通过环境变量或 `ask-user.json` 配置）临时隐藏/显示弹窗，以便阅读之前的 Agent 输出
 - Pi-TUI 对齐的按键绑定和编辑器行为
 - 工具调用和结果的自定义 TUI 渲染
 - 通过 `promptSnippet` 和 `promptGuidelines` 集成系统提示词
@@ -59,10 +59,9 @@ pi install npm:@yandy0725/pi-ask-user
 | `allowMultiple` | `boolean?` | `false` | 启用多选模式 |
 | `allowFreeform` | `boolean?` | `true` | 添加"自定义输入"自由文本选项 |
 | `allowComment` | `boolean?` | `true` | 在自定义 UI 中提供可切换的额外上下文选项（`ctrl+g` 或切换行），并在回退对话框中收集可选注释 |
-| `displayMode` | `"overlay" \| "inline"?` | 环境变量或 `"overlay"` | 控制自定义 UI 渲染：`overlay` 显示居中模态框（当前行为），`inline` 不显示叠加框架渲染 |
-| `overlayToggleKey` | `string?` | 环境变量或 `"alt+o"` | 隐藏/显示叠加弹窗的快捷键（仅 overlay 模式）。Pi-TUI 键位格式，例如 `"alt+o"`、`"ctrl+shift+h"`。传入 `"off"` 禁用。 |
-| `commentToggleKey` | `string?` | 环境变量或 `"ctrl+g"` | 当 `allowComment: true` 时切换可选注释/额外上下文行的快捷键。传入 `"off"` 禁用。 |
 | `timeout` | `number?` | — | N 毫秒后自动关闭，超时返回 `null` |
+
+外观类选项（`displayMode`、`overlayToggleKey`、`commentToggleKey`）**不是**模型可见参数：它们是用户偏好，由环境变量与 `ask-user.json` 解析（见[显示模式](#显示模式)与[快捷键](#快捷键)）。内部 `AskParams` 类型仍接受它们（供 SDK/直接调用），但 LLM 的工具调用无法设置。
 
 ## 通过环境变量设置个人偏好
 
@@ -78,11 +77,12 @@ export PI_ASK_USER_COMMENT_TOGGLE_KEY=alt+c
 
 生效优先级：
 
-1. 每次调用时的 `displayMode` 参数（如提供）
-2. `PI_ASK_USER_DISPLAY_MODE`（如设置为 `"overlay"` 或 `"inline"`）
-3. 项目配置文件 `.pi/ask-user.json`（如存在）中的 `displayMode`
-4. 用户配置文件 `~/.pi/agent/ask-user.json`（如存在）中的 `displayMode`
-5. 回退默认值：`"overlay"`
+1. `PI_ASK_USER_DISPLAY_MODE`（如设置为 `"overlay"` 或 `"inline"`）
+2. 项目配置文件 `.pi/ask-user.json`（如存在）中的 `displayMode`
+3. 用户配置文件 `~/.pi/agent/ask-user.json`（如存在）中的 `displayMode`
+4. 回退默认值：`"overlay"`
+
+（SDK/直接调用传入的 `displayMode` 仍会覆盖以上所有层级，但该字段已不在模型可见的 tool schema 里。）
 
 无法识别的值会被静默忽略并回退到 `"overlay"`。
 
@@ -94,7 +94,7 @@ export PI_ASK_USER_COMMENT_TOGGLE_KEY=alt+c
 - 用户级（全局）：`~/.pi/agent/ask-user.json`
 - 项目级：`.pi/ask-user.json`
 
-项目级文件中的字段会覆盖用户级文件中同名字段。配置优先级：调用参数 > 环境变量 > 项目配置 > 用户配置 > 默认值。
+项目级文件中的字段会覆盖用户级文件中同名字段。配置优先级：环境变量 > 项目配置 > 用户配置 > 默认值。
 
 **示例 `~/.pi/agent/ask-user.json`：**
 
@@ -112,10 +112,9 @@ export PI_ASK_USER_COMMENT_TOGGLE_KEY=alt+c
 
 `overlayToggleKey` 和 `commentToggleKey` 的生效优先级：
 
-1. 每次调用时的参数（如提供）
-2. 对应的环境变量（`PI_ASK_USER_OVERLAY_TOGGLE_KEY` / `PI_ASK_USER_COMMENT_TOGGLE_KEY`）
-3. 项目配置文件 `.pi/ask-user.json`（如存在）
-4. 用户配置文件 `~/.pi/agent/ask-user.json`（如存在）
+1. 对应的环境变量（`PI_ASK_USER_OVERLAY_TOGGLE_KEY` / `PI_ASK_USER_COMMENT_TOGGLE_KEY`）
+2. 项目配置文件 `.pi/ask-user.json`（如存在）
+3. 用户配置文件 `~/.pi/agent/ask-user.json`（如存在）
 5. 内置默认值：`alt+o` 和 `ctrl+g`
 
 传入 `"off"`、`"none"` 或 `"disabled"`（任意级别）可以完全禁用快捷键。无效的键位格式会被静默丢弃，使用下一个来源。键位格式遵循 Pi-TUI 的 [`KeyId`](https://github.com/earendil-works/pi-mono/blob/main/packages/tui/src/keys.ts) 格式：`[mod+]...key`，修饰键为 `ctrl`、`shift`、`alt`、`super`，可任意顺序用 `+` 连接（如 `ctrl+g`、`alt+shift+x`、`escape`、`tab`）。
@@ -132,7 +131,7 @@ export PI_ASK_USER_COMMENT_TOGGLE_KEY=alt+c
 | `esc` | 清除搜索过滤、退出自由文本/注释模式、或取消提示。 |
 | `↑` / `↓`、`ctrl+k` / `ctrl+j` | 导航选项。`ctrl+k` / `ctrl+j`（vim 风格）可在可搜索提示中打字时不干扰过滤输入。 |
 
-如果你始终不希望看到叠加层，请每次调用时设置 `displayMode: "inline"`，或全局设置 `PI_ASK_USER_DISPLAY_MODE=inline`。
+如果你始终不希望看到叠加层，请全局设置 `PI_ASK_USER_DISPLAY_MODE=inline`，或在 `ask-user.json` 中设置 `"displayMode": "inline"`。
 
 ## 结果详情
 

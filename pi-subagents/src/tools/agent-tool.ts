@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-base-to-string, @typescript-eslint/restrict-template-expressions -- Pi SDK types are not fully exported; see upstream Pi SDK for type improvements */
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { defineTool } from "@earendil-works/pi-coding-agent";
+import { StringEnum } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { AgentTypeRegistry } from "../config/agent-types";
@@ -53,6 +54,21 @@ function buildTierGuideline(tiers: ModelTierMap | undefined): string | undefined
 	if (configured.length === 0) return undefined;
 	return `User-configured subagent model tiers — when a task needs one of these capability levels, pass the mapped model via the model parameter: ${configured.join(", ")}.`;
 }
+
+/**
+ * 行为纪律（进 system prompt 的 Guidelines，不进 description）。
+ *
+ * 之前这些写在 `description` 里，同时与参数描述重复（`run_in_background` / `resume` / `model` /
+ * `thinking` / `timeout` / `inherit_context` 各说两遍，共 516 字符），而 description 是每工具
+ * 各一份、不参与去重。现在只留“何时用 / 怎么配合”这一类，参数细节全交给参数描述。
+ */
+const PROMPT_GUIDELINES: readonly string[] = [
+	"Use subagent for work that needs its own context or a different model; finish inline work yourself.",
+	"For parallel work set run_in_background: true on each agent — sibling foreground calls run concurrently anyway, but they block the current turn and bypass the concurrency limit.",
+	"Give each subagent a self-contained prompt; it cannot see the parent conversation unless inherit_context is true.",
+	"Subagent results come back as text — summarize them for the user.",
+	"Use steer_subagent to redirect a running background agent, and get_subagent_result with wait: true to block for one result.",
+];
 
 // ---- Class ----
 
@@ -131,27 +147,12 @@ export class AgentTool {
 		return defineTool({
 			name: "subagent" as const,
 			label: "Subagent",
-			promptSnippet: "subagent: Launch a specialized agent for complex, multi-step tasks.",
-			...(tierGuideline ? { promptGuidelines: [tierGuideline] } : {}),
-			description: `Launch a new agent to handle complex, multi-step tasks autonomously.
-
-The subagent tool launches specialized agents that autonomously handle complex tasks. Each agent type has specific capabilities and tools available to it.
+			promptSnippet: "Launch a specialized agent for complex, multi-step tasks",
+			promptGuidelines: tierGuideline ? [...PROMPT_GUIDELINES, tierGuideline] : [...PROMPT_GUIDELINES],
+			description: `Launch a subagent that works autonomously on a task.
 
 Available agent types:
-${typeListText}
-
-Guidelines:
-- For parallel work, use run_in_background: true on each agent. Foreground calls run sequentially — only one executes at a time.
-- Provide clear, detailed prompts so the agent can work autonomously.
-- Subagent results are returned as text — summarize them for the user.
-- Use run_in_background for work you don't need immediately. You will be notified when it completes.
-- Use resume with an agent ID to continue a previous agent's work.
-- Use steer_subagent to send mid-run messages to a running background agent.
-- Use model to specify a different model (as "provider/modelId", or fuzzy e.g. "haiku", "sonnet").
-- Use thinking to control extended thinking level.
-- Use timeout (seconds) as a hard safety net for tasks that might run away — the agent is killed at the deadline and output may be truncated.
-- Use inherit_context if the agent needs the parent conversation history.
-`,
+${typeListText}`,
 			parameters: Type.Object({
 				prompt: Type.String({
 					description: "The task for the agent to perform.",
@@ -169,8 +170,8 @@ Guidelines:
 					}),
 				),
 				thinking: Type.Optional(
-					Type.String({
-						description: "Thinking level: off, minimal, low, medium, high, xhigh. Overrides agent default.",
+					StringEnum(["off", "minimal", "low", "medium", "high", "xhigh"] as const, {
+						description: "Thinking level override. Default: inherit the agent type's setting.",
 					}),
 				),
 				max_turns: Type.Optional(

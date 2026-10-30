@@ -92,7 +92,7 @@ export function buildTypeListText(registry: TypeListRegistry, agentDir: string):
 		...defaultDescs,
 		...(customDescs.length > 0 ? ["", "Custom agents:", ...customDescs] : []),
 		"",
-		`Custom agents can be defined in .pi/agents/<name>.md (project) or ${agentDir}/agents/<name>.md (global) — they are picked up automatically. Project-level agents override global ones. Creating a .md file with the same name as a default agent overrides it.`,
+		`Custom agents live in .pi/agents/<name>.md (project) or ${agentDir}/agents/<name>.md (global); a file with a default agent's name overrides it.`,
 	].join("\n");
 }
 

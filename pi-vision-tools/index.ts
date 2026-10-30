@@ -43,11 +43,8 @@ export default function (pi: ExtensionAPI) {
 		name: TOOL_NAME,
 		label: "Describe Image",
 		description:
-			"Analyze an image by delegating to a vision-capable model. Lets non-multimodal models understand images. " +
-			"`image_path` is a file path, data: URL, or raw base64 (>100 chars). " +
-			"`compress` (default true) downscales/strips to speed up; set false for pixel-perfect needs. " +
-			"`thinkLevel` controls the vision model's thinking effort (off/minimal/low/medium/high/xhigh).",
-		promptSnippet: "describe_image: delegate image analysis to a vision model (non-multimodal models).",
+			"Analyze an image by delegating to a vision-capable model, so callers without vision can understand images.",
+		promptSnippet: "Analyze an image via a vision model (for callers without vision)",
 		promptGuidelines: [
 			"Use describe_image when you need to understand an image you cannot see (the calling model lacks vision).",
 			"Set compress:false when you need pixel-perfect accuracy (reading coordinates, tiny UI elements).",
@@ -63,7 +60,7 @@ export default function (pi: ExtensionAPI) {
 			),
 			thinkLevel: Type.Optional(
 				StringEnum(THINK_LEVELS, {
-					description: "Vision model thinking effort. Default off.",
+					description: "Vision model thinking effort. Default: the /vision config default, else off.",
 				}),
 			),
 		}),

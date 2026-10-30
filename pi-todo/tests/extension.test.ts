@@ -52,6 +52,12 @@ describe("prompt", () => {
 		expect(def.description).not.toContain("Exactly one");
 		// T3-B 之后这句话已经不成立，不能留在提示词里
 		expect(def.description).not.toContain("NOT re-shown");
+		// spec 2026-10-30：set 的 items 没有 id 字段（旧文案“never pass an id” 与下一句
+		// “update 用精确 id” 相互矛盾），且 blockedBy 的语义原本在任何通道都没解释。
+		expect(def.description).toContain("never include an id in set's items");
+		expect(def.description).toContain("blockedBy");
+		expect(def.parameters.properties.id.description).toContain("Exact task id");
+		expect(def.parameters.properties.items.items.properties.blockedBy.description).toContain("done first");
 		expect(def.description.length).toBeLessThan(700);
 	});
 
