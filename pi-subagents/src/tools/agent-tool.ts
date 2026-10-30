@@ -46,14 +46,34 @@ export type AgentToolSettings = {
 	readonly modelTiers?: ModelTierMap;
 };
 
-/** LLM-facing guidance to map a capability tier to the model to pass via the `model` parameter, or undefined when none configured. */
-function buildTierGuideline(tiers: ModelTierMap | undefined): string | undefined {
+/**
+ * `model` 参数描述的事实部分；配置了 tiers 时再追加档位表。
+ *
+ * 档位表是 `model` 的**允许值**（R1「允许值」+ R2「参数级细节放参数」），所以落在这里；
+ * 之前整段（表 + 纪律）写在 `promptGuidelines` 里有两个问题：自定义 system prompt 时
+ * guidelines 被整体丢弃（用户配的 tier 随之静默失效，README 承诺的映射无处可查），
+ * 且把配置数据混进了行为纪律列表。纪律侧现在只留 TIER_GUIDELINE。
+ */
+const MODEL_PARAM_DESCRIPTION =
+	'Optional model override. Accepts "provider/modelId" or fuzzy name (e.g. "haiku", "sonnet"). Omit to use the agent type\'s default.';
+
+/** Tier → model table for the `model` parameter description, or undefined when none configured. */
+function buildTierTable(tiers: ModelTierMap | undefined): string | undefined {
 	const configured = MODEL_TIERS.filter((tier) => tiers?.[tier]).map(
 		(tier) => `${tier} → ${tiers?.[tier]} (${MODEL_TIER_INTENTS[tier]})`,
 	);
 	if (configured.length === 0) return undefined;
-	return `User-configured subagent model tiers — when a task needs one of these capability levels, pass the mapped model via the model parameter: ${configured.join(", ")}.`;
+	return configured.join(", ");
 }
+
+/**
+ * 纪律侧只点名「按配置档位选模型」，映射表本身在 `model` 参数描述里。
+ *
+ * 这条同时覆盖了 guidelines 通道的可用性风险：即便自定义 system prompt 让 guidelines 消失，
+ * 参数描述里的档位表仍在，模型仍能查到映射（只是少了这条主动提示）。
+ */
+const TIER_GUIDELINE =
+	"When a subagent task needs a specific cost or capability level, use the matching configured tier's model rather than the agent type's default.";
 
 /**
  * 行为纪律（进 system prompt 的 Guidelines，不进 description）。
@@ -141,14 +161,14 @@ export class AgentTool {
 	toToolDefinition() {
 		const typeListText = this.typeListText;
 		const availableTypesText = this.availableTypesText;
-		const tierGuideline = buildTierGuideline(this.settings.modelTiers);
+		const tierTable = buildTierTable(this.settings.modelTiers);
 		const registry = this.registry;
 
 		return defineTool({
 			name: "subagent" as const,
 			label: "Subagent",
 			promptSnippet: "Launch a specialized agent for complex, multi-step tasks",
-			promptGuidelines: tierGuideline ? [...PROMPT_GUIDELINES, tierGuideline] : [...PROMPT_GUIDELINES],
+			promptGuidelines: tierTable ? [...PROMPT_GUIDELINES, TIER_GUIDELINE] : [...PROMPT_GUIDELINES],
 			description: `Launch a subagent that works autonomously on a task.
 
 Available agent types:
@@ -165,8 +185,9 @@ ${typeListText}`,
 				}),
 				model: Type.Optional(
 					Type.String({
-						description:
-							'Optional model override. Accepts "provider/modelId" or fuzzy name (e.g. "haiku", "sonnet"). Omit to use the agent type\'s default.',
+						description: tierTable
+							? `${MODEL_PARAM_DESCRIPTION} Configured tiers: ${tierTable}.`
+							: MODEL_PARAM_DESCRIPTION,
 					}),
 				),
 				thinking: Type.Optional(

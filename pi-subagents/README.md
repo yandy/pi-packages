@@ -121,9 +121,10 @@ Send a steering message to a running agent.
 ## Model Tiers
 
 Instead of hardcoding model IDs, you can map capability tiers to concrete models in
-`subagents.json`. The mapping feeds the `subagent` tool's prompt guidelines, which tell the
-agent which model to pass via the `model` parameter — there is no `model_tier` tool
-parameter.
+`subagents.json`. The mapping is listed in the `subagent` tool's `model` parameter
+description, alongside a prompt guideline telling the agent to pick the configured
+tier when a task calls for a specific cost or capability level — there is no
+`model_tier` tool parameter.
 
 | Tier | Intent |
 |------|--------|
@@ -147,8 +148,8 @@ override one tier without restating the others:
 
 Because the agent copies the mapped value into `model`, it goes through the same resolver as
 any other model value: `provider/modelId` and fuzzy names (e.g. `"haiku"`) both work. Tiers
-without a mapping are omitted from the guidelines — nothing is silently substituted for
-them. If an agent type pins `model` in its frontmatter, that model always wins.
+without a mapping are omitted from the description and its guideline — nothing is silently
+substituted for them. If an agent type pins `model` in its frontmatter, that model always wins.
 
 ## Commands
 

@@ -58,7 +58,7 @@ describe("AgentTool — model tier guidance", () => {
 		expect(def.description).not.toContain("model_tier");
 	});
 
-	it("renders configured tier → model mappings in promptGuidelines", () => {
+	it("renders configured tier → model mappings in the model parameter description", () => {
 		const deps = createToolDeps({
 			settings: {
 				defaultMaxTurns: undefined,
@@ -68,19 +68,40 @@ describe("AgentTool — model tier guidance", () => {
 			},
 		});
 		const def = makeTool(deps).toToolDefinition();
-		const guidelines = (def.promptGuidelines ?? []).join("\n");
-		expect(guidelines).toContain("fast → deepseek-flash");
-		expect(guidelines).toContain("advanced → qwen3.8-max");
-		expect(guidelines).toContain("model parameter");
-		expect(guidelines).not.toContain("standard →");
+		const props = (def.parameters as { properties: Record<string, { description?: string }> }).properties;
+		const modelDescription = props.model?.description ?? "";
+		// 映射表是 model 的允许值（R1/R2），随 tools[] 发送：自定义 system prompt 下也不丢。
+		expect(modelDescription).toContain("fast → deepseek-flash");
+		expect(modelDescription).toContain("advanced → qwen3.8-max");
+		expect(modelDescription).not.toContain("standard →");
+		// 不再重复一遍“如何用 model 参数”。
+		expect(modelDescription).not.toContain("model parameter");
 	});
 
-	it("omits the tier guideline when no tiers are configured", () => {
+	it("keeps only the tier-selection rule in promptGuidelines, without the mapping table", () => {
+		const deps = createToolDeps({
+			settings: {
+				defaultMaxTurns: undefined,
+				defaultTimeoutSeconds: undefined,
+				maxConcurrent: 4,
+				modelTiers: { fast: "deepseek-flash", advanced: "qwen3.8-max" },
+			},
+		});
+		const guidelines = (makeTool(deps).toToolDefinition().promptGuidelines ?? []).join("\n");
+		expect(guidelines).toContain("capability level");
+		// R4/R5：纪律不承载配置数据，也不复制参数描述的映射。
+		expect(guidelines).not.toContain("fast → deepseek-flash");
+		expect(guidelines).not.toContain("cheapest, fastest");
+	});
+
+	it("omits the tier mapping and guideline when no tiers are configured", () => {
 		const def = makeTool(createToolDeps()).toToolDefinition();
 		// 行为纪律现在恒在 promptGuidelines 里（spec 2026-10-30 D1），只要求不出现 tier 映射。
 		const guidelines = (def.promptGuidelines ?? []).join("\n");
-		expect(guidelines).not.toContain("subagent model tiers");
+		expect(guidelines).not.toContain("capability level");
 		expect(guidelines).toContain("Use subagent for work that needs its own context");
+		const props = (def.parameters as { properties: Record<string, { description?: string }> }).properties;
+		expect(props.model?.description).not.toContain("Configured tiers");
 	});
 });
 

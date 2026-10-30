@@ -3,8 +3,9 @@
  *
  * A tier is a user-facing class of model (`fast` | `standard` | `advanced`).
  * Users map each tier to a real model in `subagents.json` (`modelTiers`); the
- * mapping is surfaced to the agent through the `subagent` tool's prompt
- * guidelines so it can pass the configured model via the `model` parameter.
+ * mapping is surfaced to the agent in the `subagent` tool's `model` parameter
+ * description (a fact about that parameter's allowed values), plus one prompt
+ * guideline telling it to pick the matching tier when a task warrants it.
  * There is no `model_tier` tool parameter. See README for tier semantics.
  */
 
