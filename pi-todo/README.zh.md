@@ -11,6 +11,7 @@
 - **依赖关系**：可选的 `blockedBy` 数组，含自依赖和循环检测
 - **紧凑组件**悬于编辑器上方：`○` pending · `◉` in_progress · `✓` done · `🔒` blocked；清单变长时自动开窗（锚定在飞任务），并常驻一行进度
 - **分支安全的持久化**：状态从会话分支重建，因此 `/fork` 和 `/resume` 会保留正确的待办列表
+- **模型安静了就催一次**：看板还有未完成任务、且一段时间没有 `todo` 调用时，会在下一次请求里注入一条短提醒（仅本次请求，不写进会话）
 
 ## 安装
 
@@ -56,6 +57,23 @@ todo(action: "set" | "update" | "list", items?, id?, status?, title?, blockedBy?
 - `set` 是整表替换并重新编号：若有任务在飞，返回里会附一行 `⚠ ids renumbered` 点名它们，因为你手里的 id 刚刚失效
 
 全部任务完成后，组件会自动隐藏。
+
+## 模型安静了会催一次
+
+光靠提示词约束不住看板的新鲜度：在 40 个确实拿到了这些 guidelines 的真实会话里，30% 的会话 `set` 之后再没更新过，43% 的会话设了 3 条以上的计划却只做了不到三分之一数量的更新，76% 的 `done` 在标记前根本没有对应的 `in_progress` —— 模型是在最后一次性补账，而不是边做边记。
+
+所以扩展会主动提醒：它统计距离上一次 `todo` 调用过了多少个 assistant 轮，当看板还有未完成任务且轮数到阈值时，往下一次模型请求末尾追加一条短提醒：
+
+```
+<todo-reminder>The pi-todo board has not been updated for 6 turns. Still in_progress: #2 修 CI. When one of them is finished, call todo action "update" with its id and status "done" right away — do not batch completions to the end of the run.</todo-reminder>
+```
+
+几个值得知道的细节：
+
+- **只作用于本次请求**：提醒只加在发出去的请求里，从不落盘。因此它不会在长跑里累积成多份互相矛盾的「当下状态」，会话文件也保持干净（`/tree`、resume 不受影响）。
+- **有节流**：第一次在 5 轮后提醒，之后每次等待翻倍（5 → 10 → 20 → 40）。长任务里只有几次提醒，不是每轮一次。
+- **会自己闭嘴**：任何一次 `todo` 调用（包括报错的那次）都会重置计时，所以按时维护看板的模型不会被打断。
+- **无事可催时不出声**：没有看板、全部完成、或剩下的任务全被依赖挡住，都不会产生提醒。
 
 ## Widget 与全量视图
 

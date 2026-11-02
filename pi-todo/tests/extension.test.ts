@@ -169,15 +169,63 @@ describe("parallel dispatch", () => {
 });
 
 describe("context injection", () => {
-	// T3-B（before_agent_start 注入 <todo-state>）已于 0.2.0 发布前删除：价值未被证明，
-	// 且每轮一份会累积出「冒充当下、实为过去」的矛盾快照。见 spec §决策变更。
-	// 这条断言是回归门：重新加回注入前先读完那段理由。
+	// T3-B（before_agent_start 注入 <todo-state> 快照）已于 0.2.0 发布前删除：价值未被证明，
+	// 且每轮一份会累积出「冒充当下、实为过去」的矛盾快照。见 spec「决策变更三」。
+	// 这条断言仍是回归门：快照式注入不得复活，提醒只能走 context（请求级、不落 session）。
 	it("registers no before_agent_start handler", () => {
 		expect(handlers["before_agent_start"]).toBeUndefined();
 	});
 
-	it("does not write custom_message entries", () => {
-		expect(Object.keys(handlers).sort()).toEqual(["session_start", "session_tree"]);
+	it("counts turns on turn_end but injects only through context", () => {
+		expect(Object.keys(handlers).sort()).toEqual(["context", "session_start", "session_tree", "turn_end"]);
+	});
+});
+
+describe("stale-board reminder", () => {
+	const LAST = (n: number) => Array.from({ length: n }, (_, i) => ({ role: "user", content: `m${i}` }));
+	// 模型的每个 assistant 轮 = 一次 turn_end。注意要真的跑 n 轮，不是「每个 handler 跑一次」。
+	const turns = async (n: number) => {
+		for (let i = 0; i < n; i++) {
+			await Promise.all(handlers.turn_end.map((h) => h({ type: "turn_end", turnIndex: i }, ctx)));
+		}
+	};
+	// context 每次 provider 请求都跑一遍（含同一轮内的多次请求），所以注入是请求级的。
+	const request = async (messages: any = LAST(2)) => handlers.context[0]({ type: "context", messages }, ctx);
+
+	it("says nothing while the clock has not run out", async () => {
+		await run({ action: "set", items: [{ title: "Ship it", status: "in_progress" }] });
+		await turns(3);
+		expect(await request()).toBeUndefined();
+	});
+
+	it("injects one user-role reminder naming the stale in-progress task", async () => {
+		await run({ action: "set", items: [{ title: "Ship it", status: "in_progress" }] });
+		await turns(5);
+		const result: any = await request();
+		expect(result.messages).toHaveLength(3);
+		const injected = result.messages.at(-1);
+		expect(injected.role).toBe("user");
+		expect(injected.content[0].text).toContain("#1 Ship it");
+		expect(injected.content[0].text).toContain("5 turns");
+		// 不能改动已有消息（宿主会在请求后还原上下文，改原数组等于污染 transcript）
+		expect(result.messages[0]).toEqual({ role: "user", content: "m0" });
+	});
+
+	it("goes quiet again as soon as the model touches the board", async () => {
+		await run({ action: "set", items: [{ title: "Ship it", status: "in_progress" }] });
+		await turns(5);
+		expect(await request()).toBeDefined();
+		await run({ action: "update", id: "1", status: "done" }, "c2");
+		await turns(4);
+		expect(await request()).toBeUndefined();
+	});
+
+	it("never reminds on an empty or fully-done board", async () => {
+		await turns(30);
+		expect(await request()).toBeUndefined();
+		await run({ action: "set", items: [{ title: "Ship it", status: "done" }] });
+		await turns(30);
+		expect(await request()).toBeUndefined();
 	});
 });
 
