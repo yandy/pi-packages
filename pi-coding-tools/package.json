@@ -38,7 +38,7 @@
 	},
 	"dependencies": {
 		"@ast-grep/cli": "^0.51.0",
-		"vscode-jsonrpc": "^9.0.3"
+		"vscode-jsonrpc": "^10.0.0"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.6.2",
