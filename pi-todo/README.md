@@ -11,6 +11,7 @@ A minimal pi package that adds a single `todo` tool with an editor-overhead widg
 - **Dependencies**: optional `blockedBy` array, with self-dependency and cycle detection
 - **Compact widget** above the editor: `○` pending · `◉` in_progress · `✓` done · `🔒` blocked — windowed around the in-flight task when the board grows, with an always-visible progress line
 - **Branch-safe persistence**: state is reconstructed from the session branch, so `/fork` and `/resume` keep the right todos
+- **Reminder when the model goes quiet**: if the board has open work and no `todo` call has happened for a while, one short reminder is injected into the next request (request-local, never written to the session)
 
 ## Install
 
@@ -56,6 +57,23 @@ Parallel dispatch is supported:
 - `set` replaces the board and renumbers ids; if items were in flight it appends a `⚠ ids renumbered` line naming them, because your in-hand references just broke
 
 The widget hides automatically when every task is done.
+
+## Reminder when the model goes quiet
+
+Prompt rules alone do not keep a board current: in 40 real sessions with these guidelines delivered, 30% never updated after `set`, 43% set a plan of 3+ tasks and then made fewer than a third as many updates, and 76% of `done` marks arrived with no `in_progress` for that task first — the board was written up at the end instead of kept live.
+
+So the extension also nudges. It counts assistant turns since the last `todo` call and, once the board has open work and the count reaches the threshold, appends one short reminder to the next model request:
+
+```
+<todo-reminder>The pi-todo board has not been updated for 6 turns. Still in_progress: #2 修 CI. When one of them is finished, call todo action "update" with its id and status "done" right away — do not batch completions to the end of the run.</todo-reminder>
+```
+
+Details worth knowing:
+
+- **Request-local**: the reminder is added to the outgoing request only. It is never persisted, so it cannot pile up into several stale copies that contradict each other, and the session stays clean for `/tree` and resume.
+- **Rate-limited**: the first reminder comes after 5 turns, and the wait doubles after each one (5 → 10 → 20 → 40). A long run gets a handful of reminders, not one per turn.
+- **Self-cancelling**: any `todo` call — including one that fails — resets the clock, so a model that keeps the board current is never interrupted.
+- **Silent when there is nothing to do**: no board, an all-done board, and a board whose remaining tasks are all blocked produce no reminder at all.
 
 ## Widget and full view
 

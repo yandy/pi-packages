@@ -14,6 +14,7 @@ import {
 	updateTodo,
 } from "./src/todo-store.js";
 import { TodoView } from "./src/todo-view.js";
+import { formatReminder, ReminderScheduler } from "./src/reminder.js";
 import { formatProgress, renderWidgetLines, TodoWidget } from "./src/widget.js";
 
 // 编辑器上方 widget 的 slot id（值就是本包的标识）。
@@ -27,6 +28,8 @@ interface TodoDetails {
 
 export default function (pi: ExtensionAPI) {
 	let todos: TodoItem[] = [];
+	// 看板漂移的计时器：模型跑到「模型自己都不记得还有张板」时才提醒一次（指数退避）。
+	const nagger = new ReminderScheduler();
 
 	const refreshWidget = (ctx: ExtensionContext) => {
 		if (!ctx.hasUI) return;
@@ -52,6 +55,24 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => reconstructState(ctx));
 	pi.on("session_tree", async (_event, ctx) => reconstructState(ctx));
+
+	// 计数只在这里累加：turn_end 在 0.80.2 是纯通知（返回 void），不能注入任何东西。
+	pi.on("turn_end", async () => {
+		nagger.onTurn();
+	});
+
+	// 注入点必须用 context：它每次 provider 请求都会跑，且结果只作用于本次请求（不落 session），
+	// 所以不会像 T3-B 的 before_agent_start 快照那样在长 run 里累积出多份互相矛盾的「当下状态」。
+	pi.on("context", async (event) => {
+		const staleTurns = nagger.takeDue();
+		if (staleTurns === undefined) return;
+		const text = formatReminder(todos, staleTurns);
+		// 板子空了、全绿或全被阻塞：这次到期作废，不追加任何消息（连缓存都不碰）。
+		if (!text) return;
+		return {
+			messages: [...event.messages, { role: "user" as const, content: [{ type: "text" as const, text }], timestamp: Date.now() }],
+		};
+	});
 
 	const TodoParams = Type.Object({
 		action: Type.String({ enum: ["set", "update", "list"] }),
@@ -139,6 +160,8 @@ export default function (pi: ExtensionAPI) {
 		},
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			// 任何一次 todo 调用（含报错）都算「模型还在照看这张板」：重启计时并清空退避。
+			nagger.onTodoCall();
 			let result: TodoResult;
 			// set 会重编号：先记下上一张板上谁在飞，否则父会话手里的 id 会静默失效
 			const preInFlight = todos.filter((t) => t.status === "in_progress");
