@@ -116,6 +116,40 @@ pi.on("context", async (event) => {
 
 基线已在 §1 给出。发版后用同一脚本重扫「新版本之后开始的会话」，对比 `no_update` / `plan_then_idle` / `done_without_in_progress` / 会话结束时未完成率四项。**若四项都没有改善，应删除本功能**，而不是留着当噪声。
 
+### 5.4 怎么跑（已入库的脚本）
+
+三个件，都在仓库根：
+
+| 文件 | 作用 |
+|---|---|
+| `scripts/todo-audit.ts` | 只读 session jsonl，输出 §1 那四项判据。不启动 pi、不花 token，可随时重跑 |
+| `scripts/todo-nag-spy.ts` | 观察扩展：每次 provider 请求数一遍 `<todo-reminder>` 出现次数，写 jsonl |
+| `scripts/experiments/todo-nag/run.sh` | 受控 A/B 的跑批：两手臂 × N 次，两个手臂共用 `task.md` 的同一份提示词 |
+
+**观察式（零成本，先跑这个）**：
+
+```bash
+node --no-warnings scripts/todo-audit.ts                      # 全量历史（基线）
+node --no-warnings scripts/todo-audit.ts --since 2026-11-05    # 只看新版本之后开始的会话
+```
+
+它可以直接拿来验证 §1 的基线（实测 41 个会话：29% / 44% / 34% / 76%，与 §1 的 30% / 43% / 33% / 76% 相差 1 个会话，来自 ack 判别口径）。
+
+**受控 A/B（要花 token，但能归因）**：
+
+```bash
+RUNS=8 MODEL=<你常用的模型> bash scripts/experiments/todo-nag/run.sh
+```
+
+- `off` 手臂 = `pi-todo-v0.4.2` 的 `index.ts`（脚本自动建 detached worktree 到 `.worktrees/pi-todo-v042`）
+- `on` 手臂 = `main` 的 `index.ts`
+- 两边都用 `pi -ne -nc -e <index.ts> -e <spy>`，即只加载被测扩展 + 观察器，不加载其它包、不读 `AGENTS.md`；每次 run 用全新的空目录当 cwd，所以不会触发 project trust
+- 结束后自动打两个手臂的指标表 + 提醒注入计数，原始数据在 `$OUT`（默认 `/tmp/pi-todo-ab`）
+
+**为什么必须带 spy**：本方案的注入是请求级、不落盘的（§4.2），session 文件里永远没有 `<todo-reminder>`。没有 spy 就只能看到「结果变好了没有」，看不到「提醒到底触发了几次」—— 前者变好可能是别的因素，后者为零则说明功能压根没上线。这正是 2026-10-10 那轮把 T3-B 误判为有效的坑。
+
+**样本量的实话**：§1 的 30% vs 37% 差异本身就淹没在噪声里，`RUNS=6~8` 只能抓到很大的效应。所以主判据要看**连续量** `done_without_in_progress` 比例（它最直接反映「事后补账」），而不是会话级的二值率。若两个手臂的这个比例重叠，就等于没差别。
+
 ## 6. 决策记录
 
 | # | 问题 | 结论 |
