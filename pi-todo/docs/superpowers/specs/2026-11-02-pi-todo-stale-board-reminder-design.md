@@ -50,7 +50,7 @@
 | **触发点与病因错位**（`before_agent_start` 只在 run 边界触发一次） | 用 `context`：**每次 provider 请求**都跑，覆盖「一句话 → 几十次工具调用」这种真实现场 |
 | **副作用是结构性的**（每 user turn 一份永久留在上下文，多份并存时必有「冒充当下、实为过去」的指令） | `context` 的结果**只作用于本次请求**（0.80.2 `runner.js:694`；1.4.0 `runner.js:1006`），不落 session、不进 `/tree`、不影响 resume/compaction。且措辞只说「你已经 N 轮没更新」，不断言「现在的看板长这样」 |
 
-另外，上一轮 spec 自己写的后续条件是「若将来要真解 run 内漂移……候选是 T3-A（tool_result 尾追，需限频）或 T3-C（turn_end + context_edit）」，并要求**先做 A/B**。本方案取了 T3-A 的「限频 + run 内」内核，但把注入点换到不落盘的 `context`，因此拿到了 T3-A 的效果而避开它的 token 与持久化代价。
+另外，上一轮 spec 自己写的后续条件是「若将来要真解 run 内漂移……候选是 T3-A（tool_result 尾追，需限频）或 T3-C（turn_end + context_edit）」。本方案取了 T3-A 的「限频 + run 内」内核，但把注入点换到不落盘的 `context`，因此拿到了 T3-A 的效果而避开它的 token 与持久化代价。
 
 ## 4. 设计
 
@@ -112,10 +112,6 @@ pi.on("context", async (event) => {
 
 踩到的坑（复现时别再踩）：1.4.0 的 `getCurrentSystemMessage` 要求 system 消息带 `timestamp`（真实 transcript 都有，手搓的 `{role:"system", content}` 没有），否则 `restoreSystemMessages` 认为「没有 system 可还原」，注入结果里 system 会**看起来**丢了 —— 这是测试夹具失真，不是产品缺陷。
 
-### 5.3 落地后的 A/B（上一轮 spec 的强制前置）
-
-基线已在 §1 给出。发版后用同一脚本重扫「新版本之后开始的会话」，对比 `no_update` / `plan_then_idle` / `done_without_in_progress` / 会话结束时未完成率四项。**若四项都没有改善，应删除本功能**，而不是留着当噪声。
-
 ## 6. 决策记录
 
 | # | 问题 | 结论 |
@@ -125,5 +121,5 @@ pi.on("context", async (event) => {
 | D3 | 用 `tool_result` 尾追（T3-A）？ | **否**。会持久化进 transcript，且替换 content 有丢 `structuredContent` 的陷阱 |
 | D4 | 用 `context`（请求级）？ | **是**。每次请求都触发、不落盘、不动 system prompt 前缀 |
 | D5 | 阈值与退避 | 首次 5 轮，之后 ×2，封顶 40；依据是中位 7 轮的 in_progress→done 跨度 |
-| D6 | 要不要配置项 | **不要**。上轮 spec 的口径是「硬编码则噪声不可回退」，但本方案的噪声自身上界（封顶间隔 + 全绿/全阻塞静默）已把它压到个位数次/长跑。真出问题按 §5.3 直接删功能，而不是加旋钮 |
+| D6 | 要不要配置项 | **不要**。上轮 spec 的口径是「硬编码则噪声不可回退」，但本方案的噪声自身上界（封顶间隔 + 全绿/全阻塞静默）已把它压到个位数次/长跑 |
 | D7 | 版本 | `0.4.2 → 0.5.0`（行为变化，0.x 用 minor） |
