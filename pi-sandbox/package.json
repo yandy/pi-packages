@@ -42,7 +42,7 @@
 		"@types/node": "^26.6.6",
 		"typebox": "^1.4.3",
 		"typescript": "~7.0.2",
-		"vitest": "^5.0.5"
+		"vitest": "^5.1.0"
 	},
 	"dependencies": {
 		"@deepseek-ai/node-addon-system": "^0.1.2",
