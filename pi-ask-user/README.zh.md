@@ -130,6 +130,7 @@ export PI_ASK_USER_COMMENT_TOGGLE_KEY=alt+c
 | `enter` | 确认聚焦的选项、提交自由文本回复、或提交/跳过可选注释。 |
 | `esc` | 清除搜索过滤、退出自由文本/注释模式、或取消提示。 |
 | `↑` / `↓`、`ctrl+k` / `ctrl+j` | 导航选项。`ctrl+k` / `ctrl+j`（vim 风格）可在可搜索提示中打字时不干扰过滤输入。 |
+| `pgup` / `pgdn` | 当问题/背景内容超出弹窗高度时滚动该区域。弹窗总高度不会超过终端的 85%，选项和帮助行始终可见；被隐藏的内容会用 `↑ n lines above` / `↓ n lines below` 指示行标注。仅在选项选择模式下可用（自由文本/注释模式下这两个按键归编辑器所有）。 |
 
 如果你始终不希望看到叠加层，请全局设置 `PI_ASK_USER_DISPLAY_MODE=inline`，或在 `ask-user.json` 中设置 `"displayMode": "inline"`。
 
