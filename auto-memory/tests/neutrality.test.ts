@@ -210,8 +210,9 @@ describe("neutrality: the gate detects violations", () => {
 		const root = await fixture({ "a.ts": lines.join("\n") });
 		const violations = await scanDanglingReferences(root);
 		expect(violations).toHaveLength(lines.length);
-		// 报的是「文件:行」，路径相对包根 —— 夹具在 tmpdir 下，所以只比对尾部
-		expect(violations.map((v) => v.split(" → ")[0].split("/").pop())).toEqual(
+		// 报的是「文件:行」，路径相对包根 —— 夹具在 tmpdir 下，所以只比对末段。
+		// 分隔符要同时认 `/` 与 `\`：Windows 上 `relative()` 产出的是反斜杠路径。
+		expect(violations.map((v) => v.split(" → ")[0].split(/[/\\]/).pop())).toEqual(
 			lines.map((_, i) => `a.ts:${i + 1}`),
 		);
 		for (const v of violations) expect(v).toMatch(/（.+）$/); // 每条都带上「为什么算悬空」

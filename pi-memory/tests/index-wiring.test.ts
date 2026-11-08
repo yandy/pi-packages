@@ -1605,7 +1605,7 @@ describe("index wiring (integration)", () => {
 		expect(detectLegacyMemoryDirMock).toHaveBeenCalledWith(
 			expect.objectContaining({ newDir: dir, cwd: expect.any(String) }),
 		);
-		expect(detectLegacyMemoryDirMock.mock.calls[0][0].legacyRoot).toMatch(/[.\/]\.pi[\/]memory$/);
+		expect(detectLegacyMemoryDirMock.mock.calls[0][0].legacyRoot).toMatch(/[./\\]\.pi[./\\]memory$/);
 		expect(detectLegacyMemoryDirMock.mock.calls[0][0].newRoot).toBe(dir);
 	});
 

@@ -13,21 +13,22 @@ import { configFiles, loadConfig } from "../src/config";
  */
 describe("configFiles", () => {
 	it("lists the global file first and the project file second when trusted", () => {
+		// 期望值一律用 join() 派生：写死 "/g/memory.json" 在 Windows 上会变成 `\g\memory.json`
 		expect(configFiles({ cwd: "/proj", isProjectTrusted: () => true, _globalDir: "/g", _configDirName: ".pi" })).toEqual([
-			"/g/memory.json",
+			join("/g", "memory.json"),
 			join("/proj", ".pi", "memory.json"),
 		]);
 	});
 
 	it("omits the project file when the project is not trusted", () => {
 		expect(configFiles({ cwd: "/proj", isProjectTrusted: () => false, _globalDir: "/g", _configDirName: ".pi" })).toEqual([
-			"/g/memory.json",
+			join("/g", "memory.json"),
 		]);
 	});
 
 	it("honours the injected config dir name", () => {
 		expect(configFiles({ cwd: "/proj", isProjectTrusted: () => true, _globalDir: "/g", _configDirName: ".other" })).toEqual([
-			"/g/memory.json",
+			join("/g", "memory.json"),
 			join("/proj", ".other", "memory.json"),
 		]);
 	});

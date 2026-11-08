@@ -193,6 +193,37 @@ it("reads config from temp dir", async () => {
 
 ---
 
+## 路径断言必须跨平台
+
+`test.yml` 的 `test-full` 与 `test-packages` 都在 **ubuntu + windows** 两个 runner 上跑，所以任何写死 POSIX 分隔符的断言都会在 Windows 上红。实测踩过的三种形态：
+
+```ts
+// ✗ 写死正斜杠：win32 上 join("/g", "memory.json") 得到 "\g\memory.json"
+expect(configFiles(ctx)).toEqual(["/g/memory.json", "/proj/.pi/memory.json"]);
+// ✓ 期望值与被测实现同源，都经 join() 派生
+expect(configFiles(ctx)).toEqual([join("/g", "memory.json"), join("/proj", ".pi", "memory.json")]);
+
+// ✗ 只认正斜杠：win32 上 homedir() 拼出来的是 C:\Users\x\.pi\memory
+expect(legacyRoot).toMatch(/[.\/]\.pi[\/]memory$/);
+// ✓ 分隔符两种都认
+expect(legacyRoot).toMatch(/[./\\]\.pi[./\\]memory$/);
+
+// ✗ 只按 "/" 切：win32 上 relative() 产出 ..\..\a.ts，切不动
+expect(v.split("/").pop()).toBe("a.ts:1");
+// ✓
+expect(v.split(/[/\\]/).pop()).toBe("a.ts:1");
+```
+
+规则：**断言里的路径一律由 `join()` / `dirname()` / `relative()` 派生，不写字面量**；必须写字面量时（正则、分隔符判断）同时接受 `/` 与 `\`。
+
+本地是 POSIX 也能提前验：用 `node:path` 的 `win32` 命名空间复算一遍期望值。
+
+```sh
+node -e 'const {win32}=require("node:path"); console.log(win32.join("/g","memory.json"))'   # → \g\memory.json
+```
+
+---
+
 ## 检查清单
 
 - [ ] 没有直接读写 `~/.pi/`、`process.cwd()/.pi/`、`homedir()` 等真实路径
@@ -204,6 +235,8 @@ it("reads config from temp dir", async () => {
 - [ ] 被测函数接受路径参数注入（而非硬编码读取真实路径）
 - [ ] 异步副作用用 `waitFor` 等条件，不是猜一个 `setTimeout(0)`（见[异步等待](#异步等待)）
 - [ ] 负向断言（"没被调用"）没有套用 `waitFor`；确有固定等待处注明了原因
+- [ ] 断言里的路径由 `join()` / `dirname()` / `relative()` 派生，没有写死 POSIX 字面量（见[路径断言必须跨平台](#路径断言必须跨平台)）
+- [ ] 涉及分隔符的正则同时接受 `/` 与 `\`；切分路径用 `/[/\\]/` 而不是 `"/"`
 
 ---
 
