@@ -9,8 +9,8 @@ import {
 	type StoreConfig,
 	buildDreamTask,
 	runDream,
-} from "../src/index";
-import { createReservedNameFixture, removeReservedNameFixture } from "./helpers/reserved-name";
+} from "../src/index.js";
+import { createReservedNameFixture, removeReservedNameFixture } from "./helpers/reserved-name.js";
 
 /** 假的 `HeadlessAgentPort`：dream 只关心「宿主跑了这一轮、回了什么」。 */
 const headlessRun = vi.fn();

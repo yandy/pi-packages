@@ -2,7 +2,7 @@ import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { withFileMutationQueue } from "../src/store/mutation-queue";
+import { withFileMutationQueue } from "../src/store/mutation-queue.js";
 
 let dir: string;
 

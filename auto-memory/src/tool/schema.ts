@@ -1,5 +1,5 @@
-import { ENTRY_TYPES } from "../store/entry-file";
-import type { MemoryAction } from "./actions";
+import { ENTRY_TYPES } from "../store/entry-file.js";
+import type { MemoryAction } from "./actions.js";
 
 /** 一个参数的 JSON Schema 片段。所有参数都是字符串（可带枚举）。 */
 export interface MemoryToolField {
@@ -12,7 +12,7 @@ export interface MemoryToolField {
  * `memory` 工具的参数 schema，纯 JSON Schema。
  *
  * 键序 `type` → `required` → `properties` 与 typebox `Type.Object` 的 JSON 输出一致：适配层
- * 转换后必须与这里逐字相等（pi 侧由 `pi-memory/tests/memory-tool.test.ts` 的往返用例钉住），
+ * 转换后必须与这里逐字相等（适配层要有一条 JSON 往返相等的用例钉住它），
  * 所以模型看到的线格式在拆分前后不变。
  */
 export interface MemoryToolJsonSchema {

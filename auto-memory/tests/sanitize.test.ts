@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { sanitizeForInjection, stripInvisibleChars } from "../src/store/sanitize";
+import { sanitizeForInjection, stripInvisibleChars } from "../src/store/sanitize.js";
 
 /** spec §13 点名的不可见字符 + 其余 Unicode Cf 类别字符。 */
 const INVISIBLE: Array<[string, string]> = [

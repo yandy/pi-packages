@@ -1,5 +1,5 @@
 /**
- * 注入净化（spec §13）。**只在注入时**使用，绝不写回磁盘（D11）—— 磁盘上的 entry 必须
+ * 注入净化。**只在注入时**使用，绝不写回磁盘 —— 磁盘上的 entry 必须
  * 保持用户可读、可手工编辑的原始形态。
  *
  * 本模块是纯函数模块：不 import `node:fs`、不读配置、不碰 store。
@@ -24,7 +24,7 @@ export function stripInvisibleChars(text: string): string {
  *
  * **幂等是硬要求，所以这里刻意不转义 `&`。** 若把 `&` → `&amp;`，第一次产出的 `&lt;`
  * 在第二次就会变成 `&amp;lt;`；而 `memory_index` 的值在 resume / fork / reload 时会被
- * 逐轮重放（D13 / D14），每重放一次就漂移一次 —— system prompt 头部再也稳定不下来，
+ * 逐轮重放，每重放一次就漂移一次 —— system prompt 头部再也稳定不下来，
  * prefix cache 全废。`sanitizeForInjection(sanitizeForInjection(x)) === sanitizeForInjection(x)`
  * 由测试钉住。
  *

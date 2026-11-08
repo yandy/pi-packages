@@ -1,6 +1,6 @@
 import { cp, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { withFsRetry } from "./fs-retry";
+import { withFsRetry } from "./fs-retry.js";
 
 export interface SnapshotOptions {
 	keep: number;
@@ -13,7 +13,7 @@ export interface SnapshotOptions {
  * 只包住**幂等**的物理调用（`mkdir` 是 `recursive` 的、`cp` 会覆盖），因此重试不会产生副作用。
  * 快照跑在**每一次**写入原语里（memory-store 的 `#maybeSnapshot`，已在跨进程锁之内），而
  * Windows 上杀软扫描与同步客户端打断的正是 `mkdir`/`cp` 这类调用：不重试的话，一次瞬时
- * EPERM 就会让 `memory add` 直接失败（spec §1.2 P5）。
+ * EPERM 就会让 `memory add` 直接失败。
  */
 function withSnapshotRetry<T>(fn: () => Promise<T>, platform?: NodeJS.Platform): Promise<T> {
 	return withFsRetry(fn, { platform });

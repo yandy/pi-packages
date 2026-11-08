@@ -1,7 +1,7 @@
-import type { EntryType } from "./store/entry-file";
-import { splitLines } from "./store/entry-index";
-import type { MemoryStore } from "./store/memory-store";
-import { sanitizeForInjection } from "./store/sanitize";
+import type { EntryType } from "./store/entry-file.js";
+import { splitLines } from "./store/entry-index.js";
+import type { MemoryStore } from "./store/memory-store.js";
+import { sanitizeForInjection } from "./store/sanitize.js";
 
 /**
  * entry 正文的截断标记。与 `INDEX_TRUNCATION_MARKER` **刻意分开**：这里截的是

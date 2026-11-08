@@ -11,7 +11,7 @@ import {
 	buildExtractTask,
 	renderConversation,
 	runExtract,
-} from "../src/index";
+} from "../src/index.js";
 
 /** 假的 `HeadlessAgentPort`。 */
 const headlessRun = vi.fn();

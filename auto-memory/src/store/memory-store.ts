@@ -1,14 +1,14 @@
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { deriveDescription, type EntryType, parseEntryFile, serializeEntryFile } from "./entry-file";
-import { formatIndexLine, indexCapacity, parseEntryIndex, removeIndexLine, upsertIndexLine } from "./entry-index";
-import { entryFileName, resolveUniqueFileName } from "./filename";
-import { withLock } from "./fs-lock";
-import { withFsRetry } from "./fs-retry";
-import { withFileMutationQueue } from "./mutation-queue";
-import { isProcessLockActive, tryWithProcessLock, withProcessLock } from "./process-lock";
-import { createSnapshot } from "./snapshot";
-import { isReservedWindowsName } from "./windows-names";
+import { deriveDescription, type EntryType, parseEntryFile, serializeEntryFile } from "./entry-file.js";
+import { formatIndexLine, indexCapacity, parseEntryIndex, removeIndexLine, upsertIndexLine } from "./entry-index.js";
+import { entryFileName, resolveUniqueFileName } from "./filename.js";
+import { withLock } from "./fs-lock.js";
+import { withFsRetry } from "./fs-retry.js";
+import { withFileMutationQueue } from "./mutation-queue.js";
+import { isProcessLockActive, tryWithProcessLock, withProcessLock } from "./process-lock.js";
+import { createSnapshot } from "./snapshot.js";
+import { isReservedWindowsName } from "./windows-names.js";
 
 export const INDEX_FILE = "MEMORY.md";
 export const LOCK_FILE = ".lock";
@@ -49,7 +49,7 @@ export async function sameFile(a: string, b: string): Promise<boolean> {
  * 「一次调用一个作用域」的调用方（主 agent 工具、extract）是安全的默认。
  *
  * `skipSnapshot` 供「整轮已经自己拍过一次全目录快照」的持有者使用：dream 进入时快照整个目录
- * （spec §6）。它内部每个原语再各拍一次，
+ * 。它内部每个原语再各拍一次，
  * 会让同一批变更产生 N 份重复备份，并把 `snapshotKeep`（默认 5）的名额挤光 —— 用户还想用来做
  * 崩溃恢复的 `write` 快照会被 `pruneSnapshots` 删掉。
  */
@@ -117,14 +117,14 @@ export class MemoryStore {
 		return this.cfg.platform ?? process.platform;
 	}
 
-	/** 物理写入路径的统一重试入口（spec §4.5）：只包物理调用，不包逻辑。 */
+	/** 物理写入路径的统一重试入口：只包物理调用，不包逻辑。 */
 	#retry<T>(fn: () => Promise<T>): Promise<T> {
 		return withFsRetry(fn, { platform: this.#platform });
 	}
 
 	constructor(readonly cfg: StoreConfig) {}
 
-	/** 读取路径与 `#savingQueue` 的 `mkdir` **刻意不重试**（spec §4.5）：读失败不改变磁盘状态，
+	/** 读取路径与 `#savingQueue` 的 `mkdir` **刻意不重试**：读失败不改变磁盘状态，
 	 *  目录创建失败会在获取锁阶段就干净地报错（无残留）；重试只会拖慢 fail-closed。 */
 	async #entryFiles(): Promise<string[]> {
 		const names = await readdir(this.cfg.memoryDir).catch(() => []);
@@ -133,7 +133,7 @@ export class MemoryStore {
 				.filter((n) => n.endsWith(".md") && n !== INDEX_FILE && !n.startsWith("."))
 				// win32：按名打开保留设备名文件会命中设备（CON 等），`readFile` 会阻塞在控制台而不是
 				// 返回内容。修复前的版本或外部工具可能留下过这种文件，这里把它从清单里剔除 ——
-				// 最坏表现是「该条记忆在本机不可见」，而不是卡住整个扫描（spec Ruling 5）。
+				// 最坏表现是「该条记忆在本机不可见」，而不是卡住整个扫描。
 				.filter((n) => !(this.#platform === "win32" && isReservedWindowsName(n)))
 				.sort()
 		);
@@ -221,9 +221,9 @@ export class MemoryStore {
 	/**
 	 * 只在逻辑锁空闲时执行 `fn`；有人持有或排队则**立刻**返回 `null`，绝不等待。
 	 *
-	 * extract 用它实现「锁忙就跳过本轮」（spec §5.2）：extract 在每次 `agent_end` 都触发，
+	 * extract 用它实现「锁忙就跳过本轮」：extract 在每轮结束都触发，
 	 * 若让它排队等 dream（分钟级），一批又一批的提取会堆在进程内队列里，等 dream 结束后
-	 * 依次重放早已过时的对话。跳过是无损的 —— 下一轮 `agent_end` 会再来。
+	 * 依次重放早已过时的对话。跳过是无损的 —— 下一轮结束时会再来。
 	 */
 	async tryWithLogicalLock<T>(fn: () => Promise<T>): Promise<T | null> {
 		return tryWithProcessLock(this.#logicalKey, fn);
@@ -337,7 +337,7 @@ export class MemoryStore {
 		if (value && /[\r\n]/.test(value)) throw new Error("description must be a single line");
 	}
 
-	/** `created` 只接受 `YYYY-MM-DD`（spec §3.1）；非法值写出去会让 `parseEntryFile` 返回 null，
+	/** `created` 只接受 `YYYY-MM-DD`；非法值写出去会让 `parseEntryFile` 返回 null，
 	 *  整条记忆对 store 静默不可见。 */
 	#validateCreated(value: string | undefined): void {
 		if (value === undefined) return;

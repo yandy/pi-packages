@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { type EntryManifest, type HeadlessRunRequest, runSideQuery } from "../src/index";
+import { type EntryManifest, type HeadlessRunRequest, runSideQuery } from "../src/index.js";
 
 /**
  * 侧查询的编排（spec §4.1 的 `HeadlessAgentPort`）。

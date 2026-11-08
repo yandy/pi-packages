@@ -1,5 +1,5 @@
-import { renderConversation } from "./conversation";
-import type { ExtractMessage } from "./ports";
+import { renderConversation } from "./conversation.js";
+import type { ExtractMessage } from "./ports.js";
 
 /**
  * dream / extract 的 prompt 文本。

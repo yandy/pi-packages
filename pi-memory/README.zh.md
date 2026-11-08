@@ -348,6 +348,8 @@ Lock: free
 
 ## 文件布局
 
+磁盘格式、项目目录推导、锁与快照布局都由 [`@yandy0725/auto-memory`](https://www.npmjs.com/package/@yandy0725/auto-memory)（本包适配的、与 harness 无关的基础层）定义，下面这些内容以它的 README 为准；本节只说明 pi 把它们放在哪。
+
 ```
 ~/.local/share/auto-memory/
   git/

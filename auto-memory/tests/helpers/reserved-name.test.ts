@@ -2,7 +2,7 @@ import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createReservedNameFixture, removeReservedNameFixture } from "./reserved-name";
+import { createReservedNameFixture, removeReservedNameFixture } from "./reserved-name.js";
 
 describe("reserved-name fixture helper", () => {
 	let dir: string;

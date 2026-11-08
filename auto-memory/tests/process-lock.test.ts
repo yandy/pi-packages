@@ -4,7 +4,7 @@ import {
 	ProcessLockTimeoutError,
 	tryWithProcessLock,
 	withProcessLock,
-} from "../src/store/process-lock";
+} from "../src/store/process-lock.js";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 

@@ -1,13 +1,13 @@
 /**
- * `memory` 工具的模型可见文案（spec §5.4）。
+ * `memory` 工具的模型可见文案。
  *
  * 一份文本、多处落地：pi 有三个通道（`description` 进工具 schema、`promptSnippet` 进 system
  * prompt 的 `Available tools`、`promptGuidelines` 进 `Guidelines`），别的宿主可能只有 `description`
  * 一个通道（那就把 GUIDELINES 并进 system prompt 的一个 section，或干脆只用 description）。
  * **文案本身不属于任何宿主**，所以住在这里。
  *
- * 改动这里的任何一个字都会同时改掉所有宿主的提示词，pi 侧还有
- * `pi-memory/tests/prompt-meta.test.ts` 的三通道预算（2750 字符）钉着总量。
+ * 改动这里的任何一个字都会同时改掉所有宿主的提示词；适配层通常还有一道总量预算的钉子
+ * （pi 侧是 `prompt-meta.test.ts` 的三通道 2750 字符）。
  */
 
 /** 工具名。所有宿主必须用同一个名字：extract / dream 的 prompt 文本里是按名字引用它的。 */

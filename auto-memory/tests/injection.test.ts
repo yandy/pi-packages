@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { MemoryStore, type StoreConfig, sanitizeForInjection } from "../src/index";
+import { MemoryStore, type StoreConfig, sanitizeForInjection } from "../src/index.js";
 import {
 	ENTRY_TRUNCATION_MARKER,
 	type EntryManifest,
@@ -15,7 +15,7 @@ import {
 	scanEntries,
 	truncateForInjection,
 	truncateIndexForInjection,
-} from "../src/injection";
+} from "../src/injection.js";
 
 const CFG = (memoryDir: string): StoreConfig => ({
 	memoryDir,

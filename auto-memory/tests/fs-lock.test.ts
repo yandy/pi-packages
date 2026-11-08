@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { MemoryLockedError, readLockStatus, tryWithLock, withLock, type LockInfo } from "../src/store/fs-lock";
+import { MemoryLockedError, readLockStatus, tryWithLock, withLock, type LockInfo } from "../src/store/fs-lock.js";
 
 let dir: string;
 let lockPath: string;

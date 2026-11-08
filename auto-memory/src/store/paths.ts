@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { join, posix, resolve, win32 } from "node:path";
 import { promisify } from "node:util";
-import { windowsSafeName } from "./windows-names";
+import { windowsSafeName } from "./windows-names.js";
 
 const execFileP = promisify(execFile);
 const GIT_TIMEOUT_MS = 3000;
@@ -10,13 +10,11 @@ const GIT_TIMEOUT_MS = 3000;
 /**
  * 仓库根：`git rev-parse --show-toplevel`（绝对路径）。
  *
- * 2026-10-04 用户决定回到这个实现（spec Ruling 12，**撤销 Ruling 3**）：Windows 上只用
- * PowerShell、Git Bash 不在支持面内，所以「MSYS 形态输出会让 `resolve()` 得到 `C:\c\…`」这条
- * 动机消失。随之删除了 `--is-inside-work-tree` 判据与 MSYS 仿真用例：裸仓库、cwd 在 `.git`
- * 内部（含 `.git/objects`）时 git 以 `fatal: this operation must be run in a work tree` 退出，
- * 这里天然返回 `null`，调用方落回 `local/<绝对路径>`；非仓库同样由 catch 返回 `null`。
+ * 不加 `--is-inside-work-tree` 判据：裸仓库、cwd 在 `.git` 内部（含 `.git/objects`）时 git 以
+ * `fatal: this operation must be run in a work tree` 退出，这里天然返回 `null`，调用方落回
+ * `local/<绝对路径>`；非仓库同样由 catch 返回 `null`。
  *
- * 已知限制（spec §7）：若 PATH 上的 `git` 是 cygwin/MSYS 构建（对任何调用者都打印
+ * 已知限制：若 PATH 上的 `git` 是 cygwin/MSYS 构建（对任何调用者都打印
  * `/cygdrive/c/…` 这类 POSIX 形态路径），`resolve()` 会得到错误前缀 —— 同一项目会出现第二个
  * 记忆目录。Git for Windows 的 `git.exe` 打印原生路径，不受影响。
  */
@@ -59,7 +57,7 @@ export interface NamingOptions {
 
 // win32 上 `\` 也是分隔符 —— 它必须参与分段，而不是被转义成字面量：转义会让整个名字在
 // `join(memoryDir, …)` 时仍被拆成多级目录（`local/C_3a/Users/...`），而畸形 key
-// （`host/a\..\..\..\etc`）里的 `..` 段还能让目录逃出 memoryDir（spec §1.2 P1/P7）。
+// （`host/a\..\..\..\etc`）里的 `..` 段还能让目录逃出 memoryDir。
 const PATH_SEPARATORS = /[/\\]/;
 const POSIX_SEPARATORS = /\//;
 
@@ -67,7 +65,7 @@ const POSIX_SEPARATORS = /\//;
  * Encode a project key into a single, human-readable directory name.
  * `host/repo/path` → `host__repo__path`; `/abs/path` → `abs__path`。
  *
- * 平台差异（spec Ruling 1/D2）：win32 上按 `/` 与 `\` 双分隔符分段，并保证输出满足三条
+ * 平台差异：win32 上按 `/` 与 `\` 双分隔符分段，并保证输出满足三条
  * 不变量 —— 不含分隔符、不以 `.`/空格结尾、不是保留设备名；POSIX 上 `\` 仍是普通字符，
  * 输出与 win32 支持引入前逐字节一致。
  */
@@ -102,7 +100,7 @@ const SCHEME_URL = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
 /**
  * Windows 盘符路径（`Z:\…` / `Z:/…`）。在 win32 上这是**本地路径**，不是 scp 的 `host:path`：
  * Git for Windows 就这么解释（用户可以 `git clone Z:\some.git`）；而 `resolve()` 会把它当成
- * host `z`（spec Ruling 13）。POSIX 上同一串是合法的 scp 写法（host `C`），与 git 一致，不改判。
+ * host `z`。POSIX 上同一串是合法的 scp 写法（host `C`），与 git 一致，不改判。
  */
 const WINDOWS_DRIVE_PATH = /^[a-zA-Z]:[\\/]/;
 
@@ -217,10 +215,10 @@ export async function projectIdentity(cwd: string, platform: NodeJS.Platform = p
 type PathApi = typeof import("node:path");
 
 /**
- * 断言 `dir` 确实是 `base` 之内的一层（spec §4.2 / D4）。
+ * 断言 `dir` 确实是 `base` 之内的一层。
  *
  * 派生名一旦含有分隔符，`join` 就会把它拆成多级路径 —— 畸形 remote（key 里带 `\..\..`）
- * 能让目录逃出 `memoryDir`。fail-closed：越界即抛错，由 session_start 转成配置错误态，
+ * 能让目录逃出 `memoryDir`。fail-closed：越界即抛错，由适配层在会话启动时转成配置错误态，
  * 而不是悄悄写到别的地方。
  *
  * 导出仅为直接单测：POSIX 命名下 `projectDirName` 不可能产出分隔符，公开 API 走不到这条分支。

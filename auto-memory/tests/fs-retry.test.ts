@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { isTransientFsError, withFsRetry } from "../src/store/fs-retry";
+import { isTransientFsError, withFsRetry } from "../src/store/fs-retry.js";
 
 function errnoError(code: string): NodeJS.ErrnoException {
 	const e = new Error(`${code}: simulated`) as NodeJS.ErrnoException;

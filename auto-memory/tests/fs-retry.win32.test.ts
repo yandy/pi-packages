@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { withFsRetry } from "../src/store/fs-retry";
+import { withFsRetry } from "../src/store/fs-retry.js";
 
 /**
  * 真机用例：用 .NET 的 `FileShare.None` 造出**真实的**共享冲突（杀软/编辑器打断写入时

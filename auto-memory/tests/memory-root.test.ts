@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { defaultMemoryRoot } from "../src/config";
+import { defaultMemoryRoot } from "../src/config.js";
 
 /**
  * 共享数据根（spec D3 / §5.2）。

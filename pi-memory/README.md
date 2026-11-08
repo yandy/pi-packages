@@ -351,6 +351,8 @@ Automatic 1.x → 2.0 migration has been removed. Legacy topic files (frontmatte
 
 ## File layout
 
+The on-disk format, the project-directory derivation, the locking and the snapshot layout are defined by [`@yandy0725/auto-memory`](https://www.npmjs.com/package/@yandy0725/auto-memory) — the harness-agnostic core this package adapts. Its README is the authority for everything below; this section only shows where pi puts things.
+
 ```
 ~/.local/share/auto-memory/
   git/

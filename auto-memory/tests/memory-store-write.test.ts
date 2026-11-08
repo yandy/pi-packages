@@ -2,10 +2,10 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { parseEntryFile, serializeEntryFile } from "../src/store/entry-file";
-import { parseEntryIndex } from "../src/store/entry-index";
-import { MemoryStore, type StoreConfig } from "../src/store/memory-store";
-import { ProcessLockTimeoutError } from "../src/store/process-lock";
+import { parseEntryFile, serializeEntryFile } from "../src/store/entry-file.js";
+import { parseEntryIndex } from "../src/store/entry-index.js";
+import { MemoryStore, type StoreConfig } from "../src/store/memory-store.js";
+import { ProcessLockTimeoutError } from "../src/store/process-lock.js";
 
 let dir: string;
 let store: MemoryStore;

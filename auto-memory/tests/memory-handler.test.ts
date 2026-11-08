@@ -2,10 +2,10 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { parseEntryFile } from "../src/store/entry-file";
-import { parseEntryIndex } from "../src/store/entry-index";
-import { MemoryStore, type StoreConfig } from "../src/store/memory-store";
-import { DREAM_ACTIONS, MAIN_AGENT_ACTIONS, createMemoryActionHandler, type MemoryHandlerDeps } from "../src/index";
+import { parseEntryFile } from "../src/store/entry-file.js";
+import { parseEntryIndex } from "../src/store/entry-index.js";
+import { MemoryStore, type StoreConfig } from "../src/store/memory-store.js";
+import { DREAM_ACTIONS, MAIN_AGENT_ACTIONS, createMemoryActionHandler, type MemoryHandlerDeps } from "../src/index.js";
 
 let dir: string;
 let store: MemoryStore;

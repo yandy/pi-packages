@@ -1,6 +1,6 @@
 import { open, readFile, rm } from "node:fs/promises";
 import { hostname } from "node:os";
-import { withFsRetry } from "./fs-retry";
+import { withFsRetry } from "./fs-retry.js";
 
 /**
  * **跨进程**锁。只保护「毫秒级的物理写入」这一件事。
@@ -18,7 +18,7 @@ import { withFsRetry } from "./fs-retry";
  * 加上「比字节 + 放回」则会把空窗拉长，同进程内可稳定复现双持有。
  *
  * 因此这里的策略是「安全优先」：崩溃遗留的锁**立刻**报一条可操作的错误（写明 pid / op /
- * startedAt / 路径，并提示如何清除），由人（或 Plan B 的显式 `/memory unlock`）处理。
+ * startedAt / 路径，并提示如何清除），由人（经宿主提供的显式 unlock 入口）处理。
  */
 export interface LockInfo {
 	pid: number;
@@ -49,7 +49,7 @@ export class MemoryLockedError extends Error {
 				? `Memory lock at ${lockPath} is abandoned by ${described} — delete the file to clear it`
 				: holder
 					? `Memory is locked by ${described}`
-					: `Memory lock at ${lockPath} is still being written (0 bytes) — if no other process is writing, delete the file or run /memory unlock`,
+					: `Memory lock at ${lockPath} is still being written (0 bytes) — if no other process is writing, delete the file or use your agent's memory unlock command`,
 		);
 		this.name = "MemoryLockedError";
 	}
@@ -95,7 +95,7 @@ type LockRead =
  * 读锁的状态。**必须区分「不存在」与「存在但读不懂」** —— 把前者当成后者会让
  * 「持有者刚释放、锁刚被删」被误报成「遗弃的锁」，从而在正常竞争下抛出误导性的错误。
  *
- * 自 `open(wx)` 原语起还多一态 `empty`：锁文件建立与记录写入之间有一个极短窗口（spec §4.4），
+ * 自 `open(wx)` 原语起还多一态 `empty`：锁文件建立与记录写入之间有一个极短窗口，
  * 它必须与「读不懂」分开 —— 否则等待者会把「别人正在建锁」误报成「遗弃的锁」并立刻失败。
  */
 async function readLockState(lockPath: string): Promise<LockRead> {
@@ -107,7 +107,7 @@ async function readLockState(lockPath: string): Promise<LockRead> {
 		// 权限之类的错误：无法判断内容，按「读不懂」处理（不接管、报可操作错误）
 		return { kind: "unreadable" };
 	}
-	// 0 字节是**正常的中间态**：`open(wx)` 建立文件与写入记录之间有一个极短窗口（spec §4.4）。
+	// 0 字节是**正常的中间态**：`open(wx)` 建立文件与写入记录之间有一个极短窗口。
 	// 它必须与「读不懂」分开 —— 否则等待者会把「别人正在建锁」误报成「遗弃的锁」并立刻失败。
 	if (raw.length === 0) return { kind: "empty" };
 	try {
@@ -119,12 +119,12 @@ async function readLockState(lockPath: string): Promise<LockRead> {
 }
 
 /**
- * 锁的诊断视图（spec §14 的 `/memory`）。
+ * 锁的诊断视图（供宿主的状态命令使用）。
  *
  * **复用私有的 `readLockState`**，不另写一份读逻辑：状态必须与获取路径同源，
- * 否则会出现「`/memory` 说 free，下一次写入却报 locked」这种无法诊断的矛盾。
+ * 否则会出现「宿主的状态命令说 free，下一次写入却报 locked」这种无法诊断的矛盾。
  * 对外只暴露三态：`empty`（建立中的 0 字节记录）归入 `unreadable` —— 对人类观察者而言
- * 它只可能是崩溃残留，处置方式与「读不懂」相同（`/memory unlock`）。
+ * 它只可能是崩溃残留，处置方式与「读不懂」相同（经宿主的显式 unlock 入口清除）。
  * 它**不判断存活、也不删任何东西**（永不自动回收）；持有者是否已死由调用方自己看 pid。
  */
 export async function readLockStatus(
@@ -161,9 +161,9 @@ async function acquireOnce(lockPath: string, info: LockInfo): Promise<AcquireOut
  *
  * 与旧实现的差别：旧实现先把记录写进同目录的临时文件、再 `link` 到锁路径，因而内容原子出现；
  * 但 `link` **只支持 NTFS**（ReFS、部分网络共享与云盘目录都不支持），在那些卷上整把锁取不到
- * → 记忆完全不可写（spec §1.2 P4）。`open(wx)` 的**建立**在任意卷上都原子 —— 原子的只是
+ * → 记忆完全不可写。`open(wx)` 的**建立**在任意卷上都原子 —— 原子的只是
  * 「谁建了这个文件」，**不是记录内容**：内容随后才写，于是有「文件已建立、内容未写入」的极短
- * 窗口，由读取侧的 `empty` 态与 `/memory unlock` 兜底（spec §4.4）。
+ * 窗口，由读取侧的 `empty` 态与宿主的显式 unlock 入口兜底。
  */
 async function createExclusive(lockPath: string, info: LockInfo): Promise<boolean> {
 	let handle: Awaited<ReturnType<typeof open>>;
@@ -195,7 +195,7 @@ async function createExclusive(lockPath: string, info: LockInfo): Promise<boolea
 		// 走到这里说明这把锁没有可用的持有者（记录没写进去，或 close 失败）：先关句柄再删文件
 		// （Windows 上删除打开中的文件需要 share-delete，且删除会延迟到关闭之后），否则会留下
 		// 0 字节/自指的锁挡住后来的写入者。`rm` 走重试：win32 上杀软/索引器造成的瞬时 EPERM
-		// 正是本任务要消掉的那类残留（spec §1.2 P5）。
+		// 正是本任务要消掉的那类残留。
 		await handle.close().catch(() => {});
 		await withFsRetry(() => rm(lockPath, { force: true })).catch(() => {});
 		throw e;
@@ -221,7 +221,7 @@ function isAbandoned(holder: LockInfo | null): boolean {
 /**
  * 只在锁仍是自己持有的情况下删除；否则留给真正的持有者。
  * 记录读不懂或仍是 0 字节（建立中）时也**不删** —— 那是别人的状态（或需要人工处理的状态），
- * 不该由我们清理 —— 我们无法证明它属于自己（spec §4.4）。`force: true` 让「刚好被释放」不是错误。
+ * 不该由我们清理 —— 我们无法证明它属于自己。`force: true` 让「刚好被释放」不是错误。
  */
 async function releaseLock(lockPath: string): Promise<void> {
 	const state = await readLockState(lockPath);

@@ -1,5 +1,5 @@
 /**
- * `memory` 工具的 action 全集与注册范围（spec §5.4）。
+ * `memory` 工具的 action 全集与注册范围。
  *
  * 注册范围是**硬约束**：
  * - 主 agent 与 extract 子会话只拿到 5 个（`MAIN_AGENT_ACTIONS`）；

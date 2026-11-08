@@ -11,7 +11,7 @@ import {
 	requiredModels,
 	taskModel,
 	type MemoryConfig,
-} from "../src/config";
+} from "../src/config.js";
 
 describe("DEFAULT_CONFIG", () => {
 	it("has expected defaults", () => {

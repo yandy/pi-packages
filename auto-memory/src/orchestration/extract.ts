@@ -1,8 +1,8 @@
-import type { SessionPersistenceConfig } from "../config";
-import type { MemoryStore } from "../store/memory-store";
-import { MAIN_AGENT_ACTIONS, type MemoryAction } from "../tool/actions";
-import { buildExtractTask } from "./prompts";
-import type { HeadlessAgentPort, HostTranscriptPort } from "./ports";
+import type { SessionPersistenceConfig } from "../config.js";
+import type { MemoryStore } from "../store/memory-store.js";
+import { MAIN_AGENT_ACTIONS, type MemoryAction } from "../tool/actions.js";
+import { buildExtractTask } from "./prompts.js";
+import type { HeadlessAgentPort, HostTranscriptPort } from "./ports.js";
 
 export interface RunExtractOpts {
 	/** 必填：模型来自显式配置（启动校验已保证可解析），没有父模型回退。 */
@@ -36,7 +36,7 @@ export interface ExtractPorts {
 /**
  * 跑一轮 extract。
  *
- * **不等待逻辑锁**：拿不到就跳过本轮并返回 `{ skipped: true }`。extract 在每次 `agent_end` 都触发，
+ * **不等待逻辑锁**：拿不到就跳过本轮并返回 `{ skipped: true }`。extract 在每轮结束都触发，
  * 让它排队等 dream（分钟级）只会把一批批早已过时的对话堆在队列里，等 dream 结束后依次重放。
  *
  * 错误**不吞**：吞掉会让 extract 的失败对用户完全不可见。由调用方决定如何呈现（适配层通常

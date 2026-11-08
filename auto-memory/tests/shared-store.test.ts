@@ -1,0 +1,74 @@
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { MemoryStore, formatIndexLine, parseEntryIndex, resolveMemoryDir, type StoreConfig } from "../src/index.js";
+
+/**
+ * 跨宿主共享的实质承诺（Review Focus #5）。
+ *
+ * 「两个 harness 能读到同一批文件」只是必要条件；真正会咬人的是**同时写**：两个 `MemoryStore`
+ * 实例指向同一个目录时，跨进程 `.lock` 必须让物理写入互斥，索引不得出现半行、空行或重复行。
+ * 这里用两个实例模拟两个宿主进程 —— 锁是文件级的，同进程两个 store 走的是同一条 `.lock` 路径。
+ */
+let dir: string;
+
+const CFG = (memoryDir: string): StoreConfig => ({
+	memoryDir,
+	indexMaxLines: 200,
+	indexMaxBytes: 25600,
+	lock: { timeoutMs: 5000, snapshotKeep: 5 },
+});
+
+beforeEach(async () => {
+	dir = await mkdtemp(join(tmpdir(), "am-shared-"));
+});
+afterEach(async () => {
+	await rm(dir, { recursive: true, force: true });
+});
+
+describe("two stores on one directory", () => {
+	it("interleaves concurrent writes without tearing the index", async () => {
+		const a = new MemoryStore(CFG(dir));
+		const b = new MemoryStore(CFG(dir));
+
+		await Promise.all([
+			...[0, 1, 2, 3, 4].map((i) => a.addEntry({ name: `A${i}`, description: `a${i}`, body: `正文 A${i}` })),
+			...[0, 1, 2, 3, 4].map((i) => b.addEntry({ name: `B${i}`, description: `b${i}`, body: `正文 B${i}` })),
+		]);
+
+		const raw = await readFile(join(dir, "MEMORY.md"), "utf8");
+		const parsed = parseEntryIndex(raw);
+		expect(parsed.entries).toHaveLength(10);
+		expect(parsed.unrecognized).toBe(0);
+		// 没有空行、没有半行：每一行都严格是 formatIndexLine 的输出
+		const files = parsed.entries.map((e) => e.file).sort();
+		expect(files).toEqual([...[0, 1, 2, 3, 4].map((i) => `A${i}.md`), ...[0, 1, 2, 3, 4].map((i) => `B${i}.md`)].sort());
+		for (const line of raw.split("\n")) {
+			if (line.trim() === "" || line.startsWith("#")) continue;
+			const entry = parsed.entries.find((e) => line === formatIndexLine(e.name, e.file, e.description));
+			expect(entry, `索引行不是 formatIndexLine 的产物：${JSON.stringify(line)}`).toBeDefined();
+		}
+		// 十个 entry 文件都在，正文没被写串
+		expect((await a.listEntries()).map((e) => e.file).sort()).toEqual(files);
+		expect(await readFile(join(dir, "A0.md"), "utf8")).toContain("正文 A0");
+		expect(await readFile(join(dir, "B4.md"), "utf8")).toContain("正文 B4");
+	});
+
+	it("leaves no lock behind once both stores are done", async () => {
+		const a = new MemoryStore(CFG(dir));
+		const b = new MemoryStore(CFG(dir));
+		await Promise.all([a.addEntry({ name: "A", body: "a" }), b.addEntry({ name: "B", body: "b" })]);
+		// `.lock` 只在毫秒级物理写入期间存在；两次写都结束后目录里不该留下它
+		expect(await readdir(dir)).not.toContain(".lock");
+	});
+
+	it("resolves the same directory for the same cwd whoever asks", async () => {
+		// 跨宿主共享的前提：目录推导只依赖 cwd 与数据根，不依赖任何宿主状态。
+		const config = { memoryDir: dir };
+		const first = await resolveMemoryDir(config, process.cwd());
+		const second = await resolveMemoryDir({ ...config }, process.cwd());
+		expect(first).toBe(second);
+		expect(first.startsWith(dir)).toBe(true);
+	});
+});

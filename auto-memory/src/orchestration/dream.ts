@@ -1,12 +1,12 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { SessionPersistenceConfig } from "../config";
-import { BACKUP_DIR, type MemoryStore } from "../store/memory-store";
-import { createSnapshot } from "../store/snapshot";
-import { isReservedWindowsName } from "../store/windows-names";
-import { DREAM_ACTIONS } from "../tool/actions";
-import { buildDreamTask } from "./prompts";
-import type { HeadlessAgentPort } from "./ports";
+import type { SessionPersistenceConfig } from "../config.js";
+import { BACKUP_DIR, type MemoryStore } from "../store/memory-store.js";
+import { createSnapshot } from "../store/snapshot.js";
+import { isReservedWindowsName } from "../store/windows-names.js";
+import { DREAM_ACTIONS } from "../tool/actions.js";
+import { buildDreamTask } from "./prompts.js";
+import type { HeadlessAgentPort } from "./ports.js";
 
 export interface RunDreamOpts {
 	/** 必填：模型来自显式配置（启动校验已保证可解析），没有父模型回退。 */

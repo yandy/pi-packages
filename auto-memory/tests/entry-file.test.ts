@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveDescription, parseEntryFile, serializeEntryFile, type EntryMeta } from "../src/store/entry-file";
+import { deriveDescription, parseEntryFile, serializeEntryFile, type EntryMeta } from "../src/store/entry-file.js";
 
 const META: EntryMeta = {
 	name: "Use real DB in tests",

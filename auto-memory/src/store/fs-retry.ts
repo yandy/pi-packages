@@ -1,9 +1,9 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
 /**
- * 物理文件系统调用的短退避重试。存在理由（spec §1.2 P5）：Windows 上杀软扫描、索引器、
- * 编辑器会用瞬时 `EPERM`/`EBUSY` 打断正常写入；而 pi-memory 是 fail-closed 且锁永不自动回收 ——
- * 一次瞬时错误若落在释放锁的 `rm(.lock)` 上，就会留下一个只能人工 `/memory unlock` 的锁，
+ * 物理文件系统调用的短退避重试。存在理由：Windows 上杀软扫描、索引器、
+ * 编辑器会用瞬时 `EPERM`/`EBUSY` 打断正常写入；而本包是 fail-closed 且锁永不自动回收 ——
+ * 一次瞬时错误若落在释放锁的 `rm(.lock)` 上，就会留下一个只能人工清除的锁，
  * 之后该项目**所有**记忆写入被堵死。
  */
 
@@ -31,7 +31,7 @@ export interface FsRetryOptions {
 /**
  * 重试 `fn` 直到成功、遇到非瞬时错误、或耗尽预算。
  * **错过的错误原样上抛**（含耗尽后的最后一次）—— 调用方的 fail-closed 语义与错误文案都不变
- * （spec Ruling 8），这里不包装新错误类型。
+ * ，这里不包装新错误类型。
  */
 export async function withFsRetry<T>(fn: () => Promise<T>, options: FsRetryOptions = {}): Promise<T> {
 	const retries = options.retries ?? 6;

@@ -2,9 +2,9 @@ import { chmod, link, mkdtemp, readFile, readdir, rm, unlink, writeFile } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { serializeEntryFile, type EntryMeta } from "../src/store/entry-file";
-import { parseEntryIndex } from "../src/store/entry-index";
-import { MemoryStore, sameFile, unlinkStrict, type StoreConfig } from "../src/store/memory-store";
+import { serializeEntryFile, type EntryMeta } from "../src/store/entry-file.js";
+import { parseEntryIndex } from "../src/store/entry-index.js";
+import { MemoryStore, sameFile, unlinkStrict, type StoreConfig } from "../src/store/memory-store.js";
 
 let dir: string;
 let store: MemoryStore;

@@ -1,7 +1,7 @@
-import type { SessionPersistenceConfig } from "../config";
-import type { EntryManifest } from "../injection";
-import { buildSideQueryTask } from "../injection";
-import type { HeadlessAgentPort } from "./ports";
+import type { SessionPersistenceConfig } from "../config.js";
+import type { EntryManifest } from "../injection.js";
+import { buildSideQueryTask } from "../injection.js";
+import type { HeadlessAgentPort } from "./ports.js";
 
 export interface RunSideQueryOpts {
 	/** 本轮的候选清单（`scanEntries` 的产出）。 */

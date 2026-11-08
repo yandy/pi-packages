@@ -1,7 +1,7 @@
-import { indexCapacity, type IndexCapacity } from "../store/entry-index";
-import type { EntryType } from "../store/entry-file";
-import type { MemoryStore } from "../store/memory-store";
-import { MAIN_AGENT_ACTIONS, WRITE_ACTIONS, type MemoryAction } from "./actions";
+import { indexCapacity, type IndexCapacity } from "../store/entry-index.js";
+import type { EntryType } from "../store/entry-file.js";
+import type { MemoryStore } from "../store/memory-store.js";
+import { MAIN_AGENT_ACTIONS, WRITE_ACTIONS, type MemoryAction } from "./actions.js";
 
 /** handler 需要的宿主/适配层能力。全是纯函数，没有任何宿主类型。 */
 export interface MemoryHandlerDeps {

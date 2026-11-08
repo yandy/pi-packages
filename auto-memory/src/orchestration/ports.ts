@@ -1,4 +1,4 @@
-import type { MemoryAction } from "../tool/actions";
+import type { MemoryAction } from "../tool/actions.js";
 
 /**
  * 适配层要实现的两个端口。

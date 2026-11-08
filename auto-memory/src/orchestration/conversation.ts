@@ -1,4 +1,4 @@
-import type { ExtractMessage } from "./ports";
+import type { ExtractMessage } from "./ports.js";
 
 /**
  * 对话渲染：把中立的 `ExtractMessage` 序列压成 extract prompt 里的那一段文本，

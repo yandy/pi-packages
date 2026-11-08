@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DREAM_ACTIONS, MAIN_AGENT_ACTIONS, type MemoryAction, memoryToolSchema } from "../src/index";
+import { DREAM_ACTIONS, MAIN_AGENT_ACTIONS, type MemoryAction, memoryToolSchema } from "../src/index.js";
 
 /**
  * `memory` 工具的中立契约（spec §5.4）。

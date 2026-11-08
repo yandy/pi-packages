@@ -39,9 +39,9 @@ export interface ExtractMemoriesConfig {
 	model?: string;
 	thinkLevel: ThinkLevel;
 	maxContextTokens: number;
-	/** 渲染进 extract prompt 时，单条 tool_result 的字符上限（spec §11.2）。 */
+	/** 渲染进 extract prompt 时，单条 tool_result 的字符上限。 */
 	maxToolResultChars: number;
-	/** 渲染进 extract prompt 时，单条 assistant 文本的字符上限（spec §11.2）。 */
+	/** 渲染进 extract prompt 时，单条 assistant 文本的字符上限。 */
 	maxAssistantChars: number;
 }
 
@@ -63,7 +63,7 @@ export interface MemoryConfig {
 	/** 注入截断：`memory_index` section 最多带多少**字节**（默认 16384 ≈ 50 条中文索引行的实测上界）。 */
 	memIndexInjectMaxBytes: number;
 	/**
-	 * 两级锁的参数（spec §5.2）。结构与 `StoreConfig["lock"]` 逐字一致，因此可以原样传给
+	 * 两级锁的参数。结构与 `StoreConfig["lock"]` 逐字一致，因此可以原样传给
 	 * `new MemoryStore({ ..., lock: config.lock })`。
 	 * **没有** ttl / 心跳 / 接管字段：跨进程 `.lock` 永远只持毫秒且永不自动回收。
 	 */
@@ -86,7 +86,7 @@ export interface MemoryConfig {
 
 export const DEFAULT_CONFIG: MemoryConfig = {
 	// headless 子会话默认只在内存里跑：extract / dream / 侧查询都不该往用户的 sessions 目录里落盘。
-	// **没有模型默认值**：model 必须由用户显式配置（defaults.model 或 per-task），否则 session_start 报错。
+	// **没有模型默认值**：model 必须由用户显式配置（defaults.model 或 per-task），否则会话启动即报错。
 	defaults: { sessionPersistence: { enabled: false } },
 	memoryDir: defaultMemoryRoot(),
 	memIndexMaxLines: 200,
@@ -118,7 +118,7 @@ export const DEFAULT_CONFIG: MemoryConfig = {
 /** 需要显式模型的子任务。顺序固定：dream → extractMemories → autoSurfacing（校验信息按此顺序输出）。 */
 export type ModelTask = "dream" | "extractMemories" | "autoSurfacing";
 
-/** 某任务的模型值：per-task 优先，其次共享的 defaults.model。`/memory` 的模块状态行也用它。 */
+/** 某任务的模型值：per-task 优先，其次共享的 defaults.model。宿主的状态命令也用它。 */
 export function taskModel(cfg: MemoryConfig, task: ModelTask): string | undefined {
 	// `?.`：`deepMerge` 把用户写的 `"dream": null` 原样带进来 —— 那时应该报「没有模型」，
 	// 而不是抛 TypeError，把启动校验变成一句看不懂的初始化失败。
@@ -152,7 +152,7 @@ export function modelConfigErrors(cfg: MemoryConfig, resolve: (value: string) =>
 	return errors;
 }
 
-/** 已通过启动校验的模型值；缺失时抛错（真正的守卫在 session_start，这里是防御）。 */
+/** 已通过启动校验的模型值；缺失时抛错（真正的守卫在适配层的会话启动路径上，这里是防御）。 */
 export function requiredModel(cfg: MemoryConfig, task: ModelTask): string {
 	const value = taskModel(cfg, task);
 	if (value === undefined) {
@@ -165,7 +165,7 @@ export function expandTilde(p: string, platform: NodeJS.Platform = process.platf
 	if (p === "~") return homedir();
 	if (p.startsWith("~/")) return join(homedir(), p.slice(2));
 	// `~\` 只在 Windows 上展开：POSIX 上 `~\foo` 是以 `~` 开头的合法文件名，
-	// 改写它会破坏用户真实的路径（spec Ruling 4）。
+	// 改写它会破坏用户真实的路径。
 	if (platform === "win32" && p.startsWith("~\\")) return join(homedir(), p.slice(2));
 	return p;
 }
@@ -198,7 +198,7 @@ function readJsonSafe(path: string): Partial<MemoryConfig> {
 }
 
 /**
- * 共享数据根（spec D3 / §5.2）。
+ * 共享数据根。
  *
  * 这是「跳 harness 共享同一份记忆」的地基：任何宿主都必须独立算出**同一个**目录，所以规则里
  * 既不能出现宿主名，也不能有平台分支 —— 所有平台走同一条 XDG 规则（不为 darwin/win32 开例外）。

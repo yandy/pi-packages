@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { escapeWindowsTrailing, isReservedWindowsName, windowsSafeName } from "../src/store/windows-names";
+import { escapeWindowsTrailing, isReservedWindowsName, windowsSafeName } from "../src/store/windows-names.js";
 
 describe("isReservedWindowsName", () => {
 	it("recognises the classic device names, case-insensitively", () => {

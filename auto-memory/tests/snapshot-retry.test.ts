@@ -19,8 +19,8 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MemoryStore } from "../src/store/memory-store";
-import { createSnapshot } from "../src/store/snapshot";
+import { MemoryStore } from "../src/store/memory-store.js";
+import { createSnapshot } from "../src/store/snapshot.js";
 
 let memoryDir: string;
 let backupRoot: string;

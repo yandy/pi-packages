@@ -5,7 +5,7 @@ import {
 	parseEntryIndex,
 	removeIndexLine,
 	upsertIndexLine,
-} from "../src/store/entry-index";
+} from "../src/store/entry-index.js";
 
 const HANDWRITTEN = ["# Memory Index", "", "## Project", "- [A](a.md) — 第一条", "", "<!-- keep me -->", ""].join("\n");
 
