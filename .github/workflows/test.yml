@@ -44,6 +44,8 @@ jobs:
               - "pi-vision-tools/**"
             pi-memory:
               - "pi-memory/**"
+            auto-memory:
+              - "auto-memory/**"
       - id: filter-packages
         run: echo "packages=$(echo '${{ steps.filter.outputs.changes }}' | jq -c 'map(select(. != "root"))')" >> "$GITHUB_OUTPUT"
 
