@@ -2,8 +2,8 @@ import { mkdir, mkdtemp, readFile, rm, stat, unlink, utimes, writeFile } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { serializeEntryFile, type EntryMeta } from "../src/entry-file";
-import { MemoryStore, type StoreConfig } from "../src/memory-store";
+import { serializeEntryFile, type EntryMeta } from "../src/store/entry-file";
+import { MemoryStore, type StoreConfig } from "../src/store/memory-store";
 import { createReservedNameFixture, removeReservedNameFixture } from "./helpers/reserved-name";
 
 let dir: string;

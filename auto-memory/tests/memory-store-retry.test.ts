@@ -12,7 +12,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MemoryStore } from "../src/memory-store";
+import { MemoryStore } from "../src/store/memory-store";
 
 let dir: string;
 

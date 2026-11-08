@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { entryFileName, resolveUniqueFileName } from "../src/filename";
+import { entryFileName, resolveUniqueFileName } from "../src/store/filename";
 
 describe("entryFileName", () => {
 	it("keeps ASCII words and collapses whitespace to dashes", () => {

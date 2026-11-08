@@ -1,7 +1,7 @@
 import type { ModelRegistry, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { MemoryStore } from "@yandy0725/auto-memory";
 import { runHeadlessAgent } from "./agent-runner";
 import type { SessionPersistenceConfig, ThinkLevel } from "./config";
-import type { MemoryStore } from "./memory-store";
 
 /**
  * 渲染进 extract prompt 的一条消息。

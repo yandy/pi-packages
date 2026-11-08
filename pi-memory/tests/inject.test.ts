@@ -19,8 +19,7 @@ import {
 	truncateIndexForInjection,
 } from "../src/inject";
 import { MEMORY_INDEX_SECTION } from "../src/index-source";
-import { MemoryStore, type StoreConfig } from "../src/memory-store";
-import { sanitizeForInjection } from "../src/sanitize";
+import { MemoryStore, type StoreConfig, sanitizeForInjection } from "@yandy0725/auto-memory";
 
 const { runHeadlessAgentMock } = vi.hoisted(() => ({
 	runHeadlessAgentMock: vi.fn(),

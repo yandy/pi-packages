@@ -2,9 +2,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { parseEntryFile } from "../src/entry-file";
-import { parseEntryIndex } from "../src/entry-index";
-import { MemoryStore, type StoreConfig } from "../src/memory-store";
+import { parseEntryFile, parseEntryIndex, MemoryStore, type StoreConfig } from "@yandy0725/auto-memory";
 import {
 	createMemoryTool,
 	DREAM_ACTIONS,

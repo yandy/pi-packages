@@ -1,9 +1,8 @@
+import { type IndexCapacity, type MemoryStore, indexCapacity } from "@yandy0725/auto-memory";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type, type TSchema } from "typebox";
-import { indexCapacity, type IndexCapacity } from "./entry-index";
-import type { MemoryStore } from "./memory-store";
 
 /**
  * `memory` 工具的 action 全集。注册范围是**硬约束**（spec §4.3 / D12）：

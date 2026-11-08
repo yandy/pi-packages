@@ -63,7 +63,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 	};
 });
 
-import { readLockStatus, withLock } from "../src/fs-lock";
+import { readLockStatus, withLock } from "../src/store/fs-lock";
 
 let dir: string;
 let lockPath: string;

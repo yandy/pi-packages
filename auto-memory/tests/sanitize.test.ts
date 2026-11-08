@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { sanitizeForInjection, stripInvisibleChars } from "../src/sanitize";
+import { sanitizeForInjection, stripInvisibleChars } from "../src/store/sanitize";
 
 /** spec §13 点名的不可见字符 + 其余 Unicode Cf 类别字符。 */
 const INVISIBLE: Array<[string, string]> = [
@@ -112,7 +112,7 @@ describe("sanitizeForInjection", () => {
 	});
 
 	it("does not touch the file system (D11: sanitising is injection-time only)", async () => {
-		const source = await readFile(fileURLToPath(new URL("../src/sanitize.ts", import.meta.url)), "utf8");
+		const source = await readFile(fileURLToPath(new URL("../src/store/sanitize.ts", import.meta.url)), "utf8");
 		expect(source).not.toMatch(/^\s*import\b.*node:fs/m);
 		expect(source).not.toMatch(/\b(writeFile|readFile|mkdir|unlink)\s*\(/);
 	});

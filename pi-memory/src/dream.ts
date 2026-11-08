@@ -1,11 +1,9 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { ModelRegistry, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { BACKUP_DIR, type MemoryStore, createSnapshot, isReservedWindowsName } from "@yandy0725/auto-memory";
 import { runHeadlessAgent } from "./agent-runner";
 import type { SessionPersistenceConfig, ThinkLevel } from "./config";
-import { BACKUP_DIR, type MemoryStore } from "./memory-store";
-import { createSnapshot } from "./snapshot";
-import { isReservedWindowsName } from "./windows-names";
 
 /** Build the dream consolidation task. dream 只有 `memory` 工具的 7 个 action，没有任何文件工具。 */
 export function buildDreamTask(maxLines: number): string {

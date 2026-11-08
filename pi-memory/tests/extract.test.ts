@@ -11,7 +11,7 @@ import {
 	type RunExtractOpts,
 	toExtractMessages,
 } from "../src/extract";
-import { MemoryStore, type StoreConfig } from "../src/memory-store";
+import { MemoryStore, type StoreConfig } from "@yandy0725/auto-memory";
 
 const { runHeadlessAgentMock } = vi.hoisted(() => ({
 	runHeadlessAgentMock: vi.fn().mockResolvedValue("saved 2 memories"),

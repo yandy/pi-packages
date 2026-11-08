@@ -1,11 +1,11 @@
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { deriveDescription, type EntryType, parseEntryFile, serializeEntryFile } from "./entry-file";
 import { formatIndexLine, indexCapacity, parseEntryIndex, removeIndexLine, upsertIndexLine } from "./entry-index";
 import { entryFileName, resolveUniqueFileName } from "./filename";
 import { withLock } from "./fs-lock";
 import { withFsRetry } from "./fs-retry";
+import { withFileMutationQueue } from "./mutation-queue";
 import { isProcessLockActive, tryWithProcessLock, withProcessLock } from "./process-lock";
 import { createSnapshot } from "./snapshot";
 import { isReservedWindowsName } from "./windows-names";

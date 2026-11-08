@@ -1,13 +1,20 @@
 import { unlink } from "node:fs/promises";
 import { join } from "node:path";
+import {
+	LOCK_FILE,
+	type LockInfo,
+	MemoryStore,
+	indexCapacity,
+	parseEntryIndex,
+	readLockStatus,
+	resolveMemoryDir,
+	withFsRetry,
+} from "@yandy0725/auto-memory";
 import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { loadConfig, modelConfigErrors, requiredModel, taskModel, type MemoryConfig, type SessionPersistenceConfig } from "./src/config";
 import { runDream } from "./src/dream";
-import { indexCapacity, parseEntryIndex } from "./src/entry-index";
 import { runExtract } from "./src/extract";
-import { readLockStatus, type LockInfo } from "./src/fs-lock";
-import { withFsRetry } from "./src/fs-retry";
 import { readRecordedMemoryIndex } from "./src/index-source";
 import { applyIndexSection, buildIndexSection, buildInjection, indexInjectionCapacity, injectSurfacedContent, runSideQuery, scanEntries } from "./src/inject";
 import {
@@ -16,10 +23,8 @@ import {
 	MAIN_AGENT_ACTIONS,
 	type MemoryToolDeps,
 } from "./src/memory-tool";
-import { LOCK_FILE, MemoryStore } from "./src/memory-store";
 import { resolveModel } from "./src/model-resolver";
 import { readDreamMeta, shouldNudge, writeDreamMeta } from "./src/nudge";
-import { resolveMemoryDir } from "./src/paths";
 import { searchSessions } from "./src/session-search";
 
 function extractAgentsMdBlocks(systemPrompt: string): string[] {

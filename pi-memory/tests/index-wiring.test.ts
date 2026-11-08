@@ -62,10 +62,17 @@ vi.mock("../src/config", async (importOriginal) => {
 	};
 });
 
-vi.mock("../src/paths", () => ({
-	resolveMemoryDir: vi.fn().mockImplementation(async (_config: unknown, cwd: string) =>
-		dirOverrideRef.current ? dirOverrideRef.current(cwd) : dirRef.current),
-}));
+// `resolveMemoryDir` 现在来自 core，但同一个包还提供 `MemoryStore` / `indexCapacity` /
+// `parseEntryIndex` / `readLockStatus` / `withFsRetry` / `LOCK_FILE` —— 那些是本文件端到端写入
+// 用例的被测对象，必须保持真实，所以只能整体展开后替换这一个符号。
+vi.mock("@yandy0725/auto-memory", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@yandy0725/auto-memory")>();
+	return {
+		...actual,
+		resolveMemoryDir: vi.fn().mockImplementation(async (_config: unknown, cwd: string) =>
+			dirOverrideRef.current ? dirOverrideRef.current(cwd) : dirRef.current),
+	};
+});
 
 vi.mock("../src/nudge", () => ({
 	shouldNudge: shouldNudgeMock,

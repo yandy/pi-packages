@@ -10,8 +10,8 @@ import {
 	projectDirName,
 	projectIdentity,
 	resolveMemoryDir,
-} from "../src/paths";
-import { isReservedWindowsName } from "../src/windows-names";
+} from "../src/store/paths";
+import { isReservedWindowsName } from "../src/store/windows-names";
 
 const execFileP = promisify(execFile);
 

@@ -12,6 +12,9 @@
 		"directory": "pi-memory"
 	},
 	"type": "module",
+	"dependencies": {
+		"@yandy0725/auto-memory": "^1.0.0"
+	},
 	"keywords": [
 		"pi-package"
 	],

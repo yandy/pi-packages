@@ -1,11 +1,13 @@
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import {
+	type EntryType,
+	type MemoryStore,
+	sanitizeForInjection,
+	splitLines,
+} from "@yandy0725/auto-memory";
 import { runHeadlessAgent } from "./agent-runner";
 import type { SessionPersistenceConfig, ThinkLevel } from "./config";
-import type { EntryType } from "./entry-file";
-import { splitLines } from "./entry-index";
 import { MEMORY_INDEX_SECTION } from "./index-source";
-import type { MemoryStore } from "./memory-store";
-import { sanitizeForInjection } from "./sanitize";
 
 /**
  * entry 正文的截断标记。与 `INDEX_TRUNCATION_MARKER` **刻意分开**：这里截的是

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildDreamTask, runDream, type RunDreamOpts } from "../src/dream";
-import { MemoryStore, type StoreConfig } from "../src/memory-store";
+import { MemoryStore, type StoreConfig } from "@yandy0725/auto-memory";
 import { createReservedNameFixture, removeReservedNameFixture } from "./helpers/reserved-name";
 
 const { runHeadlessAgentMock } = vi.hoisted(() => ({
