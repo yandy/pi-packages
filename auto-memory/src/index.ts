@@ -73,3 +73,25 @@ export type {
 	SessionPersistenceConfig,
 	ThinkLevel,
 } from "./config";
+
+// ── tool/ 中立工具契约 ────────────────────────────────────────────────────────
+// schema 是纯 JSON Schema，文案是纯字符串，handler 是纯函数：适配层把它们包成宿主的工具对象
+// （pi → typebox + ToolDefinition + pi-tui 渲染；dsh → schemastery + defineTool）。
+export { DREAM_ACTIONS, MAIN_AGENT_ACTIONS } from "./tool/actions";
+export type { MemoryAction } from "./tool/actions";
+export { memoryToolSchema } from "./tool/schema";
+export type { MemoryToolField, MemoryToolJsonSchema } from "./tool/schema";
+export {
+	MEMORY_TOOL_DESCRIPTION,
+	MEMORY_TOOL_GUIDELINES,
+	MEMORY_TOOL_LABEL,
+	MEMORY_TOOL_NAME,
+	MEMORY_TOOL_SNIPPET,
+} from "./tool/texts";
+export { capacityWarning, createMemoryActionHandler } from "./tool/handler";
+export type {
+	MemoryActionResult,
+	MemoryHandlerConfig,
+	MemoryHandlerDeps,
+	MemoryHandlerOptions,
+} from "./tool/handler";
