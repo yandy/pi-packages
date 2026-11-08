@@ -1,24 +1,27 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-	buildExtractTask,
+	MAIN_AGENT_ACTIONS,
+	MemoryStore,
 	type ExtractMessage,
+	type RunExtractOpts,
+	type StoreConfig,
+	buildExtractTask,
 	renderConversation,
 	runExtract,
-	type RunExtractOpts,
-	toExtractMessages,
-} from "../src/extract";
-import { MemoryStore, type StoreConfig } from "@yandy0725/auto-memory";
+} from "../src/index";
 
-const { runHeadlessAgentMock } = vi.hoisted(() => ({
-	runHeadlessAgentMock: vi.fn().mockResolvedValue("saved 2 memories"),
-}));
-vi.mock("../src/agent-runner", () => ({
-	runHeadlessAgent: runHeadlessAgentMock,
-}));
+/** 假的 `HeadlessAgentPort`。 */
+const headlessRun = vi.fn();
+/**
+ * 假的 `HostTranscriptPort`：透传。core 的测试直接给中立的 `ExtractMessage`，
+ * 「宿主消息形状 → ExtractMessage」的翻译是宿主知识，钉在 `pi-memory/tests/host-transcript.test.ts`。
+ */
+const toExtractMessages = (raw: unknown[]): ExtractMessage[] => raw as ExtractMessage[];
+const ports = { headless: { run: headlessRun }, transcript: { toExtractMessages, searchSessions: async () => "" } };
+const extract = (o: RunExtractOpts) => runExtract(o, ports);
 
 const LIMITS = { maxToolResultChars: 500, maxAssistantChars: 2000, maxContextTokens: 100_000 };
 
@@ -41,16 +44,14 @@ function busyStore(): MemoryStore {
 
 function opts(over: Partial<RunExtractOpts> = {}): RunExtractOpts {
 	return {
-		thinkLevel: "high",
+		effort: "high",
 		memoryDir: dir,
 		store,
-		messages: [{ role: "user", content: "hello" }],
+		messages: [{ role: "user", text: "hello" }],
 		maxContextTokens: 2000,
 		maxToolResultChars: 500,
 		maxAssistantChars: 2000,
 		model: "deepseek/deepseek-v4-flash",
-		modelRegistry: {} as any,
-		customTools: [],
 		...over,
 	};
 }
@@ -58,197 +59,11 @@ function opts(over: Partial<RunExtractOpts> = {}): RunExtractOpts {
 beforeEach(async () => {
 	dir = await mkdtemp(join(tmpdir(), "mem-extract-"));
 	store = new MemoryStore(CFG(dir));
-	runHeadlessAgentMock.mockClear();
-	runHeadlessAgentMock.mockResolvedValue("saved 2 memories");
+	headlessRun.mockClear();
+	headlessRun.mockResolvedValue("saved 2 memories");
 });
 afterEach(async () => {
 	await rm(dir, { recursive: true, force: true });
-});
-
-describe("toExtractMessages", () => {
-	it("maps a pi user message with string content", () => {
-		expect(toExtractMessages([{ role: "user", content: "hello", timestamp: 1 }])).toEqual([
-			{ role: "user", text: "hello" },
-		]);
-	});
-
-	it("maps block content and renders images as a placeholder", () => {
-		const out = toExtractMessages([
-			{
-				role: "user",
-				content: [
-					{ type: "text", text: "look" },
-					{ type: "image", data: "AAAA", mimeType: "image/png" },
-				],
-			},
-		]);
-		expect(out).toEqual([{ role: "user", text: "look\n[image]" }]);
-	});
-
-	it("maps an assistant message with text and tool calls", () => {
-		const out = toExtractMessages([
-			{
-				role: "assistant",
-				content: [
-					{ type: "text", text: "ok" },
-					{ type: "toolCall", id: "t1", name: "memory", arguments: { action: "add" } },
-				],
-			},
-		]);
-		expect(out).toEqual([
-			{ role: "assistant", text: "ok", toolCalls: [{ name: "memory", args: '{"action":"add"}' }] },
-		]);
-	});
-
-	it("drops thinking blocks but keeps the assistant text next to them", () => {
-		const out = toExtractMessages([
-			{
-				role: "assistant",
-				content: [
-					{ type: "thinking", thinking: "hmm" },
-					{ type: "text", text: "answer" },
-				],
-			},
-		]);
-		expect(out).toEqual([{ role: "assistant", text: "answer" }]);
-	});
-
-	it("maps a tool result and keeps the error flag", () => {
-		const out = toExtractMessages([
-			{
-				role: "toolResult",
-				toolCallId: "t1",
-				toolName: "bash",
-				content: [{ type: "text", text: "exit 1" }],
-				isError: true,
-			},
-		]);
-		expect(out).toEqual([{ role: "toolResult", text: "exit 1", toolName: "bash", isError: true }]);
-	});
-
-	it("maps a custom message to assistant text", () => {
-		const out = toExtractMessages([
-			{ role: "custom", customType: "note", content: "preserved", display: true, timestamp: 1 },
-			{
-				role: "custom",
-				customType: "note",
-				content: [
-					{ type: "text", text: "part one" },
-					{ type: "text", text: "part two" },
-				],
-				display: false,
-				timestamp: 2,
-			},
-			{
-				role: "custom",
-				customType: "note",
-				content: [{ type: "image", data: "AAAA", mimeType: "image/png" }],
-				display: false,
-				timestamp: 3,
-			},
-		]);
-		expect(out).toEqual([
-			{ role: "assistant", text: "preserved" },
-			{ role: "assistant", text: "part one part two" },
-		]);
-	});
-
-	// Minor（复核者点名）：memory-auto-surfacing 是 pi-memory 自己注入的 <relevant_memories>。
-	// 把它渲染成 assistant 文本会再次进入 extract prompt，等于让 extract 从自己的记忆里反复提取。
-	it("skips the memory-auto-surfacing self-injection but keeps other custom messages", () => {
-		const out = toExtractMessages([
-			{
-				role: "custom",
-				customType: "memory-auto-surfacing",
-				content: "<relevant_memories>\n## SSH\n2222\n</relevant_memories>",
-				display: false,
-				timestamp: 1,
-			},
-			{ role: "custom", customType: "note", content: "kept", display: true, timestamp: 2 },
-		]);
-
-		expect(out).toEqual([{ role: "assistant", text: "kept" }]);
-	});
-
-	it("maps bash executions to bash tool results and honours excludeFromContext", () => {
-		const out = toExtractMessages([
-			{
-				role: "bashExecution",
-				command: "npm test",
-				output: "boom",
-				exitCode: 1,
-				cancelled: false,
-				truncated: false,
-				timestamp: 1,
-			},
-			{
-				role: "bashExecution",
-				command: "ls",
-				output: "a b",
-				exitCode: 0,
-				cancelled: false,
-				truncated: false,
-				timestamp: 2,
-			},
-			{
-				role: "bashExecution",
-				command: "sleep 10",
-				output: "killed",
-				exitCode: undefined,
-				cancelled: true,
-				truncated: false,
-				timestamp: 3,
-			},
-			{
-				role: "bashExecution",
-				command: "cat secret",
-				output: "hidden",
-				exitCode: 0,
-				cancelled: false,
-				truncated: false,
-				excludeFromContext: true,
-				timestamp: 4,
-			},
-		]);
-		expect(out).toEqual([
-			{ role: "toolResult", toolName: "bash", text: "$ npm test\nboom", isError: true },
-			{ role: "toolResult", toolName: "bash", text: "$ ls\na b", isError: false },
-			{ role: "toolResult", toolName: "bash", text: "$ sleep 10\nkilled", isError: false },
-		]);
-	});
-
-	it("maps branch and compaction summaries to assistant context", () => {
-		const out = toExtractMessages([
-			{ role: "branchSummary", summary: "back from the refactor branch", fromId: "e12", timestamp: 1 },
-			{ role: "compactionSummary", summary: "the compacted history", tokensBefore: 90_000, timestamp: 2 },
-			{ role: "compactionSummary", tokensBefore: 90_000, timestamp: 3 },
-		]);
-		expect(out).toEqual([
-			{ role: "assistant", text: "[branch summary] back from the refactor branch" },
-			{ role: "assistant", text: "[compaction summary] the compacted history" },
-		]);
-	});
-
-	it("keeps an unknown role as assistant text and never as a user rule", () => {
-		const out = toExtractMessages([
-			{ role: "system", content: "from content" },
-			{ role: "mystery", output: "from output" },
-			{ role: "mystery", text: "from text" },
-			{ role: "mystery", summary: "from summary" },
-			{ role: "mystery", content: [{ type: "text", text: "from array" }] },
-		]);
-		expect(out).toEqual([
-			{ role: "assistant", text: "from content" },
-			{ role: "assistant", text: "from output" },
-			{ role: "assistant", text: "from text" },
-			{ role: "assistant", text: "from summary" },
-			{ role: "assistant", text: "from array" },
-		]);
-	});
-
-	it("drops messages that have no text at all", () => {
-		expect(toExtractMessages([null, 42, {}, { role: "mystery" }, { role: "user", content: [] }])).toEqual([]);
-	});
 });
 
 describe("renderConversation", () => {
@@ -297,19 +112,11 @@ describe("renderConversation", () => {
 		expect(out).toContain("[2] tool_result: [error] boom");
 	});
 
-	it("makes mapped bash output obey maxToolResultChars", () => {
+	it("counts a bash result's `$ cmd` prefix toward maxToolResultChars", () => {
+		// 宿主把一次 bash 执行映射成 `text: "$ run\n" + output`；那 6 个字符的前缀也算进预算，
+		// 所以 86 字符的正文按 20 的上限截掉 66。
 		const out = renderConversation(
-			toExtractMessages([
-				{
-					role: "bashExecution",
-					command: "run",
-					output: "x".repeat(80),
-					exitCode: 0,
-					cancelled: false,
-					truncated: false,
-					timestamp: 1,
-				},
-			]),
+			[{ role: "toolResult", toolName: "bash", text: `$ run\n${"x".repeat(80)}` }],
 			{ ...LIMITS, maxToolResultChars: 20 },
 		);
 		expect(out).toContain("[1] tool_result: $ run\n");
@@ -457,17 +264,12 @@ describe("renderConversation", () => {
 
 describe("buildExtractTask", () => {
 	it("renders the whole conversation, not just two messages", () => {
-		const messages = toExtractMessages([
-			{ role: "user", content: "how do I debug SSH?" },
-			{ role: "assistant", content: [{ type: "text", text: "Use ssh -vvv" }] },
-			{ role: "user", content: "no, the port is wrong" },
-			{
-				role: "toolResult",
-				toolName: "bash",
-				content: [{ type: "text", text: "Connection refused on 22" }],
-				isError: true,
-			},
-		]);
+		const messages: ExtractMessage[] = [
+			{ role: "user", text: "how do I debug SSH?" },
+			{ role: "assistant", text: "Use ssh -vvv" },
+			{ role: "user", text: "no, the port is wrong" },
+			{ role: "toolResult", toolName: "bash", text: "Connection refused on 22", isError: true },
+		];
 		const task = buildExtractTask(messages, 2000, [], { maxToolResultChars: 500, maxAssistantChars: 2000 });
 
 		expect(task).toContain("[1] user: how do I debug SSH?");
@@ -549,68 +351,75 @@ describe("buildExtractTask", () => {
 });
 
 describe("runExtract", () => {
-	// spec §5.2：extract **不等待**逻辑锁 —— 拿不到即跳过本轮。
+	// extract **不等待**逻辑锁 —— 拿不到即跳过本轮。
 	it("returns skipped without calling the headless agent when the logical lock is busy", async () => {
-		const out = await runExtract(opts({ store: busyStore() }));
+		const out = await extract(opts({ store: busyStore() }));
 		expect(out).toEqual({ skipped: true });
-		expect(runHeadlessAgentMock).not.toHaveBeenCalled();
+		expect(headlessRun).not.toHaveBeenCalled();
 	});
 
-	it("skips when nothing renderable is left", async () => {
-		const out = await runExtract(opts({ messages: [] }));
-		expect(out).toEqual({ skipped: true });
-		expect(runHeadlessAgentMock).not.toHaveBeenCalled();
+	it("skips without calling the host when the transcript maps to nothing", async () => {
+		expect(await extract(opts({ messages: [] }))).toEqual({ skipped: true });
+		expect(headlessRun).not.toHaveBeenCalled();
 
-		const out2 = await runExtract(opts({ messages: [null, 42, {}] }));
-		expect(out2).toEqual({ skipped: true });
-		expect(runHeadlessAgentMock).not.toHaveBeenCalled();
+		// 「垃圾消息映射成空数组」是宿主的责任；core 的契约只有一条：映射结果为空 → 跳过本轮。
+		const empty = {
+			headless: { run: headlessRun },
+			transcript: { toExtractMessages: () => [], searchSessions: async () => "" },
+		};
+		expect(await runExtract(opts({ messages: [null, 42, {}] }), empty)).toEqual({ skipped: true });
+		expect(headlessRun).not.toHaveBeenCalled();
 	});
 
-	it("runs the headless agent with no built-in tools (noTools, not tools:[]), maxTurns=5 and the custom tools", async () => {
-		const customTools = [{ name: "memory" } as unknown as ToolDefinition];
-		const out = await runExtract(
+	it("asks for no builtin tools, five actions, maxTurns=5 and a 120s timeout", async () => {
+		const out = await extract(
 			opts({
-				customTools,
 				model: "deepseek/deepseek-v4-flash",
 				sessionPersistence: { enabled: true },
 			}),
 		);
 
 		expect(out).toEqual({ skipped: false, result: "saved 2 memories" });
-		expect(runHeadlessAgentMock).toHaveBeenCalledTimes(1);
-		expect(runHeadlessAgentMock.mock.calls[0][0].tools).toBeUndefined();
-		expect(runHeadlessAgentMock).toHaveBeenCalledWith(
+		expect(headlessRun).toHaveBeenCalledTimes(1);
+		expect(headlessRun).toHaveBeenCalledWith(
 			expect.objectContaining({
 				cwd: dir,
-				thinkLevel: "high",
+				effort: "high",
 				maxTurns: 5,
 				timeoutMs: 120_000,
-				// `tools: []` 会把 customTools 一起过滤掉（Finding C1），必须用 noTools 关 builtin。
-				noTools: "builtin",
-				customTools,
+				// 「关 builtin、只留 memory 工具」在 core 里就是这两个字段；
+				// 白名单陷阱（宿主的 tools: [] 会连 customTools 一起滤掉）由适配层躲开。
+				builtinTools: "none",
+				memoryTool: { actions: MAIN_AGENT_ACTIONS, skipLogicalLock: true, onWrite: undefined },
 				model: "deepseek/deepseek-v4-flash",
 				sessionPersistence: { enabled: true },
 			}),
 		);
 	});
 
+	it("forwards onWrite into the memory tool spec so the adapter can count writes", async () => {
+		const onWrite = vi.fn();
+		await extract(opts({ onWrite }));
+		expect(headlessRun.mock.calls[0][0].memoryTool).toMatchObject({ onWrite });
+	});
+
 	it("releases the logical lock after a successful run", async () => {
-		await runExtract(opts());
+		await extract(opts());
 		expect(store.logicalLockActive()).toBe(false);
 	});
 
 	it("renders the configured char limits into the task", async () => {
-		await runExtract(
+		await extract(
 			opts({
 				messages: [
-					{ role: "assistant", content: [{ type: "text", text: "a".repeat(400) }] },
-					{ role: "toolResult", toolName: "bash", content: [{ type: "text", text: "r".repeat(400) }] },
+					{ role: "assistant", text: "a".repeat(400) },
+					{ role: "toolResult", toolName: "bash", text: "r".repeat(400) },
 				],
 				maxToolResultChars: 30,
 				maxAssistantChars: 40,
 			}),
 		);
-		const task: string = runHeadlessAgentMock.mock.calls[0][0].task;
+		const task: string = headlessRun.mock.calls[0][0].task;
 		expect(task).toContain("a".repeat(40));
 		expect(task).not.toContain("a".repeat(41));
 		expect(task).toContain("r".repeat(30));
@@ -618,14 +427,14 @@ describe("runExtract", () => {
 	});
 
 	it("passes the AGENTS.md blocks through", async () => {
-		await runExtract(opts({ agentsMdBlocks: ['<project_instructions path="/x">\nrule\n</project_instructions>'] }));
-		expect(runHeadlessAgentMock.mock.calls[0][0].task).toContain("## AGENTS.md Rules");
+		await extract(opts({ agentsMdBlocks: ['<project_instructions path="/x">\nrule\n</project_instructions>'] }));
+		expect(headlessRun.mock.calls[0][0].task).toContain("## AGENTS.md Rules");
 	});
 
-	// spec §14：extract 失败不得被静默吞掉（v1 内部就有一层 .catch(() => {})）。
+	// extract 失败不得被静默吞掉。
 	it("propagates a headless-agent failure instead of swallowing it", async () => {
-		runHeadlessAgentMock.mockRejectedValueOnce(new Error("extract failed"));
-		await expect(runExtract(opts())).rejects.toThrow("extract failed");
+		headlessRun.mockRejectedValueOnce(new Error("extract failed"));
+		await expect(extract(opts())).rejects.toThrow("extract failed");
 		expect(store.logicalLockActive()).toBe(false);
 	});
 });

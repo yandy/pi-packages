@@ -10,6 +10,8 @@ import {
 	type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { FILE_IO_TOOLS } from "../src/agent-config";
+import { toHeadlessToolOptions } from "../src/agent-runner";
 
 /**
  * SDK 语义钉子：`tools` 是**白名单**，会把 `customTools` 一起过滤。
@@ -97,5 +99,41 @@ describe("createAgentSession tool filtering (real SDK)", () => {
 		} finally {
 			created.session.dispose?.();
 		}
+	});
+});
+
+describe("toHeadlessToolOptions（core 请求 → pi 的工具抑制选项）", () => {
+	const buildMemoryTool = vi.fn(() => memoryTool);
+	const base = {
+		task: "t",
+		cwd: "/mem",
+		model: "m",
+		maxTurns: 1,
+		timeoutMs: 1000,
+	};
+
+	it("uses noTools='builtin' and no `tools` allowlist when a memory tool is requested", () => {
+		const out = toHeadlessToolOptions(
+			{ ...base, builtinTools: "none", memoryTool: { actions: ["add"] } },
+			buildMemoryTool,
+		);
+		expect(out.noTools).toBe("builtin");
+		// 关键：`tools` 必须**不存在**。传 [] 就是白名单，会把 customTools 一起滤掉。
+		expect(out.tools).toBeUndefined();
+		expect(out.customTools).toEqual([memoryTool]);
+		expect(buildMemoryTool).toHaveBeenCalledWith({ actions: ["add"] });
+	});
+
+	it("uses tools: [] when no tool is requested and builtinTools is 'none'", () => {
+		const out = toHeadlessToolOptions({ ...base, builtinTools: "none", memoryTool: null }, buildMemoryTool);
+		expect(out.tools).toEqual([]);
+		expect(out.noTools).toBeUndefined();
+		expect(out.customTools).toEqual([]);
+	});
+
+	it("maps builtinTools 'file-io' onto pi's builtin allowlist", () => {
+		const out = toHeadlessToolOptions({ ...base, builtinTools: "file-io", memoryTool: null }, buildMemoryTool);
+		expect(out.tools).toEqual([...FILE_IO_TOOLS]);
+		expect(out.noTools).toBeUndefined();
 	});
 });

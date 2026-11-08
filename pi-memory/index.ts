@@ -9,23 +9,22 @@ import {
 	indexInjectionCapacity,
 	parseEntryIndex,
 	readLockStatus,
+	renderSurfacedBlock,
 	resolveMemoryDir,
+	runDream,
+	runExtract,
+	runSideQuery,
 	scanEntries,
 	withFsRetry,
 } from "@yandy0725/auto-memory";
 import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { loadConfig, modelConfigErrors, requiredModel, taskModel, type MemoryConfig, type SessionPersistenceConfig } from "./src/config";
-import { runDream } from "./src/dream";
-import { runExtract } from "./src/extract";
 import { readRecordedMemoryIndex } from "./src/index-source";
-import { applyIndexSection, buildInjection, injectSurfacedContent, runSideQuery } from "./src/inject-pi";
-import {
-	createMemoryTool,
-	DREAM_ACTIONS,
-	MAIN_AGENT_ACTIONS,
-	type MemoryToolDeps,
-} from "./src/memory-tool";
+import { applyIndexSection, buildInjection } from "./src/inject-pi";
+import { createPiHeadlessAgent } from "./src/agent-runner";
+import { createPiTranscript } from "./src/host-transcript";
+import { createMemoryTool, type MemoryToolDeps } from "./src/memory-tool";
 import { resolveModel } from "./src/model-resolver";
 import { readDreamMeta, shouldNudge, writeDreamMeta } from "./src/nudge";
 import { searchSessions } from "./src/session-search";
@@ -222,6 +221,17 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	/**
+	 * core 的编排（dream / extract / 侧查询）经这两个端口用到 pi 的能力。
+	 * `headless` 每次现造：`ctx.modelRegistry` 来自事件上下文，不在工厂作用域里。
+	 */
+	const piTranscript = createPiTranscript();
+	const headlessFor = (ctx: ExtensionContext) =>
+		createPiHeadlessAgent({
+			modelRegistry: ctx.modelRegistry,
+			buildMemoryTool: (spec) => createMemoryTool(toolDeps, spec),
+		});
+
+	/**
 	 * 建立本 session 的记忆运行时：目录 → store → 索引来源 → 注册工具。
 	 *
 	 * 只在 `session_start` 调用，且调用方已通过模型校验。
@@ -318,24 +328,19 @@ export default function (pi: ExtensionAPI) {
 					const dreamThinkLevel = config.dream.thinkLevel;
 					const dir = nudgeDir;
 					ui.setStatus("dream", "Consolidating memory...");
-					const dreamRun = runDream({
-						model: dreamModel,
-						thinkLevel: dreamThinkLevel,
-						memoryDir: dir,
-						store: activeStore,
-						maxLines: config.memIndexMaxLines,
-						modelRegistry: ctx.modelRegistry,
-						sessionPersistence: resolveDefault(config, "dream", "sessionPersistence"),
-						// dream 的 7 个 action 只注入它自己的 headless session（D12）；整轮持锁与
-						// 进入时的全目录快照都在 runDream 里，所以内部原语两个选项都跳过。
-						customTools: [
-							createMemoryTool(toolDeps, {
-								actions: DREAM_ACTIONS,
-								skipLogicalLock: true,
-								skipSnapshot: true,
-							}),
-						],
-					});
+					// dream 的 7 个 action 只注入它自己的 headless 子会话；整轮持锁与进入时的
+					// 全目录快照都在 runDream 里，所以内部原语两个 skip 都开（由 core 表达）。
+					const dreamRun = runDream(
+						{
+							model: dreamModel,
+							effort: dreamThinkLevel,
+							memoryDir: dir,
+							store: activeStore,
+							maxLines: config.memIndexMaxLines,
+							sessionPersistence: resolveDefault(config, "dream", "sessionPersistence"),
+						},
+						{ headless: headlessFor(ctx) },
+					);
 					track(dreamRun);
 					// 两参 `.then`（而不是 `.then().catch()`）：成功分支自己写 meta，两个分支都不再读 ctx；
 					// writeDreamMeta 的失败也必须在分支内兜住，否则它会变成无人接管的 rejection。
@@ -386,18 +391,20 @@ export default function (pi: ExtensionAPI) {
 				const manifest = await scanEntries(activeStore);
 				if (manifest.length > 0) {
 					const selected = await runSideQuery(
-						manifest,
-						event.prompt.slice(0, 4000),
-						injectedFiles,
-						autoSurfacing.maxFiles,
-						autoSurfacing.thinkLevel,
-						requiredModel(config, "autoSurfacing"),
-						ctx.modelRegistry,
-						memoryDir,
-						resolveDefault(config, "autoSurfacing", "sessionPersistence"),
+						{
+							manifest,
+							userPrompt: event.prompt.slice(0, 4000),
+							injectedFiles,
+							maxFiles: autoSurfacing.maxFiles,
+							effort: autoSurfacing.thinkLevel,
+							model: requiredModel(config, "autoSurfacing"),
+							cwd: memoryDir,
+							sessionPersistence: resolveDefault(config, "autoSurfacing", "sessionPersistence"),
+						},
+						{ headless: headlessFor(ctx) },
 					);
 					if (selected.length > 0) {
-						const content = await injectSurfacedContent(
+						const content = await renderSurfacedBlock(
 							activeStore,
 							selected,
 							autoSurfacing.maxEntryBytes,
@@ -477,32 +484,29 @@ export default function (pi: ExtensionAPI) {
 		// 长时后台任务（120s timeout），而 `session_shutdown` 只等 `lock.timeoutMs`（默认 5s），
 		// 所以「extract 在途 + session 已销毁」是常态路径：UI 必须在**同步段**快照，回调里不再碰 ctx。
 		const ui = ctx.hasUI ? ctx.ui : undefined;
-		const extractRun = runExtract({
-			agentsMdBlocks: extractAgentsMdBlocks(lastSystemPrompt),
-			model: extractModel,
-			thinkLevel: extractConfig.thinkLevel,
-			memoryDir: dir,
-			store: activeStore,
-			// **不再**把消息压成 `{role, content}` 字符串（那是提取失真的根因，spec §11.1）：
-			// 原样交给 extract，由 toExtractMessages 保留角色 / tool_call / tool_result。
-			messages: event.messages,
-			maxContextTokens: extractConfig.maxContextTokens,
-			maxToolResultChars: extractConfig.maxToolResultChars,
-			maxAssistantChars: extractConfig.maxAssistantChars,
-			modelRegistry: ctx.modelRegistry,
-			// extract 的工具集与主 agent 相同（5 个 action，D12），且**只**注入它自己的 headless session。
-			// 不开 skipSnapshot：extract 没有整轮快照，它的每次写入都该留下自己的回滚点。
-			customTools: [
-				createMemoryTool(toolDeps, {
-					actions: MAIN_AGENT_ACTIONS,
-					skipLogicalLock: true,
-					onWrite: () => {
-						written += 1;
-					},
-				}),
-			],
-			sessionPersistence: resolveDefault(config, "extractMemories", "sessionPersistence"),
-		});
+		// extract 的工具集与主 agent 相同（5 个 action），且**只**注入它自己的 headless 子会话；
+		// 不开 skipSnapshot：extract 没有整轮快照，它的每次写入都该留下自己的回滚点。
+		// 这两件事都由 core 的 runExtract 表达，pi 只提供 onWrite 计数与两个端口。
+		const extractRun = runExtract(
+			{
+				agentsMdBlocks: extractAgentsMdBlocks(lastSystemPrompt),
+				model: extractModel,
+				effort: extractConfig.thinkLevel,
+				memoryDir: dir,
+				store: activeStore,
+				// **不再**把消息压成 `{role, content}` 字符串（那是提取失真的根因）：原样交给
+				// core，由 pi 的 HostTranscriptPort 保留角色 / tool_call / tool_result。
+				messages: event.messages,
+				maxContextTokens: extractConfig.maxContextTokens,
+				maxToolResultChars: extractConfig.maxToolResultChars,
+				maxAssistantChars: extractConfig.maxAssistantChars,
+				sessionPersistence: resolveDefault(config, "extractMemories", "sessionPersistence"),
+				onWrite: () => {
+					written += 1;
+				},
+			},
+			{ headless: headlessFor(ctx), transcript: piTranscript },
+		);
 		track(extractRun);
 		// 用两参 `.then`（而不是 `.then().catch()`）：成功通知自己抛错只会进它自己的分支，
 		// 不会被失败回调接住 —— 否则会被误报成 `Extract failed:` 并烧掉本 session 的失败配额。
@@ -617,22 +621,17 @@ export default function (pi: ExtensionAPI) {
 			// 先取模型再改状态：requiredModel 抛错时不能把 "dream" 状态留在那儿（这条链没有 .finally）。
 			const dreamModel = requiredModel(config, "dream");
 			ui?.setStatus("dream", "Consolidating memory...");
-			const dreamRun = runDream({
-				model: dreamModel,
-				thinkLevel: config.dream.thinkLevel,
-				memoryDir,
-				store: activeStore,
-				maxLines: config.memIndexMaxLines,
-				modelRegistry: ctx.modelRegistry,
-				sessionPersistence: resolveDefault(config, "dream", "sessionPersistence"),
-				customTools: [
-					createMemoryTool(toolDeps, {
-						actions: DREAM_ACTIONS,
-						skipLogicalLock: true,
-						skipSnapshot: true,
-					}),
-				],
-			});
+			const dreamRun = runDream(
+				{
+					model: dreamModel,
+					effort: config.dream.thinkLevel,
+					memoryDir,
+					store: activeStore,
+					maxLines: config.memIndexMaxLines,
+					sessionPersistence: resolveDefault(config, "dream", "sessionPersistence"),
+				},
+				{ headless: headlessFor(ctx) },
+			);
 			track(dreamRun);
 			void dreamRun
 				.then(

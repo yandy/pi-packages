@@ -9,6 +9,7 @@ import {
 	SettingsManager,
 	type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import type { HeadlessAgentPort, HeadlessRunRequest } from "@yandy0725/auto-memory";
 import { FILE_IO_TOOLS } from "./agent-config";
 import type { SessionPersistenceConfig, ThinkLevel } from "./config";
 import { resolveModel } from "./model-resolver";
@@ -150,4 +151,63 @@ export async function runHeadlessAgent(opts: HeadlessAgentOpts): Promise<string>
 		unsubscribe();
 		session.dispose?.();
 	}
+}
+
+/** 构造 `memory` 工具所需的宿主能力：pi 的模型注册表 + 把 core 的工具规格包成 `ToolDefinition`。 */
+export interface PiHeadlessDeps {
+	modelRegistry: import("@earendil-works/pi-coding-agent").ModelRegistry;
+	buildMemoryTool: (spec: NonNullable<HeadlessRunRequest["memoryTool"]>) => ToolDefinition;
+}
+
+/** `createAgentSession` 的工具抑制选项（`HeadlessAgentOpts` 的那三个字段）。 */
+export interface HeadlessToolOptions {
+	tools?: string[];
+	noTools?: "all" | "builtin";
+	customTools: ToolDefinition[];
+}
+
+/**
+ * 把 core 的中立请求翻成 pi 的工具抑制选项。**白名单陷阱就在这里躲开**：
+ *
+ * pi 的 `tools` 是白名单，`createAgentSession` 的 `allowedToolNames` 与 `agent-session` 的
+ * `isAllowedTool` 同时作用于 builtin 与 customTools，所以 `tools: []` 会把 `memory` 工具一起滤掉
+ * —— dream 一个原语都调不到却「成功」返回，extract 写不进任何记忆。因此：
+ *
+ * - 要注入 `memory` 工具 → `noTools: "builtin"`（关 builtin、留 customTools），**不传** `tools`；
+ * - 不注入工具且 `builtinTools === "none"` → `tools: []`（零工具就是意图，侧查询如此）；
+ * - 不注入工具且 `builtinTools === "file-io"` → `tools: [...FILE_IO_TOOLS]`。
+ *
+ * 导出仅为直接单测：`createPiHeadlessAgent` 是它唯一的调用方。
+ */
+export function toHeadlessToolOptions(
+	req: HeadlessRunRequest,
+	buildMemoryTool: PiHeadlessDeps["buildMemoryTool"],
+): HeadlessToolOptions {
+	if (req.memoryTool) {
+		return { noTools: "builtin", customTools: [buildMemoryTool(req.memoryTool)] };
+	}
+	return req.builtinTools === "file-io"
+		? { tools: [...FILE_IO_TOOLS], customTools: [] }
+		: { tools: [], customTools: [] };
+}
+
+/** `HeadlessAgentPort` 的 pi 实现。 */
+export function createPiHeadlessAgent(deps: PiHeadlessDeps): HeadlessAgentPort {
+	return {
+		run(req: HeadlessRunRequest): Promise<string | null> {
+			return runHeadlessAgent({
+				task: req.task,
+				cwd: req.cwd,
+				modelRegistry: deps.modelRegistry,
+				model: req.model,
+				// core 不解释档位；pi 的 6 值枚举由启动时的模型校验保证可解析。
+				thinkLevel: req.effort as ThinkLevel | undefined,
+				maxTurns: req.maxTurns,
+				timeoutMs: req.timeoutMs,
+				signal: req.signal,
+				sessionPersistence: req.sessionPersistence as SessionPersistenceConfig | undefined,
+				...toHeadlessToolOptions(req, deps.buildMemoryTool),
+			});
+		},
+	};
 }

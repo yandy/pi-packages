@@ -1,18 +1,21 @@
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildDreamTask, runDream, type RunDreamOpts } from "../src/dream";
-import { MemoryStore, type StoreConfig } from "@yandy0725/auto-memory";
+import {
+	DREAM_ACTIONS,
+	MemoryStore,
+	type RunDreamOpts,
+	type StoreConfig,
+	buildDreamTask,
+	runDream,
+} from "../src/index";
 import { createReservedNameFixture, removeReservedNameFixture } from "./helpers/reserved-name";
 
-const { runHeadlessAgentMock } = vi.hoisted(() => ({
-	runHeadlessAgentMock: vi.fn(),
-}));
-vi.mock("../src/agent-runner", () => ({
-	runHeadlessAgent: runHeadlessAgentMock,
-}));
+/** 假的 `HeadlessAgentPort`：dream 只关心「宿主跑了这一轮、回了什么」。 */
+const headlessRun = vi.fn();
+const ports = { headless: { run: headlessRun } };
+const dream = (o: RunDreamOpts) => runDream(o, ports);
 
 let dir: string;
 let store: MemoryStore;
@@ -27,13 +30,11 @@ const CFG = (memoryDir: string, over: Partial<StoreConfig> = {}): StoreConfig =>
 
 function opts(over: Partial<RunDreamOpts> = {}): RunDreamOpts {
 	return {
-		thinkLevel: "high",
+		effort: "high",
 		memoryDir: dir,
 		store,
 		maxLines: 200,
 		model: "deepseek/deepseek-v4-flash",
-		modelRegistry: {} as any,
-		customTools: [],
 		...over,
 	};
 }
@@ -45,7 +46,8 @@ async function backupDirs(): Promise<string[]> {
 beforeEach(async () => {
 	dir = await mkdtemp(join(tmpdir(), "mem-dream-"));
 	store = new MemoryStore(CFG(dir));
-	runHeadlessAgentMock.mockReset();
+	headlessRun.mockReset();
+	headlessRun.mockResolvedValue("ok");
 });
 afterEach(async () => {
 	// win32 宿主上 rm(dir, { recursive: true }) 删不掉保留名文件，必须先经 \\?\ 前缀摘除
@@ -126,7 +128,7 @@ describe("runDream", () => {
 	it("holds the process-wide logical lock for the whole run", async () => {
 		// 短超时：没有 skipLogicalLock 的调用会被挡住，5s 的默认超时会让这个用例跑 5 秒。
 		const shortStore = new MemoryStore(CFG(dir, { lock: { timeoutMs: 40, snapshotKeep: 5 } }));
-		runHeadlessAgentMock.mockImplementationOnce(async () => {
+		headlessRun.mockImplementationOnce(async () => {
 			expect(shortStore.logicalLockActive()).toBe(true);
 			// 持有者自己的原语调用（skipLogicalLock）必须能通过
 			await expect(
@@ -139,38 +141,45 @@ describe("runDream", () => {
 			return "consolidated";
 		});
 
-		const summary = await runDream(opts({ store: shortStore }));
+		const summary = await dream(opts({ store: shortStore }));
 
 		expect(summary).toBe("consolidated");
 		expect(shortStore.logicalLockActive()).toBe(false);
 	});
 
-	it("passes noTools='builtin' plus the dream-only customTools through to the headless agent", async () => {
-		runHeadlessAgentMock.mockResolvedValueOnce("ok");
-		const customTools = [{ name: "memory" } as unknown as ToolDefinition];
+	it("asks for no builtin tools and the seven dream-only actions, with both skips on", async () => {
+		headlessRun.mockResolvedValueOnce("ok");
 
-		await runDream(opts({ customTools, model: "deepseek/deepseek-v4-flash" }));
+		await dream(opts({ model: "deepseek/deepseek-v4-flash" }));
 
-		expect(runHeadlessAgentMock).toHaveBeenCalledWith(
+		// 「关 builtin、只留 memory 工具」在 core 里表达为 builtinTools:"none" + memoryTool；
+		// 白名单陷阱（宿主的 `tools: []` 会连 customTools 一起滤掉）由适配层负责躲开。
+		expect(headlessRun).toHaveBeenCalledWith(
 			expect.objectContaining({
 				cwd: dir,
-				thinkLevel: "high",
+				effort: "high",
 				maxTurns: undefined,
 				timeoutMs: 600_000,
-				// `tools: []` 会把 customTools 一起过滤掉（Finding C1），必须用 noTools 关 builtin。
-				noTools: "builtin",
-				customTools,
+				builtinTools: "none",
 				model: "deepseek/deepseek-v4-flash",
+				memoryTool: { actions: DREAM_ACTIONS, skipLogicalLock: true, skipSnapshot: true },
 			}),
 		);
-		expect(runHeadlessAgentMock.mock.calls[0][0].tools).toBeUndefined();
-		expect(runHeadlessAgentMock.mock.calls[0][0].task).toContain("hard limit of 200 lines");
+		expect(headlessRun.mock.calls[0][0].task).toContain("hard limit of 200 lines");
+	});
+
+	it("throws when the host declines to run the round, and releases the lock", async () => {
+		headlessRun.mockResolvedValueOnce(null);
+
+		// 静默返回空摘要会让用户以为合并成功了；dream 是显式触发的，必须显式失败。
+		await expect(dream(opts())).rejects.toThrow("the host did not run the dream round");
+		expect(store.logicalLockActive()).toBe(false);
 	});
 
 	it("passes sessionPersistence through", async () => {
-		runHeadlessAgentMock.mockResolvedValueOnce("ok");
-		await runDream(opts({ sessionPersistence: { enabled: true, sessionDir: "/custom" } }));
-		expect(runHeadlessAgentMock).toHaveBeenCalledWith(
+		headlessRun.mockResolvedValueOnce("ok");
+		await dream(opts({ sessionPersistence: { enabled: true, sessionDir: "/custom" } }));
+		expect(headlessRun).toHaveBeenCalledWith(
 			expect.objectContaining({ sessionPersistence: { enabled: true, sessionDir: "/custom" } }),
 		);
 	});
@@ -182,12 +191,12 @@ describe("runDream", () => {
 		await writeFile(join(dir, "sessions", "s.jsonl"), "x", "utf8");
 		await rm(join(dir, ".backups"), { recursive: true, force: true });
 
-		runHeadlessAgentMock.mockImplementationOnce(async () => {
+		headlessRun.mockImplementationOnce(async () => {
 			// 快照必须**先于** headless agent
 			expect(await backupDirs()).toHaveLength(1);
 			return "ok";
 		});
-		await runDream(opts());
+		await dream(opts());
 
 		const [snapshot] = await backupDirs();
 		expect(snapshot).toMatch(/-dream$/);
@@ -200,9 +209,9 @@ describe("runDream", () => {
 		await createReservedNameFixture(dir, "con.md", "正文");
 		await writeFile(join(dir, "ok.md"), "正文", "utf8");
 		await rm(join(dir, ".backups"), { recursive: true, force: true });
-		runHeadlessAgentMock.mockResolvedValueOnce("ok");
+		headlessRun.mockResolvedValueOnce("ok");
 
-		await runDream(opts({ store: win }));
+		await dream(opts({ store: win }));
 
 		const [snapshot] = await backupDirs();
 		const contents = (await readdir(join(dir, ".backups", snapshot))).sort();
@@ -214,9 +223,9 @@ describe("runDream", () => {
 		await writeFile(join(dir, "con.md"), "正文", "utf8");
 		await writeFile(join(dir, "ok.md"), "正文", "utf8");
 		await rm(join(dir, ".backups"), { recursive: true, force: true });
-		runHeadlessAgentMock.mockResolvedValueOnce("ok");
+		headlessRun.mockResolvedValueOnce("ok");
 
-		await runDream(opts({ store: posix }));
+		await dream(opts({ store: posix }));
 
 		const [snapshot] = await backupDirs();
 		const contents = (await readdir(join(dir, ".backups", snapshot))).sort();
@@ -225,11 +234,11 @@ describe("runDream", () => {
 
 	it("prunes old dream snapshots down to lock.snapshotKeep", async () => {
 		const tiny = new MemoryStore(CFG(dir, { lock: { timeoutMs: 5000, snapshotKeep: 1 } }));
-		runHeadlessAgentMock.mockResolvedValue("ok");
+		headlessRun.mockResolvedValue("ok");
 
-		await runDream(opts({ store: tiny }));
-		await runDream(opts({ store: tiny }));
-		await runDream(opts({ store: tiny }));
+		await dream(opts({ store: tiny }));
+		await dream(opts({ store: tiny }));
+		await dream(opts({ store: tiny }));
 
 		expect(await backupDirs()).toHaveLength(1);
 	});
@@ -241,22 +250,22 @@ describe("runDream", () => {
 			logicalLockActive: () => false,
 		} as unknown as MemoryStore;
 
-		await expect(runDream(opts({ store: fakeStore }))).rejects.toThrow(
+		await expect(dream(opts({ store: fakeStore }))).rejects.toThrow(
 			"dream must run under the memory logical lock",
 		);
-		expect(runHeadlessAgentMock).not.toHaveBeenCalled();
+		expect(headlessRun).not.toHaveBeenCalled();
 	});
 
 	it("propagates a headless-agent failure and releases the lock", async () => {
-		runHeadlessAgentMock.mockRejectedValueOnce(new Error("dream failed"));
+		headlessRun.mockRejectedValueOnce(new Error("dream failed"));
 
-		await expect(runDream(opts())).rejects.toThrow("dream failed");
+		await expect(dream(opts())).rejects.toThrow("dream failed");
 		expect(store.logicalLockActive()).toBe(false);
 	});
 
 	it("still snapshots when the memory directory is empty", async () => {
-		runHeadlessAgentMock.mockResolvedValueOnce("ok");
-		await runDream(opts());
+		headlessRun.mockResolvedValueOnce("ok");
+		await dream(opts());
 
 		const [snapshot] = await backupDirs();
 		expect(snapshot).toMatch(/-dream$/);

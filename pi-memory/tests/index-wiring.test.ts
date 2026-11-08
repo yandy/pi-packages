@@ -62,10 +62,13 @@ vi.mock("../src/config", async (importOriginal) => {
 	};
 });
 
-// `resolveMemoryDir` 与 `scanEntries` 现在来自 core，但同一个包还提供 `MemoryStore` /
-// `indexCapacity` / `parseEntryIndex` / `readLockStatus` / `withFsRetry` / `LOCK_FILE` /
-// `buildIndexSection` / `indexInjectionCapacity` —— 那些是本文件端到端写入用例的被测对象，
-// 必须保持真实，所以只能整体展开后替换这两个符号。
+// auto-surfacing 的三个函数（scanEntries / runSideQuery / renderSurfacedBlock）与 dream / extract
+// 的编排现在都来自 core，在这里一并替换；applyIndexSection / buildInjection 走 pi 的真实实现，
+// 这样「sections 注入 + 冻结」这件事本身也被钉住。
+// `resolveMemoryDir` / `scanEntries` / `runDream` / `runExtract` / `buildDreamTask` 同样来自 core，
+// 但同一个包还提供 `MemoryStore` / `indexCapacity` / `parseEntryIndex` / `readLockStatus` /
+// `withFsRetry` / `LOCK_FILE` / `buildIndexSection` / `indexInjectionCapacity` —— 那些是本文件
+// 端到端写入用例的被测对象，必须保持真实，所以只能整体展开后替换这几个符号。
 // 同一个模块只能有一个 `vi.mock` 工厂（后注册的会覆盖前者），所以两者必须写在一起。
 vi.mock("@yandy0725/auto-memory", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@yandy0725/auto-memory")>();
@@ -74,6 +77,11 @@ vi.mock("@yandy0725/auto-memory", async (importOriginal) => {
 		resolveMemoryDir: vi.fn().mockImplementation(async (_config: unknown, cwd: string) =>
 			dirOverrideRef.current ? dirOverrideRef.current(cwd) : dirRef.current),
 		scanEntries: scanEntriesMock,
+		runSideQuery: runSideQueryMock,
+		renderSurfacedBlock: injectSurfacedContentMock,
+		runDream: runDreamMock,
+		runExtract: runExtractMock,
+		buildDreamTask: vi.fn().mockReturnValue("dream task"),
 	};
 });
 
@@ -86,28 +94,6 @@ vi.mock("../src/nudge", () => ({
 vi.mock("../src/session-search", () => ({
 	searchSessions: vi.fn().mockResolvedValue(""),
 }));
-
-vi.mock("../src/dream", () => ({
-	runDream: runDreamMock,
-	buildDreamTask: vi.fn().mockReturnValue("dream task"),
-}));
-
-vi.mock("../src/extract", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("../src/extract")>();
-	return { ...actual, runExtract: runExtractMock };
-});
-
-// 只替换 auto-surfacing 的两个函数：applyIndexSection / buildInjection / injectSurfacedContent
-// 走真实实现，这样「sections 注入 + 冻结」这件事本身也被钉住（scanEntries 已经改从 core 来，
-// 它的 mock 在上面的 `@yandy0725/auto-memory` 工厂里）。
-vi.mock("../src/inject-pi", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("../src/inject-pi")>();
-	return {
-		...actual,
-		runSideQuery: runSideQueryMock,
-		injectSurfacedContent: injectSurfacedContentMock,
-	};
-});
 
 // 录制值重放的真实现由 tests/index-source.test.ts 覆盖（本地 SDK 是 0.80.2，没有
 // sessionEntryToContextMessages 导出，真实路径在这里永远拿不到录制值）—— 接线层只钉
@@ -516,7 +502,7 @@ describe("index wiring (integration)", () => {
 		]);
 		const injectedAtCall: Array<Set<string>> = [];
 		runSideQueryMock.mockImplementation(async (...args: any[]) => {
-			injectedAtCall.push(new Set(args[2]));
+			injectedAtCall.push(new Set(args[0].injectedFiles));
 			return ["ssh.md"];
 		});
 		injectSurfacedContentMock.mockResolvedValue("<relevant_memories>\n## SSH\nx\n</relevant_memories>");
@@ -668,10 +654,10 @@ describe("index wiring (integration)", () => {
 		await handlers["agent_end"][0]({ messages: [{ role: "user", content: "hi" }] }, uiCtx(uiWith(notify)));
 
 		// customTools[0] 就是传给 extract 的真工具：直接跑它，onWrite 就是唯一的计数通道
-		const tool = runExtractMock.mock.calls[0][0].customTools[0];
-		await tool.execute("c1", { action: "add", name: "A", description: "d", content: "正文 A" }, undefined, undefined, undefined);
-		await tool.execute("c2", { action: "add", name: "B", description: "d", content: "正文 B" }, undefined, undefined, undefined);
-		await tool.execute("c3", { action: "list" }, undefined, undefined, undefined);
+		const onWrite = runExtractMock.mock.calls[0][0].onWrite;
+		onWrite({ action: "add", name: "A" });
+		onWrite({ action: "add", name: "B" });
+		// `list` 是读、不计数：这条规则在 core 的 WRITE_ACTIONS 里（auto-memory/tests/memory-handler.test.ts）。
 		await flush();
 		expect(notify).not.toHaveBeenCalled();
 
@@ -697,8 +683,8 @@ describe("index wiring (integration)", () => {
 		await handlers["session_start"][0]({}, uiCtx());
 
 		await handlers["agent_end"][0]({ messages: [{ role: "user", content: "hi" }] }, uiCtx(uiWith(notify)));
-		const tool = runExtractMock.mock.calls[0][0].customTools[0];
-		await tool.execute("c1", { action: "add", name: "A", description: "d", content: "正文" }, undefined, undefined, undefined);
+		const onWrite = runExtractMock.mock.calls[0][0].onWrite;
+		onWrite({ action: "add", name: "A" });
 
 		resolveExtract?.({ skipped: false, result: "ok" });
 		await flush();
@@ -743,8 +729,8 @@ describe("index wiring (integration)", () => {
 			{ messages: [{ role: "user", content: "hi" }] },
 			uiCtx({ hasUI: false, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } }),
 		);
-		const tool = runExtractMock.mock.calls[0][0].customTools[0];
-		await tool.execute("c1", { action: "add", name: "A", description: "d", content: "正文" }, undefined, undefined, undefined);
+		const onWrite = runExtractMock.mock.calls[0][0].onWrite;
+		onWrite({ action: "add", name: "A" });
 
 		resolveExtract?.({ skipped: false, result: "ok" });
 		await flush();
@@ -907,8 +893,8 @@ describe("index wiring (integration)", () => {
 		const session = disposableCtx();
 		const caught = await captureUnhandledRejections(async () => {
 			await handlers["agent_end"][0]({ messages: [{ role: "user", content: "hi" }] }, session.ctx);
-			const tool = runExtractMock.mock.calls[0][0].customTools[0];
-			await tool.execute("c1", { action: "add", name: "A", description: "d", content: "正文" }, undefined, undefined, undefined);
+			const onWrite = runExtractMock.mock.calls[0][0].onWrite;
+			onWrite({ action: "add", name: "A" });
 
 			// extract 还没回来，session 先被 /new（或退出宽限超时）销毁了
 			session.dispose();
@@ -963,8 +949,8 @@ describe("index wiring (integration)", () => {
 
 		const caught = await captureUnhandledRejections(async () => {
 			await handlers["agent_end"][0]({ messages: [{ role: "user", content: "hi" }] }, uiCtx(uiWith(notify)));
-			const tool = runExtractMock.mock.calls[0][0].customTools[0];
-			await tool.execute("c1", { action: "add", name: "A", description: "d", content: "正文" }, undefined, undefined, undefined);
+			const onWrite = runExtractMock.mock.calls[0][0].onWrite;
+			onWrite({ action: "add", name: "A" });
 			resolveExtract?.({ skipped: false, result: "ok" });
 			await flush();
 		});
@@ -1253,7 +1239,7 @@ describe("index wiring (integration)", () => {
 		// 清单来自 store（不是逐文件 readFile）
 		expect(typeof scanEntriesMock.mock.calls[0][0].readEntry).toBe("function");
 		expect(runSideQueryMock).toHaveBeenCalledTimes(1);
-		expect(runSideQueryMock.mock.calls[0][2]).toBeInstanceOf(Set);
+		expect(runSideQueryMock.mock.calls[0][0].injectedFiles).toBeInstanceOf(Set);
 		expect(injectSurfacedContentMock).toHaveBeenCalledWith(
 			scanEntriesMock.mock.calls[0][0],
 			["ssh.md"],
@@ -1280,7 +1266,7 @@ describe("index wiring (integration)", () => {
 		// 调用瞬间深拷贝，否则「第二轮已含 ssh.md」是拿断言时的集合比它自己，永远成立。
 		const injectedAtCall: Array<Set<string>> = [];
 		runSideQueryMock.mockImplementation(async (...args: any[]) => {
-			injectedAtCall.push(new Set(args[2]));
+			injectedAtCall.push(new Set(args[0].injectedFiles));
 			return ["ssh.md"];
 		});
 		injectSurfacedContentMock.mockResolvedValue("<relevant_memories>x</relevant_memories>");
@@ -1330,7 +1316,7 @@ describe("index wiring (integration)", () => {
 
 		await handlers["before_agent_start"][0]({ prompt: "q", systemPrompt: "sp" }, uiCtx());
 
-		expect(runSideQueryMock.mock.calls[0][8]).toEqual({ enabled: true });
+		expect(runSideQueryMock.mock.calls[0][0].sessionPersistence).toEqual({ enabled: true });
 	});
 
 	it("resolveDefault: per-task sessionPersistence overrides defaults", async () => {
@@ -1348,10 +1334,10 @@ describe("index wiring (integration)", () => {
 
 		await handlers["before_agent_start"][0]({ prompt: "q", systemPrompt: "sp" }, uiCtx());
 
-		expect(runSideQueryMock.mock.calls[0][8]).toEqual({ enabled: false });
+		expect(runSideQueryMock.mock.calls[0][0].sessionPersistence).toEqual({ enabled: false });
 	});
 
-	it("agent_end hands the raw messages, char limits and a 5-action tool to runExtract", async () => {
+	it("agent_end hands the raw messages, char limits, an onWrite counter and both ports to runExtract", async () => {
 		mockConfigValue.extractMemories.enabled = true;
 		const { pi, handlers } = createFakePi();
 		memoryFactory(pi as any);
@@ -1371,15 +1357,14 @@ describe("index wiring (integration)", () => {
 		expect(args.maxToolResultChars).toBe(500);
 		expect(args.maxAssistantChars).toBe(2000);
 		expect(typeof args.store.tryWithLogicalLock).toBe("function");
-		expect(args.customTools).toHaveLength(1);
-		expect(args.customTools[0].name).toBe("memory");
-		expect(args.customTools[0].parameters.properties.action.enum).toEqual([
-			"add",
-			"replace",
-			"remove",
-			"list",
-			"search",
-		]);
+		// 计数通道：core 把它透进子会话的 memory 工具，pi 只负责累加与通知
+		expect(typeof args.onWrite).toBe("function");
+		// 「5 个 action + memory 工具」由 core 的 runExtract 决定（钉在 auto-memory/tests/extract.test.ts）；
+		// pi 这一侧只提供两个端口。
+		const ports = runExtractMock.mock.calls[0][1];
+		expect(typeof ports.headless.run).toBe("function");
+		expect(typeof ports.transcript.toExtractMessages).toBe("function");
+		expect(typeof ports.transcript.searchSessions).toBe("function");
 	});
 
 	it("agent_end extracts AGENTS.md blocks from the last system prompt", async () => {
@@ -1453,17 +1438,8 @@ describe("index wiring (integration)", () => {
 				expect(args.memoryDir).toBe(dir);
 				expect(args.maxLines).toBe(200);
 				expect(typeof args.store.withLogicalLock).toBe("function");
-				expect(args.customTools).toHaveLength(1);
-				expect(args.customTools[0].parameters.properties.action.enum).toEqual([
-					"add",
-					"replace",
-					"remove",
-					"list",
-					"search",
-					"rename",
-					"rebuild_index",
-				]);
-				expect(Object.keys(args.customTools[0].parameters.properties)).toContain("new_name");
+				// 「7 个 action + memory 工具」由 core 的 runDream 决定（钉在 auto-memory/tests/dream.test.ts）
+				expect(typeof runDreamMock.mock.calls[0][1].headless.run).toBe("function");
 
 				// 成功回调（SessionManager.list → writeDreamMeta → notifyDream）必须在 unstub 前排空，
 				// 否则会漏到真实 ~/.pi；notify 断言证明回调确实在本用例内跑完。
@@ -1520,7 +1496,7 @@ describe("index wiring (integration)", () => {
 
 		expect(confirm).toHaveBeenCalled();
 		expect(runDreamMock).toHaveBeenCalledTimes(1);
-		expect(runDreamMock.mock.calls[0][0].customTools[0].parameters.properties.action.enum).toHaveLength(7);
+		expect(typeof runDreamMock.mock.calls[0][1].headless.run).toBe("function");
 	});
 
 	// ── Plan C（spec §14 `/memory` 状态与 `/memory unlock`）─────────────────
@@ -1959,7 +1935,7 @@ describe("index wiring (integration)", () => {
 		]);
 		// injectedFiles 是活 Set：必须在调用瞬间深拷贝（见 `does not surface the same entry file twice`）
 		runSideQueryMock.mockImplementation(async (...args: any[]) => {
-			injectedAtCall.push(new Set(args[2]));
+			injectedAtCall.push(new Set(args[0].injectedFiles));
 			return ["ssh.md"];
 		});
 		injectSurfacedContentMock.mockResolvedValue("<relevant_memories>x</relevant_memories>");

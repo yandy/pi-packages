@@ -98,6 +98,26 @@ export {
 	truncateIndexForInjection,
 } from "./injection";
 export type { EntryManifest } from "./injection";
+
+// ── orchestration/ LLM 编排 ───────────────────────────────────────────────────
+// 适配层实现 `HeadlessAgentPort` 与 `HostTranscriptPort` 两个端口，就能拿到与 pi 完全相同的
+// dream / extract / 侧查询行为（prompt 文本、锁与快照边界、截断预算、错误语义）。
+export { runDream } from "./orchestration/dream";
+export type { RunDreamOpts } from "./orchestration/dream";
+export { runExtract } from "./orchestration/extract";
+export type { ExtractPorts, RunExtractOpts } from "./orchestration/extract";
+export { renderConversation } from "./orchestration/conversation";
+export type { ConversationLimits } from "./orchestration/conversation";
+export { runSideQuery } from "./orchestration/surfacing";
+export type { RunSideQueryOpts } from "./orchestration/surfacing";
+export { buildDreamTask, buildExtractTask } from "./orchestration/prompts";
+export type {
+	ExtractMessage,
+	HeadlessAgentPort,
+	HeadlessRunRequest,
+	HostTranscriptPort,
+	OrchestrationPorts,
+} from "./orchestration/ports";
 export { memoryToolSchema } from "./tool/schema";
 export type { MemoryToolField, MemoryToolJsonSchema } from "./tool/schema";
 export {
