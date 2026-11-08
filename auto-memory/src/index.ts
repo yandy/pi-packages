@@ -50,3 +50,26 @@ export type { NamingOptions, ProjectIdentity, ProjectKind } from "./store/paths"
 export { sanitizeForInjection, stripInvisibleChars } from "./store/sanitize";
 
 export { escapeWindowsTrailing, isReservedWindowsName, windowsSafeName } from "./store/windows-names";
+
+// ── 配置（默认值、合并语义、模型校验、共享数据根）──────────────────────────────
+// 配置文件**在哪**是宿主知识，由适配层组装成 `loadConfigFrom` 的 `files` 入参。
+export {
+	DEFAULT_CONFIG,
+	defaultMemoryRoot,
+	expandTilde,
+	loadConfigFrom,
+	modelConfigErrors,
+	requiredModel,
+	requiredModels,
+	taskModel,
+} from "./config";
+export type {
+	AutoSurfacingConfig,
+	DefaultsConfig,
+	ExtractMemoriesConfig,
+	LoadConfigFromOptions,
+	MemoryConfig,
+	ModelTask,
+	SessionPersistenceConfig,
+	ThinkLevel,
+} from "./config";
