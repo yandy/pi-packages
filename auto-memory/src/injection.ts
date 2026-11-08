@@ -57,7 +57,7 @@ export const INDEX_TRUNCATION_MARKER = "[truncated: memory index exceeds injecti
 /**
  * 索引文本 → 窗口用的行数组。
  *
- * 行拆分**共用 `entry-index` 的 `splitLines`**（先做行尾归一）：`/memory` 的 `Index:` 与
+ * 行拆分**共用 `entry-index` 的 `splitLines`**（先做行尾归一）：宿主状态命令报的 `Index:` 与
  * `Inject:` 必须活在同一个「行」的定义上，否则 CRLF / 单独 CR 的文件上两行行数会互相矛盾。
  * 额外摘掉**尾部全部空行**：`rebuildIndex` 把它们当噪音，但它们照样白吃窗口行数。
  */
@@ -135,7 +135,7 @@ export function truncateIndexForInjection(
 }
 
 /**
- * `/memory` 的注入口径。复用 `indexWindow`，所以报出来的数字与实际注入的值不可能不一致。
+ * 注入侧的容量口径（供宿主的状态命令使用）。复用 `indexWindow`，所以报出来的数字与实际注入的值不可能不一致。
  *
  * 口径：行数 = 窗口内的索引行（**不含**截断标记那一行）；字节数 = 窗口正文的 UTF-8 字节
  * （行间换行与末尾换行算在内，**不含**截断标记）。未截断且文件是 LF 时，它与 `Index:`

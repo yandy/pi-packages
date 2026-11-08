@@ -22,7 +22,7 @@ beforeEach(async () => {
 	// Keep git hermetic: never read the machine's global or system config.
 	// 用临时空文件而不是 `/dev/null`：Windows 上它会变成 `C:\dev\null`（不存在也会被 git 忽略，
 	// 但语义依赖平台；临时文件在两个平台上都一样明确）。
-	dir = await mkdtemp(join(tmpdir(), "pi-memory-paths-"));
+	dir = await mkdtemp(join(tmpdir(), "am-paths-"));
 	emptyGitConfig = join(dir, "gitconfig-empty");
 	await writeFile(emptyGitConfig, "", "utf8");
 	vi.stubEnv("GIT_CONFIG_GLOBAL", emptyGitConfig);
@@ -163,7 +163,7 @@ describe("projectDirName", () => {
 	});
 
 	it("keeps the POSIX result byte-identical when the platform is posix", () => {
-		// D2：win32 专属分支不得影响 POSIX 输出
+		// win32 专属分支不得影响 POSIX 输出
 		expect(projectDirName("/home/a\\b", { platform: "linux" })).toBe("home__a\\b");
 		expect(projectDirName("C:\\Users\\yandy", { platform: "linux" })).toBe("C_3a\\Users\\yandy");
 	});

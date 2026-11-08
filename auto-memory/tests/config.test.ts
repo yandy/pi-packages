@@ -21,7 +21,7 @@ describe("DEFAULT_CONFIG", () => {
 		expect(DEFAULT_CONFIG.memIndexInjectMaxLines).toBe(50);
 		expect(DEFAULT_CONFIG.memIndexInjectMaxBytes).toBe(16384);
 		expect(DEFAULT_CONFIG.lock).toEqual({ timeoutMs: 5000, snapshotKeep: 5 });
-		// 模型没有默认值：必须由用户显式配置，否则启动即报错（设计 §2.1）
+		// 模型没有默认值：必须由用户显式配置，否则启动即报错
 		expect(DEFAULT_CONFIG.defaults).toEqual({ sessionPersistence: { enabled: false } });
 		expect(DEFAULT_CONFIG.defaults?.model).toBeUndefined();
 		expect(DEFAULT_CONFIG.dream.model).toBeUndefined();
@@ -31,7 +31,7 @@ describe("DEFAULT_CONFIG", () => {
 		expect(DEFAULT_CONFIG.extractMemories.enabled).toBe(false);
 		expect(DEFAULT_CONFIG.extractMemories.maxToolResultChars).toBe(500);
 		expect(DEFAULT_CONFIG.extractMemories.maxAssistantChars).toBe(2000);
-		// 其余默认值一并钉住：任何一个被改动都必须让这条用例红（spec §5.3「逐字不变」）。
+		// 其余默认值一并钉住：任何一个被改动都必须让这条用例红。
 		expect(DEFAULT_CONFIG.memoryDir).toBe(defaultMemoryRoot());
 		expect(DEFAULT_CONFIG.dream.nudgeAfterSessions).toBe(5);
 		expect(DEFAULT_CONFIG.dream.nudgeAfterHours).toBe(24);
@@ -72,7 +72,7 @@ describe("loadConfigFrom", () => {
 	 */
 	const globalOnly = (platform?: NodeJS.Platform) => loadConfigFrom([join(globalDir, "memory.json")], { platform });
 	const globalAndProject = (platform?: NodeJS.Platform) =>
-		loadConfigFrom([join(globalDir, "memory.json"), join(projectDir, ".pi", "memory.json")], { platform });
+		loadConfigFrom([join(globalDir, "memory.json"), join(projectDir, ".agent", "memory.json")], { platform });
 
 	it("returns defaults when no config files exist", async () => {
 		const cfg = await globalAndProject();
@@ -107,8 +107,8 @@ describe("loadConfigFrom", () => {
 	});
 	it("project overrides global", async () => {
 		await writeFile(join(globalDir, "memory.json"), JSON.stringify({ memIndexMaxLines: 100 }));
-		await mkdir(join(projectDir, ".pi"), { recursive: true });
-		await writeFile(join(projectDir, ".pi", "memory.json"), JSON.stringify({ memIndexMaxLines: 50 }));
+		await mkdir(join(projectDir, ".agent"), { recursive: true });
+		await writeFile(join(projectDir, ".agent", "memory.json"), JSON.stringify({ memIndexMaxLines: 50 }));
 		const cfg = await globalAndProject();
 		expect(cfg.memIndexMaxLines).toBe(50);
 	});
@@ -129,17 +129,17 @@ describe("loadConfigFrom", () => {
 	});
 
 	it("expands ~\\ in memoryDir on win32", async () => {
-		await writeFile(join(globalDir, "memory.json"), JSON.stringify({ memoryDir: "~\\.pi\\memory" }));
+		await writeFile(join(globalDir, "memory.json"), JSON.stringify({ memoryDir: "~\\.agent\\memory" }));
 		const cfg = await globalAndProject("win32");
 		// 注入的 `_platform` 只改展开条件，拼接仍走宿主的 join（POSIX 上反斜杠是普通字符，不是分隔符）。
-		// 真 Windows 上本期望与 `join(homedir(), ".pi", "memory")` 逐字节相同。
-		expect(cfg.memoryDir).toBe(join(homedir(), ".pi\\memory"));
+		// 真 Windows 上本期望与 `join(homedir(), ".agent", "memory")` 逐字节相同。
+		expect(cfg.memoryDir).toBe(join(homedir(), ".agent\\memory"));
 	});
 
 	it("leaves ~\\ alone on POSIX (it is a legal file name there)", async () => {
-		await writeFile(join(globalDir, "memory.json"), JSON.stringify({ memoryDir: "~\\.pi\\memory" }));
+		await writeFile(join(globalDir, "memory.json"), JSON.stringify({ memoryDir: "~\\.agent\\memory" }));
 		const cfg = await globalAndProject("linux");
-		expect(cfg.memoryDir).toBe("~\\.pi\\memory");
+		expect(cfg.memoryDir).toBe("~\\.agent\\memory");
 	});
 
 	it("has autoSurfacing defaults", async () => {
@@ -219,7 +219,7 @@ describe("loadConfigFrom", () => {
 		expect(cfg.dream.sessionPersistence).toBeUndefined();
 	});
 
-	// 模型没有默认值：必须由用户显式配置，否则启动即报错（设计 §2.1）
+	// 模型没有默认值：必须由用户显式配置，否则启动即报错
 	it("ships no model default, so models must be configured explicitly", async () => {
 		const cfg = await globalAndProject();
 		expect(cfg.defaults?.model).toBeUndefined();

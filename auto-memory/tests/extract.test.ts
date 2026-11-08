@@ -67,7 +67,7 @@ afterEach(async () => {
 });
 
 describe("renderConversation", () => {
-	// spec §11.1 的根因：v1 只取「第一条 user + 最后一条 assistant」，中间的纠正全部丢失。
+	// 根因：v1 只取「第一条 user + 最后一条 assistant」，中间的纠正全部丢失。
 	it("keeps every message, numbered in order, including the mid-turn correction", () => {
 		const messages: ExtractMessage[] = [
 			{ role: "user", text: "first" },
@@ -142,7 +142,7 @@ describe("renderConversation", () => {
 		expect(out).toContain("[truncated: 599 chars omitted from the middle]");
 	});
 
-	// spec §11.2「优先保留全部 user 消息」：中段裁减只丢非 user 块，中间的纠正必须留下。
+	// 「优先保留全部 user 消息」：中段裁减只丢非 user 块，中间的纠正必须留下。
 	it("keeps a mid-turn user correction when the budget is exceeded", () => {
 		const messages: ExtractMessage[] = [
 			{ role: "assistant", text: `LEFT${"a".repeat(300)}` },
@@ -171,7 +171,7 @@ describe("renderConversation", () => {
 		expect(out.length).toBeLessThanOrEqual(400);
 	});
 
-	// Plan B ledger 的 Minor：块级标记被 `assemble` 追加在末尾时，字符串回退会在它之外
+	// 块级标记被 `assemble` 追加在末尾时，字符串回退会在它之外
 	// 再插一个标记（输出里出现两个 `[truncated: …]`），而且回退标记的 N 把旧标记自身的
 	// 长度也算成「省略的正文」。
 	it("emits exactly one middle marker when the fallback runs after a trailing block drop", () => {
@@ -206,7 +206,7 @@ describe("renderConversation", () => {
 		expect(out.length).toBeLessThanOrEqual(80);
 	});
 
-	// Plan C 终审 #9 / Plan D（D4）：user 正文里恰好出现与块级标记逐字相同的串（模型抄了
+	// user 正文里恰好出现与块级标记逐字相同的串（模型抄了
 	// 我们自己的截断标记）。`String.replace` 删**首次**出现 → 误删正文里的那一份，真正的
 	// 标记留在输出里，于是 N 与保留下来的首尾全部错位；`lastIndexOf` 只删我们自己那一个。
 	it("removes only the block-level marker when a user block carries the same string", () => {
@@ -228,7 +228,7 @@ describe("renderConversation", () => {
 		expect(out.length).toBeLessThanOrEqual(400);
 	});
 
-	// Plan D（D4，R-D9）：仿冒串与真标记**逐字相同**（N 也相同），但位置在真标记**之后**
+	// 仿冒串与真标记**逐字相同**（N 也相同），但位置在真标记**之后**
 	// —— 落在未被丢弃的尾部 user 块里。按字符串搜索删除（删首次或删末次都一样）会命中正文里
 	// 的那一份、把真正的块级标记留在输出里：输出出现两个 `[truncated: …]`，N 与首尾全部错位。
 	// 按 `assemble()` 已知的插入位置删除，输出里才恰有一个标记、N 是真实省略量。
@@ -310,7 +310,7 @@ describe("buildExtractTask", () => {
 
 	it("inserts AGENTS.md blocks after the Output section and before the Conversation", () => {
 		const blocks = [
-			'<project_instructions path="/home/user/.pi/agent/AGENTS.md">\nglobal: use Chinese\n</project_instructions>',
+			'<project_instructions path="/home/user/.agent/AGENTS.md">\nglobal: use Chinese\n</project_instructions>',
 			'<project_instructions path="/project/AGENTS.md">\nproject: never skip tests\n</project_instructions>',
 		];
 		const task = buildExtractTask([{ role: "user", text: "hi" }], 2000, blocks, {

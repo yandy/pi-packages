@@ -85,7 +85,7 @@ export function createMemoryActionHandler(
 	return async (params: unknown): Promise<MemoryActionResult> => {
 		const store = deps.getStore();
 		if (!store) {
-			throw new Error(deps.getUnavailableMessage() ?? "Memory not initialized (no session_start yet)");
+			throw new Error(deps.getUnavailableMessage() ?? "Memory not initialized (no store for this session yet)");
 		}
 		const cfg = deps.getConfig();
 		const p = params as MemoryParams;

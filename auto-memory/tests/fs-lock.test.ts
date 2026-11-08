@@ -70,7 +70,7 @@ describe("withLock", () => {
 		expect(Date.now() - started).toBeLessThan(2000);
 	});
 
-	// `open(wx)` 让锁文件先出现、记录后写入（spec §4.4）：这中间态必须被当作「有人正在建锁」
+	// `open(wx)` 让锁文件先出现、记录后写入：这中间态必须被当作「有人正在建锁」
 	// 等待，而不是「读不懂 → 立刻报遗弃」。
 	it("waits (does not declare abandonment) while another process is mid-acquire", async () => {
 		await writeFile(lockPath, "", "utf8"); // 0 字节：建立中或崩溃在这一瞬间，无法区分
@@ -78,7 +78,7 @@ describe("withLock", () => {
 		const err = await withLock(lockPath, "add", { timeoutMs: 150, pollMs: 20 }, async () => "never").catch((e: unknown) => e);
 		expect(err).toBeInstanceOf(MemoryLockedError);
 		expect((err as MemoryLockedError).abandoned).toBe(false);
-		// spec §7 风险表：这类错误必须给出清除指引（`/memory` 也提示 `run /memory unlock`）
+		// 这类错误必须给出可操作的清除指引（宿主的状态命令也提示同一件事）
 		expect((err as MemoryLockedError).message).toContain(lockPath);
 		expect((err as MemoryLockedError).message).toContain("delete the file");
 		expect(Date.now() - started).toBeGreaterThanOrEqual(140);
@@ -187,7 +187,7 @@ describe("tryWithLock", () => {
 	});
 });
 
-// ── Plan C（`/memory` 的锁诊断）新增 ──────────────────────────────────────────
+// ── 锁诊断（宿主的状态命令用）────────────────────────────────────────────────
 describe("readLockStatus", () => {
 	it("reports absent when there is no lock file", async () => {
 		expect(await readLockStatus(lockPath)).toEqual({ kind: "absent" });
@@ -207,7 +207,7 @@ describe("readLockStatus", () => {
 		});
 	});
 
-	// Review Focus #5：三态必须可读 —— 「不存在」与「存在但读不懂」是不同的处置。
+	// 三态必须可读 —— 「不存在」与「存在但读不懂」是不同的处置。
 	it("reports unreadable for garbage, an empty file and a wrong shape", async () => {
 		for (const raw of ["not json", "", "123", "{}", JSON.stringify({ pid: "x" }), "[]"]) {
 			await writeFile(lockPath, raw, "utf8");

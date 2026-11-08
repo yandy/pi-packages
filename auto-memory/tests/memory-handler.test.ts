@@ -104,7 +104,7 @@ describe("action add", () => {
 		await expect(run(handler, { action: "add", name: "A" })).rejects.toThrow("content is required for add");
 	});
 
-	// Review Focus #3：MEMORY.md 是索引本身，绝不能被当成 entry 文件写穿。
+	// MEMORY.md 是索引本身，绝不能被当成 entry 文件写穿。
 	it("never writes an entry over MEMORY.md", async () => {
 		const handler = createMemoryActionHandler(deps());
 		await run(handler, { action: "add", name: "A", content: "A 正文" });
@@ -131,7 +131,7 @@ describe("action add", () => {
 		expect(parseEntryIndex(await store.readIndex()).entries).toHaveLength(2);
 	});
 
-	// Review Focus #5：用户手写的索引内容与「无尾换行」都必须在工具写入后逐字保留。
+	// 用户手写的索引内容与「无尾换行」都必须在工具写入后逐字保留。
 	it("preserves handwritten index lines and a missing trailing newline", async () => {
 		await writeFile(join(dir, "MEMORY.md"), "# Memory Index\n\n## Project\n<!-- keep -->", "utf8");
 		const handler = createMemoryActionHandler(deps());
@@ -315,7 +315,9 @@ describe("dream-only actions", () => {
 describe("guards 与写选项透传", () => {
 	it("throws when the store is not initialized yet", async () => {
 		const handler = createMemoryActionHandler(deps({ getStore: () => null }));
-		await expect(run(handler, { action: "list" })).rejects.toThrow("Memory not initialized (no session_start yet)");
+		await expect(run(handler, { action: "list" })).rejects.toThrow(
+			"Memory not initialized (no store for this session yet)",
+		);
 	});
 
 	it("prints the unavailable message verbatim when the caller supplies one", async () => {
@@ -323,11 +325,11 @@ describe("guards 与写选项透传", () => {
 			deps({
 				getStore: () => null,
 				getUnavailableMessage: () =>
-					'Memory not initialized — no model for dream — set "dream.model" or "defaults.model" in memory.json; run /memory for details',
+					'Memory not initialized — no model for dream — set "dream.model" or "defaults.model" in the config file',
 			}),
 		);
 		await expect(run(handler, { action: "list" })).rejects.toThrow(
-			'Memory not initialized — no model for dream — set "dream.model" or "defaults.model" in memory.json; run /memory for details',
+			'Memory not initialized — no model for dream — set "dream.model" or "defaults.model" in the config file',
 		);
 	});
 
@@ -406,7 +408,7 @@ describe("onWrite 回调", () => {
 
 });
 
-// ── Plan C 清理项（Plan B ledger 分诊给 Plan C 的低风险 Minor）─────────────────
+// ── action 集合的冻结保证 ────────────────────────────────────────────────────
 
 describe("search 的 sessions 分支也填 details", () => {
 	it("reports the scope and the trimmed query instead of an empty object", async () => {

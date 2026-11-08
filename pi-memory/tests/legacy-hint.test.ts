@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { projectDirName, projectIdentity } from "@yandy0725/auto-memory";
@@ -44,13 +44,17 @@ afterEach(async () => {
 
 const opts = () => ({ newDir, newRoot, legacyRoot, cwd });
 
-/** 递归列出 base 下的全部条目（相对路径 + mtime），用来断言探测没有写盘。 */
+/**
+ * 递归列出 base 下的全部条目：相对路径 + 类型 + `mtimeMs` + 大小。
+ * 带上 mtime 与大小，才能同时抓到「新建/删除条目」与「原地改写内容」两类写盘。
+ */
 async function snapshotTree(root: string): Promise<string[]> {
 	const out: string[] = [];
 	const walk = async (dir: string): Promise<void> => {
 		for (const entry of await readdir(dir, { withFileTypes: true })) {
 			const full = join(dir, entry.name);
-			out.push(`${full.slice(root.length)}${entry.isDirectory() ? "/" : ""}`);
+			const st = await stat(full);
+			out.push(`${full.slice(root.length)} ${entry.isDirectory() ? "dir" : "file"} ${st.mtimeMs} ${st.size}`);
 			if (entry.isDirectory()) await walk(full);
 		}
 	};

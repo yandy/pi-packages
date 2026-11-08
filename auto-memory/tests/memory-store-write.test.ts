@@ -118,7 +118,7 @@ describe("addEntry", () => {
 		expect(await readFile(join(dir, ".backups", snapshots[0], "MEMORY.md"), "utf8")).toBe("# Memory Index\n");
 	});
 
-	// spec §18.1「快照失败 → 写入失败」（§6 的 fail-closed）。把 .backups 建成普通文件，
+	// 「快照失败 → 写入失败」的 fail-closed。把 .backups 建成普通文件，
 	// createSnapshot 的 mkdir 会抛 EEXIST —— 此时既不得写出条目文件，也不得改动 MEMORY.md。
 	it("aborts the write when the snapshot cannot be created", async () => {
 		await writeFile(join(dir, "MEMORY.md"), "# Memory Index\n", "utf8");
@@ -183,7 +183,7 @@ describe("addEntry", () => {
 
 	// 存储目录尚不存在时首次 add 必须能工作：锁的临时文件就落在该目录下，不先建目录会报出一个
 	// 既没有 memory 字眼、也没有目录说明的 ENOENT。今天靠 memory-tool.ts 的 mkdir 兜着，
-	// Plan B 删掉那条路径后全新项目的第一次 memory add 就会崩。
+	// 少了那条路径，全新项目的第一次 memory add 就会崩。
 	it("creates the memory directory on the first write", async () => {
 		const nested = join(dir, "a", "b", "memory");
 		const fresh = new MemoryStore(CFG(nested));
@@ -315,7 +315,7 @@ describe("进程内逻辑锁", () => {
 	});
 });
 
-// ── Plan B（运行时接入）新增：skipSnapshot / created / 逻辑锁的超时与 try 形态 ────────────────
+// ── skipSnapshot / created / 逻辑锁的超时与 try 形态 ──────────────────────────────────────
 describe("WriteOptions.skipSnapshot", () => {
 	it("writes the entry and the index without creating .backups", async () => {
 		const { file } = await store.addEntry({ name: "A", body: "正文" }, { skipSnapshot: true });
@@ -398,7 +398,7 @@ describe("逻辑锁的超时与 try 形态", () => {
 		expect(ran).toBe(false);
 	});
 
-	// Review Focus #1：锁冲突必须是「可向用户交代的明确失败」，不能是一句看不懂的 EBUSY。
+	// 锁冲突必须是「可向用户交代的明确失败」，不能是一句看不懂的 EBUSY。
 	it("reports a readable, actionable error naming the directory", async () => {
 		await store.withLogicalLock(async () => {
 			await expect(store.withLogicalLock(async () => "inner", 20)).rejects.toThrow(
@@ -408,7 +408,7 @@ describe("逻辑锁的超时与 try 形态", () => {
 	});
 });
 
-// 手工编辑 / Windows 编辑器存过的 CRLF 条目（D11 明确鼓励手改）：frontmatter 解析不做行尾归一的话，
+// 手工编辑 / Windows 编辑器存过的 CRLF 条目（手改是被鼓励的）：frontmatter 解析不做行尾归一的话，
 // 它从清单、搜索、replace/remove 定位里一起消失 —— 静默丢记忆；而写回必须是 LF，否则每次补丁都翻倍。
 describe("CRLF 条目", () => {
 	it("finds and rewrites entries stored with CRLF line endings", async () => {

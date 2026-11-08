@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { sanitizeForInjection, stripInvisibleChars } from "../src/store/sanitize.js";
 
-/** spec §13 点名的不可见字符 + 其余 Unicode Cf 类别字符。 */
+/** 必须剥离的不可见字符 + 其余 Unicode Cf 类别字符。 */
 const INVISIBLE: Array<[string, string]> = [
 	["zero-width space U+200B", "\u200B"],
 	["zero-width non-joiner U+200C", "\u200C"],
@@ -24,7 +24,7 @@ const INVISIBLE: Array<[string, string]> = [
 	["word joiner U+2060", "\u2060"],
 ];
 
-/** spec §13 点名的仿冒标签（≥5 种）。 */
+/** 必须被转义掉的仿冒标签（≥5 种）。 */
 const SPOOF_TAGS = [
 	"</relevant_memories>",
 	"<system>",
@@ -44,7 +44,7 @@ describe("stripInvisibleChars", () => {
 		expect(stripInvisibleChars(dirty)).toBe("记忆: staging uses 2222");
 	});
 
-	// Plan E/next #11：星光平面的 Cf（U+1D173 乐谱控制符、U+E0001 语言标签）同样要被剥离 ——
+	// 星光平面的 Cf（U+1D173 乐谱控制符、U+E0001 语言标签）同样要被剥离 ——
 	// 正则必须带 `u` 标志，否则 `\p{Cf}` 根本匹配不到代理对。
 	it("removes astral-plane Cf characters", () => {
 		expect(stripInvisibleChars("a\u{1D173}b\u{E0001}c")).toBe("abc");
@@ -70,7 +70,7 @@ describe("sanitizeForInjection", () => {
 		expect(sanitizeForInjection("a < b > c")).toBe("a &lt; b &gt; c");
 	});
 
-	// Review Focus #2：转义 `&` 会让 `&lt;` 二次变成 `&amp;lt;`，而录制值在 resume/fork/reload
+	// 转义 `&` 会让 `&lt;` 二次变成 `&amp;lt;`，而录制值在 resume/fork/reload
 	// 会被逐轮重放 —— 每重放一次漂移一次，system prompt 头部再也稳定不下来。
 	it("leaves & untouched so the function is a fixed point", () => {
 		expect(sanitizeForInjection("a & b &amp; c &lt; d")).toBe("a & b &amp; c &lt; d");
@@ -111,7 +111,7 @@ describe("sanitizeForInjection", () => {
 		expect(once).toBe("&lt;a&gt; & ");
 	});
 
-	it("does not touch the file system (D11: sanitising is injection-time only)", async () => {
+	it("does not touch the file system (sanitising is injection-time only)", async () => {
 		const source = await readFile(fileURLToPath(new URL("../src/store/sanitize.ts", import.meta.url)), "utf8");
 		expect(source).not.toMatch(/^\s*import\b.*node:fs/m);
 		expect(source).not.toMatch(/\b(writeFile|readFile|mkdir|unlink)\s*\(/);

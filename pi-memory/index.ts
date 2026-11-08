@@ -71,7 +71,7 @@ function dreamFailureMessage(e: unknown): string {
 /**
  * `<relevant_memories>` 里实际注入的块数（每块以 `\n## ` 开头）。
  * 近似值：正文里自己以 `## ` 开头的行会被多算 —— 它只用于一条通知文案（spec §14），
- * 而把 `injectSurfacedContent` 的返回值改成结构体反而会弄脏 Plan B 已钉住的接口。
+ * 而把 `renderSurfacedBlock` 的返回值改成结构体反而会弄脏已经钉住的接口。
  */
 function countInjectedBlocks(content: string): number {
 	return Math.max(0, content.split("\n## ").length - 1);

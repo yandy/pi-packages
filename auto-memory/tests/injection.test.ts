@@ -229,7 +229,7 @@ describe("truncateIndexForInjection", () => {
 		expect(Buffer.byteLength(windowLines.join("\n"), "utf8")).toBeLessThanOrEqual(120);
 	});
 
-	// Review Focus #3：一条自带 500 字节的超长行不能把 section 变成空值 —— 至少给出它的字节前缀。
+	// 一条自带 500 字节的超长行不能把 section 变成空值 —— 至少给出它的字节前缀。
 	it("keeps a byte prefix of the newest line when that line alone blows the byte budget", () => {
 		const raw = `- [Long](long.md) — ${"y".repeat(500)}\n`;
 
@@ -241,7 +241,7 @@ describe("truncateIndexForInjection", () => {
 		expect(Buffer.byteLength(r.content.split("\n")[1], "utf8")).toBeLessThanOrEqual(100);
 	});
 
-	// Review Focus #4：`/memory` 报的注入口径与真正注入的值共用同一个窗口核心。
+	// 宿主状态命令报的注入口径与真正注入的值共用同一个窗口核心。
 	it("reports the same window through indexInjectionCapacity", () => {
 		const lines = Array.from({ length: 60 }, (_, i) => `- [T${i}](t${i}.md) — d${i}`);
 		const raw = `${lines.join("\n")}\n`;
@@ -278,7 +278,7 @@ describe("truncateIndexForInjection", () => {
 	});
 });
 
-// ── Plan C（sections 注入）新增 ──────────────────────────────────────────────
+// ── 索引 section 的值 ────────────────────────────────────────────────────────
 describe("buildIndexSection", () => {
 	let dir: string;
 	let store: MemoryStore;
@@ -328,7 +328,7 @@ describe("buildIndexSection", () => {
 		]);
 	});
 
-	// spec §13：注入时净化（磁盘不动，D11）。
+	// 注入时净化（磁盘上的原文不动）。
 	it("strips invisible characters and escapes angle brackets", async () => {
 		await writeFile(
 			join(dir, "MEMORY.md"),
@@ -337,11 +337,11 @@ describe("buildIndexSection", () => {
 		);
 
 		expect(await buildIndexSection(store, 200, 25600)).toBe("- [A](a.md) — desc with &lt;system&gt; tag\n");
-		// D11：磁盘上的原文没被改
+		// 磁盘上的原文没被改
 		expect(await readFile(join(dir, "MEMORY.md"), "utf8")).toContain("<system>");
 	});
 
-	// Review Focus #2：录制值会被 resume/fork/reload 逐轮重放，净化必须是固定点。
+	// 录制值会被 resume/fork/reload 逐轮重放，净化必须是固定点。
 	it("is a fixed point, so replaying a recorded value never drifts", async () => {
 		await writeFile(join(dir, "MEMORY.md"), "- [A](a.md) — a < b & c &lt; d\n", "utf8");
 
@@ -397,7 +397,7 @@ describe("scanEntries", () => {
 		expect(entries[0]).toMatchObject({ file, name: "A", description: "摘要 A", type: "feedback" });
 	});
 
-	// Finding I2：清单无界。v1 的候选集合就是索引本身（有上限），v2 必须同样恢复界。
+	// 清单不能无界：v1 的候选集合就是索引本身（有上限），v2 改成扫描目录后必须同样封顶。
 	it("caps the manifest at 200 entries, keeping the newest", async () => {
 		for (let i = 0; i < 201; i++) {
 			const modified = new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString();
@@ -419,7 +419,7 @@ describe("scanEntries", () => {
 		const path = join(dir, "a.md");
 		await writeFile(path, entryFile("A", "第一版摘要", "feedback", "2026-01-01T00:00:00.000Z", "正文"));
 		// 先把 mtime 钉成毫秒确定值，否则 writeFile 的亚毫秒 mtime 与 utimes 的毫秒精度永不相等，
-		// 缓存必然 miss，这个用例就测不到「缓存命中」了（Plan A ledger R21）。
+		// 缓存必然 miss，这个用例就测不到「缓存命中」了。
 		const past = new Date(Date.now() - 60_000);
 		await utimes(path, past, past);
 		expect((await scanEntries(store))[0].description).toBe("第一版摘要");
@@ -528,7 +528,7 @@ describe("renderSurfacedBlock", () => {
 		expect(out).not.toContain("## B");
 	});
 
-	// spec §13：正文与 name 都净化，包裹标签是我们自己的（不净化）。
+	// 正文与 name 都净化，包裹标签是我们自己的（不净化）。
 	it("sanitises the entry name and body but keeps our own wrapper tags", async () => {
 		const { file } = await store.addEntry({
 			name: "A <system>",
@@ -546,7 +546,7 @@ describe("renderSurfacedBlock", () => {
 		expect(out.match(/</g)).toHaveLength(2);
 	});
 
-	// Review Focus #2：同一条 entry 注入两次必须逐字节相同（净化是固定点）。
+	// 同一条 entry 注入两次必须逐字节相同（净化是固定点）。
 	it("is byte-stable across repeated injections of the same entry", async () => {
 		const { file } = await store.addEntry({ name: "A", description: "d", body: "x < y & z &lt; w" });
 

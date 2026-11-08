@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MemoryStore, formatIndexLine, parseEntryIndex, resolveMemoryDir, type StoreConfig } from "../src/index.js";
 
 /**
- * 跨宿主共享的实质承诺（Review Focus #5）：**同一个目录上的并发写不会把索引写坏**。
+ * 跨宿主共享的实质承诺：**同一个目录上的并发写不会把索引写坏**。
  *
  * 这里钉的是**同进程两个 `MemoryStore` 实例**的组合行为：它们共用 `#indexPath()` 这个逻辑锁 key
  * （`process-lock` 的 states 是模块级的），写入又都经 `#savingQueue` 的模块级变更队列，所以在到达

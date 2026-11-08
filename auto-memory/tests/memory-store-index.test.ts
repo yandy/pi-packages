@@ -66,7 +66,7 @@ describe("removeEntry", () => {
 		expect(await readFile(join(dir, ".backups", last, "A.md"), "utf8")).toContain("正文");
 	});
 
-	// 与 addEntry 同一性质（spec §6 / §18.1）：快照建不了时删除必须中止，
+	// 与 addEntry 同一性质：快照建不了时删除必须中止，
 	// 否则会出现「无快照可回滚」的不可逆删除。
 	it("aborts the removal when the snapshot cannot be created", async () => {
 		await store.addEntry({ name: "A", body: "正文" });

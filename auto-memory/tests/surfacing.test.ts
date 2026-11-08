@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { type EntryManifest, type HeadlessRunRequest, runSideQuery } from "../src/index.js";
 
 /**
- * 侧查询的编排（spec §4.1 的 `HeadlessAgentPort`）。
+ * 侧查询的编排。
  *
  * 被测的是 core 的决策：候选过滤、prompt 构造、请求字段、以及对宿主回复的解析与失败兜底。
  * 宿主怎么跑那一轮（pi 的 `createAgentSession`、别家的 subagent）由适配层的假端口代替。

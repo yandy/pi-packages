@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DREAM_ACTIONS, MAIN_AGENT_ACTIONS, type MemoryAction, memoryToolSchema } from "../src/index.js";
 
 /**
- * `memory` 工具的中立契约（spec §5.4）。
+ * `memory` 工具的中立契约。
  *
  * 这里钉的是**发给模型的 JSON Schema 本身**：pi 适配层把它转成 typebox、dsh 适配层把它转成
  * schemastery，两边都必须转出与这里逐字相同的线格式（pi 侧的钉子是
@@ -101,7 +101,7 @@ describe("memoryToolSchema", () => {
 	});
 });
 
-describe("action 集合是冻结的（D12 的注册范围不得被静默拓宽）", () => {
+describe("action 集合是冻结的（注册范围不得被静默拓宽）", () => {
 	it("freezes both action sets", () => {
 		expect(Object.isFrozen(MAIN_AGENT_ACTIONS)).toBe(true);
 		expect(Object.isFrozen(DREAM_ACTIONS)).toBe(true);
