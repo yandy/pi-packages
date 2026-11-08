@@ -148,6 +148,7 @@ While an `ask_user` prompt is open:
 | `enter` | Confirm the focused option, submit a freeform response, or submit/skip an optional comment. |
 | `esc` | Clear the search filter, exit freeform/comment mode, or cancel the prompt. |
 | `↑` / `↓`, `ctrl+k` / `ctrl+j` | Navigate options. `ctrl+k` / `ctrl+j` (vim-style) work while typing in searchable prompts without disturbing the filter. |
+| `pgup` / `pgdn` | Scroll the question/context region when it is taller than the popup. The popup never exceeds 85% of the terminal height, so options and the help line always stay visible; a `↑ n lines above` / `↓ n lines below` indicator marks the hidden content. Only in option-select mode (the editor owns these keys in freeform/comment mode). |
 
 If you prefer never to see the overlay, set `PI_ASK_USER_DISPLAY_MODE=inline` globally or `"displayMode": "inline"` in `ask-user.json`.
 

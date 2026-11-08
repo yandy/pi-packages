@@ -33,7 +33,12 @@ import {
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { type QuestionOption, renderSingleSelectRows } from "./src/single-select-layout.js";
+import {
+	type QuestionOption,
+	renderSingleSelectRows,
+	type SelectableBlock,
+	windowSelectedBlocks,
+} from "./src/single-select-layout.js";
 
 const _require = createRequire(import.meta.url);
 const ASK_USER_VERSION: string = (_require("./package.json") as { version: string }).version;
@@ -368,6 +373,14 @@ function resolveShortcut(
 type AskMode = "select" | "freeform" | "comment";
 
 const ASK_OVERLAY_MAX_HEIGHT_RATIO = 0.85;
+/** Fixed lines in the box: 2 borders + 5 spacers (title/help measured at render time). */
+const ASK_OVERLAY_FIXED_LINES = 7;
+/** Maximum share of the available rows the header (question+context) may claim. */
+const ASK_HEADER_MAX_SHARE = 0.5;
+/** Minimum header rows (question) kept visible when space is tight. */
+const MIN_HEADER_ROWS = 1;
+/** Minimum interactive-region rows (option list) kept visible when tight. */
+const MIN_MODE_ROWS = 4;
 // biome-ignore lint/suspicious/noExplicitAny: SizeValue compatibility with pi-tui
 const ASK_OVERLAY_WIDTH: any = "92%";
 const ASK_OVERLAY_MIN_WIDTH = 40;
@@ -447,6 +460,7 @@ class MultiSelectList implements Component {
 	private selectedIndex = 0;
 	private checked = new Set<number>();
 	private commentEnabled = false;
+	private maxVisibleRows = 10;
 	private cachedWidth?: number;
 	private cachedLines?: string[];
 
@@ -472,6 +486,14 @@ class MultiSelectList implements Component {
 
 	public isCommentEnabled(): boolean {
 		return this.commentEnabled;
+	}
+
+	setMaxVisibleRows(rows: number): void {
+		const next = Math.max(1, Math.floor(rows));
+		if (next !== this.maxVisibleRows) {
+			this.maxVisibleRows = next;
+			this.invalidate();
+		}
 	}
 
 	invalidate(): void {
@@ -596,7 +618,6 @@ class MultiSelectList implements Component {
 
 		const theme = this.theme;
 		const count = this.getItemCount();
-		const maxVisible = Math.min(count, 10);
 
 		if (count === 0) {
 			this.cachedLines = [theme.fg("warning", "No options")];
@@ -604,55 +625,54 @@ class MultiSelectList implements Component {
 			return this.cachedLines;
 		}
 
-		const startIndex = Math.max(0, Math.min(this.selectedIndex - Math.floor(maxVisible / 2), count - maxVisible));
-		const endIndex = Math.min(startIndex + maxVisible, count);
-
-		const lines: string[] = [];
-
-		for (let i = startIndex; i < endIndex; i++) {
+		const pointerWidth = 2; // "→ " / "  "
+		const blocks: SelectableBlock[] = [];
+		for (let i = 0; i < count; i++) {
 			const isSelected = i === this.selectedIndex;
-			const prefix = isSelected ? theme.fg("accent", "→") : " ";
+			const pointer = isSelected ? theme.fg("accent", "→ ") : "  ";
+			const continuation = " ".repeat(pointerWidth);
+			const lines: string[] = [];
 
 			if (this.isCommentToggleRow(i)) {
 				const checkbox = this.commentEnabled ? theme.fg("success", "[✓]") : theme.fg("dim", "[ ]");
 				const label = isSelected
 					? theme.fg("accent", theme.bold(COMMENT_TOGGLE_LABEL))
 					: theme.fg("text", theme.bold(COMMENT_TOGGLE_LABEL));
-				lines.push(truncateToWidth(`${prefix}   ${checkbox} ${label}`, width, ""));
-				continue;
-			}
-
-			if (this.isFreeformRow(i)) {
+				lines.push(`${pointer}  ${checkbox} ${label}`);
+			} else if (this.isFreeformRow(i)) {
 				const label = theme.fg("text", theme.bold("Type something."));
 				const desc = theme.fg("muted", "Enter a custom response");
-				const line = `${prefix}   ${label} ${theme.fg("dim", "—")} ${desc}`;
-				lines.push(truncateToWidth(line, width, ""));
-				continue;
-			}
+				lines.push(`${pointer}  ${label} ${theme.fg("dim", "—")} ${desc}`);
+			} else {
+				const option = this.options[i];
+				if (!option) continue;
 
-			const option = this.options[i];
-			if (!option) continue;
+				const checkbox = this.checked.has(i) ? theme.fg("success", "[✓]") : theme.fg("dim", "[ ]");
+				const num = theme.fg("dim", `${i + 1}.`);
+				const title = isSelected
+					? theme.fg("accent", theme.bold(option.title))
+					: theme.fg("text", theme.bold(option.title));
+				lines.push(`${pointer}${num} ${checkbox} ${title}`);
 
-			const checkbox = this.checked.has(i) ? theme.fg("success", "[✓]") : theme.fg("dim", "[ ]");
-			const num = theme.fg("dim", `${i + 1}.`);
-			const title = isSelected ? theme.fg("accent", theme.bold(option.title)) : theme.fg("text", theme.bold(option.title));
-
-			const firstLine = `${prefix} ${num} ${checkbox} ${title}`;
-			lines.push(truncateToWidth(firstLine, width, ""));
-
-			if (option.description) {
-				const indent = "      ";
-				const wrapWidth = Math.max(10, width - indent.length);
-				const wrapped = wrapTextWithAnsi(option.description, wrapWidth);
-				for (const w of wrapped) {
-					lines.push(truncateToWidth(indent + theme.fg("muted", w), width, ""));
+				if (option.description) {
+					const indent = `${continuation}    `;
+					const wrapWidth = Math.max(10, width - indent.length);
+					const wrapped = wrapTextWithAnsi(option.description, wrapWidth);
+					for (const w of wrapped) {
+						lines.push(indent + theme.fg("muted", w));
+					}
 				}
 			}
+
+			blocks.push({ lines, selected: isSelected });
 		}
 
-		if (startIndex > 0 || endIndex < count) {
-			lines.push(theme.fg("dim", truncateToWidth(`  (${this.selectedIndex + 1}/${count})`, width, "")));
-		}
+		const rows = windowSelectedBlocks({
+			blocks,
+			maxRows: this.maxVisibleRows,
+			indicator: theme.fg("dim", `(${this.selectedIndex + 1}/${count})`),
+		});
+		const lines = rows.map((row) => truncateToWidth(row.line, width, ""));
 
 		this.cachedWidth = width;
 		this.cachedLines = lines;
@@ -1032,13 +1052,21 @@ class AskComponent extends Container {
 	private titleText: Text;
 	private questionText: Text;
 	private contextComponent?: Component;
-	private modeContainer: Container;
 	private helpText: Text;
 
-	// Mode components
+	// Mode components (rendered in order; tracked separately from the static
+	// children so the budget-aware render can measure and clamp them directly)
+	private modeComponents: Component[] = [];
 	private singleSelectList?: WrappedSingleSelectList;
 	private multiSelectList?: MultiSelectList;
 	private editor?: Editor;
+
+	// Header (question + context) scroll state. The overlay is hard-clamped by
+	// pi-tui at maxHeight (85% of terminal rows), and lines beyond that are
+	// silently sliced off — so the component must budget its own height and
+	// scroll the header region when question+context exceed their share.
+	private headerScrollOffset = 0;
+	private headerScrollState = { scrollable: false, pageSize: 0 };
 
 	// Focusable - propagate to Editor for IME cursor positioning
 	private _focused = false;
@@ -1112,10 +1140,6 @@ class AskComponent extends Container {
 
 		this.addChild(new Spacer(1));
 
-		this.modeContainer = new Container();
-		this.addChild(this.modeContainer);
-
-		this.addChild(new Spacer(1));
 		this.helpText = new Text("", 1, 0);
 		this.addChild(this.helpText);
 
@@ -1138,48 +1162,146 @@ class AskComponent extends Container {
 		this.updateHelpText();
 	}
 
+	/**
+	 * Budget-aware render. pi-tui slices any overlay lines beyond maxHeight
+	 * (85% of terminal rows, minus margins) without scrolling, so the component
+	 * must never emit more lines than that. The available height is split
+	 * between the header (question + context) and the interactive region; the
+	 * interactive region keeps a floor of a few rows so options stay visible,
+	 * and the header becomes a scrollable viewport (pageUp/pageDown) whenever it
+	 * does not fit.
+	 */
 	override render(width: number): string[] {
 		const innerWidth = Math.max(1, width - BOX_BORDER_OVERHEAD);
+		const termRows = this.tui.terminal?.rows ?? 24;
+		// Mirrors the overlay options: maxHeight "85%" clamped by margin 1.
+		const budgetHeight = Math.max(1, Math.min(Math.floor(termRows * ASK_OVERLAY_MAX_HEIGHT_RATIO), termRows - 2));
 
-		if (this.mode === "select" && !this.allowMultiple) {
-			const overlayMaxHeight = Math.max(12, Math.floor(this.tui.terminal.rows * ASK_OVERLAY_MAX_HEIGHT_RATIO));
-			const staticLines = this.countStaticLines(innerWidth);
-			const availableOptionRows = Math.max(4, overlayMaxHeight - staticLines);
-			this.ensureSingleSelectList().setMaxVisibleRows(availableOptionRows);
+		// Measure the fixed chrome — the title and help lines can wrap (real
+		// keybinding hints span two rows at common widths), so they must be
+		// counted, not assumed: 2 borders + 5 spacers + measured rows.
+		const titleLines = this.titleText.render(innerWidth);
+		const helpLines = this.helpText.render(innerWidth);
+		const chromeLines = ASK_OVERLAY_FIXED_LINES + titleLines.length + helpLines.length;
+
+		const headerLines = this.buildHeaderLines(innerWidth);
+
+		// Measure the interactive region at its natural (unclamped) height.
+		const modeDesired = this.measureModeRegion(innerWidth);
+
+		// Allocate the remaining rows between header and interactive region:
+		// the header may claim at most ~half the available rows, the interactive
+		// region takes the rest (with a floor so options stay usable), and any
+		// rows the interactive region cannot use flow back to the header.
+		const available = Math.max(2, budgetHeight - chromeLines);
+		const headerCap = Math.max(MIN_HEADER_ROWS, Math.floor(available * ASK_HEADER_MAX_SHARE));
+		let headerBudget = Math.min(headerLines.length, headerCap);
+		let modeBudget = Math.min(modeDesired, Math.max(MIN_MODE_ROWS, available - headerBudget));
+		headerBudget = Math.min(headerLines.length, Math.max(MIN_HEADER_ROWS, available - modeBudget));
+		// Hard clamp for tiny terminals where even the floors exceed the budget.
+		if (headerBudget + modeBudget > available) {
+			modeBudget = Math.max(1, available - headerBudget);
 		}
 
-		// Render children at the inner width (excluding side border characters)
-		const rawLines = super.render(innerWidth);
+		const modeLines = this.renderModeRegion(innerWidth, modeBudget).slice(0, Math.max(1, modeBudget));
+		const headerViewport = this.renderHeaderViewport(headerLines, headerBudget, innerWidth);
 
-		// First and last lines are the top/bottom box borders — pass through at full width.
-		// All inner lines get wrapped with side borders.
+		// Assemble: borders, title, header viewport, interactive region, help.
+		const inner: string[] = [];
+		inner.push("");
+		inner.push(...titleLines);
+		inner.push("");
+		inner.push(...headerViewport);
+		inner.push("");
+		inner.push(...modeLines);
+		inner.push("");
+		inner.push(...helpLines);
+
 		const borderColor = (s: string) => this.theme.fg("accent", s);
 		const titleColor = (s: string) => this.theme.fg("dim", this.theme.bold(s));
-		return rawLines.map((line, index) => {
-			if (index === 0 || index === rawLines.length - 1) {
-				// Box top/bottom borders already rendered at innerWidth — re-render at full width
-				if (index === 0) return new BoxBorderTop(borderColor, "ask_user", titleColor).render(width)[0];
-				return new BoxBorderBottom(borderColor, `v${ASK_USER_VERSION}`, (s: string) => this.theme.fg("dim", s)).render(
-					width,
-				)[0];
-			}
+		const lines: string[] = [new BoxBorderTop(borderColor, "ask_user", titleColor).render(width)[0] ?? ""];
+		for (const line of inner) {
 			const padded = truncateToWidth(line, innerWidth, "", true);
-			return `${borderColor(BOX_BORDER_LEFT)}${padded}${borderColor(BOX_BORDER_RIGHT)}`;
-		});
+			lines.push(`${borderColor(BOX_BORDER_LEFT)}${padded}${borderColor(BOX_BORDER_RIGHT)}`);
+		}
+		lines.push("");
+		lines.push(
+			new BoxBorderBottom(borderColor, `v${ASK_USER_VERSION}`, (s: string) => this.theme.fg("dim", s)).render(width)[0] ??
+				"",
+		);
+
+		// Hard guarantee: never exceed the overlay budget (tiny terminals).
+		return lines.slice(0, Math.max(budgetHeight, 3));
 	}
 
-	private countWrappedLines(text: string, width: number): number {
-		return Math.max(1, wrapTextWithAnsi(text, Math.max(10, width - 2)).length);
+	private buildHeaderLines(width: number): string[] {
+		const lines: string[] = [];
+		lines.push(...this.questionText.render(width));
+		if (this.contextComponent && this.context) {
+			lines.push("");
+			lines.push(...this.contextComponent.render(width));
+		}
+		return lines;
 	}
 
-	private countStaticLines(width: number): number {
-		const titleLines = 1;
-		const questionLines = this.countWrappedLines(this.question, width);
-		const contextLines = this.context ? 1 + this.countWrappedLines(this.context, width) : 0;
-		const helpLines = 1;
-		const borderLines = 2;
-		const spacerLines = this.context ? 6 : 5;
-		return borderLines + spacerLines + titleLines + questionLines + contextLines + helpLines;
+	private renderHeaderViewport(content: string[], budget: number, width: number): string[] {
+		if (budget <= 0) {
+			this.headerScrollState = { scrollable: false, pageSize: 0 };
+			return [];
+		}
+		if (content.length <= budget) {
+			this.headerScrollOffset = 0;
+			this.headerScrollState = { scrollable: false, pageSize: 0 };
+			return content;
+		}
+
+		// Reserve one line for the scroll indicator.
+		const visible = Math.max(1, budget - 1);
+		const maxOffset = Math.max(0, content.length - visible);
+		const offset = Math.max(0, Math.min(this.headerScrollOffset, maxOffset));
+		this.headerScrollOffset = offset;
+		this.headerScrollState = { scrollable: true, pageSize: Math.max(1, visible - 1) };
+
+		const window = content.slice(offset, offset + visible);
+		const aboveCount = offset;
+		const belowCount = content.length - (offset + visible);
+		const parts: string[] = [];
+		if (aboveCount > 0) {
+			parts.push(`↑ ${aboveCount} line${aboveCount === 1 ? "" : "s"} above`);
+		}
+		if (belowCount > 0) {
+			parts.push(`↓ ${belowCount} line${belowCount === 1 ? "" : "s"} below`);
+		}
+		parts.push("pgup/pgdn scroll");
+		const indicator = this.theme.fg("dim", truncateToWidth(`  ${parts.join(" · ")}`, width, ""));
+		return [...window, indicator];
+	}
+
+	private measureModeRegion(width: number): number {
+		if (this.mode === "select") {
+			// Unclamped measurement: let the list render every row it wants.
+			const list = this.allowMultiple ? this.ensureMultiSelectList() : this.ensureSingleSelectList();
+			list.setMaxVisibleRows(Number.POSITIVE_INFINITY);
+			return list.render(width).length;
+		}
+		return this.modeComponents.reduce((count, component) => count + component.render(width).length, 0);
+	}
+
+	private renderModeRegion(width: number, budget: number): string[] {
+		if (this.mode === "select") {
+			const list = this.allowMultiple ? this.ensureMultiSelectList() : this.ensureSingleSelectList();
+			list.setMaxVisibleRows(Math.max(1, budget));
+			return list.render(width);
+		}
+		return this.modeComponents.flatMap((component) => component.render(width));
+	}
+
+	private scrollHeader(delta: number): void {
+		if (!this.headerScrollState.scrollable) return;
+		this.headerScrollOffset = Math.max(0, this.headerScrollOffset + delta);
+		// Re-clamped to the valid range on the next render.
+		this.invalidate();
+		this.tui.requestRender();
 	}
 
 	private updateStaticText(): void {
@@ -1352,6 +1474,16 @@ class AskComponent extends Container {
 		}
 	}
 
+	private setModeComponents(components: Component[]): void {
+		for (const component of this.modeComponents) {
+			this.removeChild(component);
+		}
+		this.modeComponents = components;
+		for (const component of components) {
+			this.addChild(component);
+		}
+	}
+
 	private showSelectMode(): void {
 		if (this.mode === "freeform" || this.mode === "comment") {
 			this.saveEditorDraft();
@@ -1359,12 +1491,11 @@ class AskComponent extends Container {
 
 		this.mode = "select";
 		this.pendingSelections = [];
-		this.modeContainer.clear();
 
 		if (this.allowMultiple) {
-			this.modeContainer.addChild(this.ensureMultiSelectList());
+			this.setModeComponents([this.ensureMultiSelectList()]);
 		} else {
-			this.modeContainer.addChild(this.ensureSingleSelectList());
+			this.setModeComponents([this.ensureSingleSelectList()]);
 		}
 
 		this.updateHelpText();
@@ -1378,16 +1509,17 @@ class AskComponent extends Container {
 		}
 
 		this.mode = "freeform";
-		this.modeContainer.clear();
 
 		const editor = this.ensureEditor();
 		this.setEditorText(this.freeformDraft);
 		// biome-ignore lint/suspicious/noExplicitAny: Editor.focused setter is internal
 		(editor as any).focused = this._focused;
 
-		this.modeContainer.addChild(new Text(this.theme.fg("accent", this.theme.bold("Custom response")), 1, 0));
-		this.modeContainer.addChild(new Spacer(1));
-		this.modeContainer.addChild(editor);
+		this.setModeComponents([
+			new Text(this.theme.fg("accent", this.theme.bold("Custom response")), 1, 0),
+			new Spacer(1),
+			editor,
+		]);
 
 		this.updateHelpText();
 		this.invalidate();
@@ -1400,7 +1532,6 @@ class AskComponent extends Container {
 		}
 
 		this.mode = "comment";
-		this.modeContainer.clear();
 
 		const editor = this.ensureEditor();
 		this.setEditorText(this.commentDraft);
@@ -1408,10 +1539,12 @@ class AskComponent extends Container {
 		(editor as any).focused = this._focused;
 
 		const selectedLabel = this.pendingSelections.length === 1 ? "Selected option:" : "Selected options:";
-		this.modeContainer.addChild(new Text(this.theme.fg("accent", this.theme.bold(selectedLabel)), 1, 0));
-		this.modeContainer.addChild(new Text(this.theme.fg("text", this.pendingSelections.join(", ")), 1, 0));
-		this.modeContainer.addChild(new Spacer(1));
-		this.modeContainer.addChild(editor);
+		this.setModeComponents([
+			new Text(this.theme.fg("accent", this.theme.bold(selectedLabel)), 1, 0),
+			new Text(this.theme.fg("text", this.pendingSelections.join(", ")), 1, 0),
+			new Spacer(1),
+			editor,
+		]);
 
 		this.updateHelpText();
 		this.invalidate();
@@ -1419,6 +1552,19 @@ class AskComponent extends Container {
 	}
 
 	handleInput(data: string): void {
+		// Scroll the clamped question/context viewport. Only in select mode:
+		// the editor owns pageUp/pageDown in freeform/comment modes.
+		if (this.mode === "select" && this.headerScrollState.scrollable) {
+			if (matchesKey(data, Key.pageUp)) {
+				this.scrollHeader(-this.headerScrollState.pageSize);
+				return;
+			}
+			if (matchesKey(data, Key.pageDown)) {
+				this.scrollHeader(this.headerScrollState.pageSize);
+				return;
+			}
+		}
+
 		if (this.mode === "freeform" || this.mode === "comment") {
 			if (matchesKey(data, Key.escape)) {
 				this.showSelectMode();
@@ -1555,9 +1701,7 @@ export default function (pi: ExtensionAPI) {
 			// 它们是**用户偏好**，优先级为 模型参数 > env > ask-user.json > 默认值，模型能直接
 			// 盖掉用户的设置，且占了 782 字符的 schema。取值改由 env（PI_ASK_USER_DISPLAY_MODE 等）
 			// 与 ask-user.json 提供，内部解析链与 `AskParams` 类型保留（SDK/内部调用仍可传）。
-			timeout: Type.Optional(
-				Type.Number({ description: "Auto-dismiss after N ms; returns null when expired." }),
-			),
+			timeout: Type.Optional(Type.Number({ description: "Auto-dismiss after N ms; returns null when expired." })),
 		}),
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {

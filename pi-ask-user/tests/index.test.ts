@@ -49,7 +49,14 @@ vi.mock("@earendil-works/pi-tui", () => {
 	}
 
 	class MockContainer {
-		addChild() {}
+		children: unknown[] = [];
+		addChild(component: unknown) {
+			this.children.push(component);
+		}
+		removeChild(component: unknown) {
+			const index = this.children.indexOf(component);
+			if (index !== -1) this.children.splice(index, 1);
+		}
 		clear() {}
 		invalidate() {}
 		render() {
