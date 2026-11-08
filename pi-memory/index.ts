@@ -5,6 +5,7 @@ import {
 	type LockInfo,
 	MemoryStore,
 	buildIndexSection,
+	defaultMemoryRoot,
 	indexCapacity,
 	indexInjectionCapacity,
 	parseEntryIndex,
@@ -19,8 +20,9 @@ import {
 } from "@yandy0725/auto-memory";
 import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { loadConfig, modelConfigErrors, requiredModel, taskModel, type MemoryConfig, type SessionPersistenceConfig } from "./src/config";
+import { legacyMemoryRoot, loadConfig, modelConfigErrors, requiredModel, taskModel, type MemoryConfig, type SessionPersistenceConfig } from "./src/config";
 import { readRecordedMemoryIndex } from "./src/index-source";
+import { detectLegacyMemoryDir } from "./src/legacy-hint";
 import { applyIndexSection, buildInjection } from "./src/inject-pi";
 import { createPiHeadlessAgent } from "./src/agent-runner";
 import { createPiTranscript } from "./src/host-transcript";
@@ -590,7 +592,7 @@ export default function (pi: ExtensionAPI) {
 			const indexRaw = await activeStore.readIndex();
 			const cap = indexCapacity(indexRaw, config.memIndexMaxLines, config.memIndexMaxBytes);
 			const inject = indexInjectionCapacity(indexRaw, config.memIndexInjectMaxLines, config.memIndexInjectMaxBytes);
-			const summary = [
+			const summaryLines = [
 				`Dir: ${dir}`,
 				`Index: ${cap.lineCount}/${config.memIndexMaxLines} lines, ${cap.byteLength}/${config.memIndexMaxBytes} bytes, ${parseEntryIndex(indexRaw).unrecognized} unrecognized lines`,
 				`Inject: ${inject.lineCount}/${config.memIndexInjectMaxLines} lines, ${inject.byteLength}/${config.memIndexInjectMaxBytes} bytes`,
@@ -598,8 +600,21 @@ export default function (pi: ExtensionAPI) {
 				`Modules: ${moduleStatusLine(config)}`,
 				`Last dream: ${(await readDreamMeta(dir))?.lastDreamAt ?? "never"}`,
 				`Lock: ${await lockStatusLine(dir)}`,
-			].join("\n");
-			ctx.ui.notify(summary, "info");
+			];
+			// 2.x 数据根的迁移提示：只提示、不动数据。探测失败不得让 `/memory` 报错 ——
+			// 状态块本身才是这个命令的交付物。
+			try {
+				const hint = await detectLegacyMemoryDir({
+					newDir: dir,
+					newRoot: defaultMemoryRoot(),
+					legacyRoot: legacyMemoryRoot(),
+					cwd: ctx.cwd,
+				});
+				if (hint) summaryLines.push("", hint);
+			} catch {
+				/* 探测失败：状态块照常输出 */
+			}
+			ctx.ui.notify(summaryLines.join("\n"), "info");
 		},
 	});
 

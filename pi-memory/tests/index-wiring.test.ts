@@ -39,7 +39,7 @@ const { mockConfigValue, dirRef, dirOverrideRef } = vi.hoisted(() => ({
 	dirOverrideRef: { current: null as null | ((cwd: string) => string) },
 }));
 
-const { scanEntriesMock, runSideQueryMock, injectSurfacedContentMock, runExtractMock, runDreamMock, shouldNudgeMock, readRecordedMemoryIndexMock, readDreamMetaMock, writeDreamMetaMock } =
+const { scanEntriesMock, runSideQueryMock, injectSurfacedContentMock, runExtractMock, runDreamMock, shouldNudgeMock, readRecordedMemoryIndexMock, readDreamMetaMock, writeDreamMetaMock, detectLegacyMemoryDirMock } =
 	vi.hoisted(() => ({
 		scanEntriesMock: vi.fn(),
 		runSideQueryMock: vi.fn(),
@@ -50,6 +50,7 @@ const { scanEntriesMock, runSideQueryMock, injectSurfacedContentMock, runExtract
 		readRecordedMemoryIndexMock: vi.fn(),
 		readDreamMetaMock: vi.fn(),
 		writeDreamMetaMock: vi.fn().mockResolvedValue(undefined),
+		detectLegacyMemoryDirMock: vi.fn().mockResolvedValue(null),
 	}));
 
 // 只替换 loadConfig，保留真实导出：modelConfigErrors / requiredModels 是 session_start 校验的
@@ -89,6 +90,10 @@ vi.mock("../src/nudge", () => ({
 	shouldNudge: shouldNudgeMock,
 	writeDreamMeta: writeDreamMetaMock,
 	readDreamMeta: readDreamMetaMock,
+}));
+
+vi.mock("../src/legacy-hint", () => ({
+	detectLegacyMemoryDir: detectLegacyMemoryDirMock,
 }));
 
 vi.mock("../src/session-search", () => ({
@@ -1500,6 +1505,59 @@ describe("index wiring (integration)", () => {
 	});
 
 	// ── Plan C（spec §14 `/memory` 状态与 `/memory unlock`）─────────────────
+	it("/memory appends the 2.x migration hint when the detector finds old data", async () => {
+		detectLegacyMemoryDirMock.mockResolvedValueOnce(
+			"Note: found pre-3.0 memories at /home/u/.pi/memory/local/x. Move them with:\n  mkdir -p /home/u/.local/share && mv /home/u/.pi/memory /home/u/.local/share/auto-memory",
+		);
+		const notify = vi.fn();
+		const { pi, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		await commands["memory"].handler("", uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } }));
+
+		const lines = notify.mock.calls[0][0].split("\n");
+		// 状态块 7 行 + 一个空行 + 提示两行
+		expect(lines).toHaveLength(10);
+		expect(lines[7]).toBe("");
+		expect(lines[8]).toMatch(/^Note: found pre-3\.0 memories at /);
+		expect(lines[9]).toMatch(/^ {2}mkdir -p .*&& mv /);
+		// 提示必须带上解析出的新目录与两个根，否则用户照着抄会搬错地方
+		expect(detectLegacyMemoryDirMock).toHaveBeenCalledWith(
+			expect.objectContaining({ newDir: dir, cwd: expect.any(String) }),
+		);
+		expect(detectLegacyMemoryDirMock.mock.calls[0][0].legacyRoot).toMatch(/[.\/]\.pi[\/]memory$/);
+		expect(detectLegacyMemoryDirMock.mock.calls[0][0].newRoot).toMatch(/auto-memory$/);
+	});
+
+	it("/memory prints no hint once the detector reports nothing", async () => {
+		detectLegacyMemoryDirMock.mockResolvedValueOnce(null);
+		const notify = vi.fn();
+		const { pi, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		await commands["memory"].handler("", uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } }));
+
+		expect(notify.mock.calls[0][0].split("\n")).toHaveLength(7);
+		expect(notify.mock.calls[0][0]).not.toContain("pre-3.0");
+	});
+
+	// 探测失败不得吃掉状态块：`/memory` 的交付物是状态，提示只是附加。
+	it("/memory still prints the status block when the detector throws", async () => {
+		detectLegacyMemoryDirMock.mockRejectedValueOnce(new Error("git exploded"));
+		const notify = vi.fn();
+		const { pi, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+
+		await commands["memory"].handler("", uiCtx({ hasUI: true, ui: { notify, confirm: vi.fn(), setStatus: vi.fn() } }));
+
+		expect(notify).toHaveBeenCalledTimes(1);
+		expect(notify.mock.calls[0][0].split("\n")).toHaveLength(7);
+		expect(notify.mock.calls[0][0]).toMatch(/^Dir: /);
+	});
+
 	it("/memory prints the whole status block", async () => {
 		readDreamMetaMock.mockResolvedValue({ lastDreamAt: "2026-10-01T00:00:00.000Z", sessionCountAtDream: 3 });
 		const notify = vi.fn();

@@ -1,6 +1,6 @@
 # pi-memory
 
-pi coding agent 的文件系统持久记忆层。把项目知识（事实、偏好、调试历史）以纯 Markdown 文件的形式存在 `~/.pi/memory/<git|local>/<project>/` 下，跨会话可用。
+pi coding agent 的文件系统持久记忆层。把项目知识（事实、偏好、调试历史）以纯 Markdown 文件的形式存在 `$XDG_DATA_HOME/auto-memory/<git|local>/<project>/` 下，跨会话可用。
 
 对齐 Claude Code 的自动记忆机制：**一条记忆 = 一个文件**、`MEMORY.md` 索引一行一条记忆、按相关性自动浮现、每轮自动提取、记忆分类。
 
@@ -19,7 +19,7 @@ pi coding agent 的文件系统持久记忆层。把项目知识（事实、偏�
 - **两级锁** —— 进程内逻辑锁承担**逻辑作用域**（单次原语，或 dream 的整轮）；跨进程 `.lock` **只持毫秒**且**永不自动回收**。没有 TTL、没有心跳、没有接管，所以互斥是硬保证；代价是崩溃遗留的锁必须**人工**清除（`/memory unlock`）。
 - **快照** —— 每次写入都在 `.backups/<ts>-<label>/` 留下回滚点，保留最近 `lock.snapshotKeep` 份（`migrate-` 开头的目录是旧版迁移留下的整目录快照，其 `originals/` 子目录里才是 2.0 之前的 topic 原文，永不裁剪）。`/dream` 是例外：它**进入时只对整个目录拍一次**快照，该轮内部的原语会跳过逐文件快照（一轮只留一个回滚点）。
 - **会话检索** —— `memory search scope=sessions` 查历史会话。
-- **可读、clone 友好的布局** —— git 仓库（http(s)/ssh/git remote，含 scp 写法与 `git+ssh`/`git+https`）存在 `~/.pi/memory/git/<host__owner__repo>/`，其余存在 `~/.pi/memory/local/<absolute-path>/`；同一仓库的 clone 与 worktree 共享记忆（fork 有自己的 remote，因此有独立目录）。
+- **可读、clone 友好的布局** —— git 仓库（http(s)/ssh/git remote，含 scp 写法与 `git+ssh`/`git+https`）存在 `~/.local/share/auto-memory/git/<host__owner__repo>/`，其余存在 `~/.local/share/auto-memory/local/<absolute-path>/`；同一仓库的 clone 与 worktree 共享记忆（fork 有自己的 remote，因此有独立目录）。
 
 ## 安装
 
@@ -35,10 +35,26 @@ pi install npm:@yandy0725/pi-memory
 }
 ```
 
+## 从 2.x 迁移
+
+3.0 把共享数据根从 `~/.pi/memory/` 搬到 **`$XDG_DATA_HOME/auto-memory`**（`XDG_DATA_HOME` 未设置
+或为相对路径时用 `~/.local/share/auto-memory`），这样别的 harness 才能读写**同一批文件**。磁盘格式
+没有变 —— entry 的 frontmatter、`MEMORY.md` 索引、`.lock`、`.backups/<ts>-<label>/`、
+`.dream-meta.json` 全部逐字节一致 —— 所以迁移就是一条 `mv`：
+
+```sh
+mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}" && mv ~/.pi/memory "${XDG_DATA_HOME:-$HOME/.local/share}/auto-memory"
+```
+
+**不会替你搬。** 在执行这条命令之前，3.0 看到的是一个空目录；`/memory` 在发现当前项目有 3.0 之前
+的数据时会多打一行提示，而这个提示**不创建、不移动、不修改任何文件**。搬回去就是同一条 `mv` 反向执行。
+
+如果你的记忆目录本身是个 git 仓库（比如 `~/.pi/memory/git/.git`），`mv` 会把 `.git` 一起带走，历史保留。
+
 ## 存储布局
 
 ```
-~/.pi/memory/git/github.com__owner__repo/
+~/.local/share/auto-memory/git/github.com__owner__repo/
   MEMORY.md            — 索引：一行一条记忆（em dash 分隔）
   SSH-port-on-staging.md
   Test-command.md      — 一条记忆一个文件
@@ -104,7 +120,7 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
 
 ```json
 {
-  "memoryDir": "~/.pi/memory",
+  "memoryDir": "~/project-memories",
   "memIndexMaxLines": 200,
   "memIndexMaxBytes": 25600,
   "memIndexInjectMaxLines": 50,
@@ -134,7 +150,7 @@ staging 的 SSH 用 2222 端口，密钥在 ~/.ssh/staging。
 
 | 键 | 默认值 | 说明 |
 |-----|---------|------|
-| `memoryDir` | `~/.pi/memory` | 所有记忆数据的根目录。`~`、`~/` 与（Windows 上）`~\` 会展开；相对路径按工作目录解析为绝对路径 |
+| `memoryDir` | `$XDG_DATA_HOME/auto-memory`（默认 `~/.local/share/auto-memory`） | 所有记忆数据的根目录。`~`、`~/` 与（Windows 上）`~\` 会展开；相对路径按工作目录解析为绝对路径 |
 | `memIndexMaxLines` | `200` | 写入口径：`MEMORY.md` 的最大非空行数（`# Memory Index` 头行与手写标题同样占额度，所以并不等于记忆条数） |
 | `memIndexMaxBytes` | `25600` | 写入口径：`MEMORY.md` 的最大字节数 |
 | `memIndexInjectMaxLines` | `50` | 注入口径：放进 `memory_index` section 的最大行数。窗口保留**最新**的行、丢弃**最旧**的行 —— 索引是纯时间序，窗口再小也不会藏住你刚写完的那条。**任一键写 `0` = 完全不注入索引**（section 保持空值） |
@@ -300,7 +316,7 @@ memory(action: "add" | "replace" | "remove" | "list" | "search",
 状态输出：
 
 ```
-Dir: /home/you/.pi/memory/git/github.com__owner__repo
+Dir: /home/you/.local/share/auto-memory/git/github.com__owner__repo
 Index: 38/200 lines, 2841/25600 bytes, 1 unrecognized lines
 Inject: 39/50 lines, 2841/16384 bytes
 Entries: 37
@@ -333,7 +349,7 @@ Lock: free
 ## 文件布局
 
 ```
-~/.pi/memory/
+~/.local/share/auto-memory/
   git/
     github.com__yandy__pi-packages/    ← https://github.com/yandy/pi-packages.git
       MEMORY.md            — 索引：一行一条记忆

@@ -1,6 +1,6 @@
 # pi-memory
 
-File-system driven persistent memory layer for pi coding agent. Stores project knowledge across sessions — facts, preferences, debugging history — as plain Markdown files under `~/.pi/memory/<git|local>/<project>/`.
+File-system driven persistent memory layer for pi coding agent. Stores project knowledge across sessions — facts, preferences, debugging history — as plain Markdown files under `$XDG_DATA_HOME/auto-memory/<git|local>/<project>/`.
 
 Aligned with Claude Code's auto memory mechanism: **one memory = one file**, a `MEMORY.md` index with exactly one line per memory, relevance-based auto-surfacing, per-turn memory extraction, and typed memory categories.
 
@@ -19,7 +19,7 @@ Aligned with Claude Code's auto memory mechanism: **one memory = one file**, a `
 - **Two-level locking** — an in-process logical lock carries the *logical* scope (one primitive call, or a whole dream round); the cross-process `.lock` file is held for **milliseconds only** and is **never reclaimed automatically**. There is no TTL, no heartbeat and no takeover, so mutual exclusion is a hard guarantee; the price is that a lock left behind by a crashed process must be removed by a human (`/memory unlock`).
 - **Snapshots** — every write leaves a rollback point under `.backups/<ts>-<label>/`, keeping the last `lock.snapshotKeep` (directories named `migrate-*` — whole-directory snapshots from an earlier 1.x migration, whose `originals/` subdirectory holds the pre-2.0 topic files — are never pruned). `/dream` is the exception: it snapshots the whole directory **once on entry**, and the primitives inside that round skip their per-file snapshots (one round, one rollback point).
 - **Session search** — `memory search scope=sessions` queries past conversation history.
-- **Readable, clone-safe layout** — memory lives under `~/.pi/memory/git/<host__owner__repo>/` for git repos with an http(s)/ssh/git remote (including scp-style and `git+ssh`/`git+https`), and `~/.pi/memory/local/<absolute-path>/` otherwise — clones and worktrees of the same repo share memory (a fork has its own remote, so it gets its own directory).
+- **Readable, clone-safe layout** — memory lives under `~/.local/share/auto-memory/git/<host__owner__repo>/` for git repos with an http(s)/ssh/git remote (including scp-style and `git+ssh`/`git+https`), and `~/.local/share/auto-memory/local/<absolute-path>/` otherwise — clones and worktrees of the same repo share memory (a fork has its own remote, so it gets its own directory).
 
 ## Install
 
@@ -35,10 +35,29 @@ Or add to `~/.pi/agent/settings.json`:
 }
 ```
 
+## Migrating from 2.x
+
+3.0 moves the shared data root out of `~/.pi/memory/` and into **`$XDG_DATA_HOME/auto-memory`**
+(`~/.local/share/auto-memory` when `XDG_DATA_HOME` is unset or relative), so that other harnesses
+can read and write the very same files. The on-disk format is unchanged — entry frontmatter, the
+`MEMORY.md` index, `.lock`, `.backups/<ts>-<label>/` and `.dream-meta.json` are all byte-identical —
+so migrating is a single `mv`:
+
+```sh
+mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}" && mv ~/.pi/memory "${XDG_DATA_HOME:-$HOME/.local/share}/auto-memory"
+```
+
+**Nothing is moved for you.** Until you run that command, 3.0 starts with an empty memory directory;
+`/memory` prints a one-line hint when it finds pre-3.0 data for the current project, and the hint
+never creates, moves or modifies a file. Moving the root back is the same `mv` in reverse.
+
+If your memory directory is a git repository (a `~/.pi/memory/git/.git` checkout, say), the `mv`
+takes the `.git` directory with it and the history survives.
+
 ## Storage layout
 
 ```
-~/.pi/memory/git/github.com__owner__repo/
+~/.local/share/auto-memory/git/github.com__owner__repo/
   MEMORY.md            — the index: one line per memory (em dash separator)
   SSH-port-on-staging.md
   Test-command.md      — one file per memory
@@ -104,7 +123,7 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
 
 ```json
 {
-  "memoryDir": "~/.pi/memory",
+  "memoryDir": "~/project-memories",
   "memIndexMaxLines": 200,
   "memIndexMaxBytes": 25600,
   "memIndexInjectMaxLines": 50,
@@ -134,7 +153,7 @@ Create `memory.json` in the agent directory (`~/.pi/agent/memory.json`) or the p
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `memoryDir` | `~/.pi/memory` | Root directory for all memory data. `~`, `~/` and (on Windows) `~\` are expanded; relative values are resolved against the working directory |
+| `memoryDir` | `$XDG_DATA_HOME/auto-memory` (default `~/.local/share/auto-memory`) | Root directory for all memory data. `~`, `~/` and (on Windows) `~\` are expanded; relative values are resolved against the working directory |
 | `memIndexMaxLines` | `200` | Write capacity: max non-empty lines in `MEMORY.md` (the `# Memory Index` header and hand-written headings count too, so this is not exactly the memory count) |
 | `memIndexMaxBytes` | `25600` | Write capacity: max bytes of `MEMORY.md` |
 | `memIndexInjectMaxLines` | `50` | Injection window: max lines of the index put into the `memory_index` section. The window keeps the **newest** lines and drops the **oldest** ones — the index is pure chronological order, so a smaller window never hides the memory you just wrote. **`0` (either key) injects no index at all** — the `memory_index` section stays empty |
@@ -300,7 +319,7 @@ One line per memory: `- name (type, modified …) — description [file]`.
 Status output:
 
 ```
-Dir: /home/you/.pi/memory/git/github.com__owner__repo
+Dir: /home/you/.local/share/auto-memory/git/github.com__owner__repo
 Index: 38/200 lines, 2841/25600 bytes, 1 unrecognized lines
 Inject: 39/50 lines, 2841/16384 bytes
 Entries: 37
@@ -333,7 +352,7 @@ Automatic 1.x → 2.0 migration has been removed. Legacy topic files (frontmatte
 ## File layout
 
 ```
-~/.pi/memory/
+~/.local/share/auto-memory/
   git/
     github.com__yandy__pi-packages/    ← https://github.com/yandy/pi-packages.git
       MEMORY.md            — the index: one line per memory

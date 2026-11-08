@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { type MemoryConfig, loadConfigFrom } from "@yandy0725/auto-memory";
@@ -58,4 +59,12 @@ export function configFiles(ctx: LoadConfigContext): string[] {
 
 export async function loadConfig(ctx: LoadConfigContext): Promise<MemoryConfig> {
 	return loadConfigFrom(configFiles(ctx), { platform: ctx._platform });
+}
+
+/**
+ * 2.x 的数据根（`~/.pi/memory`）。只用于迁移提示 —— core 对 `.pi` 一无所知，
+ * 所以这条宿主知识留在 pi 这一侧（见 `legacy-hint.ts`）。
+ */
+export function legacyMemoryRoot(home: string = homedir()): string {
+	return join(home, CONFIG_DIR_NAME, "memory");
 }
