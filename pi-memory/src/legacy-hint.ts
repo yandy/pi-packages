@@ -34,8 +34,11 @@ export async function detectLegacyMemoryDir(opts: LegacyHintOpts): Promise<strin
 	const { kind, key } = await projectIdentity(opts.cwd, opts.platform);
 	const legacyDir = join(opts.legacyRoot, kind, projectDirName(key, { platform: opts.platform }));
 	if (!existsSync(legacyDir)) return null;
-	return [
-		`Note: found pre-3.0 memories at ${legacyDir}. Move them with:`,
-		`  mkdir -p ${dirname(opts.newRoot)} && mv ${opts.legacyRoot} ${opts.newRoot}`,
-	].join("\n");
+	// `mv <src> <dst>` 在 dst 已存在时会把 src 塞**进** dst（得到 `<dst>/memory/…`）。
+	// 新根已存在（别的项目先迁过了、或用户配了自定义根）时，改成只搬这一个项目的子目录 ——
+	// 那正是缺的那一块，而且两条命令都不会产生嵌套。
+	const move = existsSync(opts.newRoot)
+		? `mkdir -p ${dirname(opts.newDir)} && mv ${legacyDir} ${opts.newDir}`
+		: `mkdir -p ${dirname(opts.newRoot)} && mv ${opts.legacyRoot} ${opts.newRoot}`;
+	return [`Note: found pre-3.0 memories at ${legacyDir}. Move them with:`, `  ${move}`].join("\n");
 }

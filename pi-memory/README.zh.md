@@ -43,11 +43,14 @@ pi install npm:@yandy0725/pi-memory
 `.dream-meta.json` 全部逐字节一致 —— 所以迁移就是一条 `mv`：
 
 ```sh
-mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}" && mv ~/.pi/memory "${XDG_DATA_HOME:-$HOME/.local/share}/auto-memory"
+# 与 defaultMemoryRoot() 同一条规则：XDG_DATA_HOME 是相对路径时按 XDG 规范忽略它
+case "${XDG_DATA_HOME:-}" in /*) root="$XDG_DATA_HOME";; *) root="$HOME/.local/share";; esac
+mkdir -p "$root" && mv ~/.pi/memory "$root/auto-memory"
 ```
 
 **不会替你搬。** 在执行这条命令之前，3.0 看到的是一个空目录；`/memory` 在发现当前项目有 3.0 之前
-的数据时会多打一行提示，而这个提示**不创建、不移动、不修改任何文件**。搬回去就是同一条 `mv` 反向执行。
+的数据时会多打一行提示，而这个提示**不创建、不移动、不修改任何文件**。搬回去就是同一条 `mv` 反向执行。如果你配了自定义 `memoryDir`，就搬到那里去 —— `/memory` 打的提示
+已经指向 pi 真正会读的根，并且在新根已存在时只搬当前项目的子目录（避免 `mv` 把源目录嵌进去）。
 
 如果你的记忆目录本身是个 git 仓库（比如 `~/.pi/memory/git/.git`），`mv` 会把 `.git` 一起带走，历史保留。
 

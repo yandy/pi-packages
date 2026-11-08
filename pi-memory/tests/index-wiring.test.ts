@@ -39,7 +39,7 @@ const { mockConfigValue, dirRef, dirOverrideRef } = vi.hoisted(() => ({
 	dirOverrideRef: { current: null as null | ((cwd: string) => string) },
 }));
 
-const { scanEntriesMock, runSideQueryMock, injectSurfacedContentMock, runExtractMock, runDreamMock, shouldNudgeMock, readRecordedMemoryIndexMock, readDreamMetaMock, writeDreamMetaMock, detectLegacyMemoryDirMock } =
+const { scanEntriesMock, runSideQueryMock, injectSurfacedContentMock, runExtractMock, runDreamMock, shouldNudgeMock, readRecordedMemoryIndexMock, readDreamMetaMock, writeDreamMetaMock, detectLegacyMemoryDirMock, createMemoryToolSpy } =
 	vi.hoisted(() => ({
 		scanEntriesMock: vi.fn(),
 		runSideQueryMock: vi.fn(),
@@ -51,6 +51,7 @@ const { scanEntriesMock, runSideQueryMock, injectSurfacedContentMock, runExtract
 		readDreamMetaMock: vi.fn(),
 		writeDreamMetaMock: vi.fn().mockResolvedValue(undefined),
 		detectLegacyMemoryDirMock: vi.fn().mockResolvedValue(null),
+		createMemoryToolSpy: vi.fn(),
 	}));
 
 // 只替换 loadConfig，保留真实导出：modelConfigErrors / requiredModels 是 session_start 校验的
@@ -92,6 +93,14 @@ vi.mock("../src/nudge", () => ({
 	readDreamMeta: readDreamMetaMock,
 }));
 
+// 真实现照跑（端到端写入用例要用真的工具），只加一层观察：`buildMemoryTool` 闭包有没有把
+// core 给的 spec 原样交给 createMemoryTool。
+vi.mock("../src/memory-tool", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../src/memory-tool")>();
+	createMemoryToolSpy.mockImplementation(actual.createMemoryTool);
+	return { ...actual, createMemoryTool: createMemoryToolSpy };
+});
+
 vi.mock("../src/legacy-hint", () => ({
 	detectLegacyMemoryDir: detectLegacyMemoryDirMock,
 }));
@@ -110,7 +119,7 @@ vi.mock("../src/index-source", async (importOriginal) => {
 
 import memoryFactory, { moduleStatusLine } from "../index";
 import { DEFAULT_CONFIG, loadConfig, type MemoryConfig } from "../src/config";
-import { INDEX_TRUNCATION_MARKER } from "@yandy0725/auto-memory";
+import { DREAM_ACTIONS, INDEX_TRUNCATION_MARKER, MAIN_AGENT_ACTIONS } from "@yandy0725/auto-memory";
 
 const LEGACY_TOPIC = [
 	"---",
@@ -1505,6 +1514,76 @@ describe("index wiring (integration)", () => {
 	});
 
 	// ── Plan C（spec §14 `/memory` 状态与 `/memory unlock`）─────────────────
+	// D12 的注册范围是硬约束：dream 必须拿到 7 个 action（含 rename / rebuild_index），extract
+	// 必须只拿到 5 个。core 钉「它请求了哪些 action」，pi 钉「toHeadlessToolOptions 会调
+	// buildMemoryTool(spec)」—— 中间这条 `buildMemoryTool: (spec) => createMemoryTool(toolDeps, spec)`
+	// 的闭包以前没人钉：把 spec 参数丢掉，全部套件照样绿，而 dream 会静默失去重构索引的能力。
+	it("the dream port forwards the seven-action spec into createMemoryTool", async () => {
+		// `/dream` 先要一次 confirm；再让 runDream 永不 resolve —— 本用例只观察端口闭包，
+		// 不放成功回调出去（它会 `await SessionManager.list(cwd)`，那会碰真实 ~/.pi）。
+		runDreamMock.mockImplementationOnce(() => new Promise(() => {}));
+		const { pi, commands, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+		createMemoryToolSpy.mockClear();
+
+		await commands["dream"].handler(
+			"",
+			uiCtx({ hasUI: true, ui: { notify: vi.fn(), confirm: vi.fn().mockResolvedValue(true), setStatus: vi.fn() } }),
+		);
+
+		expect(runDreamMock).toHaveBeenCalledTimes(1);
+		const ports = runDreamMock.mock.calls[0][1];
+		// runDream 被 mock 掉了，端口从没被调用过：这里亲手调一次来观察那个闭包。
+		// 模型不可解析，runHeadlessAgent 会在**建完工具之后**抛错 —— 那正是观察点。
+		await expect(
+			ports.headless.run({
+				task: "t",
+				cwd: dir,
+				model: "nope/not-resolvable",
+				builtinTools: "none",
+				memoryTool: { actions: DREAM_ACTIONS, skipLogicalLock: true, skipSnapshot: true },
+			}),
+		).rejects.toThrow(/not resolvable/);
+
+		const dreamCall = createMemoryToolSpy.mock.calls.find((c: any[]) => c[1]?.skipSnapshot === true);
+		expect(dreamCall?.[1]).toEqual({
+			actions: DREAM_ACTIONS,
+			skipLogicalLock: true,
+			skipSnapshot: true,
+		});
+		// 与主 agent 注册用的是同一份 deps（否则 /memory 的状态与工具看到的 store 会分家）
+		expect(dreamCall?.[0]).toBe(createMemoryToolSpy.mock.calls[0][0]);
+	});
+
+	it("the extract port forwards the five-action spec plus the onWrite counter", async () => {
+		mockConfigValue.extractMemories.enabled = true;
+		const { pi, handlers } = createFakePi();
+		memoryFactory(pi as any);
+		await handlers["session_start"][0]({}, uiCtx());
+		createMemoryToolSpy.mockClear();
+
+		await handlers["agent_end"][0]({ messages: [{ role: "user", content: "hi" }] }, uiCtx());
+
+		const ports = runExtractMock.mock.calls[0][1];
+		await expect(
+			ports.headless.run({
+				task: "t",
+				cwd: dir,
+				model: "nope/not-resolvable",
+				builtinTools: "none",
+				memoryTool: { actions: MAIN_AGENT_ACTIONS, skipLogicalLock: true, onWrite: () => {} },
+			}),
+		).rejects.toThrow(/not resolvable/);
+
+		const extractCall = createMemoryToolSpy.mock.calls.find((c: any[]) => c[1]?.skipLogicalLock === true);
+		expect(extractCall?.[1]?.actions).toEqual([...MAIN_AGENT_ACTIONS]);
+		expect(extractCall?.[1]?.actions).toHaveLength(5);
+		expect(typeof extractCall?.[1]?.onWrite).toBe("function");
+		// extract 没有整轮快照，所以**不得**带 skipSnapshot：每次写入都要留下自己的回滚点
+		expect(extractCall?.[1]?.skipSnapshot).toBeUndefined();
+	});
+
 	it("/memory appends the 2.x migration hint when the detector finds old data", async () => {
 		detectLegacyMemoryDirMock.mockResolvedValueOnce(
 			"Note: found pre-3.0 memories at /home/u/.pi/memory/local/x. Move them with:\n  mkdir -p /home/u/.local/share && mv /home/u/.pi/memory /home/u/.local/share/auto-memory",
@@ -1527,7 +1606,7 @@ describe("index wiring (integration)", () => {
 			expect.objectContaining({ newDir: dir, cwd: expect.any(String) }),
 		);
 		expect(detectLegacyMemoryDirMock.mock.calls[0][0].legacyRoot).toMatch(/[.\/]\.pi[\/]memory$/);
-		expect(detectLegacyMemoryDirMock.mock.calls[0][0].newRoot).toMatch(/auto-memory$/);
+		expect(detectLegacyMemoryDirMock.mock.calls[0][0].newRoot).toBe(dir);
 	});
 
 	it("/memory prints no hint once the detector reports nothing", async () => {

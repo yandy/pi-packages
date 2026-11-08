@@ -44,12 +44,14 @@ can read and write the very same files. The on-disk format is unchanged — entr
 so migrating is a single `mv`:
 
 ```sh
-mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}" && mv ~/.pi/memory "${XDG_DATA_HOME:-$HOME/.local/share}/auto-memory"
+# 与 defaultMemoryRoot() 同一条规则：XDG_DATA_HOME 是相对路径时按 XDG 规范忽略它
+case "${XDG_DATA_HOME:-}" in /*) root="$XDG_DATA_HOME";; *) root="$HOME/.local/share";; esac
+mkdir -p "$root" && mv ~/.pi/memory "$root/auto-memory"
 ```
 
 **Nothing is moved for you.** Until you run that command, 3.0 starts with an empty memory directory;
 `/memory` prints a one-line hint when it finds pre-3.0 data for the current project, and the hint
-never creates, moves or modifies a file. Moving the root back is the same `mv` in reverse.
+never creates, moves or modifies a file. Moving the root back is the same `mv` in reverse. If you set a custom `memoryDir`, move the old root there instead — `/memory` prints a hint whose command already aims at the root pi will actually read, and it moves only this project's subdirectory when the new root already exists.
 
 If your memory directory is a git repository (a `~/.pi/memory/git/.git` checkout, say), the `mv`
 takes the `.git` directory with it and the history survives.

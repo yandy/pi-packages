@@ -55,3 +55,18 @@ gh release create pi-<name>-v<新版本号> --target $COMMIT \
 - `--target` 指定 tag 指向的 commit，确保 tag 落在版本升级的那个 commit 上
 - `--workspace` 参数可用 `-w` 简写
 - tag 格式必须是 `pi-<name>-vX.Y.Z`，不能是 `vX.Y.Z`
+
+### 跨仓依赖：先发被依赖的那个包
+
+`pi-memory` 3.0.0 起在 `dependencies` 里依赖 **`@yandy0725/auto-memory`**，而那个包住在独立仓库
+（阶段 1 期间它还是本 monorepo 的一个 workspace，`private: true`）。`publish.yml` 只看 Release tag，
+不知道这层依赖，所以：
+
+- **core 未发布就发 `pi-memory`，得到的是一个装不上的包**（`npm install @yandy0725/pi-memory`
+  会报 `No matching version found for @yandy0725/auto-memory@^1.0.0`）。顺序必须是：core 的仓库先
+  发布 → 确认 registry 上能查到（轮询版本文档到 200、比对 `dist.shasum`、看 `dist-tags.latest`）
+  → 再发 `pi-memory`。
+- 阶段 1 期间 core 还是 workspace 且 `private: true`，此时**根本不能发 `pi-memory`**：workspace
+  link 只在本仓库里成立。要把 `pi-memory` 发出去，必须先完成阶段 2（core 搬出、加 `dist` 与
+  `exports`、去掉 `private`、发布），再把本仓 `package-lock.json` 里的 link 换成 registry 版本。
+- 反过来是安全的：只发 core、不发 `pi-memory`，不影响任何现有用户。

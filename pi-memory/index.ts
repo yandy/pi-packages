@@ -1,11 +1,10 @@
 import { unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
 	LOCK_FILE,
 	type LockInfo,
 	MemoryStore,
 	buildIndexSection,
-	defaultMemoryRoot,
 	indexCapacity,
 	indexInjectionCapacity,
 	parseEntryIndex,
@@ -606,7 +605,9 @@ export default function (pi: ExtensionAPI) {
 			try {
 				const hint = await detectLegacyMemoryDir({
 					newDir: dir,
-					newRoot: defaultMemoryRoot(),
+					// 必须是**配置生效后**的根（`resolveMemoryDir` 内部也是先 `resolve(config.memoryDir)`）：
+					// 用户配了自定义 memoryDir 时，指向 XDG 默认根会让他把记忆搬到 agent 永远不读的地方。
+					newRoot: resolve(config.memoryDir),
 					legacyRoot: legacyMemoryRoot(),
 					cwd: ctx.cwd,
 				});

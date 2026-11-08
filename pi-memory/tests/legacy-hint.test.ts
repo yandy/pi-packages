@@ -100,6 +100,32 @@ describe("detectLegacyMemoryDir", () => {
 		expect(await detectLegacyMemoryDir(opts())).toBeNull();
 	});
 
+	// 用户配了自定义 memoryDir 时，命令必须搬去**它真正会读**的地方，而不是 XDG 默认根：
+	// 否则用户照着我们打印的命令搬完，agent 仍然看着空目录，而这条提示是他唯一的线索。
+	it("aims the mv at the configured root, not the XDG default", async () => {
+		await mkdir(legacyDir, { recursive: true });
+		const customRoot = join(base, "somewhere-else");
+		const customDir = join(customRoot, await resolvedProjectSubpath(cwd));
+
+		const hint = await detectLegacyMemoryDir({ newDir: customDir, newRoot: customRoot, legacyRoot, cwd });
+
+		expect(hint).toContain(`mv ${legacyRoot} ${customRoot}`);
+		expect(hint).not.toContain("auto-memory");
+	});
+
+	// `mv <src> <dst>` 在 dst 已存在时会把 src 塞**进** dst（得到 <dst>/memory/…）：
+	// 根已存在（别的项目先迁过了）时必须改成搬这一个项目的子目录。
+	it("moves only this project's subdir when the new root already exists", async () => {
+		await mkdir(legacyDir, { recursive: true });
+		await mkdir(newRoot, { recursive: true }); // 根在，本项目的 newDir 不在
+
+		const hint = await detectLegacyMemoryDir(opts());
+
+		expect(hint).toContain(`mv ${legacyDir} ${newDir}`);
+		expect(hint).toContain(`mkdir -p ${dirname(newDir)}`);
+		expect(hint).not.toContain(`mv ${legacyRoot} ${newRoot}`);
+	});
+
 	// Review Focus #3：探测只许 existsSync，不许 mkdir / 不许碰 MemoryStore。
 	it("creates and modifies nothing while probing", async () => {
 		await mkdir(legacyDir, { recursive: true });

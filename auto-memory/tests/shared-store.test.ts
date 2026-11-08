@@ -5,11 +5,15 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MemoryStore, formatIndexLine, parseEntryIndex, resolveMemoryDir, type StoreConfig } from "../src/index.js";
 
 /**
- * 跨宿主共享的实质承诺（Review Focus #5）。
+ * 跨宿主共享的实质承诺（Review Focus #5）：**同一个目录上的并发写不会把索引写坏**。
  *
- * 「两个 harness 能读到同一批文件」只是必要条件；真正会咬人的是**同时写**：两个 `MemoryStore`
- * 实例指向同一个目录时，跨进程 `.lock` 必须让物理写入互斥，索引不得出现半行、空行或重复行。
- * 这里用两个实例模拟两个宿主进程 —— 锁是文件级的，同进程两个 store 走的是同一条 `.lock` 路径。
+ * 这里钉的是**同进程两个 `MemoryStore` 实例**的组合行为：它们共用 `#indexPath()` 这个逻辑锁 key
+ * （`process-lock` 的 states 是模块级的），写入又都经 `#savingQueue` 的模块级变更队列，所以在到达
+ * 跨进程 `.lock` 之前就已被完全串行化 —— 本文件**不**制造跨进程锁竞争。
+ *
+ * 跨进程 `.lock` 的原语语义（活持有者、异主机持有者、死进程遗留、`open(wx)` 建立与写记录之间的
+ * 0 字节窗口、重叠调用串行化）由 `fs-lock.test.ts` 的 18 条用例直接覆盖。真正起两个进程的端到端
+ * 用例需要子进程能 import 编译产物，留到阶段 2 有了 `dist/` 再加。
  */
 let dir: string;
 
@@ -28,7 +32,7 @@ afterEach(async () => {
 });
 
 describe("two stores on one directory", () => {
-	it("interleaves concurrent writes without tearing the index", async () => {
+	it("serialises two in-process stores so concurrent writes never tear the index", async () => {
 		const a = new MemoryStore(CFG(dir));
 		const b = new MemoryStore(CFG(dir));
 
@@ -60,6 +64,8 @@ describe("two stores on one directory", () => {
 		const b = new MemoryStore(CFG(dir));
 		await Promise.all([a.addEntry({ name: "A", body: "a" }), b.addEntry({ name: "B", body: "b" })]);
 		// `.lock` 只在毫秒级物理写入期间存在；两次写都结束后目录里不该留下它
+		// （同进程下这两个 store 被逻辑锁串行化，所以这里其实很难观察到竞争后的残留 ——
+		// 它钉的是「正常路径不留锁」，崩溃残留的处置见 fs-lock.test.ts）
 		expect(await readdir(dir)).not.toContain(".lock");
 	});
 
