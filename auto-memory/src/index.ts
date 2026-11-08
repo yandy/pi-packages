@@ -8,4 +8,5 @@
  * `@earendil-works/pi-tui`、`schemastery`）。`tests/neutrality.test.ts` 是这条约束的执行点。
  */
 
-export {};
+// store/ —— 并发
+export { withFileMutationQueue } from "./store/mutation-queue";
