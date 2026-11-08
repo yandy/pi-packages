@@ -4,10 +4,13 @@ import {
 	LOCK_FILE,
 	type LockInfo,
 	MemoryStore,
+	buildIndexSection,
 	indexCapacity,
+	indexInjectionCapacity,
 	parseEntryIndex,
 	readLockStatus,
 	resolveMemoryDir,
+	scanEntries,
 	withFsRetry,
 } from "@yandy0725/auto-memory";
 import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
@@ -16,7 +19,7 @@ import { loadConfig, modelConfigErrors, requiredModel, taskModel, type MemoryCon
 import { runDream } from "./src/dream";
 import { runExtract } from "./src/extract";
 import { readRecordedMemoryIndex } from "./src/index-source";
-import { applyIndexSection, buildIndexSection, buildInjection, indexInjectionCapacity, injectSurfacedContent, runSideQuery, scanEntries } from "./src/inject";
+import { applyIndexSection, buildInjection, injectSurfacedContent, runSideQuery } from "./src/inject-pi";
 import {
 	createMemoryTool,
 	DREAM_ACTIONS,

@@ -79,6 +79,25 @@ export type {
 // （pi → typebox + ToolDefinition + pi-tui 渲染；dsh → schemastery + defineTool）。
 export { DREAM_ACTIONS, MAIN_AGENT_ACTIONS } from "./tool/actions";
 export type { MemoryAction } from "./tool/actions";
+
+// ── 注入的纯策略 ──────────────────────────────────────────────────────────────
+// 这里只有「算出该注入什么字符串」；**注入时机、session 内去重状态、prompt cache 优化**
+// 全在适配层 —— pi 的「索引按 session 冻结」与其他宿主的「每次 assembly 重新求值」是互斥语义。
+export {
+	ENTRY_TRUNCATION_MARKER,
+	INDEX_TRUNCATION_MARKER,
+	SIDE_QUERY_MANIFEST_CHARS,
+	SIDE_QUERY_MAX_ENTRIES,
+	SIDE_QUERY_MIN_DESC_CHARS,
+	buildIndexSection,
+	buildSideQueryTask,
+	indexInjectionCapacity,
+	renderSurfacedBlock,
+	scanEntries,
+	truncateForInjection,
+	truncateIndexForInjection,
+} from "./injection";
+export type { EntryManifest } from "./injection";
 export { memoryToolSchema } from "./tool/schema";
 export type { MemoryToolField, MemoryToolJsonSchema } from "./tool/schema";
 export {

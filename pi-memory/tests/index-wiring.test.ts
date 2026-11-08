@@ -62,15 +62,18 @@ vi.mock("../src/config", async (importOriginal) => {
 	};
 });
 
-// `resolveMemoryDir` 现在来自 core，但同一个包还提供 `MemoryStore` / `indexCapacity` /
-// `parseEntryIndex` / `readLockStatus` / `withFsRetry` / `LOCK_FILE` —— 那些是本文件端到端写入
-// 用例的被测对象，必须保持真实，所以只能整体展开后替换这一个符号。
+// `resolveMemoryDir` 与 `scanEntries` 现在来自 core，但同一个包还提供 `MemoryStore` /
+// `indexCapacity` / `parseEntryIndex` / `readLockStatus` / `withFsRetry` / `LOCK_FILE` /
+// `buildIndexSection` / `indexInjectionCapacity` —— 那些是本文件端到端写入用例的被测对象，
+// 必须保持真实，所以只能整体展开后替换这两个符号。
+// 同一个模块只能有一个 `vi.mock` 工厂（后注册的会覆盖前者），所以两者必须写在一起。
 vi.mock("@yandy0725/auto-memory", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@yandy0725/auto-memory")>();
 	return {
 		...actual,
 		resolveMemoryDir: vi.fn().mockImplementation(async (_config: unknown, cwd: string) =>
 			dirOverrideRef.current ? dirOverrideRef.current(cwd) : dirRef.current),
+		scanEntries: scanEntriesMock,
 	};
 });
 
@@ -94,13 +97,13 @@ vi.mock("../src/extract", async (importOriginal) => {
 	return { ...actual, runExtract: runExtractMock };
 });
 
-// 只替换 auto-surfacing 的三个函数：buildIndexSection / applyIndexSection / buildInjection
-// 走真实实现，这样「sections 注入 + 冻结」这件事本身也被钉住。
-vi.mock("../src/inject", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("../src/inject")>();
+// 只替换 auto-surfacing 的两个函数：applyIndexSection / buildInjection / injectSurfacedContent
+// 走真实实现，这样「sections 注入 + 冻结」这件事本身也被钉住（scanEntries 已经改从 core 来，
+// 它的 mock 在上面的 `@yandy0725/auto-memory` 工厂里）。
+vi.mock("../src/inject-pi", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../src/inject-pi")>();
 	return {
 		...actual,
-		scanEntries: scanEntriesMock,
 		runSideQuery: runSideQueryMock,
 		injectSurfacedContent: injectSurfacedContentMock,
 	};
@@ -116,7 +119,7 @@ vi.mock("../src/index-source", async (importOriginal) => {
 
 import memoryFactory, { moduleStatusLine } from "../index";
 import { DEFAULT_CONFIG, loadConfig, type MemoryConfig } from "../src/config";
-import { INDEX_TRUNCATION_MARKER } from "../src/inject";
+import { INDEX_TRUNCATION_MARKER } from "@yandy0725/auto-memory";
 
 const LEGACY_TOPIC = [
 	"---",

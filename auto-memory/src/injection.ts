@@ -1,13 +1,7 @@
-import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
-import {
-	type EntryType,
-	type MemoryStore,
-	sanitizeForInjection,
-	splitLines,
-} from "@yandy0725/auto-memory";
-import { runHeadlessAgent } from "./agent-runner";
-import type { SessionPersistenceConfig, ThinkLevel } from "./config";
-import { MEMORY_INDEX_SECTION } from "./index-source";
+import type { EntryType } from "./store/entry-file";
+import { splitLines } from "./store/entry-index";
+import type { MemoryStore } from "./store/memory-store";
+import { sanitizeForInjection } from "./store/sanitize";
 
 /**
  * entry 正文的截断标记。与 `INDEX_TRUNCATION_MARKER` **刻意分开**：这里截的是
@@ -163,47 +157,25 @@ export function indexInjectionCapacity(
 	};
 }
 
-export function buildInjection(systemPrompt: string, snapshot: string): string {
-	if (!snapshot) return systemPrompt;
-	return `${systemPrompt}\n\n${snapshot}`;
-}
-
 /**
- * `memory_index` section 的值（spec §9.1 / D13）：读索引 → 截断 → 净化。
+ * 注入用的索引值：读索引 → 截断 → 净化。
  *
  * **不再自己加 `# Memory Index\n` 前缀**：v1 的索引快照函数会补一份头部，而 v2 的
  * `MEMORY.md` 由 `rebuildIndex`（默认头部就是 `# Memory Index`）写入 —— 再补一次
  * 注入文本里就有两份标题。
  *
- * 空索引返回 `""`（调用方仍要把 `""` 无条件写进 sections，见 `applyIndexSection`）。
+ * 空索引返回 `""`，而调用方仍要把这个 `""` **无条件**写进宿主的 section：省略该键通常等于
+ * 告诉宿主「这个 section 不该存在」，索引会被从 system prompt 里静默删除。
  *
- * **顺序是「先截断、后净化」，刻意如此**（Plan C 终审 #6 的决策：保留现状）。注入预算是
+ * **顺序是「先截断、后净化」，刻意如此**。注入预算是
  * **软**约束，而反过来（先净化后截断）会在字节上限处切出半个 HTML entity（`…&l`）——
  * 那才是真正会让模型读错的破损。代价：`<` → `&lt;` 会让净化后的字节数略超 `maxBytes`
- * （索引正文里尖括号极少，实际放大可忽略）。`injectSurfacedContent` 同理。
+ * （索引正文里尖括号极少，实际放大可忽略）。`renderSurfacedBlock` 同理。
  */
 export async function buildIndexSection(store: MemoryStore, maxLines: number, maxBytes: number): Promise<string> {
 	const raw = await store.readIndex();
 	const { content } = truncateIndexForInjection(raw, maxLines, maxBytes);
 	return sanitizeForInjection(content);
-}
-
-/**
- * 把冻结的索引值写进 `event.systemPromptOptions.sections`（就地修改这个可变对象）。
- *
- * 返回 `false` 表示宿主 SDK 太旧、没有 `sections`（本地类型是 0.80.2），调用方必须回退
- * `{ systemPrompt: buildInjection(…) }`（spec §19 的退路：功能不受损，只是缓存变差）。
- *
- * **无条件设置**，哪怕值是 `""`：省略这个键等于告诉 pi「该 section 不应存在」，
- * `diffSystemPromptSections` 会生成 `{ memory_index: null }`，索引被从 system prompt 里
- * **静默删除**（spec §9.1 的 null 陷阱）。「不想改」只能靠喂回逐字节相同的值实现。
- */
-export function applyIndexSection(systemPromptOptions: unknown, value: string): boolean {
-	const options = systemPromptOptions as { sections?: unknown } | null | undefined;
-	const sections = options?.sections;
-	if (typeof sections !== "object" || sections === null) return false;
-	(sections as Record<string, string | null>)[MEMORY_INDEX_SECTION] = value;
-	return true;
 }
 
 /** 侧查询清单的一行 = 一条 entry（v1 是一个 topic 文件）。 */
@@ -228,11 +200,12 @@ export const SIDE_QUERY_MIN_DESC_CHARS = 80;
 export const SIDE_QUERY_MAX_ENTRIES = 200;
 
 /**
- * 从 store 取清单。**不逐文件 readFile** —— mtime 缓存由 store 持有（spec §9.2），
+ * 从 store 取清单。**不逐文件 readFile** —— mtime 缓存由 store 持有，
  * 于是每轮只付一次 `readdir` + 每文件一次 `stat`，而不是最多 200 次 `readFile`。
  *
  * 排序为 `modified` **降序**：新记忆优先给侧查询看（`listEntries` 是升序，这里翻过来），
- * 然后截到 `SIDE_QUERY_MAX_ENTRIES`（Finding I2）。
+ * 然后截到 `SIDE_QUERY_MAX_ENTRIES`：清单会随目录无限增长，而每行都要带 description，
+ * 不封顶会把 prompt 和每轮迭代开销一起拉爆。
  */
 export async function scanEntries(store: MemoryStore): Promise<EntryManifest[]> {
 	const summaries = await store.listEntries();
@@ -244,7 +217,7 @@ export async function scanEntries(store: MemoryStore): Promise<EntryManifest[]> 
 		.slice(0, SIDE_QUERY_MAX_ENTRIES);
 }
 
-export async function injectSurfacedContent(
+export async function renderSurfacedBlock(
 	store: MemoryStore,
 	selectedFiles: string[],
 	maxEntryBytes: number,
@@ -258,9 +231,9 @@ export async function injectSurfacedContent(
 		const entry = await store.readEntry(file);
 		if (!entry) continue;
 		const { content } = truncateForInjection(entry.body, 999999, maxEntryBytes);
-		// spec §13：正文与 name 都要净化（用户/模型写进磁盘的内容可能含 `</relevant_memories>`
+		// 正文与 name 都要净化（用户/模型写进磁盘的内容可能含 `</relevant_memories>`
 		// 之类的仿冒标签）。包裹标签是我们自己生成的，不净化。
-		// 先截断后净化的取舍见 `buildIndexSection` 的注释（Plan C 终审 #6：预算是软约束，
+		// 先截断后净化的取舍见 `buildIndexSection` 的注释（预算是软约束，
 		// 而「净化后截断」会切出半个 entity）。
 		const block = `## ${sanitizeForInjection(entry.name)}\n${sanitizeForInjection(content)}`;
 		const blockBytes = Buffer.byteLength(block, "utf8");
@@ -275,7 +248,7 @@ export async function injectSurfacedContent(
 
 /** Build the side-query task prompt. */
 export function buildSideQueryTask(manifest: EntryManifest[], userPrompt: string, maxFiles: number): string {
-	// `Math.max(1, …)`：空清单不会走到这里（runSideQuery 先返回 []），但除零会得到 Infinity。
+	// `Math.max(1, …)`：空清单不会走到这里（侧查询先返回 []），但除零会得到 Infinity。
 	const perEntry = Math.max(
 		SIDE_QUERY_MIN_DESC_CHARS,
 		Math.floor(SIDE_QUERY_MANIFEST_CHARS / Math.max(1, manifest.length)),
@@ -294,53 +267,4 @@ export function buildSideQueryTask(manifest: EntryManifest[], userPrompt: string
 		"",
 		'Respond with ONLY a JSON object: {"selected_files": ["filename.md", ...]}',
 	].join("\n");
-}
-
-/** Parse selected_files JSON from headless agent response. */
-function parseSelectedFiles(result: string, candidates: EntryManifest[], maxFiles: number): string[] {
-	try {
-		const jsonMatch = result.match(/\{[^}]*"selected_files"[^}]*\}/s);
-		if (!jsonMatch) return [];
-		const parsed = JSON.parse(jsonMatch[0]);
-		const files: string[] = parsed.selected_files ?? [];
-		return files.filter((f: string) => candidates.some((c) => c.file === f)).slice(0, maxFiles);
-	} catch {
-		return [];
-	}
-}
-
-/** Run a lightweight headless side-query to select relevant entry files.
- *  Returns [] on timeout/failure — no fallback. */
-export async function runSideQuery(
-	manifest: EntryManifest[],
-	userPrompt: string,
-	injectedFiles: Set<string>,
-	maxFiles: number,
-	thinkLevel: ThinkLevel,
-	model: string,
-	modelRegistry: ModelRegistry,
-	memoryDir: string,
-	sessionPersistence?: SessionPersistenceConfig,
-): Promise<string[]> {
-	const candidates = manifest.filter((entry) => !injectedFiles.has(entry.file));
-	if (candidates.length === 0) return [];
-	const task = buildSideQueryTask(candidates, userPrompt, maxFiles);
-	try {
-		const result = await runHeadlessAgent({
-			task,
-			cwd: memoryDir,
-			modelRegistry,
-			model,
-			thinkLevel,
-			maxTurns: 1,
-			timeoutMs: 30_000,
-			// 侧查询没有任何 customTools，零工具就是意图：tools: []（白名单）把 builtin 也关掉。
-			// 若以后要给它加 customTools，必须改成 noTools: "builtin"（见 agent-runner.ts 的警告）。
-			tools: [],
-			sessionPersistence,
-		});
-		return parseSelectedFiles(result, candidates, maxFiles);
-	} catch {
-		return [];
-	}
 }
