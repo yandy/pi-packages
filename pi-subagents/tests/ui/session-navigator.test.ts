@@ -194,6 +194,30 @@ describe("TranscriptOverlay", () => {
 		expect(overlay.render(80).join("\n")).toContain("second");
 	});
 
+	it("paints a message that is already in flight when the overlay opens", () => {
+		const partial = { role: "assistant", content: [{ type: "text", text: "mid stream text" }] } as unknown as SessionMessage;
+		const source = fakeSource({
+			getMessages: () => [partial],
+			getToolDefinition: () => undefined,
+		});
+
+		const overlay = makeOverlay({ source });
+		expect(overlay.render(80).join("\n")).toContain("mid stream text");
+	});
+
+	it("renders the finalized message exactly once when the tail clears", () => {
+		// The in-flight message becomes the record's last message at `message_end`
+		// and the tail clears. If the source appended both, the transcript would
+		// show the finished reply twice.
+		const user = { role: "user", content: "go" } as unknown as SessionMessage;
+		const final = { role: "assistant", content: [{ type: "text", text: "done text" }] } as unknown as SessionMessage;
+		const messages: SessionMessage[] = [user, final];
+		const source = fakeSource({ getMessages: () => messages });
+
+		const overlay = makeOverlay({ source });
+		expect(overlay.render(80).join("\n").match(/done text/g)).toHaveLength(1);
+	});
+
 	// ── Performance: throttled rebuilds + cached laid-out lines ───────────────
 	//
 	// A running agent emits many events per second (text deltas, tool calls).

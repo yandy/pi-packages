@@ -105,10 +105,36 @@ describe("listNavigableAgents", () => {
 });
 
 describe("liveSource", () => {
-	it("getMessages returns the record's agentMessages", () => {
+	it("appends the in-flight assistant message to the message list", () => {
+		const messages = [{ role: "user", content: "hi" }] as unknown as SessionMessage[];
+		const partial = { role: "assistant", content: [{ type: "text", text: "str" }] } as unknown as SessionMessage;
+		const record = makeNavigable({ agentMessages: messages, streamingMessage: partial });
+
+		expect(liveSource(record).getMessages()).toEqual([...messages, partial]);
+	});
+
+	it("returns the record's messages unchanged when nothing is in flight", () => {
 		const messages = [{ role: "user", content: "hi" }] as unknown as SessionMessage[];
 		const record = makeNavigable({ agentMessages: messages });
-		expect(liveSource(record).getMessages()).toBe(messages);
+
+		expect(liveSource(record).getMessages()).toEqual(messages);
+	});
+
+	it("shows a message that was already streaming when the source was created", () => {
+		// An overlay opened mid-response must paint it now, not at the next delta.
+		const partial = { role: "assistant", content: [{ type: "text", text: "already going" }] } as unknown as SessionMessage;
+		const record = makeNavigable({ agentMessages: [], streamingMessage: partial });
+
+		expect(liveSource(record).getMessages()).toEqual([partial]);
+	});
+
+	it("leaves the file-snapshot source without a tail or streaming state", () => {
+		// Evicted agents are read once from disk; there is nothing in flight.
+		const source = fileSnapshotSource("/tasks/evicted-1.jsonl", () => "");
+
+		expect(source.streaming()).toBeUndefined();
+		expect(source.subscribe(() => {})).toBeUndefined();
+		expect(source.getMessages()).toEqual([]);
 	});
 
 	it("subscribe delegates to subscribeToUpdates and forwards change notifications", () => {

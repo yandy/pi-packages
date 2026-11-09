@@ -17,6 +17,7 @@ export function makeNavigable(overrides: Partial<NavigableSubagent> = {}): Navig
 		activeTools: new Map(),
 		responseText: "",
 		agentMessages: [],
+		streamingMessage: undefined,
 		modelName: undefined,
 		thinking: undefined,
 		isSessionReady: () => true,

@@ -39,6 +39,8 @@ export interface NavigableSubagent {
 	readonly activeTools: ReadonlyMap<string, string>;
 	readonly responseText: string;
 	readonly agentMessages: readonly SessionMessage[];
+	/** The assistant message currently being streamed, when one exists (not yet in `agentMessages`). */
+	readonly streamingMessage?: SessionMessage;
 	/** Short display model name (always shown; falls back to parent model when unset). */
 	readonly modelName?: string;
 	/** Thinking level when explicitly set (e.g. "high", "off"). */
@@ -137,10 +139,21 @@ export function fileSnapshotSource(outputFile: string, readFile: (path: string) 
 	};
 }
 
-/** Source a transcript live from an in-memory record (this slice's only source). */
+/**
+ * Source a transcript live from an in-memory record (this slice's only source).
+ *
+ * The transcript is the record's history plus the assistant message still in
+ * flight: Pi's agent state only gains an assistant message at `message_end`, so
+ * without the tail the overlay would jump one message at a time instead of
+ * painting the response as it streams. The tail is re-created on every delta,
+ * which the body's tail-refresh path absorbs as a refresh, not a rebuild.
+ */
 export function liveSource(record: NavigableSubagent): TranscriptSource {
 	return {
-		getMessages: () => record.agentMessages,
+		getMessages: () => {
+			const tail = record.streamingMessage;
+			return tail ? [...record.agentMessages, tail] : record.agentMessages;
+		},
 		subscribe: (onChange) => record.subscribeToUpdates(onChange),
 		streaming: () =>
 			record.status === "running" ? { activeTools: record.activeTools, responseText: record.responseText } : undefined,

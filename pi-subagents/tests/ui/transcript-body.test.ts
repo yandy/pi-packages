@@ -113,6 +113,23 @@ describe("TranscriptBody", () => {
 		expect(body.render(80).join("\n")).toContain("line 79 of file content");
 	});
 
+	it("refreshes a streaming tail that arrives as a new object on every delta", () => {
+		// The shape the live source feeds the body: the tail is re-created each delta,
+		// so the list keeps its length while the tail's identity changes. A `rebuilt`
+		// count here means the whole message (markdown and tool components) is thrown
+		// away and re-materialized — the O(transcript) cost the overlay was fixed for.
+		const user = userMessage("hi");
+		const { body, getToolDefinition } = makeTracker();
+		body.sync([user, assistantMessage("", READ_CALL)]);
+
+		for (const delta of ["Hel", "Hello", "Hello wor", "Hello world"]) {
+			expect(body.sync([user, assistantMessage(delta, READ_CALL)])).toEqual({ appended: 0, refreshed: 1, rebuilt: 0 });
+		}
+
+		expect(getToolDefinition).toHaveBeenCalledTimes(1);
+		expect(body.render(80).join("\n")).toContain("Hello world");
+	});
+
 	it("re-materializes from the divergence point when the transcript is replaced", () => {
 		const first = [userMessage("old one"), assistantMessage("old two")];
 		const { body } = makeTracker();
