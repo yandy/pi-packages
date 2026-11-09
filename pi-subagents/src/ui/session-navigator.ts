@@ -423,7 +423,7 @@ export class TranscriptOverlay implements Component {
 	/** Running-agent indicator line, or "" when the source is not streaming. */
 	private indicatorLine(): string {
 		const streaming = this.source.streaming();
-		return streaming ? `◍ ${describeActivity(streaming.activeTools, streaming.responseText)}` : "";
+		return streaming ? `◍ ${describeActivity(streaming.activeTools, streaming.streamingMessage)}` : "";
 	}
 }
 

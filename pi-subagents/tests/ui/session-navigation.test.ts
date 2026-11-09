@@ -156,11 +156,20 @@ describe("liveSource", () => {
 
 	it("streaming returns activity state only while running", () => {
 		const activeTools = new Map([["k", "read"]]);
-		const running = makeNavigable({ status: "running", activeTools, responseText: "working" });
-		expect(liveSource(running).streaming()).toEqual({ activeTools, responseText: "working" });
+		const partial = { role: "assistant", content: [{ type: "text", text: "working" }] } as unknown as SessionMessage;
+		const running = makeNavigable({ status: "running", activeTools, streamingMessage: partial });
+		expect(liveSource(running).streaming()).toEqual({ activeTools, streamingMessage: partial });
 
 		const completed = makeNavigable({ status: "completed" });
 		expect(liveSource(completed).streaming()).toBeUndefined();
+	});
+
+	it("streaming exposes the in-flight message, not a text copy", () => {
+		const partial = { role: "assistant", content: [{ type: "text", text: "working" }] } as unknown as SessionMessage;
+		const tools = new Map([["k", "read"]]);
+		const running = makeNavigable({ status: "running", activeTools: tools, streamingMessage: partial });
+
+		expect(liveSource(running).streaming()).toEqual({ activeTools: tools, streamingMessage: partial });
 	});
 
 	it("getToolDefinition delegates to the record's getToolDefinition", () => {

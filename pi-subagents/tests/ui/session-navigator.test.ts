@@ -171,7 +171,7 @@ describe("TranscriptOverlay", () => {
 
 	it("appends the streaming-activity indicator while running", () => {
 		const source = fakeSource({
-			streaming: () => ({ activeTools: new Map([["k", "read"]]), responseText: "" }),
+			streaming: () => ({ activeTools: new Map([["k", "read"]]), streamingMessage: undefined }),
 		});
 		const out = makeOverlay({ source }).render(80).join("\n");
 		expect(out).toContain("◍");
@@ -331,7 +331,7 @@ describe("TranscriptOverlay", () => {
 		let captured: (() => void) | undefined;
 		const source = fakeSource({
 			getMessages: () => messages,
-			streaming: () => ({ activeTools: active, responseText: "" }),
+			streaming: () => ({ activeTools: active, streamingMessage: undefined }),
 			subscribe: (onChange) => {
 				captured = onChange;
 				return () => {};
@@ -351,9 +351,9 @@ describe("TranscriptOverlay", () => {
 		// Completion flips the record's status; no session event follows. The
 		// indicator therefore has to be re-checked where frames and keystrokes read
 		// the cache, or `◍ …` lingers after the agent is done.
-		let streaming: { activeTools: ReadonlyMap<string, string>; responseText: string } | undefined = {
+		let streaming: { activeTools: ReadonlyMap<string, string>; streamingMessage?: SessionMessage } | undefined = {
 			activeTools: new Map([["k", "read"]]),
-			responseText: "",
+			streamingMessage: undefined,
 		};
 		const source = fakeSource({
 			getMessages: () => [{ role: "user", content: "hi" }] as unknown as SessionMessage[],
@@ -372,7 +372,10 @@ describe("TranscriptOverlay", () => {
 		const longLine = "x".repeat(500);
 		const source = fakeSource({
 			getMessages: () => [{ role: "user", content: longLine }] as unknown as SessionMessage[],
-			streaming: () => ({ activeTools: new Map(), responseText: longLine }),
+			streaming: () => ({
+				activeTools: new Map(),
+				streamingMessage: { role: "assistant", content: [{ type: "text", text: longLine }] } as unknown as SessionMessage,
+			}),
 		});
 		const overlay = makeOverlay({ source });
 		const width = 80;

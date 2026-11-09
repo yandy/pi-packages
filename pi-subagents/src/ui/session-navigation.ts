@@ -75,7 +75,7 @@ interface LabelFields {
 /** Running-agent streaming state, surfaced by a live source. */
 export interface StreamingState {
 	readonly activeTools: ReadonlyMap<string, string>;
-	readonly responseText: string;
+	readonly streamingMessage?: SessionMessage;
 }
 
 /** Liveness-agnostic transcript source consumed by the renderer. */
@@ -156,7 +156,7 @@ export function liveSource(record: NavigableSubagent): TranscriptSource {
 		},
 		subscribe: (onChange) => record.subscribeToUpdates(onChange),
 		streaming: () =>
-			record.status === "running" ? { activeTools: record.activeTools, responseText: record.responseText } : undefined,
+			record.status === "running" ? { activeTools: record.activeTools, streamingMessage: record.streamingMessage } : undefined,
 		getToolDefinition: (name) => record.getToolDefinition(name),
 	};
 }
