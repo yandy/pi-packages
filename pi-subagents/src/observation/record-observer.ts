@@ -44,11 +44,11 @@ export function subscribeSubagentObserver(
 		}
 
 		if (event.type === "message_start") {
-			state.setStreamingMessage(event.message?.role === "assistant" ? event.message : undefined);
+			state.setStreamingMessage(event.message.role === "assistant" ? event.message : undefined);
 			state.resetResponseText();
 		}
 
-		if (event.type === "message_update" && event.message?.role === "assistant") {
+		if (event.type === "message_update" && event.message.role === "assistant") {
 			state.setStreamingMessage(event.message);
 		}
 

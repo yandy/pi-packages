@@ -159,9 +159,10 @@ describe("subscribeSubagentObserver", () => {
 
 		session.emit({
 			type: "message_update",
+			message: { role: "assistant", content: [{ type: "text", text: "previous text" }] },
 			assistantMessageEvent: { type: "text_delta", delta: "previous text" },
 		});
-		session.emit({ type: "message_start" });
+		session.emit({ type: "message_start", message: { role: "assistant", content: [] } });
 		expect(state.responseText).toBe("");
 	});
 
@@ -172,12 +173,14 @@ describe("subscribeSubagentObserver", () => {
 
 		session.emit({
 			type: "message_update",
+			message: { role: "assistant", content: [{ type: "text", text: "Hello " }] },
 			assistantMessageEvent: { type: "text_delta", delta: "Hello " },
 		});
 		expect(state.responseText).toBe("Hello ");
 
 		session.emit({
 			type: "message_update",
+			message: { role: "assistant", content: [{ type: "text", text: "Hello world" }] },
 			assistantMessageEvent: { type: "text_delta", delta: "world" },
 		});
 		expect(state.responseText).toBe("Hello world");
@@ -190,6 +193,7 @@ describe("subscribeSubagentObserver", () => {
 
 		session.emit({
 			type: "message_update",
+			message: { role: "assistant", content: [{ type: "thinking", thinking: "pondering..." }] },
 			assistantMessageEvent: { type: "thinking_delta", delta: "pondering..." },
 		});
 		expect(state.responseText).toBe("");
