@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SubagentState } from "../../src/lifecycle/subagent-state";
+import type { SessionMessage } from "../../src/types";
 
 describe("SubagentState — constructor", () => {
 	it("defaults status to 'queued'", () => {
@@ -323,5 +324,20 @@ describe("SubagentState — responseText", () => {
 		state.resetResponseText();
 		state.appendResponseText("second message");
 		expect(state.responseText).toBe("second message");
+	});
+});
+
+describe("streamingMessage", () => {
+	it("starts undefined", () => {
+		expect(new SubagentState().streamingMessage).toBeUndefined();
+	});
+
+	it("holds the in-flight message and clears back to undefined", () => {
+		const state = new SubagentState();
+		const partial = { role: "assistant", content: [{ type: "text", text: "str" }] } as unknown as SessionMessage;
+		state.setStreamingMessage(partial);
+		expect(state.streamingMessage).toBe(partial);
+		state.setStreamingMessage(undefined);
+		expect(state.streamingMessage).toBeUndefined();
 	});
 });

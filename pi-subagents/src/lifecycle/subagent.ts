@@ -121,6 +121,9 @@ export class Subagent {
 	get responseText(): string {
 		return this.state.responseText;
 	}
+	get streamingMessage(): SessionMessage | undefined {
+		return this.state.streamingMessage;
+	}
 	get maxTurns(): number | undefined {
 		return this.execution.maxTurns;
 	}

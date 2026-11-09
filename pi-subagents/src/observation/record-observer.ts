@@ -20,9 +20,9 @@ export interface SubagentObserverOptions {
  * Handles:
  * - `tool_execution_start` → `state.addActiveTool(name)`
  * - `tool_execution_end` → `state.removeActiveTool(name)`, `state.incrementToolUses()`
- * - `message_start` → `state.resetResponseText()`
- * - `message_update` (text_delta) → `state.appendResponseText(delta)`
- * - `message_end` (assistant, with usage) → `state.addUsage(…)`
+ * - `message_start` → `state.setStreamingMessage(assistant ? message : undefined)`, `state.resetResponseText()`
+ * - `message_update` → `state.setStreamingMessage(message)` (assistant only), `state.appendResponseText(delta)` (text_delta)
+ * - `message_end` → `state.setStreamingMessage(undefined)`, `state.addUsage(…)` (assistant, with usage)
  * - `turn_end` → `state.incrementTurnCount()`
  * - `compaction_end` (not aborted) → `state.incrementCompactions()`, call `onCompact`
  *
@@ -44,11 +44,20 @@ export function subscribeSubagentObserver(
 		}
 
 		if (event.type === "message_start") {
+			state.setStreamingMessage(event.message?.role === "assistant" ? event.message : undefined);
 			state.resetResponseText();
+		}
+
+		if (event.type === "message_update" && event.message?.role === "assistant") {
+			state.setStreamingMessage(event.message);
 		}
 
 		if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
 			state.appendResponseText(event.assistantMessageEvent.delta);
+		}
+
+		if (event.type === "message_end") {
+			state.setStreamingMessage(undefined);
 		}
 
 		if (event.type === "turn_end") {
