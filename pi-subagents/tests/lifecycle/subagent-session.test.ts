@@ -9,7 +9,7 @@ import { createChildLifecycleMock } from "../helpers/subagent-session-io";
  * Subscribable session stub whose `prompt()` appends a final assistant message.
  * `listeners` lets tests drive turn_end events for turn-limit assertions.
  */
-function createSession(finalText: string) {
+function createSession(finalText = "") {
 	const listeners: Array<(event: any) => void> = [];
 	const session = {
 		messages: [] as unknown[],
@@ -113,7 +113,7 @@ describe("SubagentSession — runTurnLoop response capture", () => {
 	});
 
 	it("returns the finalized assistant text, not the raw stream", async () => {
-		const { session, listeners } = createSession("REWRITTEN");
+		const { session, listeners } = createSession();
 		session.prompt = vi.fn(async () => {
 			for (const l of listeners) {
 				l({ type: "message_start", message: { role: "assistant", content: [] } });
@@ -128,7 +128,7 @@ describe("SubagentSession — runTurnLoop response capture", () => {
 	});
 
 	it("returns the streamed response once the message is finalized", async () => {
-		const { session, listeners } = createSession("FALLBACK");
+		const { session, listeners } = createSession();
 		session.prompt = vi.fn(async () => {
 			for (const l of listeners) {
 				l({ type: "message_start" });
