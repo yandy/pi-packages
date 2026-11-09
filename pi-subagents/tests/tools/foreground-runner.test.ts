@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Subagent } from "../../src/lifecycle/subagent";
+import { SubagentState } from "../../src/lifecycle/subagent-state";
 import { type ForegroundParams, runForeground } from "../../src/tools/foreground-runner";
+import type { SessionMessage } from "../../src/types";
 import { createToolDeps } from "../helpers/make-deps";
 import { createResolvedSpawnConfig } from "../helpers/make-spawn-config";
-import { createTestSubagent } from "../helpers/make-subagent";
+import { createTestSubagent, makeStubExecution } from "../helpers/make-subagent";
 import { STUB_SNAPSHOT } from "../helpers/stub-ctx";
 
 function makeParams(overrides: Partial<ForegroundParams> = {}): ForegroundParams {
@@ -98,6 +101,47 @@ describe("runForeground", () => {
 		expect(onUpdate).toHaveBeenCalled();
 
 		resolve(createTestSubagent({ result: "done" }));
+		await runPromise;
+	});
+
+	it("streams the record's in-flight message text as the activity line", async () => {
+		const state = new SubagentState({ status: "running", startedAt: Date.now() - 100 });
+		const partial = {
+			role: "assistant",
+			content: [{ type: "text", text: "Reviewing the diff" }],
+		} as unknown as SessionMessage;
+		state.setStreamingMessage(partial);
+		const record = new Subagent({
+			id: "stream-1",
+			type: "general-purpose",
+			description: "streaming task",
+			execution: makeStubExecution(),
+			state,
+		});
+
+		let resolveSpawn!: (record: Subagent) => void;
+		const spawnPromise = new Promise<Subagent>((res) => {
+			resolveSpawn = res;
+		});
+		const deps = createToolDeps({
+			manager: {
+				...createToolDeps().manager,
+				spawnAndWait: vi.fn().mockImplementation((_snapshot, _type, _prompt, opts) => {
+					opts.observer.onSessionCreated(record);
+					return spawnPromise;
+				}),
+			},
+		});
+		const onUpdate = vi.fn();
+		const runPromise = runForeground(deps.manager, makeParams(), undefined, onUpdate);
+
+		await vi.advanceTimersByTimeAsync(100);
+		expect(onUpdate).toHaveBeenCalled();
+
+		const activities = onUpdate.mock.calls.map((call) => call[0]?.details?.activity);
+		expect(activities).toContain("Reviewing the diff");
+
+		resolveSpawn(record);
 		await runPromise;
 	});
 

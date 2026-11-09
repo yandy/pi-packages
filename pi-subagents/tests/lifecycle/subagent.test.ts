@@ -476,6 +476,33 @@ describe("Subagent.run() — happy path", () => {
 		await agent.run();
 		expect(agent.pendingSteerCount).toBe(0);
 	});
+
+	it("notifies change listeners when a streamed message update mutates live state", async () => {
+		const session = createMockSession();
+		const stub = createSubagentSessionStub(session);
+		const partial = { role: "assistant", content: [{ type: "text", text: "hi" }] } as unknown as SessionMessage;
+		const agent = createRunnableAgent({
+			createSubagentSession: async () => toSubagentSession(stub),
+		});
+
+		const listener = vi.fn();
+		// run() assigns subagentSession before the turn loop, so subscribe from
+		// inside the mocked prompt/turn-loop implementation.
+		stub.runTurnLoop.mockImplementation(async () => {
+			agent.subscribeToUpdates(listener);
+			session.emit({
+				type: "message_update",
+				message: partial,
+				assistantMessageEvent: { type: "text_delta", delta: "hi" },
+			});
+			return { responseText: "done", aborted: false, steered: false };
+		});
+
+		await agent.run();
+
+		expect(listener).toHaveBeenCalled();
+		expect(agent.streamingMessage).toBe(partial);
+	});
 });
 
 describe("Subagent.run() — error handling", () => {
