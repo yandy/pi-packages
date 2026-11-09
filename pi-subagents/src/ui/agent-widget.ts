@@ -178,7 +178,7 @@ export class AgentWidget implements SubagentManagerObserver {
 			turnCount: record.turnCount,
 			maxTurns: record.maxTurns,
 			activeTools: record.activeTools,
-			responseText: record.responseText,
+			streamingMessage: record.streamingMessage,
 			contextPercent: record.getContextPercent(),
 			modelName: record.invocation?.modelName,
 			thinking: record.invocation?.thinking,

@@ -9,7 +9,7 @@ import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { AgentConfigLookup } from "../config/agent-types";
 import type { LifetimeUsage } from "../lifecycle/usage";
 import { getLifetimeTotal } from "../lifecycle/usage";
-import type { SubagentType } from "../types";
+import type { SessionMessage, SubagentType } from "../types";
 import {
 	describeActivity,
 	formatMs,
@@ -39,7 +39,7 @@ export interface WidgetAgent {
 	readonly turnCount: number;
 	readonly maxTurns?: number;
 	readonly activeTools: ReadonlyMap<string, string>;
-	readonly responseText: string;
+	readonly streamingMessage?: SessionMessage;
 	/** Context-window utilisation (0–100), or null when unavailable. */
 	readonly contextPercent: number | null;
 	/** Short display model name (always shown; falls back to parent model when unset). */
@@ -119,7 +119,7 @@ export function renderRunningLines(
 	const statsText = parts.join(" · ");
 
 	const frame = SPINNER[spinnerFrame % SPINNER.length];
-	const activityText = describeActivity(agent.activeTools, agent.responseText);
+	const activityText = describeActivity(agent.activeTools, agent.streamingMessage);
 
 	const header = `${theme.fg("accent", frame)} ${theme.bold(name)}${modeTag}  ${theme.fg("muted", agent.description)} ${theme.fg("dim", "·")} ${theme.fg("dim", statsText)}`;
 	const activityLine = theme.fg("dim", `  \u23BF  ${activityText}`);

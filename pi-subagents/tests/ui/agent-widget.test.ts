@@ -154,7 +154,7 @@ describe("assembleWidgetState", () => {
 });
 
 describe("AgentWidget — projection reads activity off Subagent records", () => {
-	it("surfaces turnCount, activeTools, and responseText from the record via renderWidget", () => {
+	it("surfaces turnCount and activeTools from the record via renderWidget", () => {
 		const record = createTestSubagent({
 			status: "running",
 			completedAt: undefined,

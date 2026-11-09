@@ -50,7 +50,7 @@ export async function runForeground(
 			maxTurns: recordRef?.maxTurns ?? execution.effectiveMaxTurns,
 			durationMs: Date.now() - startedAt,
 			status: "running",
-			activity: describeActivity(recordRef?.activeTools ?? new Map(), recordRef?.responseText ?? ""),
+			activity: describeActivity(recordRef?.activeTools ?? new Map(), recordRef?.streamingMessage),
 			spinnerFrame: spinnerFrame % SPINNER.length,
 		};
 		onUpdate?.({

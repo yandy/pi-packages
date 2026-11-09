@@ -6,7 +6,7 @@
  */
 
 import type { AgentConfigLookup } from "../config/agent-types";
-import type { AgentInvocation, SubagentType } from "../types";
+import type { AgentInvocation, SessionMessage, SubagentType } from "../types";
 
 // ---- Types ----
 
@@ -146,8 +146,20 @@ function truncateLine(text: string, len = 60): string {
 	return `${line.slice(0, len)}…`;
 }
 
-/** Build a human-readable activity string from currently-running tools or response text. */
-export function describeActivity(activeTools: ReadonlyMap<string, string>, responseText?: string): string {
+/** Concatenate a message's text blocks (mirrors how pi's components read a message). */
+function messageText(message: SessionMessage | undefined): string {
+	if (!message) return "";
+	const content = (message as { content?: unknown }).content;
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	return content
+		.filter((block) => (block as { type?: string }).type === "text")
+		.map((block) => (block as { text?: string }).text ?? "")
+		.join("");
+}
+
+/** Build a human-readable activity string from currently-running tools or the in-flight message. */
+export function describeActivity(activeTools: ReadonlyMap<string, string>, message?: SessionMessage): string {
 	if (activeTools.size > 0) {
 		const groups = new Map<string, number>();
 		for (const toolName of activeTools.values()) {
@@ -166,9 +178,10 @@ export function describeActivity(activeTools: ReadonlyMap<string, string>, respo
 		return `${parts.join(", ")}…`;
 	}
 
-	// No tools active — show truncated response text if available
-	if (responseText && responseText.trim().length > 0) {
-		return truncateLine(responseText);
+	// No tools active — show truncated message text if available
+	const text = messageText(message);
+	if (text.trim().length > 0) {
+		return truncateLine(text);
 	}
 
 	return "thinking…";
