@@ -66,7 +66,7 @@ export default defineConfig({
 `await new Promise((r) => setTimeout(r, 0))` 顶替——那是猜时间，被测链里只要有真实 I/O 就会
 偶发失败，而且只在并行跑整仓时暴露。
 
-实测（pi-memory `/dream`，2026-10-24）：成功回调在 `notify` 之前 `await SessionManager.list(cwd)`
+实测（pi-memory `/dream`，2026-10-24；该包已迁往 simple-memory）：成功回调在 `notify` 之前 `await SessionManager.list(cwd)`
 （真实磁盘 I/O），测试只等一个 tick。空闲机器上 tick 被 clamp 到 0–4ms，而 `list` 中位 1.4ms、
 最长 6.4ms——300 次里 **5 次 tick 先到（1.7%）**；整仓 26 个 vitest worker 并行时余量进一步被吃掉，
 于是表现为「包内单跑必绿、`npm test` 偶发红」。
@@ -247,11 +247,9 @@ node -e 'const {win32}=require("node:path"); console.log(win32.join("/g","memory
 | 模式 | 参考文件 |
 |------|----------|
 | 文件系统隔离 + 路径注入 | `pi-vision-tools/tests/config.test.ts` |
-| 配置双向合并（global + project） | `pi-memory/tests/config.test.ts` |
 | 环境变量 stub + 文件系统隔离 | `pi-sandbox/tests/index-smoke.test.ts` |
 | Mock `getAgentDir` + 完整 mock | `pi-coding-tools/tests/config.test.ts`、`pi-web-tools/tests/config.test.ts` |
 | `vi.stubEnv("PI_CODING_AGENT_DIR")` 隔离 getAgentDir + `mkdtempSync` 双目录（global/project）隔离 | `pi-sandbox/tests/config.test.ts` |
 | `vi.hoisted()` + `mkdtempSync` 解决 hoisting | `pi-container-sandbox/tests/config-global-merge.test.ts` |
 | Stub `PI_CODING_AGENT_DIR` 隔离全局目录（跨平台） | `pi-subagents/tests/config/custom-agents.test.ts` |
 | 双目录隔离（globalDir + projectDir）工具函数 | `pi-subagents/tests/helpers/tmp-settings-dirs.ts` |
-| 异步条件等待（真实 I/O 之后断言副作用 + 拖慢依赖防回退） | `pi-memory/tests/index-wiring.test.ts` |
