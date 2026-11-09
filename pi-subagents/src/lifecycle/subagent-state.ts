@@ -3,11 +3,11 @@
  *
  * Owns the passive, readable state of a subagent — status, result, error,
  * timestamps, stats (toolUses, lifetimeUsage, compactionCount), and live-activity
- * fields (turnCount, activeTools, responseText) — together with the transition
+ * fields (turnCount, activeTools, streamingMessage) — together with the transition
  * methods (markRunning, markCompleted, …), accumulation methods
  * (incrementToolUses, addUsage, incrementCompactions), and live-activity
  * transition methods (incrementTurnCount, addActiveTool, removeActiveTool,
- * resetResponseText, appendResponseText) that mutate them.
+ * setStreamingMessage) that mutate them.
  *
  * State is encapsulated behind getters; external code reads through them but
  * mutates only via the transition/accumulation methods. The value object owns
@@ -20,6 +20,7 @@
 
 import type { LifetimeUsage } from "../lifecycle/usage";
 import { addUsage } from "../lifecycle/usage";
+import type { SessionMessage } from "../types";
 
 export type SubagentStatus = "queued" | "running" | "completed" | "steered" | "aborted" | "stopped" | "error";
 
@@ -87,9 +88,9 @@ export class SubagentState {
 
 	private _toolKeySeq = 0;
 
-	private _responseText = "";
-	get responseText(): string {
-		return this._responseText;
+	private _streamingMessage: SessionMessage | undefined;
+	get streamingMessage(): SessionMessage | undefined {
+		return this._streamingMessage;
 	}
 
 	constructor(init: SubagentStateInit = {}) {
@@ -135,14 +136,9 @@ export class SubagentState {
 		}
 	}
 
-	/** Reset the current response text. Called by record-observer on message_start. */
-	resetResponseText(): void {
-		this._responseText = "";
-	}
-
-	/** Append a text delta to the current response text. Called by record-observer on message_update. */
-	appendResponseText(delta: string): void {
-		this._responseText += delta;
+	/** Record the in-flight assistant message. Called by record-observer on message_start / message_update. */
+	setStreamingMessage(message: SessionMessage | undefined): void {
+		this._streamingMessage = message;
 	}
 
 	/** Transition to running state. Sets status and startedAt. */

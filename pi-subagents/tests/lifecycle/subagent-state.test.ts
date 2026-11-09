@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SubagentState } from "../../src/lifecycle/subagent-state";
+import type { SessionMessage } from "../../src/types";
 
 describe("SubagentState — constructor", () => {
 	it("defaults status to 'queued'", () => {
@@ -297,31 +298,26 @@ describe("SubagentState — activeTools", () => {
 	});
 });
 
-describe("SubagentState — responseText", () => {
-	it("defaults to an empty string", () => {
+describe("SubagentState — no response text accumulator", () => {
+	it("no longer accumulates a response text", () => {
 		const state = new SubagentState();
-		expect(state.responseText).toBe("");
+		expect("responseText" in state).toBe(false);
+		expect("appendResponseText" in state).toBe(false);
+		expect("resetResponseText" in state).toBe(false);
+	});
+});
+
+describe("streamingMessage", () => {
+	it("starts undefined", () => {
+		expect(new SubagentState().streamingMessage).toBeUndefined();
 	});
 
-	it("appendResponseText concatenates text deltas", () => {
+	it("holds the in-flight message and clears back to undefined", () => {
 		const state = new SubagentState();
-		state.appendResponseText("Hello ");
-		state.appendResponseText("world");
-		expect(state.responseText).toBe("Hello world");
-	});
-
-	it("resetResponseText clears accumulated text", () => {
-		const state = new SubagentState();
-		state.appendResponseText("previous text");
-		state.resetResponseText();
-		expect(state.responseText).toBe("");
-	});
-
-	it("appendResponseText works after a reset", () => {
-		const state = new SubagentState();
-		state.appendResponseText("first message");
-		state.resetResponseText();
-		state.appendResponseText("second message");
-		expect(state.responseText).toBe("second message");
+		const partial = { role: "assistant", content: [{ type: "text", text: "str" }] } as unknown as SessionMessage;
+		state.setStreamingMessage(partial);
+		expect(state.streamingMessage).toBe(partial);
+		state.setStreamingMessage(undefined);
+		expect(state.streamingMessage).toBeUndefined();
 	});
 });

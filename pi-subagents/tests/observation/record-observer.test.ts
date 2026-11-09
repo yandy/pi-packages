@@ -152,47 +152,15 @@ describe("subscribeSubagentObserver", () => {
 		expect(state.turnCount).toBe(3);
 	});
 
-	it("resets responseText on message_start", () => {
+	it("does not accumulate response text", () => {
 		const session = createMockSession();
 		const state = makeState();
 		subscribeSubagentObserver(session, state);
 
-		session.emit({
-			type: "message_update",
-			assistantMessageEvent: { type: "text_delta", delta: "previous text" },
-		});
-		session.emit({ type: "message_start" });
-		expect(state.responseText).toBe("");
-	});
+		session.emit({ type: "message_start", message: { role: "assistant", content: [] } });
+		session.emit({ type: "message_update", message: { role: "assistant", content: [] }, assistantMessageEvent: { type: "text_delta", delta: "hi" } });
 
-	it("appends to responseText on message_update text_delta", () => {
-		const session = createMockSession();
-		const state = makeState();
-		subscribeSubagentObserver(session, state);
-
-		session.emit({
-			type: "message_update",
-			assistantMessageEvent: { type: "text_delta", delta: "Hello " },
-		});
-		expect(state.responseText).toBe("Hello ");
-
-		session.emit({
-			type: "message_update",
-			assistantMessageEvent: { type: "text_delta", delta: "world" },
-		});
-		expect(state.responseText).toBe("Hello world");
-	});
-
-	it("ignores message_update with non-text_delta events", () => {
-		const session = createMockSession();
-		const state = makeState();
-		subscribeSubagentObserver(session, state);
-
-		session.emit({
-			type: "message_update",
-			assistantMessageEvent: { type: "thinking_delta", delta: "pondering..." },
-		});
-		expect(state.responseText).toBe("");
+		expect("responseText" in state).toBe(false);
 	});
 
 	it("returned function unsubscribes from session", () => {
@@ -207,5 +175,64 @@ describe("subscribeSubagentObserver", () => {
 
 		session.emit({ type: "tool_execution_end", toolName: "Write" });
 		expect(state.toolUses).toBe(1); // unchanged
+	});
+});
+
+describe("streamingMessage", () => {
+	function setup() {
+		const session = createMockSession();
+		const state = makeState();
+		subscribeSubagentObserver(session, state);
+		return { session, state };
+	}
+
+	it("tracks the assistant partial across start and update", () => {
+		const { session, state } = setup();
+		const start = { role: "assistant", content: [] };
+		session.emit({ type: "message_start", message: start });
+		expect(state.streamingMessage).toBe(start);
+
+		const grown = { role: "assistant", content: [{ type: "text", text: "hi" }] };
+		session.emit({ type: "message_update", message: grown, assistantMessageEvent: { type: "text_delta", delta: "hi" } });
+		expect(state.streamingMessage).toBe(grown);
+	});
+
+	it("clears the tail when the message ends", () => {
+		const { session, state } = setup();
+		session.emit({ type: "message_start", message: { role: "assistant", content: [] } });
+		session.emit({ type: "message_end", message: { role: "assistant", content: [], usage: { input: 1, output: 1, cacheWrite: 0 } } });
+		expect(state.streamingMessage).toBeUndefined();
+	});
+
+	it("clears the tail when a non-assistant message starts", () => {
+		const { session, state } = setup();
+		session.emit({ type: "message_start", message: { role: "assistant", content: [] } });
+		session.emit({ type: "message_start", message: { role: "toolResult", content: [] } });
+		expect(state.streamingMessage).toBeUndefined();
+	});
+});
+
+describe("onChange", () => {
+	it("fires after the state mutation, so a listener reads the new tail", () => {
+		const session = createMockSession();
+		const state = makeState();
+		const seen: unknown[] = [];
+		subscribeSubagentObserver(session, state, { onChange: () => seen.push(state.streamingMessage) });
+
+		const partial = { role: "assistant", content: [{ type: "text", text: "hi" }] };
+		session.emit({ type: "message_update", message: partial, assistantMessageEvent: { type: "text_delta", delta: "hi" } });
+
+		expect(seen).toEqual([partial]);
+	});
+
+	it("fires for events that do not touch the tail", () => {
+		const session = createMockSession();
+		const state = makeState();
+		const onChange = vi.fn();
+		subscribeSubagentObserver(session, state, { onChange });
+
+		session.emit({ type: "tool_execution_end", toolName: "Read" });
+
+		expect(onChange).toHaveBeenCalledOnce();
 	});
 });

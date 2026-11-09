@@ -1,5 +1,7 @@
 /**
- * record-observer.ts — Subscribes to session events and accumulates SubagentState stats.
+ * record-observer.ts — The single interpreter of raw session events for live
+ * state: accumulates SubagentState stats, drives `streamingMessage`, and is the
+ * single change notifier.
  *
  * Replaces the scattered callback-wrapping logic in SubagentManager's startAgent()
  * and resume() with a single direct subscription. The observer targets the
@@ -12,6 +14,8 @@ import type { CompactionInfo, SubscribableSession } from "../types";
 
 export interface SubagentObserverOptions {
 	onCompact?: (info: CompactionInfo) => void;
+	/** Called after every event's state mutation, so consumers always read post-mutation state. */
+	onChange?: () => void;
 }
 
 /**
@@ -20,9 +24,9 @@ export interface SubagentObserverOptions {
  * Handles:
  * - `tool_execution_start` → `state.addActiveTool(name)`
  * - `tool_execution_end` → `state.removeActiveTool(name)`, `state.incrementToolUses()`
- * - `message_start` → `state.resetResponseText()`
- * - `message_update` (text_delta) → `state.appendResponseText(delta)`
- * - `message_end` (assistant, with usage) → `state.addUsage(…)`
+ * - `message_start` → `state.setStreamingMessage(assistant ? message : undefined)`
+ * - `message_update` → `state.setStreamingMessage(message)` (assistant only)
+ * - `message_end` → `state.setStreamingMessage(undefined)`, `state.addUsage(…)` (assistant, with usage)
  * - `turn_end` → `state.incrementTurnCount()`
  * - `compaction_end` (not aborted) → `state.incrementCompactions()`, call `onCompact`
  *
@@ -44,11 +48,15 @@ export function subscribeSubagentObserver(
 		}
 
 		if (event.type === "message_start") {
-			state.resetResponseText();
+			state.setStreamingMessage(event.message.role === "assistant" ? event.message : undefined);
 		}
 
-		if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-			state.appendResponseText(event.assistantMessageEvent.delta);
+		if (event.type === "message_update" && event.message.role === "assistant") {
+			state.setStreamingMessage(event.message);
+		}
+
+		if (event.type === "message_end") {
+			state.setStreamingMessage(undefined);
 		}
 
 		if (event.type === "turn_end") {
@@ -71,5 +79,7 @@ export function subscribeSubagentObserver(
 				tokensBefore: event.result.tokensBefore,
 			});
 		}
+
+		options?.onChange?.();
 	});
 }

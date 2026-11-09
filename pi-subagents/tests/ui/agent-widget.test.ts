@@ -1,10 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const { renderWidgetLinesSpy } = vi.hoisted(() => ({
+	renderWidgetLinesSpy: vi.fn(),
+}));
+
+vi.mock("../../src/ui/widget-renderer", async () => {
+	const actual = await vi.importActual<typeof import("../../src/ui/widget-renderer")>(
+		"../../src/ui/widget-renderer",
+	);
+	renderWidgetLinesSpy.mockImplementation(actual.renderWidgetLines);
+	return {
+		...actual,
+		renderWidgetLines: renderWidgetLinesSpy,
+	};
+});
+
 import { AgentTypeRegistry } from "../../src/config/agent-types";
-import type { Subagent } from "../../src/lifecycle/subagent";
+import { Subagent } from "../../src/lifecycle/subagent";
+import { SubagentState } from "../../src/lifecycle/subagent-state";
 import type { SubagentManager } from "../../src/lifecycle/subagent-manager";
-import type { CompactionInfo } from "../../src/types";
+import type { CompactionInfo, SessionMessage } from "../../src/types";
 import { AgentWidget, assembleWidgetState, type UICtx } from "../../src/ui/agent-widget";
-import { createTestSubagent } from "../helpers/make-subagent";
+import { createTestSubagent, makeStubExecution } from "../helpers/make-subagent";
 
 // Minimal agent fixture — only the three fields AgentSummary requires.
 function makeAgent(overrides: { id?: string; status?: string; completedAt?: number } = {}) {
@@ -154,7 +171,7 @@ describe("assembleWidgetState", () => {
 });
 
 describe("AgentWidget — projection reads activity off Subagent records", () => {
-	it("surfaces turnCount, activeTools, and responseText from the record via renderWidget", () => {
+	it("surfaces turnCount and activeTools from the record via renderWidget", () => {
 		const record = createTestSubagent({
 			status: "running",
 			completedAt: undefined,
@@ -213,6 +230,46 @@ describe("AgentWidget — projection reads activity off Subagent records", () =>
 		const stubTheme = { fg: (_: string, t: string) => t, bold: (t: string) => t };
 		const allText = renderFn!(stubTui, stubTheme).render().join("\n");
 		expect(allText).toContain("haiku");
+	});
+
+	it("projects the record's streamingMessage onto the widget agent", () => {
+		const state = new SubagentState({ status: "running", startedAt: Date.now() - 100 });
+		const partial = {
+			role: "assistant",
+			content: [{ type: "text", text: "Investigating the repo" }],
+		} as unknown as SessionMessage;
+		state.setStreamingMessage(partial);
+		const record = new Subagent({
+			id: "stream-1",
+			type: "general-purpose",
+			description: "streaming agent",
+			invocation: { runInBackground: true },
+			execution: makeStubExecution(),
+			state,
+		});
+
+		const manager = { listAgents: () => [record] } as unknown as SubagentManager;
+		const registry = new AgentTypeRegistry(() => new Map());
+		const widget = new AgentWidget(manager, registry);
+
+		let renderFn: ((tui: unknown, theme: unknown) => { render(): string[] }) | undefined;
+		const ui: UICtx = {
+			setStatus: () => {},
+			setWidget: (_key, content) => {
+				if (typeof content === "function") renderFn = content as typeof renderFn;
+			},
+		};
+		widget.setUICtx(ui);
+
+		renderWidgetLinesSpy.mockClear();
+		widget.update();
+		const stubTui = { terminal: { columns: 200 }, requestRender: () => {} };
+		const stubTheme = { fg: (_: string, t: string) => t, bold: (t: string) => t };
+		renderFn!(stubTui, stubTheme).render();
+
+		expect(renderWidgetLinesSpy).toHaveBeenCalled();
+		const agents = renderWidgetLinesSpy.mock.calls[0][0].agents as Array<{ streamingMessage?: SessionMessage }>;
+		expect(agents[0].streamingMessage).toBe(partial);
 	});
 });
 

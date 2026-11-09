@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AgentTypeRegistry } from "../src/config/agent-types";
+import type { SessionMessage } from "../src/types";
 import type { Theme } from "../src/ui/display";
 import type { WidgetAgent } from "../src/ui/widget-renderer";
 import { renderFinishedLine, renderRunningLines, renderWidgetLines } from "../src/ui/widget-renderer";
@@ -28,7 +29,7 @@ function makeAgent(overrides: Partial<WidgetAgent> = {}): WidgetAgent {
 		turnCount: 3,
 		maxTurns: 10,
 		activeTools: new Map(),
-		responseText: "",
+		streamingMessage: { role: "assistant", content: [{ type: "text", text: "" }] } as unknown as SessionMessage,
 		contextPercent: null,
 		...overrides,
 	};
@@ -182,12 +183,25 @@ describe("renderRunningLines", () => {
 		expect(activityLine).toContain("reading");
 	});
 
-	it("shows thinking when activeTools is empty and responseText is blank", () => {
-		// Default makeAgent has activeTools: new Map() and responseText: ""
+	it("shows thinking when activeTools is empty and the message has no text", () => {
+		// Default makeAgent has activeTools: new Map() and an empty-text streamingMessage
 		const agent = makeAgent({ status: "running", completedAt: undefined });
 		const [, activityLine] = renderRunningLines(agent, testRegistry, 0, theme);
 
 		expect(activityLine).toContain("thinking…");
+	});
+
+	it("shows the streamed message text when no tools are active", () => {
+		const agent = makeAgent({
+			status: "running",
+			completedAt: undefined,
+			activeTools: new Map(),
+			streamingMessage: { role: "assistant", content: [{ type: "text", text: "streaming text" }] } as unknown as SessionMessage,
+		});
+		const [, activityLine] = renderRunningLines(agent, testRegistry, 0, theme);
+
+		expect(activityLine).toContain("streaming text");
+		expect(activityLine).not.toContain("thinking…");
 	});
 
 	it("advances spinner frame", () => {

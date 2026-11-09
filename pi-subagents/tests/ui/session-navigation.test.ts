@@ -105,17 +105,43 @@ describe("listNavigableAgents", () => {
 });
 
 describe("liveSource", () => {
-	it("getMessages returns the record's agentMessages", () => {
+	it("appends the in-flight assistant message to the message list", () => {
+		const messages = [{ role: "user", content: "hi" }] as unknown as SessionMessage[];
+		const partial = { role: "assistant", content: [{ type: "text", text: "str" }] } as unknown as SessionMessage;
+		const record = makeNavigable({ agentMessages: messages, streamingMessage: partial });
+
+		expect(liveSource(record).getMessages()).toEqual([...messages, partial]);
+	});
+
+	it("returns the record's messages unchanged when nothing is in flight", () => {
 		const messages = [{ role: "user", content: "hi" }] as unknown as SessionMessage[];
 		const record = makeNavigable({ agentMessages: messages });
-		expect(liveSource(record).getMessages()).toBe(messages);
+
+		expect(liveSource(record).getMessages()).toEqual(messages);
+	});
+
+	it("shows a message that was already streaming when the source was created", () => {
+		// An overlay opened mid-response must paint it now, not at the next delta.
+		const partial = { role: "assistant", content: [{ type: "text", text: "already going" }] } as unknown as SessionMessage;
+		const record = makeNavigable({ agentMessages: [], streamingMessage: partial });
+
+		expect(liveSource(record).getMessages()).toEqual([partial]);
+	});
+
+	it("leaves the file-snapshot source without a tail or streaming state", () => {
+		// Evicted agents are read once from disk; there is nothing in flight.
+		const source = fileSnapshotSource("/tasks/evicted-1.jsonl", () => "");
+
+		expect(source.streaming()).toBeUndefined();
+		expect(source.subscribe(() => {})).toBeUndefined();
+		expect(source.getMessages()).toEqual([]);
 	});
 
 	it("subscribe delegates to subscribeToUpdates and forwards change notifications", () => {
-		let captured: ((event: unknown) => void) | undefined;
+		let captured: (() => void) | undefined;
 		const unsub = vi.fn();
 		const record = makeNavigable({
-			subscribeToUpdates: vi.fn((fn: (event: unknown) => void) => {
+			subscribeToUpdates: vi.fn((fn: () => void) => {
 				captured = fn;
 				return unsub;
 			}) as NavigableSubagent["subscribeToUpdates"],
@@ -123,18 +149,27 @@ describe("liveSource", () => {
 		const onChange = vi.fn();
 		const returned = liveSource(record).subscribe(onChange);
 		expect(record.subscribeToUpdates).toHaveBeenCalledOnce();
-		captured?.({ type: "turn_end" });
+		captured?.();
 		expect(onChange).toHaveBeenCalledOnce();
 		expect(returned).toBe(unsub);
 	});
 
 	it("streaming returns activity state only while running", () => {
 		const activeTools = new Map([["k", "read"]]);
-		const running = makeNavigable({ status: "running", activeTools, responseText: "working" });
-		expect(liveSource(running).streaming()).toEqual({ activeTools, responseText: "working" });
+		const partial = { role: "assistant", content: [{ type: "text", text: "working" }] } as unknown as SessionMessage;
+		const running = makeNavigable({ status: "running", activeTools, streamingMessage: partial });
+		expect(liveSource(running).streaming()).toEqual({ activeTools, streamingMessage: partial });
 
 		const completed = makeNavigable({ status: "completed" });
 		expect(liveSource(completed).streaming()).toBeUndefined();
+	});
+
+	it("streaming exposes the in-flight message, not a text copy", () => {
+		const partial = { role: "assistant", content: [{ type: "text", text: "working" }] } as unknown as SessionMessage;
+		const tools = new Map([["k", "read"]]);
+		const running = makeNavigable({ status: "running", activeTools: tools, streamingMessage: partial });
+
+		expect(liveSource(running).streaming()).toEqual({ activeTools: tools, streamingMessage: partial });
 	});
 
 	it("getToolDefinition delegates to the record's getToolDefinition", () => {

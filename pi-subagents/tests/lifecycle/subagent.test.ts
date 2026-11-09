@@ -3,7 +3,7 @@ import type { CreateSubagentSessionParams } from "../../src/lifecycle/create-sub
 import { Subagent, type SubagentExecution, type SubagentLifecycleObserver } from "../../src/lifecycle/subagent";
 import type { SubagentSession, TurnLoopResult } from "../../src/lifecycle/subagent-session";
 import { SubagentState, type SubagentStateInit } from "../../src/lifecycle/subagent-state";
-import type { AgentInvocation, CompactionInfo, SubagentType } from "../../src/types";
+import type { AgentInvocation, CompactionInfo, SessionMessage, SubagentType } from "../../src/types";
 import { makeStubExecution } from "../helpers/make-subagent";
 import {
 	createMockSession,
@@ -151,7 +151,7 @@ describe("convenience getters", () => {
 			expect([...record.activeTools.values()]).toContain("Read");
 		});
 
-		it("responseText reflects state mutations via appendResponseText", () => {
+		it("streamingMessage reflects state mutations via setStreamingMessage", () => {
 			const state = new SubagentState();
 			const record = new Subagent({
 				id: "1",
@@ -160,8 +160,9 @@ describe("convenience getters", () => {
 				execution: makeStubExecution(),
 				state,
 			});
-			state.appendResponseText("Hello");
-			expect(record.responseText).toBe("Hello");
+			const partial = { role: "assistant", content: [{ type: "text", text: "Hello" }] } as unknown as SessionMessage;
+			state.setStreamingMessage(partial);
+			expect(record.streamingMessage).toBe(partial);
 		});
 	});
 
@@ -254,13 +255,13 @@ describe("Subagent — session-encapsulation methods", () => {
 			expect(agent.subscribeToUpdates(vi.fn())).toBeUndefined();
 		});
 
-		it("delegates to SubagentSession.subscribe when session is ready", () => {
+		it("returns an unsubscribe and no longer forwards raw session events", () => {
 			const agent = makeSubagent();
 			const stub = createSubagentSessionStub();
 			agent.subagentSession = toSubagentSession(stub);
 			const fn = vi.fn();
 			const unsub = agent.subscribeToUpdates(fn);
-			expect(stub.subscribe).toHaveBeenCalledWith(fn);
+			expect(stub.subscribe).not.toHaveBeenCalled();
 			expect(typeof unsub).toBe("function");
 		});
 	});
@@ -474,6 +475,33 @@ describe("Subagent.run() — happy path", () => {
 		expect(agent.pendingSteerCount).toBe(1);
 		await agent.run();
 		expect(agent.pendingSteerCount).toBe(0);
+	});
+
+	it("notifies change listeners when a streamed message update mutates live state", async () => {
+		const session = createMockSession();
+		const stub = createSubagentSessionStub(session);
+		const partial = { role: "assistant", content: [{ type: "text", text: "hi" }] } as unknown as SessionMessage;
+		const agent = createRunnableAgent({
+			createSubagentSession: async () => toSubagentSession(stub),
+		});
+
+		const listener = vi.fn();
+		// run() assigns subagentSession before the turn loop, so subscribe from
+		// inside the mocked prompt/turn-loop implementation.
+		stub.runTurnLoop.mockImplementation(async () => {
+			agent.subscribeToUpdates(listener);
+			session.emit({
+				type: "message_update",
+				message: partial,
+				assistantMessageEvent: { type: "text_delta", delta: "hi" },
+			});
+			return { responseText: "done", aborted: false, steered: false };
+		});
+
+		await agent.run();
+
+		expect(listener).toHaveBeenCalled();
+		expect(agent.streamingMessage).toBe(partial);
 	});
 });
 
@@ -794,6 +822,25 @@ describe("Subagent.resume() — observer lifecycle", () => {
 		const { agent } = createResumableAgent({ observer, session, stub });
 		await agent.resume("more");
 		expect(seen).toEqual([{ reason: "threshold", tokensBefore: 123 }]);
+	});
+
+	it("notifies change listeners when a streamed message update mutates live state", async () => {
+		const session = createMockSession();
+		const stub = createSubagentSessionStub(session);
+		const partial = { role: "assistant", content: [{ type: "text", text: "hi" }] } as unknown as SessionMessage;
+		stub.resumeTurnLoop.mockImplementation(async () => {
+			session.emit({ type: "message_update", message: partial, assistantMessageEvent: { type: "text_delta", delta: "hi" } });
+			return "resumed";
+		});
+		const { agent } = createResumableAgent({ session, stub });
+
+		const listener = vi.fn();
+		agent.subscribeToUpdates(listener);
+
+		await agent.resume("more");
+
+		expect(listener).toHaveBeenCalled();
+		expect(agent.streamingMessage).toBe(partial);
 	});
 
 	it("releases the observer subscription after resume completes", async () => {
