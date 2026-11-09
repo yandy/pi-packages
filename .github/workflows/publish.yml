@@ -44,9 +44,6 @@ jobs:
             pi-vision-tools-v*)
               echo "dir=pi-vision-tools" >> "$GITHUB_OUTPUT"
               ;;
-            pi-memory-v*)
-              echo "dir=pi-memory" >> "$GITHUB_OUTPUT"
-              ;;
             pi-subagents-v*)
               echo "dir=pi-subagents" >> "$GITHUB_OUTPUT"
               ;;

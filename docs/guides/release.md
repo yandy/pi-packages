@@ -55,3 +55,7 @@ gh release create pi-<name>-v<新版本号> --target $COMMIT \
 - `--target` 指定 tag 指向的 commit，确保 tag 落在版本升级的那个 commit 上
 - `--workspace` 参数可用 `-w` 简写
 - tag 格式必须是 `pi-<name>-vX.Y.Z`，不能是 `vX.Y.Z`
+
+## `pi-memory`
+
+`pi-memory` 已迁往 [simple-memory](https://github.com/yandy/simple-memory)，其发布流程（含「core 必须先发」这条顺序约束）见该仓 `docs/guides/release.md`。
