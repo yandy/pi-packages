@@ -3,7 +3,7 @@ import { type Component, type TUI, visibleWidth } from "@earendil-works/pi-tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { AgentTypeRegistry } from "../../src/config/agent-types";
 import type { SessionMessage } from "../../src/types";
-import type { TranscriptSource } from "../../src/ui/session-navigation";
+import { liveSource, type TranscriptSource } from "../../src/ui/session-navigation";
 import { SessionNavigatorHandler, TranscriptOverlay } from "../../src/ui/session-navigator";
 import { makeNavigable } from "../helpers/make-navigable";
 
@@ -205,17 +205,41 @@ describe("TranscriptOverlay", () => {
 		expect(overlay.render(80).join("\n")).toContain("mid stream text");
 	});
 
-	it("renders the finalized message exactly once when the tail clears", () => {
-		// The in-flight message becomes the record's last message at `message_end`
-		// and the tail clears. If the source appended both, the transcript would
-		// show the finished reply twice.
+	it("renders the finalized message exactly once when the streaming tail clears", () => {
+		// While the agent streams, `liveSource` appends the in-flight message (the
+		// "tail") after the record's history. At `message_end` the finalized message
+		// joins `agentMessages` and `streamingMessage` clears. If the source kept
+		// appending a stale tail, the finished reply would render twice.
 		const user = { role: "user", content: "go" } as unknown as SessionMessage;
+		const partial = { role: "assistant", content: [{ type: "text", text: "done text" }] } as unknown as SessionMessage;
 		const final = { role: "assistant", content: [{ type: "text", text: "done text" }] } as unknown as SessionMessage;
-		const messages: SessionMessage[] = [user, final];
-		const source = fakeSource({ getMessages: () => messages });
 
-		const overlay = makeOverlay({ source });
-		expect(overlay.render(80).join("\n").match(/done text/g)).toHaveLength(1);
+		let notify: (() => void) | undefined;
+		const record = makeNavigable({
+			agentMessages: [user],
+			streamingMessage: partial,
+			subscribeToUpdates: (fn) => {
+				notify = fn;
+				return () => {
+					notify = undefined;
+				};
+			},
+		});
+		const overlay = makeOverlay({ source: liveSource(record) });
+		const occurrences = () => overlay.render(80).join("\n").match(/done text/g)?.length ?? 0;
+
+		expect(occurrences()).toBe(1);
+
+		// `message_end`: the finalized message joins the history and the tail clears.
+		const mutable = record as unknown as {
+			agentMessages: readonly SessionMessage[];
+			streamingMessage?: SessionMessage;
+		};
+		mutable.agentMessages = [user, final];
+		mutable.streamingMessage = undefined;
+		notify?.();
+
+		expect(occurrences()).toBe(1);
 	});
 
 	// ── Performance: throttled rebuilds + cached laid-out lines ───────────────
