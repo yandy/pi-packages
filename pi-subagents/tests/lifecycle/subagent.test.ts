@@ -254,13 +254,13 @@ describe("Subagent — session-encapsulation methods", () => {
 			expect(agent.subscribeToUpdates(vi.fn())).toBeUndefined();
 		});
 
-		it("delegates to SubagentSession.subscribe when session is ready", () => {
+		it("returns an unsubscribe and no longer forwards raw session events", () => {
 			const agent = makeSubagent();
 			const stub = createSubagentSessionStub();
 			agent.subagentSession = toSubagentSession(stub);
 			const fn = vi.fn();
 			const unsub = agent.subscribeToUpdates(fn);
-			expect(stub.subscribe).toHaveBeenCalledWith(fn);
+			expect(stub.subscribe).not.toHaveBeenCalled();
 			expect(typeof unsub).toBe("function");
 		});
 	});

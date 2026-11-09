@@ -12,6 +12,8 @@ import type { CompactionInfo, SubscribableSession } from "../types";
 
 export interface SubagentObserverOptions {
 	onCompact?: (info: CompactionInfo) => void;
+	/** Called after every event's state mutation, so consumers always read post-mutation state. */
+	onChange?: () => void;
 }
 
 /**
@@ -80,5 +82,7 @@ export function subscribeSubagentObserver(
 				tokensBefore: event.result.tokensBefore,
 			});
 		}
+
+		options?.onChange?.();
 	});
 }

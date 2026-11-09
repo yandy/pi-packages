@@ -112,10 +112,10 @@ describe("liveSource", () => {
 	});
 
 	it("subscribe delegates to subscribeToUpdates and forwards change notifications", () => {
-		let captured: ((event: unknown) => void) | undefined;
+		let captured: (() => void) | undefined;
 		const unsub = vi.fn();
 		const record = makeNavigable({
-			subscribeToUpdates: vi.fn((fn: (event: unknown) => void) => {
+			subscribeToUpdates: vi.fn((fn: () => void) => {
 				captured = fn;
 				return unsub;
 			}) as NavigableSubagent["subscribeToUpdates"],
@@ -123,7 +123,7 @@ describe("liveSource", () => {
 		const onChange = vi.fn();
 		const returned = liveSource(record).subscribe(onChange);
 		expect(record.subscribeToUpdates).toHaveBeenCalledOnce();
-		captured?.({ type: "turn_end" });
+		captured?.();
 		expect(onChange).toHaveBeenCalledOnce();
 		expect(returned).toBe(unsub);
 	});

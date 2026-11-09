@@ -22,7 +22,7 @@ import {
 import type { AgentConfigLookup } from "../config/agent-types";
 import type { EvictedSubagent } from "../lifecycle/subagent-manager";
 import type { SubagentStatus } from "../lifecycle/subagent-state";
-import type { AgentSessionEvent, SessionMessage, SubagentType } from "../types";
+import type { SessionMessage, SubagentType } from "../types";
 import { formatDuration, getDisplayName } from "../ui/display";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -44,7 +44,7 @@ export interface NavigableSubagent {
 	/** Thinking level when explicitly set (e.g. "high", "off"). */
 	readonly thinking?: string;
 	isSessionReady(): boolean;
-	subscribeToUpdates(fn: (event: AgentSessionEvent) => void): (() => void) | undefined;
+	subscribeToUpdates(fn: () => void): (() => void) | undefined;
 	getToolDefinition(name: string): ToolDefinition | undefined;
 }
 
@@ -141,7 +141,7 @@ export function fileSnapshotSource(outputFile: string, readFile: (path: string) 
 export function liveSource(record: NavigableSubagent): TranscriptSource {
 	return {
 		getMessages: () => record.agentMessages,
-		subscribe: (onChange) => record.subscribeToUpdates(() => onChange()),
+		subscribe: (onChange) => record.subscribeToUpdates(onChange),
 		streaming: () =>
 			record.status === "running" ? { activeTools: record.activeTools, responseText: record.responseText } : undefined,
 		getToolDefinition: (name) => record.getToolDefinition(name),

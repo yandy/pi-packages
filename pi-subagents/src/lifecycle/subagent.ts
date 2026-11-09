@@ -7,7 +7,7 @@
  */
 
 import type { Model } from "@earendil-works/pi-ai";
-import type { AgentSessionEvent, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { CreateSubagentSessionParams } from "../lifecycle/create-subagent-session";
 import type { ParentSnapshot } from "../lifecycle/parent-snapshot";
 import { RunListeners } from "../lifecycle/run-listeners";
@@ -148,6 +148,7 @@ export class Subagent {
 
 	private readonly execution: SubagentExecution;
 	private readonly listeners = new RunListeners();
+	private readonly changeListeners = new Set<() => void>();
 
 	subagentSession?: SubagentSession;
 	private _notification?: NotificationState;
@@ -196,11 +197,18 @@ export class Subagent {
 	}
 
 	/**
-	 * Subscribe to session events for live updates (e.g., conversation viewer).
-	 * Returns an unsubscribe function, or undefined if no session is available.
+	 * Subscribe to live-state changes. Returns an unsubscribe, or undefined before a session exists.
 	 */
-	subscribeToUpdates(fn: (event: AgentSessionEvent) => void): (() => void) | undefined {
-		return this.subagentSession?.subscribe(fn);
+	subscribeToUpdates(fn: () => void): (() => void) | undefined {
+		if (!this.subagentSession) return undefined;
+		this.changeListeners.add(fn);
+		return () => {
+			this.changeListeners.delete(fn);
+		};
+	}
+
+	private notifyChange(): void {
+		for (const listener of this.changeListeners) listener();
 	}
 
 	/** The session's message history, or an empty array if no session. */
@@ -282,6 +290,7 @@ export class Subagent {
 		this.listeners.attachObserver(
 			subscribeSubagentObserver(this.subagentSession, this.state, {
 				onCompact: (info) => this.execution.observer?.onCompacted?.(this, info),
+				onChange: () => this.notifyChange(),
 			}),
 		);
 		this.execution.observer?.onSessionCreated?.(this);
@@ -348,6 +357,7 @@ export class Subagent {
 		this.listeners.attachObserver(
 			subscribeSubagentObserver(subagentSession, this.state, {
 				onCompact: (info) => this.execution.observer?.onCompacted?.(this, info),
+				onChange: () => this.notifyChange(),
 			}),
 		);
 

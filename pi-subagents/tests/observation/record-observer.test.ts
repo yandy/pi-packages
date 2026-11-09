@@ -247,3 +247,28 @@ describe("streamingMessage", () => {
 		expect(state.streamingMessage).toBeUndefined();
 	});
 });
+
+describe("onChange", () => {
+	it("fires after the state mutation, so a listener reads the new tail", () => {
+		const session = createMockSession();
+		const state = makeState();
+		const seen: unknown[] = [];
+		subscribeSubagentObserver(session, state, { onChange: () => seen.push(state.streamingMessage) });
+
+		const partial = { role: "assistant", content: [{ type: "text", text: "hi" }] };
+		session.emit({ type: "message_update", message: partial, assistantMessageEvent: { type: "text_delta", delta: "hi" } });
+
+		expect(seen).toEqual([partial]);
+	});
+
+	it("fires for events that do not touch the tail", () => {
+		const session = createMockSession();
+		const state = makeState();
+		const onChange = vi.fn();
+		subscribeSubagentObserver(session, state, { onChange });
+
+		session.emit({ type: "tool_execution_end", toolName: "Read" });
+
+		expect(onChange).toHaveBeenCalledOnce();
+	});
+});
