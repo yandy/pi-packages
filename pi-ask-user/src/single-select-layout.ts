@@ -66,7 +66,6 @@ function wrapText(text: string, width: number): string[] {
 function padLine(prefix: string, content: string): string {
 	return `${prefix}${content}`.trimEnd();
 }
-
 interface ItemBlock {
 	itemIndex: number;
 	lines: string[];
@@ -129,13 +128,75 @@ function buildItemBlocks(
 	});
 }
 
-function flatten(blocks: ItemBlock[], selectedIndex: number): AnnotatedRow[] {
-	return blocks.flatMap((block) =>
-		block.lines.map((line) => ({
-			line,
-			selected: block.itemIndex === selectedIndex,
-		})),
+export interface SelectableBlock {
+	lines: string[];
+	selected: boolean;
+}
+
+export interface WindowSelectedBlocksParams {
+	blocks: SelectableBlock[];
+	maxRows: number;
+	indicator: string;
+}
+
+/**
+ * Window pre-rendered blocks around the selected one so the total row count
+ * stays within `maxRows`. When everything fits, all rows are returned as-is;
+ * otherwise the selected block is kept visible, neighbouring blocks fill the
+ * remaining space, and a single indicator row (e.g. "  (3/12)") is appended.
+ */
+export function windowSelectedBlocks({ blocks, maxRows, indicator }: WindowSelectedBlocksParams): AnnotatedRow[] {
+	const totalRows = blocks.reduce((count, block) => count + block.lines.length, 0);
+	if (!Number.isFinite(maxRows) || !maxRows || maxRows <= 0 || totalRows <= maxRows) {
+		return blocks.flatMap((block) => block.lines.map((line) => ({ line, selected: block.selected })));
+	}
+
+	const safeMaxRows = Math.max(1, Math.floor(maxRows));
+	const selectedIndex = Math.max(
+		blocks.findIndex((block) => block.selected),
+		0,
 	);
+	const selectedBlock = blocks[selectedIndex];
+	if (!selectedBlock) return [];
+
+	const availableRows = safeMaxRows > 1 ? safeMaxRows - 1 : 1;
+
+	if (selectedBlock.lines.length >= availableRows) {
+		const visible = selectedBlock.lines.slice(0, availableRows).map((line) => ({
+			line,
+			selected: true,
+		}));
+		if (safeMaxRows > 1) visible.push({ line: indicator, selected: false });
+		return visible.slice(0, safeMaxRows);
+	}
+
+	let start = selectedIndex;
+	let end = start + 1;
+	let usedRows = selectedBlock.lines.length;
+
+	while (true) {
+		const nextCanFit = end < blocks.length && usedRows + blocks[end]?.lines.length <= availableRows;
+		if (nextCanFit) {
+			usedRows += blocks[end]?.lines.length;
+			end += 1;
+			continue;
+		}
+
+		const prevCanFit = start > 0 && usedRows + blocks[start - 1]?.lines.length <= availableRows;
+		if (prevCanFit) {
+			start -= 1;
+			usedRows += blocks[start]?.lines.length;
+			continue;
+		}
+
+		break;
+	}
+
+	const visible = blocks
+		.slice(start, end)
+		.flatMap((block) => block.lines.map((line) => ({ line, selected: block.selected })));
+	visible.push({ line: indicator, selected: false });
+	return visible.slice(0, safeMaxRows);
 }
 
 export function renderSingleSelectRows({
@@ -158,51 +219,10 @@ export function renderSingleSelectRows({
 		selectedIndex,
 		hideDescriptions,
 	);
-	const allRows = flatten(blocks, selectedIndex);
 
-	if (!Number.isFinite(maxRows) || !maxRows || maxRows <= 0 || allRows.length <= maxRows) {
-		return allRows;
-	}
-
-	const safeMaxRows = Math.max(1, Math.floor(maxRows));
-	const selectedBlock = blocks[selectedIndex] ?? blocks[0];
-	if (!selectedBlock) return [];
-
-	const indicator = `  (${selectedIndex + 1}/${itemCount})`;
-	const availableRows = safeMaxRows > 1 ? safeMaxRows - 1 : 1;
-
-	if (selectedBlock.lines.length >= availableRows) {
-		const visible = selectedBlock.lines.slice(0, availableRows).map((line) => ({
-			line,
-			selected: true,
-		}));
-		if (safeMaxRows > 1) visible.push({ line: indicator, selected: false });
-		return visible.slice(0, safeMaxRows);
-	}
-
-	let start = selectedIndex;
-	let end = selectedIndex + 1;
-	let usedRows = selectedBlock.lines.length;
-
-	while (true) {
-		const nextCanFit = end < blocks.length && usedRows + blocks[end]?.lines.length <= availableRows;
-		if (nextCanFit) {
-			usedRows += blocks[end]?.lines.length;
-			end += 1;
-			continue;
-		}
-
-		const prevCanFit = start > 0 && usedRows + blocks[start - 1]?.lines.length <= availableRows;
-		if (prevCanFit) {
-			start -= 1;
-			usedRows += blocks[start]?.lines.length;
-			continue;
-		}
-
-		break;
-	}
-
-	const visible = flatten(blocks.slice(start, end), selectedIndex);
-	visible.push({ line: indicator, selected: false });
-	return visible.slice(0, safeMaxRows);
+	return windowSelectedBlocks({
+		blocks: blocks.map((block) => ({ lines: block.lines, selected: block.itemIndex === selectedIndex })),
+		maxRows: maxRows ?? Number.POSITIVE_INFINITY,
+		indicator: `  (${selectedIndex + 1}/${itemCount})`,
+	});
 }
