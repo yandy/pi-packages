@@ -797,6 +797,25 @@ describe("Subagent.resume() — observer lifecycle", () => {
 		expect(seen).toEqual([{ reason: "threshold", tokensBefore: 123 }]);
 	});
 
+	it("notifies change listeners when a streamed message update mutates live state", async () => {
+		const session = createMockSession();
+		const stub = createSubagentSessionStub(session);
+		const partial = { role: "assistant", content: [{ type: "text", text: "hi" }] } as unknown as SessionMessage;
+		stub.resumeTurnLoop.mockImplementation(async () => {
+			session.emit({ type: "message_update", message: partial, assistantMessageEvent: { type: "text_delta", delta: "hi" } });
+			return "resumed";
+		});
+		const { agent } = createResumableAgent({ session, stub });
+
+		const listener = vi.fn();
+		agent.subscribeToUpdates(listener);
+
+		await agent.resume("more");
+
+		expect(listener).toHaveBeenCalled();
+		expect(agent.streamingMessage).toBe(partial);
+	});
+
 	it("releases the observer subscription after resume completes", async () => {
 		const session = createMockSession();
 		const { agent } = createResumableAgent({ session });

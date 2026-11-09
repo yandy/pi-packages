@@ -177,6 +177,17 @@ describe("TranscriptOverlay", () => {
 		expect(out).toContain("◍");
 	});
 
+	it("derives the running indicator text from the in-flight message", () => {
+		const source = fakeSource({
+			streaming: () => ({
+				activeTools: new Map(),
+				streamingMessage: { role: "assistant", content: [{ type: "text", text: "streaming text" }] } as unknown as SessionMessage,
+			}),
+		});
+		const out = makeOverlay({ source }).render(80).join("\n");
+		expect(out).toContain("◍ streaming text");
+	});
+
 	it("rebuilds the component tree when the source changes", () => {
 		let messages = [{ role: "user", content: "first" }] as unknown as SessionMessage[];
 		let captured: (() => void) | undefined;
@@ -321,6 +332,39 @@ describe("TranscriptOverlay", () => {
 
 		expect(overlay.render(80).join("\n")).toContain("done");
 		expect(getToolDefinition).toHaveBeenCalledTimes(1);
+	});
+
+	it("repaints a growing streaming tail without re-laying out the whole transcript", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(100_000));
+		const base = [{ role: "user", content: "go" }] as unknown as SessionMessage[];
+		let tail = { role: "assistant", content: [{ type: "text", text: "token-0" }] } as unknown as SessionMessage;
+		let captured: (() => void) | undefined;
+		const source = fakeSource({
+			getMessages: () => [...base, tail],
+			subscribe: (onChange) => {
+				captured = onChange;
+				return () => {};
+			},
+		});
+		const overlay = makeOverlay({ source });
+		const layouts = countLayouts(overlay);
+
+		expect(overlay.render(80).join("\n")).toContain("token-0");
+		expect(layouts()).toBe(1);
+
+		// Each delta replaces the tail with a new object and notifies. The throttle
+		// flushes before each render, and every sync must cost exactly one layout —
+		// a second render (a frame or keystroke) must hit the cache, not re-lay out.
+		for (let i = 1; i <= 3; i++) {
+			tail = { role: "assistant", content: [{ type: "text", text: `token-${i}` }] } as unknown as SessionMessage;
+			captured?.();
+			vi.advanceTimersByTime(THROTTLE_FLUSH_MS);
+			expect(overlay.render(80).join("\n")).toContain(`token-${i}`);
+			expect(overlay.render(80).join("\n")).toContain(`token-${i}`);
+			expect(layouts()).toBe(1 + i);
+		}
+		vi.useRealTimers();
 	});
 
 	it("refreshes the running-agent indicator when the activity changes without a message change", () => {

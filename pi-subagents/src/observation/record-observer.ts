@@ -1,5 +1,7 @@
 /**
- * record-observer.ts — Subscribes to session events and accumulates SubagentState stats.
+ * record-observer.ts — The single interpreter of raw session events for live
+ * state: accumulates SubagentState stats, drives `streamingMessage`, and is the
+ * single change notifier.
  *
  * Replaces the scattered callback-wrapping logic in SubagentManager's startAgent()
  * and resume() with a single direct subscription. The observer targets the

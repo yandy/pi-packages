@@ -191,6 +191,19 @@ describe("renderRunningLines", () => {
 		expect(activityLine).toContain("thinking…");
 	});
 
+	it("shows the streamed message text when no tools are active", () => {
+		const agent = makeAgent({
+			status: "running",
+			completedAt: undefined,
+			activeTools: new Map(),
+			streamingMessage: { role: "assistant", content: [{ type: "text", text: "streaming text" }] } as unknown as SessionMessage,
+		});
+		const [, activityLine] = renderRunningLines(agent, testRegistry, 0, theme);
+
+		expect(activityLine).toContain("streaming text");
+		expect(activityLine).not.toContain("thinking…");
+	});
+
 	it("advances spinner frame", () => {
 		const agent = makeAgent({ status: "running", completedAt: undefined });
 		const [header0] = renderRunningLines(agent, testRegistry, 0, theme);

@@ -155,7 +155,9 @@ export function liveSource(record: NavigableSubagent): TranscriptSource {
 		},
 		subscribe: (onChange) => record.subscribeToUpdates(onChange),
 		streaming: () =>
-			record.status === "running" ? { activeTools: record.activeTools, streamingMessage: record.streamingMessage } : undefined,
+			record.status === "running"
+				? { activeTools: record.activeTools, streamingMessage: record.streamingMessage }
+				: undefined,
 		getToolDefinition: (name) => record.getToolDefinition(name),
 	};
 }

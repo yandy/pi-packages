@@ -3,6 +3,9 @@
  *
  * Status/stats are delegated to the SubagentState value object; listener
  * lifecycle to RunListeners.
+ * The class also owns its own live-state listener set (`changeListeners`), whose
+ * lifetime deliberately spans runs (an already-open overlay keeps refreshing
+ * after a resume).
  * Behavior (abort, steer buffering) lives here rather than on SubagentManager.
  */
 

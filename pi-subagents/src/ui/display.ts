@@ -152,10 +152,13 @@ function messageText(message: SessionMessage | undefined): string {
 	const content = (message as { content?: unknown }).content;
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
+	// Join with "\n", not "": `truncateLine` takes the first non-empty line, so
+	// a text → toolCall → text message must expose each text run as its own line
+	// (joining with "" would fuse "First." and "Second." into a single line).
 	return content
 		.filter((block) => (block as { type?: string }).type === "text")
 		.map((block) => (block as { text?: string }).text ?? "")
-		.join("");
+		.join("\n");
 }
 
 /** Build a human-readable activity string from currently-running tools or the in-flight message. */

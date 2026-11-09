@@ -20,6 +20,19 @@ describe("describeActivity", () => {
 		);
 	});
 
+	it("treats text runs separated by a tool call as separate lines", () => {
+		expect(
+			describeActivity(
+				noTools,
+				assistant([
+					{ type: "text", text: "First." },
+					{ type: "toolCall", id: "t", name: "read", arguments: {} },
+					{ type: "text", text: "Second." },
+				]),
+			),
+		).toBe("First.");
+	});
+
 	it("truncates a long first line at 60 characters", () => {
 		const long = "x".repeat(80);
 		const out = describeActivity(noTools, assistant([{ type: "text", text: long }]));
