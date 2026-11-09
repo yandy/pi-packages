@@ -37,7 +37,6 @@ export interface NavigableSubagent {
 	readonly completedAt: number | undefined;
 	readonly toolUses: number;
 	readonly activeTools: ReadonlyMap<string, string>;
-	readonly responseText: string;
 	readonly agentMessages: readonly SessionMessage[];
 	/** The assistant message currently being streamed, when one exists (not yet in `agentMessages`). */
 	readonly streamingMessage?: SessionMessage;

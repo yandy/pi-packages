@@ -298,32 +298,12 @@ describe("SubagentState — activeTools", () => {
 	});
 });
 
-describe("SubagentState — responseText", () => {
-	it("defaults to an empty string", () => {
+describe("SubagentState — no response text accumulator", () => {
+	it("no longer accumulates a response text", () => {
 		const state = new SubagentState();
-		expect(state.responseText).toBe("");
-	});
-
-	it("appendResponseText concatenates text deltas", () => {
-		const state = new SubagentState();
-		state.appendResponseText("Hello ");
-		state.appendResponseText("world");
-		expect(state.responseText).toBe("Hello world");
-	});
-
-	it("resetResponseText clears accumulated text", () => {
-		const state = new SubagentState();
-		state.appendResponseText("previous text");
-		state.resetResponseText();
-		expect(state.responseText).toBe("");
-	});
-
-	it("appendResponseText works after a reset", () => {
-		const state = new SubagentState();
-		state.appendResponseText("first message");
-		state.resetResponseText();
-		state.appendResponseText("second message");
-		expect(state.responseText).toBe("second message");
+		expect("responseText" in state).toBe(false);
+		expect("appendResponseText" in state).toBe(false);
+		expect("resetResponseText" in state).toBe(false);
 	});
 });
 

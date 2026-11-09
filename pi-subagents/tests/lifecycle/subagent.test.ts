@@ -3,7 +3,7 @@ import type { CreateSubagentSessionParams } from "../../src/lifecycle/create-sub
 import { Subagent, type SubagentExecution, type SubagentLifecycleObserver } from "../../src/lifecycle/subagent";
 import type { SubagentSession, TurnLoopResult } from "../../src/lifecycle/subagent-session";
 import { SubagentState, type SubagentStateInit } from "../../src/lifecycle/subagent-state";
-import type { AgentInvocation, CompactionInfo, SubagentType } from "../../src/types";
+import type { AgentInvocation, CompactionInfo, SessionMessage, SubagentType } from "../../src/types";
 import { makeStubExecution } from "../helpers/make-subagent";
 import {
 	createMockSession,
@@ -151,7 +151,7 @@ describe("convenience getters", () => {
 			expect([...record.activeTools.values()]).toContain("Read");
 		});
 
-		it("responseText reflects state mutations via appendResponseText", () => {
+		it("streamingMessage reflects state mutations via setStreamingMessage", () => {
 			const state = new SubagentState();
 			const record = new Subagent({
 				id: "1",
@@ -160,8 +160,9 @@ describe("convenience getters", () => {
 				execution: makeStubExecution(),
 				state,
 			});
-			state.appendResponseText("Hello");
-			expect(record.responseText).toBe("Hello");
+			const partial = { role: "assistant", content: [{ type: "text", text: "Hello" }] } as unknown as SessionMessage;
+			state.setStreamingMessage(partial);
+			expect(record.streamingMessage).toBe(partial);
 		});
 	});
 

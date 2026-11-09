@@ -47,8 +47,6 @@ export interface TestSubagentOptions {
 	turnCount?: number;
 	/** Seed active tools by name — each entry calls addActiveTool(name). */
 	activeTools?: string[];
-	/** Seed responseText via appendResponseText(). */
-	responseText?: string;
 	/** Thread maxTurns into the stub execution. Ignored when `execution` is supplied. */
 	maxTurns?: number;
 }
@@ -66,7 +64,6 @@ export function createTestSubagent(overrides: TestSubagentOptions = {}): Subagen
 		compactionCount,
 		turnCount,
 		activeTools,
-		responseText,
 		maxTurns,
 		...stateOverrides
 	} = overrides;
@@ -112,9 +109,6 @@ export function createTestSubagent(overrides: TestSubagentOptions = {}): Subagen
 	}
 	if (activeTools !== undefined) {
 		for (const name of activeTools) state.addActiveTool(name);
-	}
-	if (responseText !== undefined) {
-		state.appendResponseText(responseText);
 	}
 	return record;
 }

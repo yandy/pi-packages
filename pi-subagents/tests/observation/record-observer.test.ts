@@ -152,51 +152,15 @@ describe("subscribeSubagentObserver", () => {
 		expect(state.turnCount).toBe(3);
 	});
 
-	it("resets responseText on message_start", () => {
+	it("does not accumulate response text", () => {
 		const session = createMockSession();
 		const state = makeState();
 		subscribeSubagentObserver(session, state);
 
-		session.emit({
-			type: "message_update",
-			message: { role: "assistant", content: [{ type: "text", text: "previous text" }] },
-			assistantMessageEvent: { type: "text_delta", delta: "previous text" },
-		});
 		session.emit({ type: "message_start", message: { role: "assistant", content: [] } });
-		expect(state.responseText).toBe("");
-	});
+		session.emit({ type: "message_update", message: { role: "assistant", content: [] }, assistantMessageEvent: { type: "text_delta", delta: "hi" } });
 
-	it("appends to responseText on message_update text_delta", () => {
-		const session = createMockSession();
-		const state = makeState();
-		subscribeSubagentObserver(session, state);
-
-		session.emit({
-			type: "message_update",
-			message: { role: "assistant", content: [{ type: "text", text: "Hello " }] },
-			assistantMessageEvent: { type: "text_delta", delta: "Hello " },
-		});
-		expect(state.responseText).toBe("Hello ");
-
-		session.emit({
-			type: "message_update",
-			message: { role: "assistant", content: [{ type: "text", text: "Hello world" }] },
-			assistantMessageEvent: { type: "text_delta", delta: "world" },
-		});
-		expect(state.responseText).toBe("Hello world");
-	});
-
-	it("ignores message_update with non-text_delta events", () => {
-		const session = createMockSession();
-		const state = makeState();
-		subscribeSubagentObserver(session, state);
-
-		session.emit({
-			type: "message_update",
-			message: { role: "assistant", content: [{ type: "thinking", thinking: "pondering..." }] },
-			assistantMessageEvent: { type: "thinking_delta", delta: "pondering..." },
-		});
-		expect(state.responseText).toBe("");
+		expect("responseText" in state).toBe(false);
 	});
 
 	it("returned function unsubscribes from session", () => {

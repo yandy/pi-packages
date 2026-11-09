@@ -15,7 +15,6 @@ export function makeNavigable(overrides: Partial<NavigableSubagent> = {}): Navig
 		completedAt: 4000,
 		toolUses: 2,
 		activeTools: new Map(),
-		responseText: "",
 		agentMessages: [],
 		streamingMessage: undefined,
 		modelName: undefined,

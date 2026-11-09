@@ -118,9 +118,6 @@ export class Subagent {
 	get activeTools(): ReadonlyMap<string, string> {
 		return this.state.activeTools;
 	}
-	get responseText(): string {
-		return this.state.responseText;
-	}
 	get streamingMessage(): SessionMessage | undefined {
 		return this.state.streamingMessage;
 	}
