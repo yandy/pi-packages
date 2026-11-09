@@ -31,6 +31,9 @@ describe("describeActivity", () => {
 		expect(describeActivity(noTools, assistant([{ type: "toolCall", id: "t", name: "read", arguments: {} }]))).toBe(
 			"thinking…",
 		);
+		expect(
+			describeActivity(noTools, assistant([{ type: "image", data: "AAAA", mimeType: "image/png" }])),
+		).toBe("thinking…");
 	});
 
 	it("falls back to thinking without a message", () => {
