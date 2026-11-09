@@ -25,7 +25,7 @@ The only thing moving today is the `◍` activity line. It reads `SubagentState.
 - Streaming tool output during execution (`tool_execution_update` partial results). The viewer deliberately renders tool results in pi's collapsed state with no expand key (`README.zh.md:159`; approved as D2 in #163). The call line already appears with the streaming tail, so what a partial would add is a growing *collapsed preview* — in the area the design deliberately minimizes. A viewer that refuses to expand a finished tool result has no use for its intermediate states.
 - Changing the 120 ms sync throttle, the widget's layout, or the activity line's wording.
 - Evicted agents (static file snapshot) — no streaming concept there.
-- `TurnLoopResult.responseText` (the turn loop's returned text in `subagent-session.ts`) — a different concept, unaffected.
+- `TurnLoopResult.responseText` (the turn loop's returned text in `subagent-session.ts`) — a different concept. Its own `text_delta` accumulator is gone: the value is now derived from the session's finalized assistant message, so the branch leaves exactly one text representation.
 
 ## Anti-goals
 

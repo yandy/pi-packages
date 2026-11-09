@@ -118,7 +118,6 @@ export class SubagentSession {
 			}
 		});
 
-		const collector = collectResponseText(session);
 		const cleanupAbort = forwardAbortSignal(session, opts.signal);
 
 		// Prepend parent context if it was captured at spawn time.
@@ -135,11 +134,10 @@ export class SubagentSession {
 			});
 		} finally {
 			unsubTurns();
-			collector.unsubscribe();
 			cleanupAbort();
 		}
 
-		const responseText = collector.getText().trim() || getLastAssistantText(session);
+		const responseText = getLastAssistantText(session);
 		return { responseText, aborted, steered: softLimitReached };
 	}
 
@@ -149,17 +147,15 @@ export class SubagentSession {
 		// Same early-return as runTurnLoop: an aborted signal must not start a run.
 		if (signal?.aborted) return getLastAssistantText(session);
 
-		const collector = collectResponseText(session);
 		const cleanupAbort = forwardAbortSignal(session, signal);
 
 		try {
 			await session.prompt(prompt);
 		} finally {
-			collector.unsubscribe();
 			cleanupAbort();
 		}
 
-		return collector.getText().trim() || getLastAssistantText(session);
+		return getLastAssistantText(session);
 	}
 
 	/** Deliver a steer to the live session. */
@@ -211,23 +207,6 @@ export class SubagentSession {
 }
 
 // ── Private turn-loop helpers ───────────────────────────────────────────────────
-
-/**
- * Subscribe to a session and collect the last assistant message text.
- * Returns an object with a `getText()` getter and an `unsubscribe` function.
- */
-function collectResponseText(session: AgentSession) {
-	let text = "";
-	const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
-		if (event.type === "message_start") {
-			text = "";
-		}
-		if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-			text += event.assistantMessageEvent.delta;
-		}
-	});
-	return { getText: () => text, unsubscribe };
-}
 
 /** Get the last assistant text from the completed session history. */
 function getLastAssistantText(session: AgentSession): string {

@@ -112,7 +112,22 @@ describe("SubagentSession — runTurnLoop response capture", () => {
 		expect(result.responseText).toBe("LOCKED");
 	});
 
-	it("captures streamed text_delta events as the response", async () => {
+	it("returns the finalized assistant text, not the raw stream", async () => {
+		const { session, listeners } = createSession("REWRITTEN");
+		session.prompt = vi.fn(async () => {
+			for (const l of listeners) {
+				l({ type: "message_start", message: { role: "assistant", content: [] } });
+				l({ type: "message_update", message: { role: "assistant", content: [] }, assistantMessageEvent: { type: "text_delta", delta: "raw stream" } });
+			}
+			session.messages.push({ role: "assistant", content: [{ type: "text", text: "REWRITTEN" }] });
+		});
+
+		const { sub } = makeSubagentSession(session);
+		const result = await sub.runTurnLoop("go", {});
+		expect(result.responseText).toBe("REWRITTEN");
+	});
+
+	it("returns the streamed response once the message is finalized", async () => {
 		const { session, listeners } = createSession("FALLBACK");
 		session.prompt = vi.fn(async () => {
 			for (const l of listeners) {
@@ -120,6 +135,7 @@ describe("SubagentSession — runTurnLoop response capture", () => {
 				l({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "hello " } });
 				l({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "world" } });
 			}
+			session.messages.push({ role: "assistant", content: [{ type: "text", text: "hello world" }] });
 		});
 		const { sub } = makeSubagentSession(session);
 		const result = await sub.runTurnLoop("go", {});
