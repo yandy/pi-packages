@@ -50,6 +50,38 @@
 
 README 至少包含：功能简介、安装方式、工具/命令/参数的完整列表、License。
 
+包目录内 **不要** 放 `LICENSE` 文件，见下节。
+
+### License：全仓单一来源
+
+仓库根的 `LICENSE` 是全仓唯一的许可文件，**任何 package 都不得存自己的副本**。
+
+- 根 `package.json` 的 `license` 字段（`"MIT"`）是全仓许可的唯一来源，且必须与根 `LICENSE` 正文一致
+- 每个 package 的 `package.json` 必须声明与根 **完全相同** 的 `license` 值（不允许某个包自选其它许可）
+- 发布时由 `prepack` 钩子把根 `LICENSE` 临时复制进包目录，`postpack` 删除；npm 会自动把包目录里的 `LICENSE` 打进 tarball（即使它不在 `files` 中），所以发布产物依然带许可文件
+
+每个 package 的 `package.json` 必须包含这两个脚本：
+
+```jsonc
+"scripts": {
+  "prepack": "node ../scripts/license.mjs",
+  "postpack": "node ../scripts/license.mjs --remove"
+}
+```
+
+忽略临时副本只需在**根** `.gitignore` 里写一条单层通配，不要在每个包重复：
+
+```gitignore
+# prepack 复制进各包目录的 LICENSE 副本（仅发布时生成，不得提交）
+/*/LICENSE
+```
+
+`*` 不跨 `/`，所以这条只匹配 `<pkg>/LICENSE` 这一层：根 `LICENSE` 照常跟踪，`pi-superpowers/skills/<name>/LICENSE` 这类第三方许可也不会被意外忽略。
+
+为什么必须用钩子：npm 只打包以包目录为根的子树，`files` 不能引用上一级目录，符号链接指向包外的 `LICENSE` 也会被排除在 tarball 之外。
+
+校验：`npm run check:license`（CI 中执行）检查上述所有项——根 `license` 与 `LICENSE` 正文一致、各包 `license` 与根一致、包内没有已提交的许可副本、磁盘上残留副本内容与根一致、`<pkg>/LICENSE` 被根 `.gitignore` 忽略、钩子已挂。
+
 ### package.json 公共字段
 
 所有 package 的 `package.json` 必须包含以下字段：
@@ -70,6 +102,8 @@ README 至少包含：功能简介、安装方式、工具/命令/参数的完�
 ```
 
 `keywords` 中必须包含 `"pi-package"`，可追加领域相关关键词。
+
+`license` 的值必须与根 `package.json` 一致（见 [License：全仓单一来源](#license全仓单一来源)）。
 
 ### Workspace 注册
 
@@ -178,6 +212,13 @@ pi-<name>/
 | `typecheck` | `tsc --noEmit` |
 | `lint` | `biome lint .` |
 | `format` | `biome format --write .` |
+
+另外所有 package（含 Pure Skills）都必须挂发布用的许可钩子（见 [License：全仓单一来源](#license全仓单一来源)）：
+
+| 脚本 | 作用 |
+|------|------|
+| `prepack` | `node ../scripts/license.mjs` |
+| `postpack` | `node ../scripts/license.mjs --remove` |
 
 ### tsconfig.json
 
@@ -302,7 +343,9 @@ pi-<name>/
   "files": ["skills/"],
   "scripts": {
     "download-skills": "node scripts/download-skills.mjs",
-    "prepublishOnly": "npm run download-skills"
+    "prepublishOnly": "npm run download-skills",
+    "prepack": "node ../scripts/license.mjs",
+    "postpack": "node ../scripts/license.mjs --remove"
   },
   "pi": {
     "skills": ["./skills"]
@@ -459,6 +502,9 @@ Pure Skills 无需 devDependencies。
 - [ ] `.github/workflows/test.yml` `paths-filter` 已添加对应 entry
 - [ ] `README.md` + `README.zh.md` 已创建
 - [ ] `.gitignore` 已创建（`node_modules/` + `*.tsbuildinfo`）
+- [ ] `license` 与根 `package.json` 完全一致，包内无 `LICENSE` 副本
+- [ ] `scripts` 已挂 `prepack` / `postpack` 许可钩子（见 [License：全仓单一来源](#license全仓单一来源)）
+- [ ] `npm run check:license` 通过
 
 ### Extension
 
@@ -466,6 +512,7 @@ Pure Skills 无需 devDependencies。
 - [ ] `files` 至少包含 `"index.ts"` 和 `"src/"`
 - [ ] `scripts` 包含 test / test:watch / typecheck / lint / format
 - [ ] `npm run check:dev-deps` 与 `npm run check:host-deps` 通过（依赖声明符合规范）
+- [ ] `npm run check:license` 通过（许可单一来源，见 [License：全仓单一来源](#license全仓单一来源)）
 - [ ] `tsconfig.json` 继承 `../tsconfig.base.json`
 - [ ] `vitest.config.ts` 已创建
 - [ ] `index.ts` 导出 `export default function(pi: ExtensionAPI)`
@@ -500,6 +547,7 @@ Pure Skills 无需 devDependencies。
 - [ ] `npm run typecheck && npm run lint && npm test` 全部通过
 - [ ] `npm run check:dev-deps` 通过（devDependencies 与根 `package.json` 一致）
 - [ ] `npm run check:host-deps` 通过（宿主提供包未写入 `dependencies`，import 的宿主提供包已在 `peerDependencies` 声明）
+- [ ] `npm run check:license` 通过（全仓单一 `LICENSE`，各包 `license` 字段与根一致，包内无副本）
 
 ### 常见重构项
 

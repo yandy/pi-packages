@@ -27,7 +27,9 @@
 		"lint": "biome lint .",
 		"format": "biome format --write .",
 		"build-image": "node --experimental-strip-types scripts/build-image.ts",
-		"clean": "rm -rf dist"
+		"clean": "rm -rf dist",
+		"prepack": "node ../scripts/license.mjs",
+		"postpack": "node ../scripts/license.mjs --remove"
 	},
 	"pi": {
 		"extensions": [

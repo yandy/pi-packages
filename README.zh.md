@@ -27,3 +27,8 @@ npm run lint              # Biome 代码检查
 npm run format            # 格式化所有包
 npm test                  # 运行所有测试
 ```
+
+## License
+
+MIT —— 仓库根目录的 [LICENSE](./LICENSE) 覆盖本 monorepo 中的所有包，各包不各自保存副本；
+发布时由 `prepack` 把根 LICENSE 注入到每个 tarball 中。

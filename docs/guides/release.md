@@ -55,6 +55,7 @@ gh release create pi-<name>-v<新版本号> --target $COMMIT \
 - `--target` 指定 tag 指向的 commit，确保 tag 落在版本升级的那个 commit 上
 - `--workspace` 参数可用 `-w` 简写
 - tag 格式必须是 `pi-<name>-vX.Y.Z`，不能是 `vX.Y.Z`
+- 发布时 `prepack` 钩子会把仓库根 `LICENSE` 复制进包目录（`postpack` 再删除），tarball 里的 `LICENSE` 因此总是与根保持一致；这个副本不要提交
 
 ## `pi-memory`
 
