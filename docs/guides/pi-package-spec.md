@@ -482,6 +482,19 @@ Pure Skills 无需 devDependencies。
 
 `package-lock.json` 与各 `package.json` 的一致性由 CI 的 `lockfile-sync` job 校验：`npm install --package-lock-only` 后 lockfile 不得出现 diff。本地修改依赖后务必执行 `npm install` 并提交 lockfile 变更。
 
+### 为什么这些字段必须逐包重复
+
+npm 的 `package.json` 没有 `extends`/继承机制。workspaces 发现、`npm ci` 构建依赖树、`npm publish` 的元数据与 provenance 都读磁盘上的实体文件，每个包的字段必须自足。以下重复属于 npm 固有成本：
+
+- **`devDependencies`**：根是版本唯一来源，包内必须重复声明同样的 4 项且版本串逐字一致（`npm run check:dev-deps` 校验）。这些工具由根 hoist，包内 `node_modules/` 不承载它们。
+- **`publishConfig.access`**：不能用根 `.npmrc` 的 `access=public` 顶替——npm 的 prefix 落在包目录，在包目录内运行 npm 时不读上级 `.npmrc`，只有从仓库根发布才读得到。
+- **`license` / `type` / `repository` / `keywords`**：发布元数据，npm 逐包读取；`repository.directory` 本就每包不同，`license` 由 `npm run check:license` 保证与根一致。
+
+两条不走的路：
+
+- **生成器**（根模板 + 每包 manifest → 生成 `package.json`）：生成物仍必须提交（npm 读实体文件），省下的是十几行静态内容，换来的是「手改 package.json 无效」的间接层，净收益为负。
+- **把标准 scripts 也收敛到根驱动**（从根执行 `vitest --project <npm 名>`、`tsc -p <dir>`、`biome check <dir>`）：技术上可行，但会让 `cd pi-<name> && npm test` 这类局部命令失效，DX 代价大于省下的行数。
+
 ---
 
 ## 发布流程
