@@ -25,7 +25,9 @@
 		"test:watch": "vitest",
 		"typecheck": "tsc --noEmit",
 		"lint": "biome lint .",
-		"format": "biome format --write ."
+		"format": "biome format --write .",
+		"prepack": "node ../scripts/license.mjs",
+		"postpack": "node ../scripts/license.mjs --remove"
 	},
 	"pi": {
 		"extensions": [

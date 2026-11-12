@@ -151,3 +151,7 @@ vite.config.ts.timestamp-*
 # superpowers plans are scratch, not committed
 /.pi/
 **/docs/superpowers/plans/
+
+# prepack 复制进各包目录的 LICENSE 副本（仅发布时生成，不得提交）
+# * 不跨 /，所以只匹配 <pkg>/LICENSE 这一层，根 LICENSE 与第三方二级路径的 LICENSE 不受影响
+/*/LICENSE

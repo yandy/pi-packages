@@ -24,6 +24,8 @@ jobs:
               - "tsconfig.base.json"
               - "vitest.config.ts"
               - "biome.json"
+              - "LICENSE"
+              - "scripts/**"
             pi-ask-user:
               - "pi-ask-user/**"
             pi-sandbox:
@@ -82,6 +84,8 @@ jobs:
         if: runner.os == 'Linux'
       - run: npm run check:host-deps
         if: runner.os == 'Linux'
+      - run: npm run check:license
+        if: runner.os == 'Linux'
       - run: npm run typecheck && npm run lint && npm test
         if: runner.os == 'Linux'
       - name: Assert ast-grep platform binary installed (integration tests would silently skip otherwise)
@@ -116,6 +120,8 @@ jobs:
       - run: npm run check:dev-deps
         if: runner.os == 'Linux'
       - run: npm run check:host-deps
+        if: runner.os == 'Linux'
+      - run: npm run check:license
         if: runner.os == 'Linux'
       - run: |
           npm run typecheck -w "${{ matrix.package }}" --if-present

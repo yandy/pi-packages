@@ -31,3 +31,8 @@ npm run lint              # Biome lint
 npm run format            # Format all packages
 npm test                  # Run all tests
 ```
+
+## License
+
+MIT — the single [LICENSE](./LICENSE) at the repository root covers every package in this monorepo.
+Packages do not keep their own copy: `prepack` injects the root license into each published tarball.

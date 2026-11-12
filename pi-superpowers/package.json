@@ -22,7 +22,9 @@
     "prompts/"
   ],
   "scripts": {
-    "download-skills": "node scripts/download-skills.mjs"
+    "download-skills": "node scripts/download-skills.mjs",
+    "prepack": "node ../scripts/license.mjs",
+    "postpack": "node ../scripts/license.mjs --remove"
   },
   "pi": {
     "skills": [
