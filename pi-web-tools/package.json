@@ -48,6 +48,6 @@
 	"dependencies": {
 		"@mixmark-io/domino": "^2.2.0",
 		"@modelcontextprotocol/sdk": "^1.32.2",
-		"turndown": "^7.2.4"
+		"turndown": "^7.2.5"
 	}
 }
