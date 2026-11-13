@@ -43,9 +43,9 @@
 		"vscode-jsonrpc": "^10.0.0"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.6.4",
+		"@biomejs/biome": "^2.6.6",
 		"@types/node": "^26.6.6",
-		"typebox": "^1.4.3",
+		"typebox": "^1.4.6",
 		"typescript": "~7.0.2",
 		"vitest": "^5.1.0"
 	}
