@@ -48,6 +48,6 @@
 	},
 	"dependencies": {
 		"@deepseek-ai/node-addon-system": "^0.1.2",
-		"koffi": "^3.3.6"
+		"koffi": "^3.3.7"
 	}
 }
