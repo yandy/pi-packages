@@ -15,6 +15,7 @@ import type { ParentSnapshot } from "../lifecycle/parent-snapshot";
 import { Subagent, type SubagentLifecycleObserver } from "../lifecycle/subagent";
 import type { SubagentSession } from "../lifecycle/subagent-session";
 import { SubagentState, type SubagentStatus } from "../lifecycle/subagent-state";
+import type { UsageSink } from "../lifecycle/usage";
 
 import type { RunConfig } from "../runtime";
 import type { AgentInvocation, CompactionInfo, ParentSessionInfo, SubagentType, ThinkingLevel } from "../types";
@@ -57,6 +58,8 @@ export interface SubagentManagerOptions {
 	/** Concurrency limiter — schedules background run thunks FIFO against the limit. */
 	limiter: ConcurrencyLimiter;
 	getRunConfig?: () => RunConfig;
+	/** Resolves the parent-session usage sink at spawn time (birth-session binding). */
+	getUsageSink?: () => UsageSink | undefined;
 	observer?: SubagentManagerObserver;
 }
 
@@ -94,11 +97,13 @@ export class SubagentManager {
 	private readonly createSubagentSession: (params: CreateSubagentSessionParams) => Promise<SubagentSession>;
 	private readonly limiter: ConcurrencyLimiter;
 	private getRunConfig?: () => RunConfig;
+	private getUsageSink?: () => UsageSink | undefined;
 	constructor(options: SubagentManagerOptions) {
 		this.createSubagentSession = options.createSubagentSession;
 		this.limiter = options.limiter;
 		this.observer = options.observer;
 		this.getRunConfig = options.getRunConfig;
+		this.getUsageSink = options.getUsageSink;
 		// Cleanup completed agents after 10 minutes (but keep sessions for resume)
 		this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
 		this.cleanupInterval.unref();
@@ -155,6 +160,7 @@ export class SubagentManager {
 				thinkingLevel: options.thinkingLevel,
 				parentSession: options.parentSession,
 				signal: options.signal,
+				usageSink: this.getUsageSink?.(),
 			},
 		});
 		this.agents.set(id, record);
@@ -253,6 +259,23 @@ export class SubagentManager {
 	private removeRecord(id: string, record: Subagent): void {
 		record.disposeSession();
 		this.agents.delete(id);
+	}
+
+	/**
+	 * Settle every tracked record's usage into its birth session. Called from the
+	 * session-shutdown handler between abortAll() and dispose(): captures
+	 * cost-so-far synchronously before the process can exit (quit) or the switch
+	 * completes. Each record is isolated — one throwing append must not stop the
+	 * others, and the shutdown path itself must never throw.
+	 */
+	settleAllUsage(): void {
+		for (const record of this.agents.values()) {
+			try {
+				record.settleUsage();
+			} catch (err) {
+				debugLog("settleAllUsage", err);
+			}
+		}
 	}
 
 	private cleanup() {

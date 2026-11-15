@@ -26,6 +26,7 @@ import { createChildLifecyclePublisher } from "./lifecycle/child-lifecycle";
 import { ConcurrencyLimiter } from "./lifecycle/concurrency-limiter";
 import { createSubagentSession, type SubagentSessionDeps } from "./lifecycle/create-subagent-session";
 import { SubagentManager } from "./lifecycle/subagent-manager";
+import type { UsageSink } from "./lifecycle/usage";
 import { CompositeSubagentObserver } from "./observation/composite-subagent-observer";
 import { type NotificationDetails, NotificationManager } from "./observation/notification";
 import { createNotificationRenderer } from "./observation/renderer";
@@ -113,6 +114,13 @@ export default function (pi: ExtensionAPI) {
 		observer,
 		limiter,
 		getRunConfig: () => settings,
+		// The ctx type exposes only ReadonlySessionManager (no appendUsage), but the
+		// runtime object is the full SessionManager — feature-detect and degrade
+		// gracefully when the method is absent.
+		getUsageSink: () => {
+			const sm = runtime.currentCtx?.sessionManager as unknown as Partial<UsageSink> | undefined;
+			return sm && typeof sm.appendUsage === "function" ? (sm as UsageSink) : undefined;
+		},
 	});
 
 	// Typed service published via Symbol.for() for cross-extension access.

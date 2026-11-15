@@ -15,6 +15,8 @@ export interface LifecycleManager {
 	dispose(): void;
 	/** Repopulate evicted descriptors recovered from disk on session start. */
 	restoreEvicted(descriptors: readonly EvictedSubagent[]): void;
+	/** Settle every tracked record's usage (cost-so-far) before teardown. */
+	settleAllUsage(): void;
 }
 
 /** Narrow runtime interface — only the methods lifecycle handlers call. */
@@ -64,12 +66,16 @@ export class SessionLifecycleHandler {
 	// 1. Unpublish service — prevent new cross-extension calls
 	// 2. Clear session context — no more session state
 	// 3. Abort all agents — stop running work
-	// 4. Dispose notifications — cancel pending nudges/timers
-	// 5. Dispose manager — final cleanup
+	// 4. Settle usage — capture cost-so-far synchronously before the process
+	//    can exit (quit) or the switch completes; the async terminal settles
+	//    afterwards compute a residual delta of zero
+	// 5. Dispose notifications — cancel pending nudges/timers
+	// 6. Dispose manager — final cleanup
 	handleSessionShutdown(): Promise<void> {
 		this.unpublishService();
 		this.runtime.clearSessionContext();
 		this.manager.abortAll();
+		this.manager.settleAllUsage();
 		this.disposeNotifications();
 		this.manager.dispose();
 		return Promise.resolve();

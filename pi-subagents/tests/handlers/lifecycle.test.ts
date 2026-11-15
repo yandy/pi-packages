@@ -12,6 +12,7 @@ describe("SessionLifecycleHandler", () => {
 	let mockAbortAll: ReturnType<typeof vi.fn<LifecycleManager["abortAll"]>>;
 	let mockDispose: ReturnType<typeof vi.fn<LifecycleManager["dispose"]>>;
 	let mockRestoreEvicted: ReturnType<typeof vi.fn<LifecycleManager["restoreEvicted"]>>;
+	let mockSettleAllUsage: ReturnType<typeof vi.fn<LifecycleManager["settleAllUsage"]>>;
 	let mockDisposeNotifications: ReturnType<typeof vi.fn<() => void>>;
 	let mockUnpublishService: ReturnType<typeof vi.fn<() => void>>;
 	let mockRecoverEvicted: ReturnType<typeof vi.fn<(parentSessionFile: string | undefined) => EvictedSubagent[]>>;
@@ -24,6 +25,7 @@ describe("SessionLifecycleHandler", () => {
 		mockAbortAll = vi.fn();
 		mockDispose = vi.fn();
 		mockRestoreEvicted = vi.fn();
+		mockSettleAllUsage = vi.fn();
 		mockDisposeNotifications = vi.fn();
 		mockUnpublishService = vi.fn();
 		mockRecoverEvicted = vi.fn(() => []);
@@ -37,6 +39,7 @@ describe("SessionLifecycleHandler", () => {
 			abortAll: mockAbortAll,
 			dispose: mockDispose,
 			restoreEvicted: mockRestoreEvicted,
+			settleAllUsage: mockSettleAllUsage,
 		};
 
 		handler = new SessionLifecycleHandler(
@@ -115,6 +118,9 @@ describe("SessionLifecycleHandler", () => {
 			mockAbortAll.mockImplementation(() => {
 				callOrder.push("abortAll");
 			});
+			mockSettleAllUsage.mockImplementation(() => {
+				callOrder.push("settleAllUsage");
+			});
 			mockDisposeNotifications.mockImplementation(() => {
 				callOrder.push("disposeNotifications");
 			});
@@ -128,6 +134,7 @@ describe("SessionLifecycleHandler", () => {
 				"unpublishService",
 				"clearSessionContext",
 				"abortAll",
+				"settleAllUsage",
 				"disposeNotifications",
 				"dispose",
 			]);

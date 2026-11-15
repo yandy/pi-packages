@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConcurrencyLimiter } from "../../src/lifecycle/concurrency-limiter";
 import type { CreateSubagentSessionParams } from "../../src/lifecycle/create-subagent-session";
 import { SubagentManager, type SubagentManagerObserver } from "../../src/lifecycle/subagent-manager";
-import type { SubagentSession } from "../../src/lifecycle/subagent-session";
+import type { SubagentSession, TurnLoopResult } from "../../src/lifecycle/subagent-session";
 import { NotificationState } from "../../src/observation/notification-state";
 import type { RunConfig } from "../../src/runtime";
 import type { Subagent } from "../../src/types";
@@ -861,5 +861,105 @@ describe("SubagentManager — toolCallId notification wiring", () => {
 
 		expect(record.notification).toBeUndefined();
 		manager.abort(id);
+	});
+});
+
+describe("SubagentManager — usage sink", () => {
+	const SNAP = { input: 500, output: 100, cacheRead: 0, cacheWrite: 20, totalTokens: 620, cost: 0.03 };
+
+	/** Factory whose session stubs report a nonzero-cost snapshot; `hang` keeps the run in-flight. */
+	function costfulFactory(hang = false) {
+		return vi.fn(async (_params: CreateSubagentSessionParams) => {
+			const stub = createSubagentSessionStub();
+			stub.getUsageSnapshot.mockReturnValue(SNAP);
+			stub.getModelAttribution.mockReturnValue({ provider: "anthropic", model: "claude-test" });
+			if (hang) {
+				// Never-resolving turn loop keeps the record in-flight (no terminal settle).
+				stub.runTurnLoop = vi.fn(() => new Promise<TurnLoopResult>(() => {}));
+			}
+			return toSubagentSession(stub);
+		});
+	}
+
+	function makeManager(
+		getUsageSink?: () => { appendUsage: ReturnType<typeof vi.fn> } | undefined,
+		hang = false,
+	) {
+		const mgr = new SubagentManager({
+			createSubagentSession: costfulFactory(hang),
+			limiter: new ConcurrencyLimiter(() => DEFAULT_MAX_CONCURRENT),
+			getUsageSink,
+		});
+		return mgr;
+	}
+
+	it("captures the sink at spawn and settles once when the run completes", async () => {
+		const sink = { appendUsage: vi.fn() };
+		const getUsageSink = vi.fn(() => sink);
+		const mgr = makeManager(getUsageSink);
+		const record = await mgr.spawnAndWait(STUB_SNAPSHOT, "general-purpose", "do work", {
+			description: "work",
+		});
+		expect(getUsageSink).toHaveBeenCalled();
+		expect(sink.appendUsage).toHaveBeenCalledTimes(1);
+		const [kind, provider, model, usage, note] = sink.appendUsage.mock.calls[0];
+		expect(kind).toBe("subagent");
+		expect(provider).toBe("anthropic");
+		expect(model).toBe("claude-test");
+		expect(usage.input).toBe(500);
+		expect(usage.cost.total).toBe(0.03);
+		expect(note).toBe('subagent "work"');
+		// A second terminal on the same record must not re-append (marker set).
+		record.completeRun({ responseText: "again", aborted: false, steered: false });
+		expect(sink.appendUsage).toHaveBeenCalledTimes(1);
+		mgr.dispose();
+	});
+
+	it("completes a run without a sink configured", async () => {
+		const mgr = makeManager(undefined);
+		const record = await mgr.spawnAndWait(STUB_SNAPSHOT, "general-purpose", "do work", {
+			description: "work",
+		});
+		expect(record.status).toBe("completed");
+		mgr.dispose();
+	});
+
+	it("settleAllUsage settles every in-flight record and a throwing append does not stop the rest", async () => {
+		const goodSink = { appendUsage: vi.fn() };
+		const badSink = {
+			appendUsage: vi.fn(() => {
+				throw new Error("sink down");
+			}),
+		};
+		// First spawn gets the good sink, second the bad one; listAgents orders
+		// most-recent-first, so the throwing record settles FIRST — the good
+		// record must still settle after it.
+		const sinks = [goodSink, badSink];
+		const mgr = makeManager(() => sinks.shift(), true);
+		mgr.spawn(STUB_SNAPSHOT, "general-purpose", "good task", { description: "good", isBackground: true });
+		mgr.spawn(STUB_SNAPSHOT, "general-purpose", "bad task", { description: "bad", isBackground: true });
+		// Let the background runs create their sessions (factory + bindObservers).
+		await vi.waitFor(() => {
+			expect(mgr.listAgents().every((r) => r.isSessionReady())).toBe(true);
+		});
+		expect(() => mgr.settleAllUsage()).not.toThrow();
+		expect(badSink.appendUsage).toHaveBeenCalledTimes(1);
+		expect(goodSink.appendUsage).toHaveBeenCalledTimes(1);
+		mgr.dispose();
+	});
+
+	it("shutdown settle then the async terminal settle appends exactly once (residual delta is zero)", async () => {
+		const sink = { appendUsage: vi.fn() };
+		const mgr = makeManager(() => sink);
+		const record = await mgr.spawnAndWait(STUB_SNAPSHOT, "general-purpose", "run", {
+			description: "run",
+		});
+		// The terminal settle already appended cost-so-far; simulate the shutdown
+		// settle arriving after it — the residual delta is zero, so no second append.
+		expect(sink.appendUsage).toHaveBeenCalledTimes(1);
+		mgr.settleAllUsage();
+		expect(sink.appendUsage).toHaveBeenCalledTimes(1);
+		void record;
+		mgr.dispose();
 	});
 });
