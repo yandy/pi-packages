@@ -410,3 +410,38 @@ describe("renderWidgetLines", () => {
 		expect(lines[0]).toContain("[dim:Agents]");
 	});
 });
+
+describe("widget line cost", () => {
+	const theme = stubTheme();
+
+	it("shows the cost after the token text in a running agent's header", () => {
+		const agent = makeAgent({
+			status: "running",
+			lifetimeUsage: { input: 500, output: 500, cacheWrite: 0 },
+			cost: 0.042,
+		});
+		const [header] = renderRunningLines(agent, testRegistry, 0, theme);
+		// The renderer wraps the whole stats string in one [dim:...] tag, not per-part.
+		expect(header).toContain("1.0k token · $0.042 ·");
+		expect(header.indexOf("$0.042")).toBeGreaterThan(header.indexOf("1.0k token"));
+	});
+
+	it("omits the cost from a running agent when zero or absent", () => {
+		const zero = makeAgent({ status: "running", cost: 0 });
+		const absent = makeAgent({ status: "running" });
+		expect(renderRunningLines(zero, testRegistry, 0, theme)[0]).not.toContain("$");
+		expect(renderRunningLines(absent, testRegistry, 0, theme)[0]).not.toContain("$");
+	});
+
+	it("shows the cost before the duration in a finished agent's line", () => {
+		const agent = makeAgent({ cost: 0.042 });
+		const line = renderFinishedLine(agent, testRegistry, theme);
+		expect(line).toContain("$0.042 · 5.0s");
+		expect(line.indexOf("$0.042")).toBeLessThan(line.indexOf("5.0s"));
+	});
+
+	it("omits the cost from a finished agent when absent", () => {
+		const line = renderFinishedLine(makeAgent(), testRegistry, theme);
+		expect(line).not.toContain("$");
+	});
+});

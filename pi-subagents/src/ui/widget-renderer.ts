@@ -12,6 +12,7 @@ import { getLifetimeTotal } from "../lifecycle/usage";
 import type { SessionMessage, SubagentType } from "../types";
 import {
 	describeActivity,
+	formatCost,
 	formatMs,
 	formatSessionTokens,
 	formatTurns,
@@ -35,6 +36,8 @@ export interface WidgetAgent {
 	readonly error?: string;
 	readonly lifetimeUsage?: Readonly<LifetimeUsage>;
 	readonly compactionCount: number;
+	/** Run cost so far in dollars; hidden when 0/undefined. */
+	readonly cost?: number;
 	// Live activity (folded from the former WidgetActivity — precomputed by AgentWidget)
 	readonly turnCount: number;
 	readonly maxTurns?: number;
@@ -85,6 +88,8 @@ export function renderFinishedLine(agent: WidgetAgent, registry: AgentConfigLook
 	}
 	parts.push(formatTurns(agent.turnCount, agent.maxTurns));
 	if (agent.toolUses > 0) parts.push(`${agent.toolUses} tool use${agent.toolUses === 1 ? "" : "s"}`);
+	const costText = formatCost(agent.cost);
+	if (costText) parts.push(costText);
 	parts.push(duration);
 
 	const modeTag = modeLabel ? ` ${theme.fg("dim", `(${modeLabel})`)}` : "";
@@ -115,6 +120,8 @@ export function renderRunningLines(
 	parts.push(formatTurns(agent.turnCount, agent.maxTurns));
 	if (agent.toolUses > 0) parts.push(`${agent.toolUses} tool use${agent.toolUses === 1 ? "" : "s"}`);
 	if (tokenText) parts.push(tokenText);
+	const costText = formatCost(agent.cost);
+	if (costText) parts.push(costText);
 	parts.push(elapsed);
 	const statsText = parts.join(" · ");
 

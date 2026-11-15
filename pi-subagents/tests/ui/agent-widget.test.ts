@@ -22,6 +22,7 @@ import type { SubagentManager } from "../../src/lifecycle/subagent-manager";
 import type { CompactionInfo, SessionMessage } from "../../src/types";
 import { AgentWidget, assembleWidgetState, type UICtx } from "../../src/ui/agent-widget";
 import { createTestSubagent, makeStubExecution } from "../helpers/make-subagent";
+import { createSubagentSessionStub, toSubagentSession } from "../helpers/mock-session";
 
 // Minimal agent fixture — only the three fields AgentSummary requires.
 function makeAgent(overrides: { id?: string; status?: string; completedAt?: number } = {}) {
@@ -404,5 +405,38 @@ describe("AgentWidget — background-only filtering", () => {
 		const text = renderLines().join("\n");
 		expect(text).toContain("background task");
 		expect(text).not.toContain("foreground task");
+	});
+});
+
+describe("AgentWidget — widget projects cost from the record", () => {
+	it("surfaces getCost() in the rendered running line", () => {
+		const record = createTestSubagent({
+			status: "running",
+			completedAt: undefined,
+			startedAt: Date.now() - 100,
+			invocation: { runInBackground: true },
+		});
+		const stub = createSubagentSessionStub();
+		stub.getUsageSnapshot.mockReturnValue({
+			input: 500, output: 500, cacheRead: 0, cacheWrite: 0, totalTokens: 1000, cost: 0.042,
+		});
+		record.subagentSession = toSubagentSession(stub);
+		const manager = { listAgents: () => [record] } as unknown as SubagentManager;
+		const widget = new AgentWidget(manager, new AgentTypeRegistry(() => new Map()));
+
+		let renderFn: ((tui: unknown, theme: unknown) => { render(): string[] }) | undefined;
+		const ui: UICtx = {
+			setStatus: () => {},
+			setWidget: (_key, content) => {
+				if (typeof content === "function") renderFn = content as typeof renderFn;
+			},
+		};
+		widget.setUICtx(ui);
+		widget.update();
+
+		const stubTui = { terminal: { columns: 200 }, requestRender: () => {} };
+		const stubTheme = { fg: (_: string, t: string) => t, bold: (t: string) => t };
+		const allText = renderFn!(stubTui, stubTheme).render().join("\n");
+		expect(allText).toContain("$0.042");
 	});
 });
