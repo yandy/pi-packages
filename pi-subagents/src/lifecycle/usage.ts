@@ -126,6 +126,62 @@ export function toUsageEntryUsage(s: SessionUsageSnapshot): Usage {
 }
 
 /**
+ * Sum a session file's appended entries into a snapshot, on the same
+ * accounting basis as `getSessionStats()` on pi 1.5.2: assistant/toolResult
+ * messages, standalone `usage` entries, and compaction/branch_summary usage —
+ * including history compacted away. `getSessionStats()` on pi 0.80.2 only
+ * scans the current `state.messages` (replaced by compaction), so entry-based
+ * summation is the single source of truth for both supported hosts.
+ *
+ * Input is `unknown[]` because `parseSessionEntries()` returns `FileEntry[]`
+ * (header included); the header and anything unrecognized contribute zero.
+ */
+export function sumSessionUsage(entries: readonly unknown[]): SessionUsageSnapshot {
+	const total: SessionUsageSnapshot = {
+		input: 0,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		totalTokens: 0,
+		cost: 0,
+	};
+	const add = (usage: unknown): void => {
+		const u = usage as
+			| {
+					input?: number;
+					output?: number;
+					cacheRead?: number;
+					cacheWrite?: number;
+					totalTokens?: number;
+					cost?: { total?: number };
+			  }
+			| undefined;
+		if (!u) return;
+		total.input += u.input ?? 0;
+		total.output += u.output ?? 0;
+		total.cacheRead += u.cacheRead ?? 0;
+		total.cacheWrite += u.cacheWrite ?? 0;
+		total.totalTokens +=
+			u.totalTokens ?? (u.input ?? 0) + (u.output ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0);
+		total.cost += u.cost?.total ?? 0;
+	};
+	for (const raw of entries) {
+		const entry = raw as
+			| { type?: string; usage?: unknown; message?: { role?: string; usage?: unknown } }
+			| null
+			| undefined;
+		if (!entry) continue;
+		if (entry.type === "usage" || entry.type === "compaction" || entry.type === "branch_summary") {
+			add(entry.usage);
+		} else if (entry.type === "message") {
+			const role = entry.message?.role;
+			if (role === "assistant" || role === "toolResult") add(entry.message?.usage);
+		}
+	}
+	return total;
+}
+
+/**
  * Narrow write-side of the parent session's `SessionManager` for cost settle.
  * The extension ctx type omits `appendUsage` (ReadonlySessionManager), so the
  * runtime object is feature-detected against this shape at the wiring point.

@@ -30,6 +30,9 @@ function createSession(finalText = "") {
 		dispose: vi.fn(),
 		sessionManager: {
 			getLeafId: vi.fn(() => `leaf-${leafSeq}`),
+			getEntries: vi.fn(() => [
+				{ type: "message", message: { role: "assistant", usage: { input: 100, output: 50, cacheRead: 7, cacheWrite: 10, totalTokens: 167, cost: { total: 0.021 } } } },
+			]),
 			advanceLeaf: () => {
 				leafSeq++;
 			},
@@ -475,16 +478,35 @@ describe("SubagentSession — usage snapshot", () => {
 		const { sub } = makeSubagentSession(session);
 		sub.getUsageSnapshot();
 		sub.getUsageSnapshot();
-		expect(session.getSessionStats).toHaveBeenCalledOnce();
+		expect(session.sessionManager.getEntries).toHaveBeenCalledOnce();
 	});
 
-	it("re-reads stats when the session leaf advances", () => {
+	it("re-reads entries when the session leaf advances", () => {
 		const { session } = createSession("X");
 		const { sub } = makeSubagentSession(session);
 		sub.getUsageSnapshot();
 		session.sessionManager.advanceLeaf();
 		sub.getUsageSnapshot();
-		expect(session.getSessionStats).toHaveBeenCalledTimes(2);
+		expect(session.sessionManager.getEntries).toHaveBeenCalledTimes(2);
+	});
+
+	it("keeps pre-compaction cost from the session file even when the live stats shrink (0.80.2 semantics)", () => {
+		const { session } = createSession("X");
+		// 0.80.2's getSessionStats() only scans state.messages; after compaction
+		// that array is replaced, so it reports a smaller number. The snapshot
+		// must come from the append-only entries instead.
+		session.getSessionStats.mockReturnValue({
+			tokens: { input: 1, output: 0, cacheRead: 0, cacheWrite: 0, total: 1 },
+			cost: 0.0001,
+			contextUsage: { percent: null },
+		});
+		session.sessionManager.getEntries.mockReturnValue([
+			{ type: "message", message: { role: "assistant", usage: { input: 100, output: 50, cacheRead: 7, cacheWrite: 10, totalTokens: 167, cost: { total: 0.02 } } } },
+			{ type: "compaction", usage: { cost: { total: 0.001 } } },
+		] as any);
+		const { sub } = makeSubagentSession(session);
+		expect(sub.getUsageSnapshot().cost).toBeCloseTo(0.021, 10);
+		expect(sub.getUsageSnapshot().input).toBe(100);
 	});
 
 	it("attributes the provider and model of the child session's model", () => {

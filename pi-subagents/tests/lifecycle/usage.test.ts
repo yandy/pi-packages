@@ -4,6 +4,7 @@ import {
 	getSessionContextPercent,
 	getSessionTokens,
 	snapshotIsZero,
+	sumSessionUsage,
 	toUsageEntryUsage,
 	usageDelta,
 	type SessionUsageSnapshot,
@@ -139,5 +140,43 @@ describe("usage", () => {
 			expect(getLifetimeTotal(undefined)).toBe(0);
 			expect(getLifetimeTotal({ input: 100, output: 200, cacheWrite: 50 })).toBe(350);
 		});
+	});
+});
+
+describe("sumSessionUsage", () => {
+	/** One assistant message with token usage and cost. */
+	const assistant = (cost: number) => ({
+		type: "message",
+		message: {
+			role: "assistant",
+			usage: {
+				input: 100, output: 20, cacheRead: 30, cacheWrite: 5, totalTokens: 155,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: cost },
+			},
+		},
+	});
+
+	it("sums tokens and cost across assistant, toolResult, usage, compaction, and branch_summary entries", () => {
+		const entries = [
+			{ type: "session", id: "s1" },
+			{ type: "message", message: { role: "user", content: "hi" } },
+			assistant(0.02),
+			{ type: "message", message: { role: "toolResult", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0.005 } } } },
+			{ type: "usage", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0.01 } } },
+			{ type: "compaction", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0.003 } } },
+			{ type: "branch_summary", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0.002 } } },
+		];
+		const snapshot = sumSessionUsage(entries);
+		expect(snapshot.input).toBe(100);
+		expect(snapshot.output).toBe(20);
+		expect(snapshot.cacheRead).toBe(30);
+		expect(snapshot.cacheWrite).toBe(5);
+		expect(snapshot.totalTokens).toBe(155);
+		expect(snapshot.cost).toBeCloseTo(0.04, 10);
+	});
+
+	it("tolerates entries with missing usage and unknown shapes", () => {
+		const snapshot = sumSessionUsage([undefined, null, { type: "message" }, { type: "usage" }, { type: "compaction", usage: {} }]);
+		expect(snapshot).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: 0 });
 	});
 });

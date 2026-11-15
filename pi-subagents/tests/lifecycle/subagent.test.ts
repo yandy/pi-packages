@@ -980,6 +980,19 @@ describe("Subagent — settleUsage", () => {
 		expect(sink.appendUsage.mock.calls[0][3].cost.total).toBe(0);
 	});
 
+	it("a completed run resumed and completed again appends only the delta since the first report", async () => {
+		const { record, sink, stub } = makeSettler(SNAP);
+		record.completeRun(createTurnLoopResult());
+		const grown = { input: 1500, output: 300, cacheRead: 700, cacheWrite: 80, totalTokens: 2580, cost: 0.08 };
+		stub.getUsageSnapshot.mockReturnValue(grown);
+		await record.resume("more");
+		expect(sink.appendUsage).toHaveBeenCalledTimes(2);
+		const second = sink.appendUsage.mock.calls[1][3];
+		expect(second.input).toBe(500);
+		expect(second.cost.total).toBeCloseTo(0.03, 10);
+		expect(((record as any).state as SubagentState).reportedUsage).toEqual(grown);
+	});
+
 	it("getCost reads the session snapshot, or is undefined before a session exists", () => {
 		const { record } = makeSettler();
 		expect(record.getCost()).toBe(0.05);

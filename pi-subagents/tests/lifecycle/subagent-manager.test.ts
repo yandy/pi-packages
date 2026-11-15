@@ -948,18 +948,24 @@ describe("SubagentManager — usage sink", () => {
 		mgr.dispose();
 	});
 
-	it("shutdown settle then the async terminal settle appends exactly once (residual delta is zero)", async () => {
+	it("shutdown settle captures in-flight cost and the later terminal appends no second time", async () => {
 		const sink = { appendUsage: vi.fn() };
-		const mgr = makeManager(() => sink);
-		const record = await mgr.spawnAndWait(STUB_SNAPSHOT, "general-purpose", "run", {
+		// hang=true: no terminal settle yet, so the shutdown settle is the first
+		// (and must capture the full cost-so-far before the process can exit).
+		const mgr = makeManager(() => sink, true);
+		const id = mgr.spawn(STUB_SNAPSHOT, "general-purpose", "run", {
 			description: "run",
+			isBackground: true,
 		});
-		// The terminal settle already appended cost-so-far; simulate the shutdown
-		// settle arriving after it — the residual delta is zero, so no second append.
-		expect(sink.appendUsage).toHaveBeenCalledTimes(1);
+		await vi.waitFor(() => {
+			expect(mgr.getRecord(id)?.isSessionReady()).toBe(true);
+		});
 		mgr.settleAllUsage();
 		expect(sink.appendUsage).toHaveBeenCalledTimes(1);
-		void record;
+		expect(sink.appendUsage.mock.calls[0][3].cost.total).toBe(0.03);
+		// The abort settles asynchronously afterwards: residual delta is zero.
+		mgr.getRecord(id)!.completeRun({ responseText: "done", aborted: true, steered: false });
+		expect(sink.appendUsage).toHaveBeenCalledTimes(1);
 		mgr.dispose();
 	});
 });

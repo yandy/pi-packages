@@ -22,6 +22,7 @@ import {
 import type { AgentConfigLookup } from "../config/agent-types";
 import type { EvictedSubagent } from "../lifecycle/subagent-manager";
 import type { SubagentStatus } from "../lifecycle/subagent-state";
+import { sumSessionUsage } from "../lifecycle/usage";
 import type { SessionMessage, SubagentType } from "../types";
 import { formatDuration, getDisplayName } from "../ui/display";
 
@@ -120,26 +121,13 @@ export function listNavigableAgents(
 
 /**
  * Sum the cost of a parsed session file's entries on the same accounting basis
- * as `getSessionStats()`: assistant and toolResult messages, standalone usage
- * entries, and compaction/branch_summary usage. Skips the session header and
- * messages without usage. Used for agents evicted from the in-memory map.
+ * as the live snapshot (`sumSessionUsage`): assistant and toolResult messages,
+ * standalone usage entries, and compaction/branch_summary usage. Skips the
+ * session header and messages without usage. Used for agents evicted from the
+ * in-memory map, so their overlay shows the same number the live widget did.
  */
 export function sumSessionCost(entries: readonly unknown[]): number {
-	const costOf = (usage: unknown): number => {
-		const u = usage as { cost?: { total?: number } } | undefined;
-		return u?.cost?.total ?? 0;
-	};
-	let total = 0;
-	for (const raw of entries) {
-		const entry = raw as { type?: string; usage?: unknown; message?: { role?: string; usage?: unknown } };
-		if (entry.type === "usage" || entry.type === "compaction" || entry.type === "branch_summary") {
-			total += costOf(entry.usage);
-		} else if (entry.type === "message") {
-			const role = entry.message?.role;
-			if (role === "assistant" || role === "toolResult") total += costOf(entry.message?.usage);
-		}
-	}
-	return total;
+	return sumSessionUsage(entries).cost;
 }
 
 /** Total cost of a persisted child-session JSONL file (evicted-agent snapshots). */

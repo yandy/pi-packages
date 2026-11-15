@@ -13,7 +13,7 @@
 import type { AgentSession, AgentSessionEvent, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { ChildLifecyclePublisher } from "../lifecycle/child-lifecycle";
 import { normalizeMaxTurns } from "../lifecycle/turn-limits";
-import { getSessionContextPercent, type SessionStatsLike, type SessionUsageSnapshot } from "../lifecycle/usage";
+import { getSessionContextPercent, type SessionStatsLike, type SessionUsageSnapshot, sumSessionUsage } from "../lifecycle/usage";
 import { extractText } from "../session/context";
 import { getAgentConversation } from "../session/conversation";
 import type { SessionMessage } from "../types";
@@ -188,26 +188,17 @@ export class SubagentSession {
 
 	/**
 	 * Session usage totals (tokens + cost) on the parent-footer accounting
-	 * basis. The leaf-id probe is O(1) so per-widget-tick callers stay cheap;
-	 * `getSessionStats()` runs only when the leaf changed (entries are
-	 * append-only and every append advances the leaf, so the leaf changes iff
-	 * the stats can have). `getLeafId` is the probe because it exists on both
-	 * the 0.80.2 and 1.5.2 `SessionManager` types — `getEntryCount` does not.
+	 * basis. Reads the append-only session entries directly: `getSessionStats()`
+	 * on pi 0.80.2 only scans `state.messages` (which compaction replaces), so
+	 * it would under-report after compaction on that host. The leaf-id probe is
+	 * O(1) so per-widget-tick callers stay cheap; summation runs only when the
+	 * leaf changed (every append advances it).
 	 */
 	getUsageSnapshot(): SessionUsageSnapshot {
 		const leafId = this._session.sessionManager.getLeafId();
 		const cached = this.usageCache;
 		if (cached && cached.leafId === leafId) return cached.snapshot;
-		const stats = this._session.getSessionStats();
-		const t = stats.tokens;
-		const snapshot: SessionUsageSnapshot = {
-			input: t.input,
-			output: t.output,
-			cacheRead: t.cacheRead ?? 0,
-			cacheWrite: t.cacheWrite,
-			totalTokens: t.total ?? t.input + t.output + t.cacheRead + t.cacheWrite,
-			cost: stats.cost ?? 0,
-		};
+		const snapshot = sumSessionUsage(this._session.sessionManager.getEntries());
 		this.usageCache = { leafId, snapshot };
 		return snapshot;
 	}
