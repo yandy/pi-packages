@@ -22,6 +22,7 @@ export function makeNavigable(overrides: Partial<NavigableSubagent> = {}): Navig
 		isSessionReady: () => true,
 		subscribeToUpdates: vi.fn(() => () => {}),
 		getToolDefinition: vi.fn(() => undefined),
+		getCost: vi.fn(() => undefined),
 		...overrides,
 	};
 }

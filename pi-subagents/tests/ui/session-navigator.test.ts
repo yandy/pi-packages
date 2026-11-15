@@ -47,7 +47,13 @@ function countLayouts(overlay: TranscriptOverlay): () => number {
 }
 
 function makeOverlay(
-	opts: { source?: TranscriptSource; done?: (r: undefined) => void; tui?: TUI; modelName?: string } = {},
+	opts: {
+		source?: TranscriptSource;
+		done?: (r: undefined) => void;
+		tui?: TUI;
+		modelName?: string;
+		getCost?: () => number | undefined;
+	} = {},
 ) {
 	return new TranscriptOverlay({
 		tui: opts.tui ?? mockTui(),
@@ -57,6 +63,7 @@ function makeOverlay(
 		cwd: "/test/cwd",
 		markdownTheme: getMarkdownTheme(),
 		modelName: opts.modelName,
+		getCost: opts.getCost,
 	});
 }
 
@@ -708,5 +715,17 @@ describe("SessionNavigatorHandler", () => {
 
 		expect(ui.notify).toHaveBeenCalledWith("Could not read the session transcript file.", "error");
 		expect(ui.custom).not.toHaveBeenCalled();
+	});
+});
+
+describe("TranscriptOverlay — cost in the title", () => {
+	it("overlays the cost after the model name when positive", () => {
+		const out = makeOverlay({ modelName: "haiku", getCost: () => 0.042 }).render(80).join("\n");
+		expect(out).toContain("Subagent session · haiku · $0.042");
+	});
+
+	it("omits the cost when zero or undefined", () => {
+		expect(makeOverlay({ getCost: () => 0 }).render(80).join("\n")).not.toContain("$");
+		expect(makeOverlay({ modelName: "haiku" }).render(80).join("\n")).not.toContain("$");
 	});
 });

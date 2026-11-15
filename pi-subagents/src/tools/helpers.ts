@@ -1,6 +1,6 @@
 import type { AgentConfigLookup } from "../config/agent-types";
 import { getLifetimeTotal, type LifetimeUsage } from "../lifecycle/usage";
-import { type AgentDetails, formatCost, formatTokens } from "../ui/display";
+import { type AgentDetails, formatTokens } from "../ui/display";
 
 /** Parenthetical status note for completed agent result text. */
 export function getStatusNote(status: string): string {

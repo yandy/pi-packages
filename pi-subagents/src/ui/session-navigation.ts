@@ -47,6 +47,8 @@ export interface NavigableSubagent {
 	isSessionReady(): boolean;
 	subscribeToUpdates(fn: () => void): (() => void) | undefined;
 	getToolDefinition(name: string): ToolDefinition | undefined;
+	/** Run cost in dollars, or undefined when no session exists. */
+	getCost(): number | undefined;
 }
 
 /**
@@ -114,6 +116,35 @@ export function listNavigableAgents(
 			}),
 		);
 	return [...live, ...evictedEntries];
+}
+
+/**
+ * Sum the cost of a parsed session file's entries on the same accounting basis
+ * as `getSessionStats()`: assistant and toolResult messages, standalone usage
+ * entries, and compaction/branch_summary usage. Skips the session header and
+ * messages without usage. Used for agents evicted from the in-memory map.
+ */
+export function sumSessionCost(entries: readonly unknown[]): number {
+	const costOf = (usage: unknown): number => {
+		const u = usage as { cost?: { total?: number } } | undefined;
+		return u?.cost?.total ?? 0;
+	};
+	let total = 0;
+	for (const raw of entries) {
+		const entry = raw as { type?: string; usage?: unknown; message?: { role?: string; usage?: unknown } };
+		if (entry.type === "usage" || entry.type === "compaction" || entry.type === "branch_summary") {
+			total += costOf(entry.usage);
+		} else if (entry.type === "message") {
+			const role = entry.message?.role;
+			if (role === "assistant" || role === "toolResult") total += costOf(entry.message?.usage);
+		}
+	}
+	return total;
+}
+
+/** Total cost of a persisted child-session JSONL file (evicted-agent snapshots). */
+export function fileCost(outputFile: string, readFile: (path: string) => string): number {
+	return sumSessionCost(parseSessionEntries(readFile(outputFile)));
 }
 
 /**

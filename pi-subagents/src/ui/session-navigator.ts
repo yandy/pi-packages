@@ -25,9 +25,10 @@ import {
 } from "@earendil-works/pi-tui";
 import type { AgentConfigLookup } from "../config/agent-types";
 import type { EvictedSubagent } from "../lifecycle/subagent-manager";
-import { describeActivity, type Theme } from "../ui/display";
+import { describeActivity, formatCost, type Theme } from "../ui/display";
 import { TranscriptBody } from "../ui/transcript-body";
 import {
+	fileCost,
 	fileSnapshotSource,
 	listNavigableAgents,
 	liveSource,
@@ -82,6 +83,8 @@ export interface TranscriptOverlayOptions {
 	modelName?: string;
 	/** Thinking level to show alongside model name, or undefined to omit. */
 	thinking?: string;
+	/** Run cost (live: record getter; evicted: parsed file snapshot). */
+	getCost?: () => number | undefined;
 }
 
 /**
@@ -109,15 +112,20 @@ export class SessionNavigatorHandler {
 		let source: TranscriptSource;
 		let modelName: string | undefined;
 		let thinking: string | undefined;
+		let getCost: (() => number | undefined) | undefined;
 		try {
 			if (entry.kind === "live") {
 				source = liveSource(entry.record);
 				modelName = entry.record.modelName;
 				thinking = entry.record.thinking;
+				getCost = () => entry.record.getCost();
 			} else {
 				source = fileSnapshotSource(entry.outputFile, readFile);
 				modelName = entry.modelName;
 				thinking = entry.thinking;
+				// Static snapshot: parse the file once, not on every overlay frame.
+				const snapshotCost = fileCost(entry.outputFile, readFile);
+				getCost = () => snapshotCost;
 			}
 		} catch {
 			ui.notify("Could not read the session transcript file.", "error");
@@ -126,7 +134,7 @@ export class SessionNavigatorHandler {
 		const markdownTheme = getMarkdownTheme();
 		await ui.custom<undefined>(
 			(tui, theme, _keybindings, done) =>
-				new TranscriptOverlay({ tui, theme, source, done, cwd, markdownTheme, modelName, thinking }),
+				new TranscriptOverlay({ tui, theme, source, done, cwd, markdownTheme, modelName, thinking, getCost }),
 			{
 				overlay: true,
 				overlayOptions: { anchor: "center", width: "90%", maxHeight: `${VIEWPORT_HEIGHT_PCT}%` },
@@ -176,6 +184,7 @@ export class TranscriptOverlay implements Component {
 	private readonly done: (result: undefined) => void;
 	private readonly modelName?: string;
 	private readonly thinking?: string;
+	private readonly getCost?: () => number | undefined;
 	private readonly body: TranscriptBody;
 
 	/** Throttle bookkeeping for coalescing live-source syncs. */
@@ -191,13 +200,24 @@ export class TranscriptOverlay implements Component {
 	/** Running-agent indicator baked into `renderedLines` — invalidates the cache when it changes. */
 	private renderedIndicator = "";
 
-	constructor({ tui, theme, source, done, cwd, markdownTheme, modelName, thinking }: TranscriptOverlayOptions) {
+	constructor({
+		tui,
+		theme,
+		source,
+		done,
+		cwd,
+		markdownTheme,
+		modelName,
+		thinking,
+		getCost,
+	}: TranscriptOverlayOptions) {
 		this.tui = tui;
 		this.theme = theme;
 		this.source = source;
 		this.done = done;
 		this.modelName = modelName;
 		this.thinking = thinking;
+		this.getCost = getCost;
 		this.body = new TranscriptBody({
 			tui,
 			cwd,
@@ -281,7 +301,9 @@ export class TranscriptOverlay implements Component {
 		const modelPart = this.modelName
 			? this.thinking ? ` · ${this.modelName} (${this.thinking})` : ` · ${this.modelName}`
 			: "";
-		const title = modelPart ? `Subagent session${modelPart}` : "Subagent session";
+		const costText = formatCost(this.getCost?.());
+		const costPart = costText ? ` · ${costText}` : "";
+		const title = modelPart || costPart ? `Subagent session${modelPart}${costPart}` : "Subagent session";
 		lines.push(row(th.bold(title)));
 		lines.push(hrMid);
 

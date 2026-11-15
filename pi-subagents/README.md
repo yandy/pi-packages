@@ -6,7 +6,8 @@ A [pi](https://pi.dev) extension providing a focused, in-process sub-agent core 
 
 - **In-process & native** — agents share the same pi runtime: same tool names, calling conventions, and UI patterns
 - **Parallel background agents** — spawn multiple agents with automatic queuing (configurable concurrency, default 4)
-- **Live widget UI** — persistent widget showing animated spinners, live tool activity, token counts, and colored status icons
+- **Live widget UI** — persistent widget showing animated spinners, live tool activity, token counts, run cost, and colored status icons
+- **Subagent cost accounting** — every run's cost is appended to the parent session as a `subagent` usage entry, so the footer total, `/session`, and `/usage` (per child model) include it exactly once; the same cost appears on the widget, completion notification, tool results, and the `/subagents:sessions` overlay title
 - **Custom agent types** — define agents in `.pi/agents/<name>.md` with YAML frontmatter: system prompts, model, thinking, tools
 - **Mid-run steering** — inject messages into running agents to redirect work without restarting
 - **Session resume** — pick up where an agent left off, preserving full conversation context
@@ -156,7 +157,7 @@ substituted for them. If an agent type pins `model` in its frontmatter, that mod
 | Command | Description |
 |---------|-------------|
 | `/subagents:settings` | Configure concurrency, turn limits, timeouts |
-| `/subagents:sessions` | View a subagent's session transcript |
+| `/subagents:sessions` | View a subagent's session transcript (title shows its run cost) |
 
 The session viewer renders the transcript read-only with Pi's own per-entry
 components and follows the running agent live. Tool results appear in Pi's

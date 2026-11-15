@@ -3,9 +3,11 @@ import { AgentTypeRegistry } from "../../src/config/agent-types";
 import type { EvictedSubagent } from "../../src/lifecycle/subagent-manager";
 import type { SessionMessage } from "../../src/types";
 import {
+	fileCost,
 	fileSnapshotSource,
 	listNavigableAgents,
 	liveSource,
+	sumSessionCost,
 	type NavigableSubagent,
 	type TranscriptSource,
 } from "../../src/ui/session-navigation";
@@ -228,5 +230,50 @@ describe("fileSnapshotSource", () => {
 		});
 		const source = fileSnapshotSource("/tasks/empty.jsonl", () => headerOnly);
 		expect(source.getMessages()).toEqual([]);
+	});
+});
+
+/** Minimal usage object with the fields sumSessionCost reads. */
+function usage(cost: number) {
+	return {
+		input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: cost },
+	};
+}
+
+describe("sumSessionCost", () => {
+	it("sums usage entries, assistant/toolResult messages, and compaction usage exactly once", () => {
+		const entries = [
+			{ type: "session", id: "s1", version: 3, timestamp: "t", cwd: "/p" },
+			{ type: "message", id: "m1", parentId: null, timestamp: "t", message: { role: "user", content: "hi" } },
+			{ type: "message", id: "m2", parentId: "m1", timestamp: "t", message: { role: "assistant", content: [], usage: usage(0.02) } },
+			{ type: "message", id: "m3", parentId: "m2", timestamp: "t", message: { role: "toolResult", toolCallId: "tc1", toolName: "read", content: [], usage: usage(0.005) } },
+			{ type: "usage", id: "u1", parentId: "m3", timestamp: "t", kind: "cache_warm", provider: "p", model: "m", usage: usage(0.01) },
+			{ type: "compaction", id: "c1", parentId: "u1", timestamp: "t", summary: "", firstKeptEntryId: "c1", tokensBefore: 0, usage: usage(0.003) },
+		] as any;
+		expect(sumSessionCost(entries)).toBeCloseTo(0.038, 10);
+	});
+
+	it("returns 0 for header-only sessions and messages without usage", () => {
+		const entries = [
+			{ type: "session", id: "s1" },
+			{ type: "message", id: "m1", message: { role: "user", content: "hi" } },
+			{ type: "message", id: "m2", message: { role: "assistant", content: [] } },
+		] as any;
+		expect(sumSessionCost(entries)).toBe(0);
+	});
+});
+
+describe("fileCost", () => {
+	it("parses a JSONL snapshot and returns the summed cost", () => {
+		const jsonl = [
+			{ type: "session", version: 3, id: "s1", timestamp: "2026-06-23T00:00:00Z", cwd: "/proj" },
+			{ type: "message", id: "m1", parentId: null, timestamp: "2026-06-23T00:00:01Z", message: { role: "user", content: "do the thing" } },
+			{ type: "message", id: "m2", parentId: "m1", timestamp: "2026-06-23T00:00:02Z", message: { role: "assistant", content: [{ type: "text", text: "done" }], usage: usage(0.02) } },
+			{ type: "usage", id: "u1", parentId: "m2", timestamp: "2026-06-23T00:00:03Z", kind: "cache_warm", provider: "anthropic", model: "claude-test", usage: usage(0.01) },
+		].map((e) => JSON.stringify(e)).join("\n");
+		const readFile = vi.fn(() => jsonl);
+		expect(fileCost("/tasks/a.jsonl", readFile)).toBeCloseTo(0.03, 10);
+		expect(readFile).toHaveBeenCalledWith("/tasks/a.jsonl");
 	});
 });
