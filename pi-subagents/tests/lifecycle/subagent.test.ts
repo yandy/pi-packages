@@ -878,3 +878,112 @@ describe("Subagent.resume() — error handling", () => {
 		await expect(agent.resume("more")).rejects.toThrow(/missing session/);
 	});
 });
+
+describe("Subagent — settleUsage", () => {
+	const SNAP = { input: 1000, output: 200, cacheRead: 500, cacheWrite: 50, totalTokens: 1750, cost: 0.05 };
+	const BASELINE = { input: 600, output: 100, cacheRead: 200, cacheWrite: 0, totalTokens: 900, cost: 0.02 };
+
+	/** A running agent with a session stub and a spy sink, ready to settle. */
+	function makeSettler(snapshot = SNAP) {
+		const sink = { appendUsage: vi.fn() };
+		const stub = createSubagentSessionStub();
+		stub.getUsageSnapshot.mockReturnValue(snapshot);
+		stub.getModelAttribution.mockReturnValue({ provider: "anthropic", model: "claude-test" });
+		const record = makeSubagent({
+			status: "running",
+			description: "Test task",
+			execution: makeStubExecution({ usageSink: sink }),
+		});
+		record.subagentSession = toSubagentSession(stub);
+		return { record, sink, stub };
+	}
+
+	it("completeRun appends the run's usage with kind, attribution, and note", () => {
+		const { record, sink } = makeSettler();
+		record.completeRun(createTurnLoopResult());
+		expect(sink.appendUsage).toHaveBeenCalledOnce();
+		const [kind, provider, model, usage, note] = sink.appendUsage.mock.calls[0];
+		expect(kind).toBe("subagent");
+		expect(provider).toBe("anthropic");
+		expect(model).toBe("claude-test");
+		expect(usage.cost.total).toBe(0.05);
+		expect(note).toBe('subagent "Test task"');
+	});
+
+	it("failRun appends the run's usage", () => {
+		const { record, sink } = makeSettler();
+		record.failRun(new Error("boom"));
+		expect(sink.appendUsage).toHaveBeenCalledOnce();
+	});
+
+	it("resume appends the run's usage on success", async () => {
+		const { record, sink } = makeSettler();
+		await record.resume("more");
+		expect(sink.appendUsage).toHaveBeenCalledOnce();
+	});
+
+	it("appends only the delta since the last report", () => {
+		const { record, sink } = makeSettler();
+		const state = (record as any).state as SubagentState;
+		state.markReported(BASELINE);
+		record.settleUsage();
+		const usage = sink.appendUsage.mock.calls[0][3];
+		expect(usage.input).toBe(400);
+		expect(usage.cost.total).toBeCloseTo(0.03, 10);
+	});
+
+	it("appends the full snapshot when nothing was reported yet, then records the marker", () => {
+		const { record, sink } = makeSettler();
+		record.settleUsage();
+		const usage = sink.appendUsage.mock.calls[0][3];
+		expect(usage.input).toBe(1000);
+		expect(usage.totalTokens).toBe(1750);
+		expect(((record as any).state as SubagentState).reportedUsage).toEqual(SNAP);
+	});
+
+	it("appends nothing for an all-zero snapshot", () => {
+		const { record, sink } = makeSettler({
+			input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: 0,
+		});
+		record.settleUsage();
+		expect(sink.appendUsage).not.toHaveBeenCalled();
+	});
+
+	it("is a no-op without a sink or without a session", () => {
+		const sink = { appendUsage: vi.fn() };
+		const noSink = makeSubagent({ status: "running" });
+		noSink.settleUsage();
+		const noSession = makeSubagent({ status: "running", execution: makeStubExecution({ usageSink: sink }) });
+		noSession.settleUsage();
+		expect(sink.appendUsage).not.toHaveBeenCalled();
+	});
+
+	it("keeps the marker when appendUsage throws, so the next settle re-reports", () => {
+		const { record, sink } = makeSettler();
+		sink.appendUsage.mockImplementationOnce(() => {
+			throw new Error("sink down");
+		});
+		expect(() => record.settleUsage()).not.toThrow();
+		expect(((record as any).state as SubagentState).reportedUsage).toBeUndefined();
+		record.settleUsage();
+		expect(sink.appendUsage).toHaveBeenCalledTimes(2);
+		const usage = sink.appendUsage.mock.calls[1][3];
+		expect(usage.input).toBe(1000);
+	});
+
+	it("still appends when cost is zero but tokens are nonzero", () => {
+		const { record, sink } = makeSettler({
+			input: 10, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 10, cost: 0,
+		});
+		record.settleUsage();
+		expect(sink.appendUsage).toHaveBeenCalledOnce();
+		expect(sink.appendUsage.mock.calls[0][3].cost.total).toBe(0);
+	});
+
+	it("getCost reads the session snapshot, or is undefined before a session exists", () => {
+		const { record } = makeSettler();
+		expect(record.getCost()).toBe(0.05);
+		const bare = makeSubagent({ status: "running" });
+		expect(bare.getCost()).toBeUndefined();
+	});
+});

@@ -321,3 +321,17 @@ describe("streamingMessage", () => {
 		expect(state.streamingMessage).toBeUndefined();
 	});
 });
+
+describe("SubagentState — reportedUsage marker", () => {
+	it("is undefined initially", () => {
+		const state = new SubagentState();
+		expect(state.reportedUsage).toBeUndefined();
+	});
+
+	it("returns the snapshot stored via markReported", () => {
+		const state = new SubagentState();
+		const snapshot = { input: 10, output: 20, cacheRead: 0, cacheWrite: 5, totalTokens: 35, cost: 0.04 };
+		state.markReported(snapshot);
+		expect(state.reportedUsage).toEqual(snapshot);
+	});
+});

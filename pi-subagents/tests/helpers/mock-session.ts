@@ -55,6 +55,15 @@ export function createSubagentSessionStub(session: MockSession = createMockSessi
 		}),
 		getConversation: vi.fn((): string => ""),
 		getContextPercent: vi.fn((): number | null => null),
+		getUsageSnapshot: vi.fn(() => ({
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: 0,
+		})),
+		getModelAttribution: vi.fn(() => ({ provider: "unknown", model: "unknown" })),
 		subscribe: vi.fn((fn: (event: unknown) => void): (() => void) => session.subscribe(fn)),
 		getSessionStats: vi.fn(() => ({
 			tokens: { input: 0, output: 0, cacheWrite: 0 },

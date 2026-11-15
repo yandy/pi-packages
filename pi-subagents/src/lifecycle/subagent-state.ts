@@ -18,7 +18,7 @@
  * session-event observer be unit-tested without constructing an executor.
  */
 
-import type { LifetimeUsage } from "../lifecycle/usage";
+import type { LifetimeUsage, SessionUsageSnapshot } from "../lifecycle/usage";
 import { addUsage } from "../lifecycle/usage";
 import type { SessionMessage } from "../types";
 
@@ -70,6 +70,12 @@ export class SubagentState {
 		return this._lifetimeUsage;
 	}
 
+	private _reportedUsage?: SessionUsageSnapshot;
+	/** Last snapshot successfully appended to a parent session (cost-settle marker). */
+	get reportedUsage(): Readonly<SessionUsageSnapshot> | undefined {
+		return this._reportedUsage;
+	}
+
 	private _compactionCount = 0;
 	get compactionCount(): number {
 		return this._compactionCount;
@@ -109,6 +115,11 @@ export class SubagentState {
 	/** Accumulate a usage delta into lifetimeUsage. Called by record-observer on message_end. */
 	addUsage(delta: { input: number; output: number; cacheWrite: number }): void {
 		addUsage(this._lifetimeUsage, delta);
+	}
+
+	/** Record a successfully-reported snapshot (cost-settle marker; advances only on append success). */
+	markReported(s: SessionUsageSnapshot): void {
+		this._reportedUsage = s;
 	}
 
 	/** Increment compaction count. Called by record-observer on compaction_end. */

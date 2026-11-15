@@ -11,12 +11,13 @@
 
 import type { Model } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { debugLog } from "../debug";
 import type { CreateSubagentSessionParams } from "../lifecycle/create-subagent-session";
 import type { ParentSnapshot } from "../lifecycle/parent-snapshot";
 import { RunListeners } from "../lifecycle/run-listeners";
 import type { SubagentSession, TurnLoopResult } from "../lifecycle/subagent-session";
 import { SubagentState, type SubagentStatus } from "../lifecycle/subagent-state";
-import type { LifetimeUsage } from "../lifecycle/usage";
+import { snapshotIsZero, toUsageEntryUsage, usageDelta, type LifetimeUsage, type UsageSink } from "../lifecycle/usage";
 import { NotificationState } from "../observation/notification-state";
 import { subscribeSubagentObserver } from "../observation/record-observer";
 import type { RunConfig } from "../runtime";
@@ -65,6 +66,8 @@ export interface SubagentExecution {
 	thinkingLevel?: ThinkingLevel;
 	parentSession?: ParentSessionInfo;
 	signal?: AbortSignal;
+	/** Parent-session usage sink captured at spawn — receives the cost-settle appends. */
+	usageSink?: UsageSink;
 }
 
 export interface SubagentInit {
@@ -216,6 +219,36 @@ export class Subagent {
 		return this.subagentSession?.messages ?? [];
 	}
 
+	/** The run's cost so far from the child session snapshot, or undefined before a session exists. */
+	getCost(): number | undefined {
+		return this.subagentSession?.getUsageSnapshot().cost;
+	}
+
+	/**
+	 * Settle the run's usage into the parent session: append the delta since the
+	 * last successful report as a `kind: "subagent"` usage entry. No-op without
+	 * a sink or session, or when the delta is all-zero. The reported marker
+	 * advances only after a successful append, so a failed append re-reports on
+	 * the next settle.
+	 */
+	settleUsage(): void {
+		const sink = this.execution.usageSink;
+		const session = this.subagentSession;
+		if (!sink || !session) return;
+
+		const current = session.getUsageSnapshot();
+		const delta = usageDelta(current, this.state.reportedUsage);
+		if (snapshotIsZero(delta)) return;
+
+		try {
+			const { provider, model } = session.getModelAttribution();
+			sink.appendUsage("subagent", provider, model, toUsageEntryUsage(delta), `subagent "${this.description}"`);
+			this.state.markReported(current);
+		} catch (err) {
+			debugLog("settleUsage", err);
+		}
+	}
+
 	/** The session's message history typed for Pi's session-rendering machinery, or empty if no session. */
 	get agentMessages(): readonly SessionMessage[] {
 		return this.subagentSession?.agentMessages ?? [];
@@ -364,8 +397,10 @@ export class Subagent {
 		try {
 			const responseText = await subagentSession.resumeTurnLoop(prompt, signal);
 			this.markCompleted(responseText);
+			this.settleUsage();
 		} catch (err) {
 			this.markError(err);
+			this.settleUsage();
 		} finally {
 			this.listeners.release();
 		}
@@ -509,6 +544,9 @@ export class Subagent {
 		else if (result.steered) this.markSteered(finalResult);
 		else this.markCompleted(finalResult);
 
+		// Settle before onRunFinished so the widget's first completion frame reads the cost.
+		this.settleUsage();
+
 		this.execution.observer?.onRunFinished?.(this);
 	}
 
@@ -517,11 +555,12 @@ export class Subagent {
 		this.subagentSession?.dispose();
 	}
 
-	/** Fail a run: mark error, release listeners, notify observer. */
+	/** Fail a run: mark error, release listeners, settle usage, notify observer. */
 	failRun(err: unknown): void {
 		this.clearTimeoutGuard();
 		this.markError(err);
 		this.listeners.release();
+		this.settleUsage();
 
 		this.execution.observer?.onRunFinished?.(this);
 	}
