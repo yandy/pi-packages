@@ -112,3 +112,17 @@ describe("createNotificationRenderer", () => {
 		expect(text).toContain("haiku");
 	});
 });
+
+describe("notification renderer — cost", () => {
+	it("shows the formatted cost in the stats line when present", () => {
+		const render = createNotificationRenderer();
+		const result = render({ details: makeDetails({ totalTokens: 1000, cost: 0.042 }) }, { expanded: false }, stubTheme());
+		expect(renderText(result)).toContain("[dim:$0.042]");
+	});
+
+	it("omits the cost when zero or absent", () => {
+		const render = createNotificationRenderer();
+		expect(renderText(render({ details: makeDetails({ cost: 0 }) }, { expanded: false }, stubTheme()))).not.toContain("$");
+		expect(renderText(render({ details: makeDetails({}) }, { expanded: false }, stubTheme()))).not.toContain("$");
+	});
+});

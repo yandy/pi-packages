@@ -8,6 +8,7 @@ import {
 	NotificationManager,
 } from "../../src/observation/notification";
 import { createTestSubagent } from "../helpers/make-subagent";
+import { createSubagentSessionStub, toSubagentSession } from "../helpers/mock-session";
 
 // ---- Pure helper tests ----
 
@@ -244,5 +245,30 @@ describe("NotificationManager", () => {
 		system.dispose();
 		vi.advanceTimersByTime(300);
 		expect(args.sendMessage).not.toHaveBeenCalled();
+	});
+});
+
+describe("cost in completion notification", () => {
+	function recordWithCost(cost: number) {
+		const record = createTestSubagent();
+		const stub = createSubagentSessionStub();
+		stub.getUsageSnapshot.mockReturnValue({
+			input: 500, output: 100, cacheRead: 0, cacheWrite: 0, totalTokens: 600, cost,
+		});
+		record.subagentSession = toSubagentSession(stub);
+		return record;
+	}
+
+	it("buildNotificationDetails carries the cost", () => {
+		const details = buildNotificationDetails(recordWithCost(0.042), 500);
+		expect(details.cost).toBe(0.042);
+	});
+
+	it("formatTaskNotification adds cost_total inside the usage element only when cost > 0", () => {
+		const xml = formatTaskNotification(recordWithCost(0.042), 500);
+		expect(xml).toMatch(/<usage>[^<]*(<[^>]+>[^<]*<\/[^>]+>)*<cost_total>\$0\.042<\/cost_total><\/usage>/);
+		expect(xml).toContain("<cost_total>$0.042</cost_total>");
+		const zeroXml = formatTaskNotification(recordWithCost(0), 500);
+		expect(zeroXml).not.toContain("<cost_total>");
 	});
 });

@@ -1,6 +1,7 @@
 import { debugLog } from "../debug";
 import { getLifetimeTotal } from "../lifecycle/usage";
 import type { Subagent } from "../types";
+import { formatCost } from "../ui/display";
 
 /** Details attached to custom notification messages for visual rendering. */
 export interface NotificationDetails {
@@ -12,6 +13,8 @@ export interface NotificationDetails {
 	maxTurns?: number;
 	totalTokens: number;
 	durationMs: number;
+	/** Run cost in dollars, or undefined when no session exists. */
+	cost?: number;
 	outputFile?: string;
 	error?: string;
 	resultPreview: string;
@@ -50,6 +53,8 @@ export function formatTaskNotification(record: Subagent, resultMaxLen: number): 
 	const contextPercent = record.getContextPercent();
 	const ctxXml = contextPercent !== null ? `<context_percent>${Math.round(contextPercent)}</context_percent>` : "";
 	const compactXml = record.compactionCount ? `<compactions>${record.compactionCount}</compactions>` : "";
+	const cost = record.getCost();
+	const costXml = cost && cost > 0 ? `<cost_total>${formatCost(cost)}</cost_total>` : "";
 
 	const resultPreview = record.result
 		? record.result.length > resultMaxLen
@@ -67,7 +72,7 @@ export function formatTaskNotification(record: Subagent, resultMaxLen: number): 
 		`<status>${escapeXml(status)}</status>`,
 		`<summary>Subagent "${escapeXml(record.description)}" ${record.status}</summary>`,
 		`<result>${escapeXml(resultPreview)}</result>`,
-		`<usage><total_tokens>${totalTokens}</total_tokens><tool_uses>${record.toolUses}</tool_uses>${ctxXml}${compactXml}<duration_ms>${durationMs}</duration_ms></usage>`,
+		`<usage><total_tokens>${totalTokens}</total_tokens><tool_uses>${record.toolUses}</tool_uses>${ctxXml}${compactXml}<duration_ms>${durationMs}</duration_ms>${costXml}</usage>`,
 		"</task-notification>",
 	]
 		.filter(Boolean)
@@ -86,6 +91,7 @@ export function buildNotificationDetails(record: Subagent, resultMaxLen: number)
 		turnCount: record.turnCount,
 		maxTurns: record.maxTurns,
 		totalTokens,
+		cost: record.getCost(),
 		durationMs: record.completedAt ? record.completedAt - record.startedAt : 0,
 		outputFile: record.outputFile,
 		error: record.error,
