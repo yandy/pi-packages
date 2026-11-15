@@ -254,3 +254,18 @@ describe("renderAgentResult", () => {
 		expect(renderAgentResult(details, "", false, false, theme)).toContain("[error:\u2717]");
 	});
 });
+
+describe("renderStats — cost", () => {
+	const theme = makeTheme();
+
+	it("includes the formatted cost after the token text", () => {
+		const details = makeDetails({ toolUses: 3, tokens: "1.0k token", cost: 0.042 });
+		const result = renderStats(details, theme);
+		expect(result).toContain("[dim:$0.042]");
+	});
+
+	it("omits the cost when zero or absent", () => {
+		expect(renderStats(makeDetails({ cost: 0 }), theme)).not.toContain("$");
+		expect(renderStats(makeDetails({}), theme)).not.toContain("$");
+	});
+});

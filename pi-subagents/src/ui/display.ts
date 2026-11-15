@@ -38,6 +38,8 @@ export interface AgentDetails {
 	maxTurns?: number;
 	agentId?: string;
 	error?: string;
+	/** Run cost so far in dollars (hidden when 0/undefined). */
+	cost?: number;
 }
 
 // ---- Constants ----
@@ -66,6 +68,14 @@ export function formatTokens(count: number): string {
 	if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M token`;
 	if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k token`;
 	return `${count} token`;
+}
+
+/**
+ * Format a cost in dollars at the parent footer's precision ($x.xxx), or ""
+ * when zero/undefined (subscription-priced models report 0 — hide, never $0.000).
+ */
+export function formatCost(cost?: number): string {
+	return cost && cost > 0 ? `$${cost.toFixed(3)}` : "";
 }
 
 /**

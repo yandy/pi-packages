@@ -6,6 +6,7 @@ import type { SessionMessage } from "../../src/types";
 import { createToolDeps } from "../helpers/make-deps";
 import { createResolvedSpawnConfig } from "../helpers/make-spawn-config";
 import { createTestSubagent, makeStubExecution } from "../helpers/make-subagent";
+import { createSubagentSessionStub, toSubagentSession } from "../helpers/mock-session";
 import { STUB_SNAPSHOT } from "../helpers/stub-ctx";
 
 function makeParams(overrides: Partial<ForegroundParams> = {}): ForegroundParams {
@@ -159,5 +160,69 @@ describe("runForeground", () => {
 		await vi.advanceTimersByTimeAsync(200);
 		// Interval must have been cleared — no further onUpdate calls
 		expect(onUpdate).not.toHaveBeenCalled();
+	});
+});
+
+describe("runForeground — cost display", () => {
+	/** A completed record whose session reports a nonzero-cost snapshot. */
+	function recordWithCost(cost: number) {
+		const record = createTestSubagent();
+		const stub = createSubagentSessionStub();
+		stub.getUsageSnapshot.mockReturnValue({
+			input: 500, output: 500, cacheRead: 0, cacheWrite: 0, totalTokens: 1000, cost,
+		});
+		record.subagentSession = toSubagentSession(stub);
+		return record;
+	}
+
+	it("includes the cost after the token text in the completion message", async () => {
+		const record = recordWithCost(0.042);
+		const deps = createToolDeps({
+			manager: {
+				spawnAndWait: vi.fn().mockResolvedValue(record),
+			},
+		});
+		const result = await runForeground(deps.manager, makeParams(), undefined, undefined);
+		expect(result.content[0].text).toContain("1.0k token, $0.042");
+		expect(result.details).toMatchObject({ cost: 0.042 });
+	});
+
+	it("omits the cost when zero", async () => {
+		const record = recordWithCost(0);
+		const deps = createToolDeps({
+			manager: {
+				spawnAndWait: vi.fn().mockResolvedValue(record),
+			},
+		});
+		const result = await runForeground(deps.manager, makeParams(), undefined, undefined);
+		expect(result.content[0].text).not.toContain("$");
+	});
+
+	it("streams live cost in the onUpdate details once the session exists", async () => {
+		vi.useRealTimers();
+		try {
+			const record = recordWithCost(0.042);
+			const deps = createToolDeps({
+				manager: {
+					spawnAndWait: vi.fn(async (_s: unknown, _t: string, _p: string, opts: Record<string, unknown>) => {
+						const observer = opts.observer as { onSessionCreated?: (a: unknown) => void };
+						observer.onSessionCreated?.(record);
+						// Let at least one 80ms spinner tick fire with the record wired.
+						await new Promise((r) => setTimeout(r, 120));
+						return record;
+					}),
+				},
+			});
+			const updates: Array<{ details?: { cost?: number } }> = [];
+			await runForeground(
+				deps.manager,
+				makeParams(),
+				undefined,
+				(update: { details?: { cost?: number } }) => updates.push(update),
+			);
+			expect(updates.some((u) => u.details?.cost === 0.042)).toBe(true);
+		} finally {
+			vi.useFakeTimers();
+		}
 	});
 });

@@ -4,7 +4,7 @@ import type { AgentSpawnConfig } from "../lifecycle/subagent-manager";
 import { buildDetails, formatLifetimeTokens, getStatusNote, textResult } from "../tools/helpers";
 import type { ResolvedSpawnConfig } from "../tools/spawn-config";
 import type { ParentSessionInfo, Subagent } from "../types";
-import { type AgentDetails, describeActivity, formatMs, SPINNER } from "../ui/display";
+import { type AgentDetails, describeActivity, formatCost, formatMs, SPINNER } from "../ui/display";
 
 /** Narrow manager interface for the foreground runner. */
 export interface ForegroundManagerDeps {
@@ -45,6 +45,7 @@ export async function runForeground(
 			...presentation.detailBase,
 			toolUses,
 			tokens: recordRef ? formatLifetimeTokens(recordRef) : "",
+			cost: recordRef?.getCost(),
 			// Read activity off the record; fall back to safe defaults before onSessionCreated fires
 			turnCount: recordRef?.turnCount ?? 1,
 			maxTurns: recordRef?.maxTurns ?? execution.effectiveMaxTurns,
@@ -94,7 +95,8 @@ export async function runForeground(
 	clearInterval(spinnerInterval);
 
 	const tokenText = formatLifetimeTokens(record);
-	const details = buildDetails(presentation.detailBase, record, { tokens: tokenText });
+	const costText = formatCost(record.getCost());
+	const details = buildDetails(presentation.detailBase, record, { tokens: tokenText, cost: record.getCost() });
 
 	const fallbackNote = identity.fellBack
 		? `Note: Unknown agent type "${identity.rawType}" — using general-purpose.\n\n`
@@ -107,6 +109,7 @@ export async function runForeground(
 	const durationMs = (record.completedAt ?? Date.now()) - record.startedAt;
 	const statsParts = [`${record.toolUses} tool uses`];
 	if (tokenText) statsParts.push(tokenText);
+	if (costText) statsParts.push(costText);
 	return textResult(
 		`${fallbackNote}Agent completed in ${formatMs(durationMs)} (${statsParts.join(", ")})${getStatusNote(record.status)}.\n\n` +
 			(record.result?.trim() ?? "No output."),

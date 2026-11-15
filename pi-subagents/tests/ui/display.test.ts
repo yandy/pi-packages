@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SessionMessage } from "../../src/types";
-import { describeActivity } from "../../src/ui/display";
+import { describeActivity, formatCost } from "../../src/ui/display";
 
 const noTools = new Map<string, string>();
 
@@ -52,5 +52,17 @@ describe("describeActivity", () => {
 	it("falls back to thinking without a message", () => {
 		expect(describeActivity(noTools, undefined)).toBe("thinking…");
 		expect(describeActivity(noTools)).toBe("thinking…");
+	});
+});
+
+describe("formatCost", () => {
+	it("formats positive cost with three decimals", () => {
+		expect(formatCost(0.042)).toBe("$0.042");
+		expect(formatCost(1.5)).toBe("$1.500");
+	});
+
+	it("returns empty string for zero, undefined cost", () => {
+		expect(formatCost(0)).toBe("");
+		expect(formatCost(undefined)).toBe("");
 	});
 });

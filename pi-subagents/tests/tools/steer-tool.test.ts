@@ -85,3 +85,28 @@ describe("SteerTool", () => {
 		expect(result.content[0].text).toContain("session closed");
 	});
 });
+
+describe("SteerTool — cost display", () => {
+	function runningRecordWithCost(cost: number) {
+		const record = createTestSubagent({ status: "running", completedAt: undefined });
+		const stub = createSubagentSessionStub(createMockSession());
+		stub.getUsageSnapshot.mockReturnValue({
+			input: 500, output: 100, cacheRead: 0, cacheWrite: 0, totalTokens: 600, cost,
+		});
+		stub.steer.mockResolvedValue(true);
+		record.subagentSession = toSubagentSession(stub);
+		return record;
+	}
+
+	it("includes the cost in the state text when nonzero", async () => {
+		const records = new Map([["agent-1", runningRecordWithCost(0.042)]]);
+		const result = await execute(makeManager(records), makeEvents(), { agent_id: "agent-1", message: "go" });
+		expect(result.content[0].text).toContain("$0.042");
+	});
+
+	it("omits the cost when zero", async () => {
+		const records = new Map([["agent-1", runningRecordWithCost(0)]]);
+		const result = await execute(makeManager(records), makeEvents(), { agent_id: "agent-1", message: "go" });
+		expect(result.content[0].text).not.toContain("$");
+	});
+});

@@ -1,6 +1,6 @@
 import type { AgentConfigLookup } from "../config/agent-types";
 import { getLifetimeTotal, type LifetimeUsage } from "../lifecycle/usage";
-import { type AgentDetails, formatTokens } from "../ui/display";
+import { type AgentDetails, formatCost, formatTokens } from "../ui/display";
 
 /** Parenthetical status note for completed agent result text. */
 export function getStatusNote(status: string): string {
@@ -30,6 +30,8 @@ export function buildDetails(
 		/** Live-activity counters — exposed as getters on Subagent (Phase 18 Step 2). */
 		turnCount?: number;
 		maxTurns?: number;
+		/** Run cost so far in dollars, or undefined before a session exists. */
+		getCost?: () => number | undefined;
 	},
 	overrides?: Partial<AgentDetails>,
 ): AgentDetails {
@@ -43,6 +45,7 @@ export function buildDetails(
 		status: record.status as AgentDetails["status"],
 		agentId: record.id,
 		error: record.error,
+		cost: record.getCost?.(),
 		...overrides,
 	};
 }

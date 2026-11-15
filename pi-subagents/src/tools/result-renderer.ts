@@ -7,7 +7,7 @@
  */
 
 import type { AgentDetails, Theme } from "../ui/display";
-import { formatMs, formatTurns, SPINNER } from "../ui/display";
+import { formatCost, formatMs, formatTurns, SPINNER } from "../ui/display";
 
 // ---- Dispatcher ----
 
@@ -93,7 +93,7 @@ export function renderFailed(details: AgentDetails, theme: Theme): string {
 // ---- Shared helper ----
 
 /**
- * Build the stats string: "haiku · thinking: high · ⟳5≤30 · 3 tool uses · 33.8k token".
+ * Build the stats string: "haiku · thinking: high · ⟳5≤30 · 3 tool uses · 33.8k token · $0.042".
  * Returns an empty string when all fields are absent or zero.
  */
 export function renderStats(details: AgentDetails, theme: Theme): string {
@@ -105,5 +105,7 @@ export function renderStats(details: AgentDetails, theme: Theme): string {
 	}
 	if (details.toolUses > 0) parts.push(`${details.toolUses} tool use${details.toolUses === 1 ? "" : "s"}`);
 	if (details.tokens) parts.push(details.tokens);
+	const cost = formatCost(details.cost);
+	if (cost) parts.push(cost);
 	return parts.map((p) => theme.fg("dim", p)).join(` ${theme.fg("dim", "\u00B7")} `);
 }

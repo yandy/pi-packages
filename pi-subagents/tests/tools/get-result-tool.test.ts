@@ -114,3 +114,27 @@ describe("GetResultTool", () => {
 		expect(result.content[0].text).toContain("[User]: hello");
 	});
 });
+
+describe("GetResultTool — cost display", () => {
+	function recordWithCost(cost: number) {
+		const record = createTestSubagent();
+		const stub = createSubagentSessionStub();
+		stub.getUsageSnapshot.mockReturnValue({
+			input: 500, output: 100, cacheRead: 0, cacheWrite: 0, totalTokens: 600, cost,
+		});
+		record.subagentSession = toSubagentSession(stub);
+		return record;
+	}
+
+	it("shows Cost: $x.xxx for a completed agent with cost", async () => {
+		const records = new Map([["agent-1", recordWithCost(0.042)]]);
+		const result = await execute(makeManager(records), makeNotifications(), { agent_id: "agent-1" });
+		expect(result.content[0].text).toContain("Cost: $0.042");
+	});
+
+	it("omits the cost stat when cost is zero", async () => {
+		const records = new Map([["agent-1", recordWithCost(0)]]);
+		const result = await execute(makeManager(records), makeNotifications(), { agent_id: "agent-1" });
+		expect(result.content[0].text).not.toContain("$");
+	});
+});

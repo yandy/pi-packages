@@ -3,7 +3,7 @@ import { Type } from "typebox";
 import type { AgentConfigLookup } from "../config/agent-types";
 import { formatLifetimeTokens, textResult } from "../tools/helpers";
 import type { Subagent } from "../types";
-import { formatDuration, getDisplayName } from "../ui/display";
+import { formatCost, formatDuration, getDisplayName } from "../ui/display";
 
 // ---- Deps interfaces ----
 
@@ -52,8 +52,10 @@ export class GetResultTool {
 		const duration = formatDuration(record.startedAt, record.completedAt);
 		const tokens = formatLifetimeTokens(record);
 		const contextPercent = record.getContextPercent();
+		const costText = formatCost(record.getCost());
 		const statsParts = [`Tool uses: ${record.toolUses}`];
 		if (tokens) statsParts.push(tokens);
+		if (costText) statsParts.push(`Cost: ${costText}`);
 		if (contextPercent !== null) statsParts.push(`Context: ${Math.round(contextPercent)}%`);
 		if (record.compactionCount) statsParts.push(`Compactions: ${record.compactionCount}`);
 		statsParts.push(`Duration: ${duration}`);

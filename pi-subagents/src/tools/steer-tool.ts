@@ -1,5 +1,6 @@
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { formatCost } from "../ui/display";
 import { formatLifetimeTokens, textResult } from "../tools/helpers";
 import type { Subagent } from "../types";
 
@@ -47,8 +48,10 @@ export class SteerTool {
 			}
 			const tokens = formatLifetimeTokens(record);
 			const contextPercent = record.getContextPercent();
+			const costText = formatCost(record.getCost());
 			const stateParts: string[] = [];
 			if (tokens) stateParts.push(tokens);
+			if (costText) stateParts.push(costText);
 			stateParts.push(`${record.toolUses} tool ${record.toolUses === 1 ? "use" : "uses"}`);
 			if (contextPercent !== null) stateParts.push(`context ${Math.round(contextPercent)}% full`);
 			if (record.compactionCount)
