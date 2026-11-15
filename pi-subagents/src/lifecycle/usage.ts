@@ -1,5 +1,7 @@
 /** usage.ts — Token usage: shapes, accumulator operators, session-stats readers. */
 
+import type { Usage } from "@earendil-works/pi-ai";
+
 /**
  * Lifetime usage components, accumulated via `message_end` events. Survives
  * compaction (which replaces session.state.messages and would reset any
@@ -62,4 +64,72 @@ export function getSessionContextPercent(session: SessionLike | undefined): numb
 	} catch {
 		return null;
 	}
+}
+
+// ── Session usage snapshots (cost settle) ─────────────────────────────────────
+
+/**
+ * Point-in-time totals of one child session, mapped from upstream
+ * `getSessionStats()`: the same accounting basis the parent footer uses for
+ * itself (assistant/toolResult/usage-entry/compaction usage, compaction-safe).
+ * Cost settle computes field-wise deltas between two snapshots.
+ */
+export interface SessionUsageSnapshot {
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	totalTokens: number;
+	cost: number;
+}
+
+/** Field-wise `current - last`; `last === undefined` → a copy of `current`. */
+export function usageDelta(current: SessionUsageSnapshot, last?: SessionUsageSnapshot): SessionUsageSnapshot {
+	if (!last) return { ...current };
+	return {
+		input: current.input - last.input,
+		output: current.output - last.output,
+		cacheRead: current.cacheRead - last.cacheRead,
+		cacheWrite: current.cacheWrite - last.cacheWrite,
+		totalTokens: current.totalTokens - last.totalTokens,
+		cost: current.cost - last.cost,
+	};
+}
+
+/** True iff every field of the snapshot is 0 (nothing to report). */
+export function snapshotIsZero(s: SessionUsageSnapshot): boolean {
+	return (
+		s.input === 0 &&
+		s.output === 0 &&
+		s.cacheRead === 0 &&
+		s.cacheWrite === 0 &&
+		s.totalTokens === 0 &&
+		s.cost === 0
+	);
+}
+
+/**
+ * Map a snapshot onto the pi-ai `Usage` shape for `appendUsage`. Token fields
+ * are real; the per-category cost split is zero-filled because the source is
+ * a scalar — downstream consumers (`addUsageToTotals`, `getUsageCostBreakdown`,
+ * TUI) read only `cost.total` and the token fields.
+ */
+export function toUsageEntryUsage(s: SessionUsageSnapshot): Usage {
+	return {
+		input: s.input,
+		output: s.output,
+		cacheRead: s.cacheRead,
+		cacheWrite: s.cacheWrite,
+		totalTokens: s.totalTokens,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: s.cost },
+	};
+}
+
+/**
+ * Narrow write-side of the parent session's `SessionManager` for cost settle.
+ * The extension ctx type omits `appendUsage` (ReadonlySessionManager), so the
+ * runtime object is feature-detected against this shape at the wiring point.
+ */
+export interface UsageSink {
+	appendUsage(kind: string, provider: string, model: string, usage: Usage, note?: string): unknown;
 }

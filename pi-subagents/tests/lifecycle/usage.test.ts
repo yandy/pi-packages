@@ -1,5 +1,85 @@
 import { describe, expect, it } from "vitest";
-import { getLifetimeTotal, getSessionContextPercent, getSessionTokens } from "../../src/lifecycle/usage";
+import {
+	getLifetimeTotal,
+	getSessionContextPercent,
+	getSessionTokens,
+	snapshotIsZero,
+	toUsageEntryUsage,
+	usageDelta,
+	type SessionUsageSnapshot,
+} from "../../src/lifecycle/usage";
+
+// Session usage snapshots — cost settle basis (2026-11-15 subagent cost design)
+describe("session usage snapshots", () => {
+	const CURRENT: SessionUsageSnapshot = {
+		input: 1000,
+		output: 200,
+		cacheRead: 500,
+		cacheWrite: 50,
+		totalTokens: 1750,
+		cost: 0.05,
+	};
+	const BASELINE: SessionUsageSnapshot = {
+		input: 600,
+		output: 100,
+		cacheRead: 200,
+		cacheWrite: 0,
+		totalTokens: 900,
+		cost: 0.02,
+	};
+
+	describe("usageDelta", () => {
+		it("returns a copy of current when last is undefined", () => {
+			expect(usageDelta(CURRENT, undefined)).toEqual(CURRENT);
+		});
+
+		it("subtracts each field of last from current", () => {
+			const delta = usageDelta(CURRENT, BASELINE);
+			expect(delta.input).toBe(400);
+			expect(delta.output).toBe(100);
+			expect(delta.cacheRead).toBe(300);
+			expect(delta.cacheWrite).toBe(50);
+			expect(delta.totalTokens).toBe(850);
+			// Float-safe: 0.05 - 0.02 is not exactly 0.03 in binary.
+			expect(delta.cost).toBeCloseTo(0.03, 10);
+		});
+	});
+
+	describe("snapshotIsZero", () => {
+		it("is true for an all-zero snapshot", () => {
+			expect(
+				snapshotIsZero({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: 0 }),
+			).toBe(true);
+		});
+
+		it("is false when only cost is nonzero", () => {
+			expect(
+				snapshotIsZero({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: 0.01 }),
+			).toBe(false);
+		});
+
+		it("is false when only totalTokens is nonzero", () => {
+			expect(
+				snapshotIsZero({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 10, cost: 0 }),
+			).toBe(false);
+		});
+	});
+
+	describe("toUsageEntryUsage", () => {
+		it("copies token fields and puts the scalar cost on cost.total with zeroed split", () => {
+			expect(
+				toUsageEntryUsage({ input: 10, output: 20, cacheRead: 30, cacheWrite: 40, totalTokens: 100, cost: 0.042 }),
+			).toEqual({
+				input: 10,
+				output: 20,
+				cacheRead: 30,
+				cacheWrite: 40,
+				totalTokens: 100,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.042 },
+			});
+		});
+	});
+});
 
 // Regression for issue #38 — token semantics + context indicator
 describe("usage", () => {
