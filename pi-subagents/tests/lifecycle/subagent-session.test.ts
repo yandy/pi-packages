@@ -11,6 +11,8 @@ import { createChildLifecycleMock } from "../helpers/subagent-session-io";
  */
 function createSession(finalText = "") {
 	const listeners: Array<(event: any) => void> = [];
+	/** Mutable leaf sequence backing getLeafId — usage-snapshot tests advance it. */
+	let leafSeq = 0;
 	const session = {
 		messages: [] as unknown[],
 		subscribe: vi.fn((listener: (event: any) => void) => {
@@ -26,8 +28,16 @@ function createSession(finalText = "") {
 		abort: vi.fn(),
 		steer: vi.fn().mockResolvedValue(undefined),
 		dispose: vi.fn(),
+		sessionManager: {
+			getLeafId: vi.fn(() => `leaf-${leafSeq}`),
+			advanceLeaf: () => {
+				leafSeq++;
+			},
+		},
+		state: { model: { provider: "anthropic", id: "claude-test" } },
 		getSessionStats: vi.fn(() => ({
-			tokens: { input: 100, output: 50, cacheWrite: 10 },
+			tokens: { input: 100, output: 50, cacheRead: 7, cacheWrite: 10, total: 167 },
+			cost: 0.021,
 			contextUsage: { percent: 42 },
 		})),
 		getToolDefinition: vi.fn((_name: string): unknown => undefined),
@@ -443,5 +453,50 @@ describe("SubagentSession — dispose", () => {
 		expect(session.dispose).toHaveBeenCalledOnce();
 		expect(lifecycle.disposed).toHaveBeenCalledOnce();
 		expect(lifecycle.disposed).toHaveBeenCalledWith({ sessionId: "child-session-abc" });
+	});
+});
+
+describe("SubagentSession — usage snapshot", () => {
+	it("maps getSessionStats tokens and cost into a snapshot", () => {
+		const { session } = createSession("X");
+		const { sub } = makeSubagentSession(session);
+		expect(sub.getUsageSnapshot()).toEqual({
+			input: 100,
+			output: 50,
+			cacheRead: 7,
+			cacheWrite: 10,
+			totalTokens: 167,
+			cost: 0.021,
+		});
+	});
+
+	it("reuses the cached snapshot while the session leaf is unchanged", () => {
+		const { session } = createSession("X");
+		const { sub } = makeSubagentSession(session);
+		sub.getUsageSnapshot();
+		sub.getUsageSnapshot();
+		expect(session.getSessionStats).toHaveBeenCalledOnce();
+	});
+
+	it("re-reads stats when the session leaf advances", () => {
+		const { session } = createSession("X");
+		const { sub } = makeSubagentSession(session);
+		sub.getUsageSnapshot();
+		session.sessionManager.advanceLeaf();
+		sub.getUsageSnapshot();
+		expect(session.getSessionStats).toHaveBeenCalledTimes(2);
+	});
+
+	it("attributes the provider and model of the child session's model", () => {
+		const { session } = createSession("X");
+		const { sub } = makeSubagentSession(session);
+		expect(sub.getModelAttribution()).toEqual({ provider: "anthropic", model: "claude-test" });
+	});
+
+	it("falls back to unknown attribution when the session has no model", () => {
+		const { session } = createSession("X");
+		(session as any).state = {};
+		const { sub } = makeSubagentSession(session);
+		expect(sub.getModelAttribution()).toEqual({ provider: "unknown", model: "unknown" });
 	});
 });

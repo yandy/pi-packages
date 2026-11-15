@@ -13,7 +13,7 @@
 import type { AgentSession, AgentSessionEvent, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { ChildLifecyclePublisher } from "../lifecycle/child-lifecycle";
 import { normalizeMaxTurns } from "../lifecycle/turn-limits";
-import { getSessionContextPercent, type SessionStatsLike } from "../lifecycle/usage";
+import { getSessionContextPercent, type SessionStatsLike, type SessionUsageSnapshot } from "../lifecycle/usage";
 import { extractText } from "../session/context";
 import { getAgentConversation } from "../session/conversation";
 import type { SessionMessage } from "../types";
@@ -181,6 +181,46 @@ export class SubagentSession {
 	/** Return session token statistics. Satisfies `SessionLike`. */
 	getSessionStats(): SessionStatsLike {
 		return this._session.getSessionStats();
+	}
+
+	/** Cached usage snapshot — invalidated when the child session's leaf entry changes. */
+	private usageCache?: { leafId: string | null; snapshot: SessionUsageSnapshot };
+
+	/**
+	 * Session usage totals (tokens + cost) on the parent-footer accounting
+	 * basis. The leaf-id probe is O(1) so per-widget-tick callers stay cheap;
+	 * `getSessionStats()` runs only when the leaf changed (entries are
+	 * append-only and every append advances the leaf, so the leaf changes iff
+	 * the stats can have). `getLeafId` is the probe because it exists on both
+	 * the 0.80.2 and 1.5.2 `SessionManager` types — `getEntryCount` does not.
+	 */
+	getUsageSnapshot(): SessionUsageSnapshot {
+		const leafId = this._session.sessionManager.getLeafId();
+		const cached = this.usageCache;
+		if (cached && cached.leafId === leafId) return cached.snapshot;
+		const stats = this._session.getSessionStats();
+		const t = stats.tokens;
+		const snapshot: SessionUsageSnapshot = {
+			input: t.input,
+			output: t.output,
+			cacheRead: t.cacheRead ?? 0,
+			cacheWrite: t.cacheWrite,
+			totalTokens: t.total ?? t.input + t.output + t.cacheRead + t.cacheWrite,
+			cost: stats.cost ?? 0,
+		};
+		this.usageCache = { leafId, snapshot };
+		return snapshot;
+	}
+
+	/**
+	 * Provider/model attribution for usage entries: the child session's active
+	 * model, or `"unknown"` when absent (partial fixtures, pre-model sessions).
+	 */
+	getModelAttribution(): { provider: string; model: string } {
+		// Optional chaining even though the SDK types `state.model` non-optional:
+		// test fixtures pass partial session objects.
+		const model = (this._session as { state?: { model?: { provider?: string; id?: string } } }).state?.model;
+		return { provider: model?.provider ?? "unknown", model: model?.id ?? "unknown" };
 	}
 
 	/** The session's message history. */
