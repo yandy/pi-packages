@@ -153,8 +153,8 @@ export interface EscalationDecision {
 
 /**
  * 审批通道的最小结构形状（不依赖 pi 类型，便于测试注入）。ask 是一次完整审批对话：
- * 直连通道 select →（Deny 时）input；broker 通道把两步放进同一个 FIFO 任务（宿主只有
- * 一个对话框槽位，select 与 input 之间不得插入其他弹窗）。
+ * select →（Deny 时）input，两步在同一次 ask 内串行完成——理由弹窗属于本次审批，
+ * 不与并发审批互相打断（并发对话框由宿主管理，包不承诺顺序）。
  * 注意：pi 的 noOpUIContext.select 静默返回 undefined——调用前必须显式查 hasUI，
  * 否则“无通道”会被误判为“用户取消”（spec §9）。
  */
