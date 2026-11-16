@@ -75,7 +75,7 @@ export class UnsupportedWindowsShellError extends Error {
 	constructor(shell: string) {
 		super(
 			`[sandbox: ${shell} is not supported on Windows]\n` +
-			`pi-sandbox confines Windows commands through the powershell tool only (requires pi >= 1.0.0); use the powershell tool instead of bash — the command was NOT executed.\n` +
+			`pi-sandbox confines Windows commands through the powershell tool only; use the powershell tool instead of bash — the command was NOT executed.\n` +
 			`bash stays fail-closed on Windows: enabling it explicitly does not unconfine it.\n` +
 			`"danger-full-access" remains the only explicit bypass.`,
 		);
