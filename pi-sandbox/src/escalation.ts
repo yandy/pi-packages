@@ -153,8 +153,9 @@ export interface EscalationDecision {
 
 /**
  * 审批通道的最小结构形状（不依赖 pi 类型，便于测试注入）。ask 是一次完整审批对话：
- * select →（Deny 时）input，两步在同一次 ask 内串行完成——理由弹窗属于本次审批，
- * 不与并发审批互相打断（并发对话框由宿主管理，包不承诺顺序）。
+ * select →（Deny 时）input 两步在同一次 ask 内串行完成。不同 ask 的弹窗可以交错：
+ * 可见性与顺序由宿主管理（TUI 侧是栈，后到的弹窗先获焦，早先的等它关闭后恢复），
+ * 包不承诺顺序，每个 ask 各自结算。
  * 注意：pi 的 noOpUIContext.select 静默返回 undefined——调用前必须显式查 hasUI，
  * 否则“无通道”会被误判为“用户取消”（spec §9）。
  */
