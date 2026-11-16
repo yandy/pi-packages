@@ -77,18 +77,14 @@ describe("注册的 read/write/edit/bash 保留提示词元数据（spec 2026-10
 	});
 
 	it("保留内置 guideline（read/write/edit 各自的行为纪律）", () => {
-		// 钉包内性质：`...localRead` 这类对象 spread 必须把 base 定义的每条 guideline 原样带上。
-		// 不钉宿主的条数与文案——它们随宿主版本漂移（宿主的 edit 纪律条数与措辞都被改过）。
+		// 钉包内性质：`...localRead` 这类对象 spread 必须把 base 定义的每条 guideline 原样带上（不少条、不改词、
+		// 不换序）；不钉宿主的条数与文案——它们随宿主版本漂移（宿主的 edit 纪律条数与措辞都被改过）。
 		for (const name of ["read", "write", "edit"] as const) {
 			const registeredGuidelines = byName.get(name)?.promptGuidelines ?? [];
 			const base = baseGuidelines(name);
 			expect(base.length, `${name} 的 base 定义没有 guideline`).toBeGreaterThan(0);
-			for (const guideline of base) {
-				expect(registeredGuidelines, `${name} 丢了 base guideline：${guideline}`).toContain(guideline);
-			}
+			expect(registeredGuidelines, `${name} 的 guideline 清单与 base 不一致`).toEqual(base);
 		}
-		expect(byName.get("read")?.promptGuidelines).toContain("Use read to examine files instead of cat or sed.");
-		expect(byName.get("write")?.promptGuidelines).toContain("Use write only for new files or complete rewrites.");
 	});
 
 	it("保留 base schema 选项（不因重建对象而丢）", () => {
