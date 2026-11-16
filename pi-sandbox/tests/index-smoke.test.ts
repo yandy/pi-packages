@@ -7,6 +7,15 @@ import { getEscalationBroker, resetEscalationBrokerForTests } from "../src/escal
 import { processPermissionState, type PermissionState } from "../src/permission";
 import { aclSkillPaths } from "../src/win32/skill-paths";
 
+/**
+ * 注册面：win32 上本包额外覆盖注册受限的 powershell（平台门控见 src/tools.ts 的 win32 装配与
+ * index.ts 的 `tools.powershell !== undefined`），其余平台只有三个基础工具。
+ * 名字已按字母序排好，可直接与 tools.sort() 做精确清单比对。
+ */
+const REGISTERED_TOOL_NAMES = process.platform === "win32"
+	? ["bash", "edit", "powershell", "write"]
+	: ["bash", "edit", "write"];
+
 let dir: string;
 beforeEach(() => {
 	dir = mkdtempSync(join(tmpdir(), "idx-"));
@@ -89,7 +98,7 @@ describe("extension activate", () => {
 		const { fakePi, tools, commands, hooks, channels } = makeFakePi();
 		const activate = (await import("../index")).default;
 		activate(fakePi as never);
-		expect(tools.sort()).toEqual(["bash", "edit", "write"]);
+		expect(tools.sort()).toEqual(REGISTERED_TOOL_NAMES);
 		expect(commands).toEqual(["permission"]);
 		// T15 起多一个 resources_discover（技能平台门控）；其余注册面不变。
 		expect(Object.keys(hooks).sort()).toEqual(["resources_discover", "session_shutdown", "session_start"]);
@@ -128,7 +137,7 @@ describe("extension activate", () => {
 		try {
 			const activate = (await import("../index")).default;
 			expect(() => activate(fakePi as never)).not.toThrow();
-			expect(tools.sort()).toEqual(["bash", "edit", "write"]);
+			expect(tools.sort()).toEqual(REGISTERED_TOOL_NAMES);
 			expect(commands).toEqual(["permission"]);
 			expect(warn.mock.calls.flat().join(" ")).toMatch(/falling back to defaults/u);
 		} finally {
