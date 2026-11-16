@@ -175,7 +175,7 @@ pi-<name>/
     // + "skills": ["./skills"]  如果内置 skills
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.80.2"
+    "@earendil-works/pi-coding-agent": ">=1.5.0"
     // 视需要追加：@earendil-works/pi-tui、@earendil-works/pi-ai、typebox
   },
   "devDependencies": {
@@ -448,7 +448,7 @@ Pure Skills 类型虽无测试脚本，仍需添加 filters 条目，否则 PR �
   安装的副本还会与宿主版本不一致（例如宿主用 1.3.x，扩展带 1.1.x），造成重复运行时模块；
 - 源码中 import 了就**必须声明在 `peerDependencies`**，由宿主提供实例；
 - 其中 `typebox` 系按宿主约定使用 `*` 范围，并在 `devDependencies` 固定具体版本供本地开发/测试（例如 `"typebox": "^1.3.34"`）；
-- pi 核心包（`@earendil-works/*`）的范围用最小宿主版本表达（当前 `>=0.80.2`），不要写成 `*`。
+- pi 核心包（`@earendil-works/*`）的范围用最小宿主版本表达（当前 `>=1.5.0`），不要写成 `*`。
 
 一致性由 `npm run check:host-deps` 校验（CI 中执行）：
 

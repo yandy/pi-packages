@@ -7,7 +7,7 @@ import {
 	createEditToolDefinition,
 	createWriteToolDefinition,
 	type EditOperations,
-	type ExtensionContext,
+	type ExtensionToolContext,
 	type ToolDefinition,
 	type WriteOperations,
 } from "@earendil-works/pi-coding-agent";
@@ -389,7 +389,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 		if (typeof candidate === "function") createHostPowerShell = candidate as HostCreatePowerShellToolDefinition;
 	}
 	// Ruling 15：以 definition 工厂为 base——自带 promptSnippet/promptGuidelines，
-	// execute 第 5 参 ctx 类型正确（ExtensionContext），spread 后注册不丢系统提示元数据。
+	// execute 第 5 参 ctx 类型正确（ExtensionToolContext），spread 后注册不丢系统提示元数据。
 	const baseBash = createBashToolDefinition(deps.cwd);
 	const baseWrite = createWriteToolDefinition(deps.cwd);
 	const baseEdit = createEditToolDefinition(deps.cwd);
@@ -418,7 +418,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 		promptGuidelines: [...(baseBash.promptGuidelines ?? []), ENV_REDIRECT_GUIDELINE, ESCALATION_GUIDELINE],
 		parameters: extendParams(baseBash.parameters),
 		prepareArguments: withPlaceholderStripping(baseBash.prepareArguments),
-		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
+		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionToolContext) {
 			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;
 			const workspaceRoot = workspaceRootFor(sessionCwd);
 			const config = configForCall(deps);
@@ -457,7 +457,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 		promptGuidelines: [...(baseWrite.promptGuidelines ?? []), ENV_REDIRECT_GUIDELINE, ESCALATION_GUIDELINE],
 		parameters: extendParams(baseWrite.parameters),
 		prepareArguments: withPlaceholderStripping(baseWrite.prepareArguments),
-		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
+		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionToolContext) {
 			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;
 			const workspaceRoot = workspaceRootFor(sessionCwd);
 			const sessionId = readSessionId(ctx);
@@ -484,7 +484,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 		promptGuidelines: [...(baseEdit.promptGuidelines ?? []), ENV_REDIRECT_GUIDELINE, ESCALATION_GUIDELINE],
 		parameters: extendParams(baseEdit.parameters),
 		prepareArguments: withPlaceholderStripping(baseEdit.prepareArguments),
-		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
+		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionToolContext) {
 			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;
 			const workspaceRoot = workspaceRootFor(sessionCwd);
 			const sessionId = readSessionId(ctx);
@@ -510,7 +510,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 		promptGuidelines: [...(basePowerShell.promptGuidelines ?? []), ENV_REDIRECT_GUIDELINE, ESCALATION_GUIDELINE],
 		parameters: extendParams(basePowerShell.parameters),
 		prepareArguments: withPlaceholderStripping(basePowerShell.prepareArguments),
-		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
+		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionToolContext) {
 			// 与 bash 完全同路径：同一 sessionCwd 解析、同一 resolveCall（subject 为 command）、同一 ledger 记账、
 			// 同一 prepareArguments/剥参与同档提权标记。
 			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;

@@ -1,4 +1,3 @@
-import { StringEnum } from "@earendil-works/pi-ai";
 import type { defineTool as DefineToolType, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { CodingToolsConfig } from "../config";
@@ -116,7 +115,9 @@ export function createLspTools(manager: LspManager, getConfig: (cwd: string) => 
 			path: Type.String({ description: "File path" }),
 			line: Type.Integer({ description: "Line number (1-based)" }),
 			character: Type.Integer({ description: "Column (0-based)" }),
-			operation: StringEnum(["definition", "references"] as const, {
+			operation: Type.Unsafe<"definition" | "references">({
+				type: "string",
+				enum: ["definition", "references"],
 				description: "definition = where it's defined; references = who uses it",
 			}),
 		}),

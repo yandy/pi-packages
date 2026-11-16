@@ -1,4 +1,4 @@
-import type { AssistantMessage, Context, Model, UserMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Context, Model, ProviderHeaders, UserMessage } from "@earendil-works/pi-ai";
 import type { VisionConfig } from "./config.js";
 import type { DecodedImage } from "./image.js";
 import { resolveModel, type VisionModelRegistry } from "./model-resolver.js";
@@ -12,7 +12,7 @@ export type CompleteFn = (
 
 export interface VisionCallInput {
 	model: Model<any>;
-	auth: { apiKey?: string; headers?: Record<string, string> };
+	auth: { apiKey?: string; headers?: ProviderHeaders };
 	prompt: string;
 	images: DecodedImage[];
 	reasoning: ThinkLevelOptions;
