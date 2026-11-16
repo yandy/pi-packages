@@ -42,6 +42,8 @@ Or add to `~/.pi/agent/settings.json`:
 }
 ```
 
+Requires pi >= 1.5.0.
+
 ## Configuration
 
 ### `/vision` command

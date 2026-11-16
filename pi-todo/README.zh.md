@@ -27,6 +27,8 @@ pi install npm:@yandy0725/pi-todo
 }
 ```
 
+需要 pi >= 1.5.0。
+
 ## 工具参考
 
 ```

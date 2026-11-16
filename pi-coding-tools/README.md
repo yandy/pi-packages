@@ -60,6 +60,8 @@ the built-in servers but cannot register new ones.
 pi install npm:@yandy0725/pi-coding-tools
 ```
 
+Requires pi >= 1.5.0.
+
 ## Configuration
 
 Configuration files control which of the five tools are enabled. All default to `true`.

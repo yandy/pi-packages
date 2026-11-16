@@ -42,6 +42,8 @@ pi install npm:@yandy0725/pi-vision-tools
 }
 ```
 
+需要 pi >= 1.5.0。
+
 ## 配置
 
 ### `/vision` 命令

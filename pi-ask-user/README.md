@@ -43,6 +43,8 @@ See: `skills/ask-user/references/ask-user-skill-extension-spec.md`.
 pi install npm:@yandy0725/pi-ask-user
 ```
 
+Requires pi >= 1.5.0.
+
 ## Tool name
 
 The registered tool name is:

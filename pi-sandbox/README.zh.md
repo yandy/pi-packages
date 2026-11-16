@@ -12,6 +12,8 @@ pi install npm:@yandy0725/pi-sandbox
 pi install .
 ```
 
+需要 pi >= 1.5.0。
+
 ## 工作原理
 
 bash 命令被包装进平台沙箱 runner 后在本地 spawn（**路径透明**：宿主路径原样有效）；write/edit 工具在执行前做进程内写围栏；read 不受限。

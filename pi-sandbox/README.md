@@ -12,6 +12,8 @@ pi install npm:@yandy0725/pi-sandbox
 pi install .
 ```
 
+Requires pi >= 1.5.0.
+
 ## How it works
 
 bash commands are wrapped in a platform sandbox runner and spawned locally (**path transparent**: host paths work as-is); the write/edit tools run an in-process write fence before execution; read is unrestricted.

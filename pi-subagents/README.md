@@ -24,6 +24,8 @@ A [pi](https://pi.dev) extension providing a focused, in-process sub-agent core 
 pi install npm:@yandy0725/pi-subagents
 ```
 
+Requires pi >= 1.5.0.
+
 ## Quick Start
 
 The parent agent spawns sub-agents using the `subagent` tool:
