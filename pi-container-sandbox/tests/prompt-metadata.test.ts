@@ -15,7 +15,7 @@ import register from "../index";
  * `wrapToolDefinition()` 只透传 name/label/description/parameters/prepareArguments/executionMode，
  * **不透传 promptSnippet / promptGuidelines**；覆盖内置工具后宿主只从覆盖后的定义读提示词元数据，
  * 不会回落到内置定义。后果：read/write/edit/bash 从 system prompt 的 "Available tools" 整体消失，
- * 内置 edit 的 4 条纪律（约 496 字符）与 read/write 各 1 条一并被吞掉（合计 779 字符）。
+ * 内置 edit 的全部纪律与 read/write 各自的纪律一并被吞掉——条数与字符数随宿主 dist 漂移，此处不钉具体值。
  *
  * 本测试捕获 `registerTool` 收到的定义，钉住这三件事：目录行在、纪律在、schema 选项未丢。
  */
@@ -78,7 +78,7 @@ describe("注册的 read/write/edit/bash 保留提示词元数据（spec 2026-10
 
 	it("保留内置 guideline（read/write/edit 各自的行为纪律）", () => {
 		// 钉包内性质：`...localRead` 这类对象 spread 必须把 base 定义的每条 guideline 原样带上。
-		// 不钉宿主的条数与文案——它们随宿主版本漂移（1.5.2 的 edit 从 4 条改成 2 条，措辞也重写过）。
+		// 不钉宿主的条数与文案——它们随宿主版本漂移（宿主的 edit 纪律条数与措辞都被改过）。
 		for (const name of ["read", "write", "edit"] as const) {
 			const registeredGuidelines = byName.get(name)?.promptGuidelines ?? [];
 			const base = baseGuidelines(name);
@@ -114,7 +114,8 @@ describe("注册的 read/write/edit/bash 保留提示词元数据（spec 2026-10
 	});
 
 	it("三通道合计不超预算（spec 2026-10-30 §10）", () => {
-		// 修补前为 2579（snippet/guidelines 全丢），修补后回收 779 字符 → 约 3358。
+		// 提示词预算回归闸：元数据整体丢失会让三通道合计显著掉字符数，反之超出预算则说明提示词膨胀。
+		// budget 是本包的策略值；三通道实际字符数随宿主 dist 漂移，故不在此写死任何一次实测值。
 		assertPromptHygiene({ pkg: "pi-container-sandbox", budget: 3500, tools, authored: [] });
 	});
 });
