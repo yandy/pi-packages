@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { initTheme } from "@earendil-works/pi-coding-agent";
-import { KeybindingsManager, TUI, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
-import type { Terminal } from "@earendil-works/pi-tui";
+import { KeybindingsManager, TuiMainScreen, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
+import type { Terminal, TUI } from "@earendil-works/pi-tui";
 
 /**
  * Real-stack integration test: no vi.mock — the actual pi-tui differential
@@ -15,11 +15,19 @@ class FakeTerminal implements Terminal {
 	private readonly rowCount: number;
 	private readonly columnCount: number;
 	public buffer = "";
+	private inputHandler: ((data: string) => void) | undefined;
 	constructor(rows: number, columns: number) {
 		this.rowCount = rows;
 		this.columnCount = columns;
 	}
-	start(): void {}
+	start(onInput: (data: string) => void): void {
+		this.inputHandler = onInput;
+	}
+	/** Feed raw bytes through the callback the TUI registered, as a real terminal does. */
+	sendInput(data: string): void {
+		if (!this.inputHandler) throw new Error("terminal was not started");
+		this.inputHandler(data);
+	}
 	stop(): void {}
 	async drainInput(): Promise<void> {}
 	write(data: string): void {
@@ -63,7 +71,11 @@ async function setupOverlay(
 	initTheme(undefined, false);
 
 	const terminal = new FakeTerminal(rows, 100);
-	const tui = new TUI(terminal);
+	const tui = new TuiMainScreen(terminal);
+	// pi-tui 1.5.x has no public TUI.handleInput: input is delivered by the
+	// terminal's start() callback, so the fake terminal must be started for
+	// key sequences to reach the focused overlay component.
+	tui.start();
 	const keybindings = new KeybindingsManager(TUI_KEYBINDINGS as any);
 
 	const { default: registerExtension } = await import("../index");
@@ -86,6 +98,7 @@ async function setupOverlay(
 	const executePromise = registeredTool.execute("real-stack-test", params, undefined, undefined, {
 		hasUI: true,
 		ui: {
+			onTerminalInput: () => () => {},
 			custom: async (factory: any) => {
 				// The extension factory only reads theme.fg/bold from this
 				// argument; identity keeps assertions ANSI-free while the
@@ -161,13 +174,13 @@ describe("ask_user overlay (real pi-tui pipeline)", () => {
 		try {
 			await harness.frame();
 
-			harness.tui.handleInput("[6~"); // pageDown
+			harness.terminal.sendInput("[6~"); // pageDown
 			const scrolled = await harness.frame();
 			expect(/↑ \d+ lines? above/.test(scrolled)).toBe(true);
 			expect(scrolled).not.toContain("Pick one");
 			expect(scrolled).toContain("→ 1. Alpha");
 
-			harness.tui.handleInput("[5~"); // pageUp
+			harness.terminal.sendInput("[5~"); // pageUp
 			const back = await harness.frame();
 			expect(back).toContain("Pick one");
 		} finally {

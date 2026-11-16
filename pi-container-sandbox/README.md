@@ -31,6 +31,8 @@ npm install && npm run build-image
 pi -e ./index.ts
 ```
 
+Requires pi >= 1.5.0.
+
 On first use the extension auto-builds the bundled sandbox image
 (`pi-container-sandbox:latest`) using the local `docker/Dockerfile`. Subsequent
 runs reuse the image.

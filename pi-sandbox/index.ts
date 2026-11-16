@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getSandboxConfig } from "./src/config";
 import { getDenialLedger } from "./src/denial-ledger";
 import { getEscalationBroker } from "./src/escalation-broker";
@@ -30,13 +30,11 @@ function readHasUI(ctx: { hasUI: boolean }): boolean {
 }
 
 /**
- * 活动工具探测（Ruling 8 的前置）：`getActiveTools` 是 pi 较新的 API，老宿主上可能不存在；
- * 取值器又可能因 ctx 失效 / reload 抛错。`typeof` 探测 + try/catch 把任何失败都归为
- * “无法判断”（undefined）——本文件的约定是扩展 factory 永不 throw（I2），提示宁可不出。
+ * 活动工具探测：取值失败（陈旧 ctx / reload / 取值器抛错）时返回 undefined，表示“无法判断”。
+ * 外层 try/catch 保证扩展 factory 永不 throw（I2）；非数组返回值同样归为无法判断。
  */
 function readActiveTools(pi: ExtensionAPI): string[] | undefined {
 	try {
-		if (typeof pi.getActiveTools !== "function") return undefined;
 		const active = pi.getActiveTools();
 		return Array.isArray(active) ? active : undefined;
 	} catch {
@@ -44,64 +42,12 @@ function readActiveTools(pi: ExtensionAPI): string[] | undefined {
 	}
 }
 
-/** Ruling 8 的提示文案：必须点名修法与失败方向（未启用前 bash 命令被拒）。
- *  方向只给**有效**的那一半 `+powershell`：win32 下未受限（沙箱受控）的 shell 是本包覆盖注册的
- *  `powershell`（**扩展工具自动激活**；pi 内建的默认激活列表 `["read","bash","edit","write"]`
- *  并不包含它），而本包的 bash 又以 `exposure: "hidden"` 注册（D3 第三版：不声明给模型、也不可被
- *  命名激活）——`-bash` 既去不掉扩展注册的工具，也不是这里需要的动作。
- *  T15 修订：补上宿主前提 `requires pi >= 1.0.0`（措辞与 `src/confine.ts` 的
- *  `UnsupportedWindowsShellError` 一致）——低于 1.0.0 的宿主没有 `powershell` 工具，
- *  只让用户去 settings.json 打开一个不存在的工具是不可执行的。 */
-const POWERSHELL_HINT_MESSAGE = [
-	"pi-sandbox: on Windows the confined shell is PowerShell only. Enable it in ~/.pi/agent/settings.json (requires pi >= 1.0.0):",
-	'  { "defaultTools": ["+powershell"] }',
-	"Until then, bash commands are refused (fail-closed).",
-].join("\n");
-
-/**
- * 每进程一次的提示标志：pi 对每个会话（含子会话）重调 factory，不加标志会每次 activate /
- * session_start 重复刷屏。模块级变量在同一 pi 进程的所有会话间共享。
- */
-let powershellHintShown = false;
-
-/**
- * Ruling 8：win32 上 pwsh 未激活时提示一次（有 UI 走 `ctx.ui.notify`，无 UI 写 stderr）。
- * 判决条件必须能明确判断：宿主有 `getActiveTools`，且 `bash` 在活动列表而 `powershell` 不在。
- * D3 第三版后本包的 bash 以 `exposure: "hidden"` 注册：`getActiveToolNames()` 只返回**被声明**的
- * 工具，hidden 永不出现在活动列表里（也不可被命名激活）——因此这条提示在 pi ≥1.0.0 上没有可触发的
- * 正常路径，保留它是为了**老宿主**（≤0.80.x：不认识 `exposure`、扩展工具一律自动激活、且该版本
- * 根本没有 powershell 工具）——正是文案里 `requires pi >= 1.0.0` 前提要拦的场景。
- * 已知边界（未裁决，先记录）：pi ≥1.0.0 上用户显式排除 powershell（`defaultTools: ["-powershell"]`
- * 或 `--exclude-tools powershell`）时 bash 不在活动列表 → 本提示不触发；若认为该状态也需要提示，
- * 触发条件应放宽为“仅 powershell ∉ active”（那会让 ≤0.80.x 宿主每次都提示升级）。
- * 任何取值失败（陈旧 ctx / 老宿主 / 取值器抛错）都静默——提示是锦上添花，绝不能阻断激活。
- */
-function maybeWarnMissingPowerShellTool(pi: ExtensionAPI, ctx: ExtensionContext): void {
-	if (process.platform !== "win32" || powershellHintShown) return;
-	const active = readActiveTools(pi);
-	if (active === undefined || active.includes("powershell") || !active.includes("bash")) return;
-	powershellHintShown = true;
-	let notified = false;
-	if (readHasUI(ctx)) {
-		try {
-			const notify = ctx.ui?.notify;
-			if (typeof notify === "function") {
-				notify(POWERSHELL_HINT_MESSAGE, "warning");
-				notified = true;
-			}
-		} catch {
-			notified = false; // ctx 已失效（reload / 会话替换）：继续走 stderr
-		}
-	}
-	if (!notified) console.warn(`sandbox: ${POWERSHELL_HINT_MESSAGE.replaceAll("\n", "\n  ")}`);
-}
-
 /**
  * Ruling 8 的 `/permission` 状态行：win32 上受限 shell 只有 PowerShell（本包覆盖注册的 `powershell`
  * 作为扩展工具自动激活；本包的 bash 以 `exposure: "hidden"` 注册，永不进活动列表）。
  * 能判断出 pwsh 不在活动工具里就注明尚未激活——`/permission` 是用户排查“bash 为何被拒”的第一站。
- * 无法判断（老宿主没有 `getActiveTools`——此类宿主上 pwsh 工具根本不存在——或取值失败）时注明
- * `activation unknown`：不断言激活状态，避免裸 `shell: powershell only` 被读成“已启用”（T15 修订）。
+ * 取值失败（陈旧 ctx / 取值器抛错）时注明 `activation unknown`：不断言激活状态，避免裸
+ * `shell: powershell only` 被读成“已启用”（T15 修订）。
  */
 function win32ShellStatusLine(pi: ExtensionAPI): string | null {
 	if (process.platform !== "win32") return null;
@@ -127,8 +73,7 @@ export default function (pi: ExtensionAPI) {
 	// Ruling 9：技能按平台**追加**贡献（pi 侧是 mergePaths 合并语义）。只返回本包的技能路径，
 	// 或空数组 = 什么也不加（非 win32 上零目录条目）；绝不返回“完整集合”而抹掉其他来源。
 	pi.on("resources_discover", () => ({ skillPaths: aclSkillPaths() }));
-	// 老宿主（含本仓 devDependency 0.80.2）没有 createPowerShellToolDefinition → tools.powershell
-	// 为 undefined：跳过注册即可，不报错（此时宿主本来也没有 powershell 工具可覆盖）。
+	// 非 win32 平台不装配 pwsh 覆盖 → tools.powershell 为 undefined：跳过注册。
 	if (tools.powershell !== undefined) pi.registerTool(tools.powershell as never);
 
 	pi.registerCommand("permission", createPermissionCommand({
@@ -187,9 +132,6 @@ export default function (pi: ExtensionAPI) {
 		getDenialLedger().forget(event.sessionId); // 子会话销毁：清掉未消费的拒绝记录（防 Map 泄漏）
 	});
 	pi.on("session_start", (_event, ctx) => {
-		// Ruling 8 的提示不依赖 UI 或会话身份（无 UI 时落 stderr），所以必须在下面的 hasUI
-		// 守卫**之前**——守卫之后的路径是审批通道注册，与提示无关。
-		maybeWarnMissingPowerShellTool(pi, ctx);
 		if (!readHasUI(ctx)) return; // headless / 子会话 / ctx 已失效：都不是审批终点
 		let sessionId: string;
 		try {
@@ -207,8 +149,9 @@ export default function (pi: ExtensionAPI) {
 			// hasUI 现查而非快照：注册后父会话可能因 reload / 会话替换失去 UI，或使 ctx 失效
 			hasUI: () => readHasUI(ctx),
 			select: (title, options, opts) => ctx.ui.select(title, options, opts),
-			// 两步式的第二步：Deny 后的可选理由。旧宿主/异常 ctx 可能没有 input——缺失时 broker 跳过追问。
-			input: typeof ctx.ui.input === "function" ? (title, placeholder, opts) => ctx.ui.input(title, placeholder, opts) : undefined,
+			// 两步式的第二步：Deny 后的可选理由。异常 ctx 可能缺 input——缺失/抛错时 broker 跳过理由追问
+			// （拒绝照常结算）。
+			input: (title, placeholder, opts) => ctx.ui.input(title, placeholder, opts),
 		});
 	});
 	pi.on("session_shutdown", () => {

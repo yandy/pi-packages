@@ -4,6 +4,7 @@ import { PassThrough } from "node:stream";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createEditToolDefinition, createWriteToolDefinition } from "@earendil-works/pi-coding-agent";
 import { createSandboxTools, ESCALATION_PROPS, resolveCall, resolveCallMode } from "../src/tools";
 import { canonicalizeTarget, isWithinRoots } from "../src/fence";
 import { writableRoots } from "../src/policy";
@@ -66,10 +67,28 @@ const TEST_SESSION = "test-session";
 function toolCtx(hasUI = true, choice: string | undefined = "Allow once") {
 	return {
 		hasUI,
-		sessionManager: { getSessionId: () => TEST_SESSION },
+		// 宿主 bash 工具（pi 1.5.x 的 dist/core/tools/bash.js resolveSpawnContext）会读
+		// sessionManager.getSessionFile()：缺失时 execute 内抛 TypeError，spawnFn 永远不被调用。
+		// 桩形状 = { getSessionId(): string; getSessionFile(): string }，后续走真实宿主 bash
+		// 链路的用例复用同一个桩。
+		sessionManager: {
+			getSessionId: () => TEST_SESSION,
+			getSessionFile: () => join(dir, "session.jsonl"),
+		},
 		ui: { select: vi.fn(async () => choice), input: vi.fn(async () => undefined), notify: vi.fn() },
 	} as never;
 }
+
+/** 需要定制共享 toolCtx 的 mock 时使用的完整结构视图；不另造审批 ctx 桩。 */
+type ToolCtxTestDouble = {
+	hasUI: boolean;
+	sessionManager: { getSessionId(): string; getSessionFile(): string };
+	ui: {
+		select: ReturnType<typeof vi.fn>;
+		input: ReturnType<typeof vi.fn>;
+		notify: ReturnType<typeof vi.fn>;
+	};
+};
 
 /** 播种一笔前置拒绝（denial-first 门禁的放行条件）。 */
 function seedDenial(kind: "command" | "operation" = "command", sessionId = TEST_SESSION) {
@@ -91,11 +110,11 @@ describe("createSandboxTools schemas", () => {
 	it("提权参数显式声明 null：strict 模式下模型拿到的是 schema 认可的“不提权”取值（而非猜字符串）", () => {
 		const { deps } = makeDeps();
 		const { bash, write, edit } = createSandboxTools(deps);
-		// 背景（pi 1.0.0 实测）：strict 提供商（如 deepseek-flash，compat.supportsStrictMode=true）下 pi 会把
+		// 1.5.x 默认启用 strict 转换：strict 提供商（如 deepseek-flash，compat.supportsStrictMode=true）下 pi 会把
 		// 所有 property 塞进 required，并对“不允许 null”的字段补 anyOf[X,{type:"null"}]。声明 null 后：
 		// ① 模型有显式的合法取值（JSON null）来表达“不提权”，不必与 “never null” 的文案打架去写字符串 "null"；
-		// ② pi 的 strict 转换不再补一层包裹（schemaAllowsNull 递归识别）；
-		// ③ JSON null 不会被 pi 的 normalizeOptionalNulls 剥掉，而是原样送达 execute（归一化分支保持可达）。
+		// ② pi 的 strict 转换不再补一层包裹；
+		// ③ declared schema 允许 null，所以 optional 的 JSON null 会保留并原样送达 execute（归一化分支保持可达）。
 		for (const tool of [bash, write, edit]) {
 			const props = (tool.parameters as { properties: Record<string, unknown> }).properties;
 			expect(JSON.parse(JSON.stringify(props.sandbox_permissions))).toEqual({
@@ -145,11 +164,22 @@ describe("createSandboxTools schemas", () => {
 		expect(bash.promptSnippet).toBe("Execute bash commands (ls, grep, find, etc.)");
 		expect(write.promptGuidelines).toContain("Use write only for new files or complete rewrites.");
 		expect(write.promptGuidelines?.[write.promptGuidelines.length - 1]).toContain("sandbox_permissions");
-		// pi 0.80.2 dist 事实：editSchema 自带 additionalProperties:false，writeSchema 无该字段。
-		// spread 版 extendParams 如实保留 base options——edit 钉 false（Type.Object 重建即丢），
-		// write 钉 base 原样（undefined）；裁决原文假设 write 也为 false，与 dist 不符，按事实钉住。
-		expect((write.parameters as { additionalProperties?: boolean }).additionalProperties).toBeUndefined();
-		expect((edit.parameters as { additionalProperties?: boolean }).additionalProperties).toBe(false);
+		// Ruling 15 的包内性质（不钉宿主的 schema 事实，宿主版本会漂移）：spread 版 extendParams
+		// 如实保留 base schema 的自有 options——包装后与 base 同值。
+		const baseWrite = createWriteToolDefinition(ws);
+		const baseEdit = createEditToolDefinition(ws);
+		expect((write.parameters as { additionalProperties?: boolean }).additionalProperties)
+			.toBe((baseWrite.parameters as { additionalProperties?: boolean }).additionalProperties);
+		expect((edit.parameters as { additionalProperties?: boolean }).additionalProperties)
+			.toBe((baseEdit.parameters as { additionalProperties?: boolean }).additionalProperties);
+		// 上面两条在「base 本就没有这个 option」的宿主上恒真，故再钉一条关系约束：顶层 schema options
+		// 键集合与 base 逐字一致。它只在两种情形下鉴别得出问题：① 手写 `{ type, properties }` 重建会丢
+		// `required` 键；② base 自带 `additionalProperties` 一类自有 option 的宿主版本。对 TypeBox 式
+		// 重建（`Type.Object({ ...base.properties })`）它无鉴别力——当前宿主上重建出的顶层键、`required`、
+		// `additionalProperties` 三项与 base 全同。
+		for (const [tool, base] of [[write, baseWrite], [edit, baseEdit]] as const) {
+			expect(Object.keys(tool.parameters as object).sort()).toEqual(Object.keys(base.parameters as object).sort());
+		}
 	});
 	it("常驻规则禁止把全局缓存/数据目录搬进 workspace 作为沙箱绕行，且排在提权协议之前（β′）", () => {
 		const { deps } = makeDeps();
@@ -182,11 +212,17 @@ describe("prepareArguments（pi 校验前的占位符剥离；edit 必须串联 
 		expect(Object.keys(ESCALATION_PROPS)).toEqual([...PLACEHOLDER_KEYS]);
 	});
 
-	it('bash：字符串 "null" 被剥掉（pi ≥0.80.2 校验期不再硬拒；0.80.2 实测同拒），command/timeout 原样保留', () => {
+	it('bash：字符串 "null" 被剥掉，command/timeout 原样保留', () => {
 		const { deps } = makeDeps();
 		const { bash } = createSandboxTools(deps);
 		expect(bash.prepareArguments?.({ command: "ls", timeout: null, sandbox_permissions: "null", justification: "null" }))
 			.toEqual({ command: "ls", timeout: null });
+	});
+
+	it('bash：带空白的 sandbox_permissions " null " 也被剥掉', () => {
+		const { deps } = makeDeps();
+		const { bash } = createSandboxTools(deps);
+		expect(bash.prepareArguments?.({ command: "ls", sandbox_permissions: " null " })).toEqual({ command: "ls" });
 	});
 
 	it("write：占位符剥掉，path/content 原样保留", () => {
@@ -505,29 +541,82 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 		expect(ctx.ui.select.mock.calls[0][2]).toBeUndefined();
 	});
 
-	it("direct 路径也排进 FIFO 车道：本会话已注册通道时经 broker.request（Ruling 17）", async () => {
+	it("direct 路径 ctx.ui.select 抛错 → 按取消处理，不冒泡宿主内部报错（与 broker.request 口径一致）", async () => {
 		const { deps } = makeDeps();
-		const ownSelect = vi.fn(async () => "Allow once");
-		getEscalationBroker().registerParent({ sessionId: "self", hasUI: () => true, select: ownSelect });
-		seedDenial("command", "self");
-		const ctx = {
-			hasUI: true,
-			sessionManager: { getSessionId: () => "self" },
-			ui: {
-				select: vi.fn(async () => {
-					throw new Error("must go through the broker lane");
-				}),
-			},
-		} as never;
-		const mode = await resolveCallMode(
+		const ctx = toolCtx(true) as ToolCtxTestDouble;
+		ctx.ui.select.mockRejectedValue(new Error("host UI internals exploded"));
+		seedDenial("command");
+		// 宿主 select 的内部报错绝不能变成用户/模型看到的工具错误文本：应落进 approveEscalation
+		// 既有的"取消"分支，且文案里不得出现宿主原文。
+		const settled = await resolveCallMode(
 			{ sandbox_permissions: "danger-full-access", justification: "j" },
 			ctx, deps, "command", () => "x",
-		);
-		expect(mode).toBe("danger-full-access");
-		expect(ownSelect).toHaveBeenCalledTimes(1);
+		).then(() => null, (error: Error) => error);
+		expect(settled).toBeInstanceOf(Error);
+		expect(settled?.message).toMatch(/cancelled/);
+		expect(settled?.message).not.toContain("host UI internals exploded");
+		expect(ctx.ui.input).not.toHaveBeenCalled();
 	});
 
-	it("hasUI 但本会话未注册通道 → 回落直连 ctx.ui.select（行为与改动前一致）", async () => {
+	it("hasUI 时直连 ctx.ui.select，即使本会话已注册通道也不经 broker.request", async () => {
+		const { deps } = makeDeps();
+		const broker = getEscalationBroker();
+		const ownSelect = vi.fn(async () => "Allow once");
+		broker.registerParent({ sessionId: TEST_SESSION, hasUI: () => true, select: ownSelect });
+		const request = vi.spyOn(broker, "request");
+		const ctx = toolCtx(true, "Allow once") as ToolCtxTestDouble;
+		seedDenial("command");
+		try {
+			const mode = await resolveCallMode(
+				{ sandbox_permissions: "danger-full-access", justification: "j" },
+				ctx, deps, "command", () => "x",
+			);
+			expect(mode).toBe("danger-full-access");
+			expect(ctx.ui.select).toHaveBeenCalledTimes(1);
+			expect(ownSelect).not.toHaveBeenCalled();
+			expect(request).not.toHaveBeenCalled();
+		} finally {
+			request.mockRestore();
+		}
+	});
+
+	it("父会话自己的审批与子会话转发的审批并发时两者都结算", async () => {
+		const { deps } = makeDeps();
+		const parentCtx = toolCtx(true) as ToolCtxTestDouble;
+		let releaseDirect: ((value: string | undefined) => void) | undefined;
+		parentCtx.ui.select.mockImplementation(() => new Promise<string | undefined>((resolve) => {
+			releaseDirect = resolve;
+		}));
+		let releaseForwarded: ((value: string | undefined) => void) | undefined;
+		const forwardedSelect = vi.fn((_title: string) => new Promise<string | undefined>((resolve) => {
+			releaseForwarded = resolve;
+		}));
+		const broker = getEscalationBroker();
+		broker.registerParent({ sessionId: TEST_SESSION, hasUI: () => true, select: forwardedSelect });
+		broker.linkChild("child-concurrent", TEST_SESSION);
+		seedDenial("command");
+		seedDenial("command", "child-concurrent");
+		const direct = resolveCallMode(
+			{ sandbox_permissions: "danger-full-access", justification: "parent" },
+			parentCtx, deps, "command", () => "parent-command",
+		);
+		const forwarded = resolveCallMode(
+			{ sandbox_permissions: "danger-full-access", justification: "child" },
+			subagentCtx("child-concurrent"), deps, "command", () => "child-command",
+		);
+		// 直连与转发两个 UI 都必须先进入在飞状态，不要求谁的弹窗先出现。
+		await vi.waitFor(() => {
+			expect(parentCtx.ui.select).toHaveBeenCalledTimes(1);
+			expect(forwardedSelect).toHaveBeenCalledTimes(1);
+		});
+		if (releaseDirect === undefined || releaseForwarded === undefined) throw new Error("both approvals must be pending");
+		releaseDirect("Allow once");
+		releaseForwarded("Allow once");
+		await expect(direct).resolves.toBe("danger-full-access");
+		await expect(forwarded).resolves.toBe("danger-full-access");
+	});
+
+	it("hasUI 且本会话未注册通道 → 仍直连 ctx.ui.select", async () => {
 		const { deps } = makeDeps();
 		const select = vi.fn(async () => "Allow once");
 		const ctx = { hasUI: true, sessionManager: { getSessionId: () => "unregistered" }, ui: { select } } as never;
@@ -643,7 +732,7 @@ describe("denial-first 硬门禁（未经真实拒绝不提权）", () => {
 	it("占位符归一化按字段可达性：JSON null 与 justification 的字符串形态是真实输入", async () => {
 		const { deps } = makeDeps();
 		const plain = { mode: "workspace-write" as const, escalated: false, ignoredEscalation: false };
-		// JSON null：strict 提供商在声明 Type.Null() 后会原样送达 execute（不再被 pi 剥掉）→ 视作未提供。
+		// JSON null：schema 显式声明 Type.Null()，declared-schema 校验会保留并原样送达 execute → 视作未提供。
 		expect(await resolveCall({ sandbox_permissions: null, justification: null }, toolCtx(), deps, "command", () => "x"))
 			.toEqual(plain);
 		// justification 的字符串臂是 Type.String()（字段本身为 string | null）：字符串 "null"/"" 在未走钩子的
@@ -745,21 +834,16 @@ describe("windows tool wiring", () => {
 		});
 	}
 
-	it("builds the tool set on win32 and exposes a powershell tool when the host provides the builder", () => {
+	it("builds the tool set on win32 and exposes a powershell tool", () => {
 		const tools = createSandboxTools({ cwd: process.cwd(), permission: processPermissionState, platform: "win32" });
 		for (const name of ["bash", "write", "edit"] as const) expect(tools[name]).toBeDefined();
-		if (tools.powershell === undefined) {
-			// 宿主 <1.0.0（本仓 devDependency 0.80.2 即如此）时合法缺省：不报错、不阻断
-			expect(typeof tools.powershell).toBe("undefined");
-			return;
-		}
-		expect((tools.powershell as { name?: string }).name).toBe("powershell");
+		expect(tools.powershell?.label).toBe("powershell (sandboxed)");
 	});
 
 	it("registers bash with exposure:hidden on win32 and leaves the key unset elsewhere", () => {
-		// win32 工具接线（D3 第三版）：pi 1.0.0 的默认激活列表按**名字**激活 ["read","bash","edit","write"]，
-		// 而 `defaultActive: false` 的语义恰是“被命名即激活”→ 挡不住默认列表（真机证伪）。因此改用
-		// `exposure: "hidden"`：_applyToolLoadout 丢弃 hidden、命名激活也不生效（registered but unreachable）。
+		// win32 工具接线（D3）：内建默认激活列表按**名字**激活 ["read","bash","edit","write"]，扩展同名工具
+		// 覆盖内建定义；`defaultActive: false` 仍允许命名激活，挡不住默认列表。因此改用 `exposure: "hidden"`：
+		// _applyToolLoadout 丢弃 hidden、命名激活也不生效（registered but unreachable）。
 		// 但绝不能跳过注册（那会露出 pi 内置的未受限 bash，显式启用即 fail-open），所以是“注册 + hidden”。
 		const win32 = createSandboxTools({ cwd: process.cwd(), permission: processPermissionState, platform: "win32" });
 		expect((win32.bash as { exposure?: string }).exposure).toBe("hidden");
@@ -778,7 +862,7 @@ describe("windows tool wiring", () => {
 			_hostCreatePowerShellToolDefinition: build,
 		});
 		expect(tools.powershell).toBeUndefined();
-		// 平台门控先于宿主探测/构造：非 win32 上连 builder 都不该被摸（老宿主上该键本来也不存在）。
+		// 平台门控先于 builder 构造：非 win32 上连注入的 spy 都不该被调用。
 		expect(build).not.toHaveBeenCalled();
 	});
 
@@ -793,8 +877,7 @@ describe("windows tool wiring", () => {
 	});
 
 	it("win32 + host builder: powershell carries the same escalation surface and builds ops per call", async () => {
-		// 宿主 0.80.2 没有 createPowerShellToolDefinition → 正例分支靠测试注入到达；
-		// 注入值走与生产命名空间探测同一条 `typeof === "function"` 口径。
+		// 注入 builder spy，观察 base 元数据装配与 execute 时的受限 ops 构造。
 		const calls: { cwd: string; opts?: unknown }[] = [];
 		const builder = fakePowerShellBuilder(calls);
 		const { deps } = makeDeps({ platform: "win32", _hostCreatePowerShellToolDefinition: builder });
@@ -831,7 +914,7 @@ describe("windows tool wiring", () => {
 	});
 
 	it("a throwing host pwsh builder degrades to no powershell tool without breaking bash/write/edit", () => {
-		// I2 fail-open 回归闸：构造期抛错若冒泡出 createSandboxTools，pi 会把整个扩展置 null，
+		// I2 fail-open 回归闸：经注入缝传入抛错的 builder；构造期抛错若冒泡出 createSandboxTools，pi 会把整个扩展置 null，
 		// bash/write/edit 随即无沙箱裸跑。必须降级为“无 pwsh 覆盖”，三个基础工具照常注册。
 		const builder = vi.fn(() => {
 			throw new Error("host builder exploded");

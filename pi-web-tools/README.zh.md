@@ -23,6 +23,8 @@ npm install
 pi -e ./index.ts
 ```
 
+需要 pi >= 1.5.0。
+
 ### 前置条件
 
 - `websearch`：无需配置——Exa MCP 免费层（150次/天）。可选：设置 `DEEPSEEK_API_KEY`（或在 pi 中配置 `deepseek` provider）启用 DeepSeek 回退位；设置 `ALIYUN_API_KEY`（或配置 `aliyun` provider）启用阿里云回退位。

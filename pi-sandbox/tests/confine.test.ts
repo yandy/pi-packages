@@ -191,7 +191,9 @@ describe("windows-acl dialect", () => {
 		expect(error.message).toContain("the command was NOT executed");
 		expect(error.message).toContain("powershell tool only");
 		expect(error.message).toContain("fail-closed");
-		expect(error.message).toContain("pi >= 1.0.0");
+		expect(error.message).toContain(
+			"pi-sandbox confines Windows commands through the powershell tool only; use the powershell tool instead of bash — the command was NOT executed.",
+		);
 		expect(error.message).toContain("danger-full-access");
 		expect(error.message).not.toContain("-bash");
 		expect(error.message).not.toContain("defaultTools");

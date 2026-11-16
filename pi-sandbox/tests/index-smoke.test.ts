@@ -7,6 +7,15 @@ import { getEscalationBroker, resetEscalationBrokerForTests } from "../src/escal
 import { processPermissionState, type PermissionState } from "../src/permission";
 import { aclSkillPaths } from "../src/win32/skill-paths";
 
+/**
+ * 注册面：win32 上本包额外覆盖注册受限的 powershell（平台门控见 src/tools.ts 的 win32 装配与
+ * index.ts 的 `tools.powershell !== undefined`），其余平台只有三个基础工具。
+ * 名字已按字母序排好，可直接与 tools.sort() 做精确清单比对。
+ */
+const REGISTERED_TOOL_NAMES = process.platform === "win32"
+	? ["bash", "edit", "powershell", "write"]
+	: ["bash", "edit", "write"];
+
 let dir: string;
 beforeEach(() => {
 	dir = mkdtempSync(join(tmpdir(), "idx-"));
@@ -89,7 +98,7 @@ describe("extension activate", () => {
 		const { fakePi, tools, commands, hooks, channels } = makeFakePi();
 		const activate = (await import("../index")).default;
 		activate(fakePi as never);
-		expect(tools.sort()).toEqual(["bash", "edit", "write"]);
+		expect(tools.sort()).toEqual(REGISTERED_TOOL_NAMES);
 		expect(commands).toEqual(["permission"]);
 		// T15 起多一个 resources_discover（技能平台门控）；其余注册面不变。
 		expect(Object.keys(hooks).sort()).toEqual(["resources_discover", "session_shutdown", "session_start"]);
@@ -128,7 +137,7 @@ describe("extension activate", () => {
 		try {
 			const activate = (await import("../index")).default;
 			expect(() => activate(fakePi as never)).not.toThrow();
-			expect(tools.sort()).toEqual(["bash", "edit", "write"]);
+			expect(tools.sort()).toEqual(REGISTERED_TOOL_NAMES);
 			expect(commands).toEqual(["permission"]);
 			expect(warn.mock.calls.flat().join(" ")).toMatch(/falling back to defaults/u);
 		} finally {
@@ -278,16 +287,21 @@ describe("escalation approval forwarding wiring (spec 2026-09-30 §4.5)", () => 
 		expect(input).toHaveBeenCalledWith("Why deny?", "optional", { signal: ac.signal });
 	});
 
-	it("旧宿主 ctx.ui 无 input → 通道 input 为 undefined（broker 跳过理由追问）", async () => {
+	it("异常 ctx 无 input → broker 跳过理由追问（Deny 照常结算，不抛错）", async () => {
 		const { fakePi, hooks } = makeFakePi();
 		const activate = (await import("../index")).default;
 		activate(fakePi as never);
-		const ctx = { hasUI: true, sessionManager: { getSessionId: () => "p" }, ui: { select: async () => "Allow once" } };
+		// 1.5.x 的 ctx.ui.input 是必填成员，所以通道的 input 总是被注册；但注册方是跨会话抽象，
+		// 异常 ctx 仍可能拿不到它。缺失时取用会抛 TypeError——broker 必须包住，跳过理由追问、
+		// 保住 Deny 语义（不得退化成“取消”）。
+		const ctx = { hasUI: true, sessionManager: { getSessionId: () => "p" }, ui: { select: async () => "Deny" } };
 		hooks.session_start?.({ type: "session_start" }, ctx);
 		getEscalationBroker().linkChild("c", "p");
 		const resolved = getEscalationBroker().resolveChannel("c");
 		expect(resolved).not.toBeNull();
-		expect(resolved?.input).toBeUndefined();
+		if (resolved === null) throw new Error("channel must resolve");
+		await expect(getEscalationBroker().request(resolved, "T", ["Allow once", "Deny"], undefined, { title: "Why deny?", placeholder: "optional" }))
+			.resolves.toEqual({ choice: "Deny" });
 	});
 
 	it("ctx 失效（hasUI 取值器抛错）→ 通道失效并 fail-closed，不冒泡宿主报错", async () => {
@@ -320,12 +334,8 @@ describe("escalation approval forwarding wiring (spec 2026-09-30 §4.5)", () => 
 	});
 });
 
-/**
- * T15：技能平台门控（Ruling 9）与 pwsh 未激活提示（Ruling 8）。
- * 提示是**每进程一次**的模块级标志，所以每个需要“首次提示”的用例先 `vi.resetModules()`
- * 再 import index；fires-once 用例用两次 activate 钉住跨会话不重复。
- */
-describe("T15: 平台门控与 pwsh 未激活提示（Ruling 8/9）", () => {
+/** T15：技能平台门控（Ruling 9）与 /permission 的 PowerShell 状态行（Ruling 8）。 */
+describe("T15: 平台门控与 PowerShell 状态行（Ruling 8/9）", () => {
 	/** Node 上 process.platform 是 configurable 的数据属性：临时改写后按原描述符还原。 */
 	async function withPlatform<T>(platform: string, run: () => Promise<T> | T): Promise<T> {
 		const original = Object.getOwnPropertyDescriptor(process, "platform");
@@ -337,20 +347,12 @@ describe("T15: 平台门控与 pwsh 未激活提示（Ruling 8/9）", () => {
 		}
 	}
 
-	/** 带 getActiveTools 的假 pi（Ruling 8 的探测面）；传函数可模拟取值抛错（陈旧宿主）。 */
+	/** 带 getActiveTools 的假 pi；传函数可模拟取值抛错（陈旧 ctx）。 */
 	function makeFakePiWithActiveTools(active: string[] | (() => string[])) {
 		const made = makeFakePi();
 		(made.fakePi as unknown as { getActiveTools: () => string[] }).getActiveTools =
 			typeof active === "function" ? active : () => active;
 		return made;
-	}
-
-	function uiCtx(sessionId: string, notify: ReturnType<typeof vi.fn>) {
-		return {
-			hasUI: true,
-			sessionManager: { getSessionId: () => sessionId },
-			ui: { select: async () => "Allow once", input: async () => "because", notify },
-		};
 	}
 
 	it("contributes the ACL skill path only on win32", async () => {
@@ -370,8 +372,8 @@ describe("T15: 平台门控与 pwsh 未激活提示（Ruling 8/9）", () => {
 	});
 
 	it("registers the powershell tool only when createSandboxTools provides one", async () => {
-		// 宿主 0.80.2 没有 createPowerShellToolDefinition，win32 的正例分支单测里无法自然到达；
-		// 这里 mock 掉 ../src/tools 的返回值，只钉 index.ts 的 `!== undefined` 门控本身。
+		// 这里 mock 掉 ../src/tools 的返回值，只钉 index.ts 的 `!== undefined` 门控本身，
+		// 不把 win32 builder 与平台装配耦合进这个注册门控用例。
 		// （缺省分支由本文件首个用例的 tools 精确集合覆盖：undefined 必须跳过注册而不是注册 undefined。）
 		vi.doMock("../src/tools", () => ({
 			createSandboxTools: () => ({
@@ -440,9 +442,9 @@ describe("T15: 平台门控与 pwsh 未激活提示（Ruling 8/9）", () => {
 	});
 
 	it("/permission 状态行在 win32 且无法判断激活状态时标注 activation unknown（T15 修订）", async () => {
-		// 老宿主（含本仓 devDependency 0.80.2 同一形态）没有 getActiveTools：此类宿主上 pwsh
-		// 工具根本不存在，裸 "shell: powershell only" 会被读成“已启用”，必须显式标注未知态。
-		const { fakePi, commandHandlers } = makeFakePi(); // 无 getActiveTools
+		// 取值失败（陈旧 ctx）时无法判断激活状态，裸 "shell: powershell only" 会被读成“已启用”，
+		// 必须显式标注未知态。
+		const { fakePi, commandHandlers } = makeFakePi(); // 无 getActiveTools：读取失败，归入统一未知态
 		const activate = await importIndexWithDangerFullAccessOverride();
 		activate(fakePi as never);
 		const notify = vi.fn();
@@ -456,178 +458,18 @@ describe("T15: 平台门控与 pwsh 未激活提示（Ruling 8/9）", () => {
 		expect(text).not.toContain("(not activated)");
 	});
 
-	it("Ruling 8: win32 + bash 活动而 pwsh 缺失 → 有 UI 提示一次，消息点名修法", async () => {
-		vi.resetModules();
-		const activate = (await import("../index")).default;
-		const first = makeFakePiWithActiveTools(["bash"]);
-		activate(first.fakePi as never);
-		const notify = vi.fn();
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		try {
-			await withPlatform("win32", async () => {
-				first.hooks.session_start?.({ type: "session_start" }, uiCtx("p", notify));
-				first.hooks.session_start?.({ type: "session_start" }, uiCtx("p", notify)); // 同一 activate 内重复 session_start
-			});
-			expect(notify).toHaveBeenCalledTimes(1);
-			expect(notify.mock.calls[0]?.[1]).toBe("warning");
-			const message = String(notify.mock.calls[0]?.[0]);
-			expect(message).toContain("~/.pi/agent/settings.json");
-			expect(message).toContain("requires pi >= 1.0.0"); // T15 修订：宿主前提与 UnsupportedWindowsShellError 同措辞
-			expect(message).toContain('"defaultTools"');
-			// 只给有效方向：pi 在 win32 上默认只激活 powershell，本包 bash 又以 exposure: "hidden" 注册——
-			// `-bash` 既去不掉扩展注册的工具，也不是这里需要的动作。
-			expect(message).toContain('{ "defaultTools": ["+powershell"] }');
-			expect(message).not.toContain("-bash");
-			expect(message).toContain("refused");
-			expect(warn).not.toHaveBeenCalled();
-
-			// 每进程一次：宿主对每个会话重调 factory，第二次 activate / session_start 不得再刷屏
-			const second = makeFakePiWithActiveTools(["bash"]);
-			activate(second.fakePi as never);
-			const notify2 = vi.fn();
-			await withPlatform("win32", async () => {
-				second.hooks.session_start?.({ type: "session_start" }, uiCtx("p2", notify2));
-			});
-			expect(notify2).not.toHaveBeenCalled();
-		} finally {
-			warn.mockRestore();
-		}
-	});
-
-	it("Ruling 8: win32 + 无 UI（hasUI=false）→ 提示写 stderr", async () => {
-		vi.resetModules();
-		const activate = (await import("../index")).default;
-		const { fakePi, hooks } = makeFakePiWithActiveTools(["bash"]);
-		activate(fakePi as never);
-		const notify = vi.fn();
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		try {
-			await withPlatform("win32", async () => {
-				hooks.session_start?.({ type: "session_start" }, { hasUI: false, ui: { notify } });
-			});
-			expect(notify).not.toHaveBeenCalled();
-			expect(warn).toHaveBeenCalledTimes(1);
-			const text = String(warn.mock.calls[0]?.[0]);
-			expect(text).toContain("sandbox:");
-			expect(text).toContain("+powershell");
-		} finally {
-			warn.mockRestore();
-		}
-	});
-
-	it("Ruling 8: ctx 已失效（hasUI 取值器抛错）→ 回落 console.warn，不冒泡（I2）", async () => {
-		vi.resetModules();
-		const activate = (await import("../index")).default;
-		const { fakePi, hooks } = makeFakePiWithActiveTools(["bash"]);
-		activate(fakePi as never);
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		try {
-			const staleCtx = {
-				get hasUI(): boolean {
-					throw new Error("This extension ctx is stale after session replacement or reload.");
-				},
-				ui: { notify: vi.fn() },
-			};
-			await withPlatform("win32", async () => {
-				expect(() => hooks.session_start?.({ type: "session_start" }, staleCtx)).not.toThrow();
-			});
-			expect(warn).toHaveBeenCalledTimes(1);
-			expect(String(warn.mock.calls[0]?.[0])).toContain("+powershell");
-		} finally {
-			warn.mockRestore();
-		}
-	});
-
-	it("Ruling 8: win32 + 老宿主无 getActiveTools → 无法判断，静默且不抛（I2）", async () => {
-		vi.resetModules();
-		const activate = (await import("../index")).default;
-		const { fakePi, hooks } = makeFakePi(); // 无 getActiveTools
-		activate(fakePi as never);
-		const notify = vi.fn();
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		try {
-			await withPlatform("win32", async () => {
-				expect(() => hooks.session_start?.({ type: "session_start" }, uiCtx("p", notify))).not.toThrow();
-			});
-			expect(notify).not.toHaveBeenCalled();
-			expect(warn).not.toHaveBeenCalled();
-		} finally {
-			warn.mockRestore();
-		}
-	});
-
-	it("Ruling 8: win32 + getActiveTools 抛错（陈旧宿主 ctx）→ 静默且不抛（I2）", async () => {
-		vi.resetModules();
-		const activate = (await import("../index")).default;
-		const { fakePi, hooks } = makeFakePiWithActiveTools(() => {
-			throw new Error("host ctx is stale");
+	it("陈旧 ctx：getActiveTools 抛错 → /permission 不抛且状态行标注 activation unknown", async () => {
+		const { fakePi, commandHandlers } = makeFakePiWithActiveTools(() => {
+			throw new Error("This extension ctx is stale after session replacement or reload.");
 		});
+		const activate = await importIndexWithDangerFullAccessOverride();
 		activate(fakePi as never);
 		const notify = vi.fn();
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		try {
-			await withPlatform("win32", async () => {
-				expect(() => hooks.session_start?.({ type: "session_start" }, uiCtx("p", notify))).not.toThrow();
-			});
-			expect(notify).not.toHaveBeenCalled();
-			expect(warn).not.toHaveBeenCalled();
-		} finally {
-			warn.mockRestore();
-		}
-	});
-
-	it("Ruling 8: win32 + pwsh 已在活动列表 → 静默", async () => {
-		vi.resetModules();
-		const activate = (await import("../index")).default;
-		const { fakePi, hooks } = makeFakePiWithActiveTools(["bash", "powershell"]);
-		activate(fakePi as never);
-		const notify = vi.fn();
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		try {
-			await withPlatform("win32", async () => {
-				hooks.session_start?.({ type: "session_start" }, uiCtx("p", notify));
-			});
-			expect(notify).not.toHaveBeenCalled();
-			expect(warn).not.toHaveBeenCalled();
-		} finally {
-			warn.mockRestore();
-		}
-	});
-
-	it("Ruling 8: win32 + bash 本就不活动 → 静默（不该催装 pwsh）", async () => {
-		vi.resetModules();
-		const activate = (await import("../index")).default;
-		const { fakePi, hooks } = makeFakePiWithActiveTools(["read"]);
-		activate(fakePi as never);
-		const notify = vi.fn();
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		try {
-			await withPlatform("win32", async () => {
-				hooks.session_start?.({ type: "session_start" }, uiCtx("p", notify));
-			});
-			expect(notify).not.toHaveBeenCalled();
-			expect(warn).not.toHaveBeenCalled();
-		} finally {
-			warn.mockRestore();
-		}
-	});
-
-	it("Ruling 8: 非 win32 → 即使 bash 活动、pwsh 缺失也不提示", async () => {
-		vi.resetModules();
-		const activate = (await import("../index")).default;
-		const { fakePi, hooks } = makeFakePiWithActiveTools(["bash"]);
-		activate(fakePi as never);
-		const notify = vi.fn();
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		try {
-			// 平台门控：本用例断言的是**非 win32** 分支（不该催装 pwsh），不钉 platform 在 Windows 上会走 win32 提示分支。
-			await withPlatform("linux", async () => {
-				hooks.session_start?.({ type: "session_start" }, uiCtx("p", notify));
-				expect(notify).not.toHaveBeenCalled();
-				expect(warn).not.toHaveBeenCalled();
-			});
-		} finally {
-			warn.mockRestore();
-		}
+		await withPlatform("win32", async () => {
+			await expect(commandHandlers.permission.handler("", { ui: { notify } })).resolves.toBeUndefined();
+		});
+		expect(notify).toHaveBeenCalledTimes(1);
+		const text = String(notify.mock.calls[0]?.[0]);
+		expect(text).toContain("shell: powershell only (activation unknown)");
 	});
 });

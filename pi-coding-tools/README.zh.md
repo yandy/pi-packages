@@ -57,6 +57,8 @@ Gradle/Maven 元数据）都相对它解析。
 pi install npm:@yandy0725/pi-coding-tools
 ```
 
+需要 pi >= 1.5.0。
+
 ## 配置
 
 配置文件控制这 5 个自定义工具的启用状态。所有工具默认启用。

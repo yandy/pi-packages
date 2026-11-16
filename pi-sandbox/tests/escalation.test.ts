@@ -57,15 +57,14 @@ describe("validateEscalationArgs", () => {
 });
 
 describe('normalizeEscalationValue（占位符归一化，按字段可达性定生死）', () => {
-	// pi ≥1.0.0 实测：execute 之前有 validateToolArguments（针对 declared schema）。
-	// 2026-10-02 三次修订：工具侧 prepareArguments（stripEscalationPlaceholders）在校验前剥掉字符串占位符，
-	// 真实工具链上 "null" / "" 到不了这里；本函数是 resolveCall 层的兑底，承重于未走钩子的调用路径
-	//（子代理转发、未来新增的工具入口）。
+	// 1.5.x 的 validateToolArguments 针对 declared schema；工具侧 prepareArguments（stripEscalationPlaceholders）
+	// 在校验前剥掉字符串占位符，真实工具链上它们到不了这里。本函数是 resolveCall 层的兜底，承重于未走钩子的
+	// 调用路径（子代理转发、未来新增的工具入口）。
 	// - justification 的字符串臂是 Type.String()（字段本身为 string | null）："null" / "NULL" / "" 都是合法字符串
 	//   → 钩子一旦缺席就会真的到达 execute，归一化是 load-bearing 的（否则普通调用会被误判 MALFORMED，
 	//   或带着 Reason: null 弹审批）；
-	// - sandbox_permissions 是两个字面量枚举：字符串形态若不剥就在校验期被拒（execute 不会跑），只有 JSON null
-	//   （schema 已显式声明）和“省略”能到 —— 这两个分支同样由本函数处理。
+	// - sandbox_permissions 显式声明 Type.Null()："null" / "NULL" / "" 会被强转成 JSON null 并放行，带空白的
+	//   " null " / "   " 仍被硬拒；未走钩子时 JSON null 原样到达 execute，与“省略”一样由本函数归一化。
 	it("null / 非字符串（含 JSON null）→ 未提供", () => {
 		expect(normalizeEscalationValue(null)).toBeUndefined();
 		expect(normalizeEscalationValue(undefined)).toBeUndefined();

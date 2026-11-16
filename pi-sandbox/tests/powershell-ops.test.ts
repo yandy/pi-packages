@@ -155,7 +155,7 @@ describe("powershell sandbox ops", () => {
 		expect(spawnFn.mock.calls[1]?.[0]).toBe("pwsh-b.exe");
 	});
 
-	it("uses the host's getPowerShellConfig when no config is injected (pi >= 1.0.0)", async () => {
+	it("uses the host's getPowerShellConfig when no config is injected", async () => {
 		const hostConfig = vi.fn()
 			.mockReturnValueOnce({ shell: "host-pwsh-a.exe", args: ["-Command"] })
 			.mockReturnValueOnce({ shell: "host-pwsh-b.exe", args: ["-Command"] });
@@ -180,22 +180,4 @@ describe("powershell sandbox ops", () => {
 		expect(spawnFn.mock.calls[1]?.[0]).toBe("host-pwsh-b.exe");
 	});
 
-	it("fails closed without spawning when the host has no usable getPowerShellConfig (pi < 1.0.0)", async () => {
-		// 真实 ESM 命名空间缺该导出时属性读取得到 undefined；vitest 的 ESM mock 对「未声明的导出」
-		// 直接抛错，所以这里把导出显式声明成非函数——两条路径都落在同一个 `typeof === "function"` 探测上。
-		vi.doMock("@earendil-works/pi-coding-agent", () => ({ getPowerShellConfig: undefined }));
-		vi.resetModules();
-		const fresh = await import("../src/powershell-ops");
-		const spawnFn = vi.fn();
-		const ops = fresh.createSandboxPowerShellOps({
-			mode: "danger-full-access",
-			workspaceRoot: "C:\\ws",
-			platform: "win32",
-			spawnFn: spawnFn as never,
-		});
-		await expect(ops.exec("echo hi", cwd, { onData: () => {} })).rejects.toThrow(
-			/pi-sandbox: the powershell tool requires pi >= 1\.0\.0/,
-		);
-		expect(spawnFn).not.toHaveBeenCalled();
-	});
 });

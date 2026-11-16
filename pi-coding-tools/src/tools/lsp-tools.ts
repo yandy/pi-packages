@@ -1,4 +1,3 @@
-import { StringEnum } from "@earendil-works/pi-ai";
 import type { defineTool as DefineToolType, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { CodingToolsConfig } from "../config";
@@ -28,6 +27,12 @@ export interface LspTools {
  */
 const LSP_LANGUAGE_SERVER_GUIDELINE =
 	"lsp_symbols, lsp_hover and lsp_navigate need a language server; without one they return an install hint.";
+
+/**
+ * `lsp_navigate` 的 operation 取值。类型实参与下发的 `enum` 都从这一个常量派生：
+ * `Type.Unsafe` 不校验两者一致，分开写会让 schema 与 TS 类型各自漂移。
+ */
+const NAVIGATE_OPERATIONS = ["definition", "references"] as const;
 
 export function createLspTools(manager: LspManager, getConfig: (cwd: string) => CodingToolsConfig): LspTools {
 	const lsp_symbols = defineTool({
@@ -116,7 +121,9 @@ export function createLspTools(manager: LspManager, getConfig: (cwd: string) => 
 			path: Type.String({ description: "File path" }),
 			line: Type.Integer({ description: "Line number (1-based)" }),
 			character: Type.Integer({ description: "Column (0-based)" }),
-			operation: StringEnum(["definition", "references"] as const, {
+			operation: Type.Unsafe<(typeof NAVIGATE_OPERATIONS)[number]>({
+				type: "string",
+				enum: [...NAVIGATE_OPERATIONS],
 				description: "definition = where it's defined; references = who uses it",
 			}),
 		}),

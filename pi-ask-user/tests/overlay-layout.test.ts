@@ -234,6 +234,7 @@ async function buildAskComponent(params: Record<string, unknown>, rows = 24): Pr
 	await tool.execute("layout-test", params, undefined, undefined, {
 		hasUI: true,
 		ui: {
+			onTerminalInput: () => () => {},
 			custom: async (factory: any) => {
 				component = factory({ requestRender() {}, terminal: { rows } }, createTheme(), createKeybindings(), () => {});
 				return null;

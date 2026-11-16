@@ -12,6 +12,10 @@ pi install npm:@yandy0725/pi-sandbox
 pi install .
 ```
 
+需要 pi >= 1.5.0。
+
+低于 1.5.0 的宿主不受支持，且 pi 安装扩展时**不会校验或告警这个 peer 下限**。在这类宿主上，本扩展可能在 ESM 链接期加载失败，`bash` / `write` / `edit`（Windows 上还有 `powershell`）会回落到**未受限**的内建实现。请先升级 pi，再通过 `/permission` 与扩展加载状态确认 pi-sandbox 确实生效。
+
 ## 工作原理
 
 bash 命令被包装进平台沙箱 runner 后在本地 spawn（**路径透明**：宿主路径原样有效）；write/edit 工具在执行前做进程内写围栏；read 不受限。
@@ -34,9 +38,9 @@ bash 命令被包装进平台沙箱 runner 后在本地 spawn（**路径透明**
 - **读不受限**：与其他 runner 一致，受约束进程能读调用者可读的一切
 - **被其他 AppContainer 工具以包 SID 打标过的文件对 Low 完整性子进程不可读**（移除外来 ACE 或重装目录树可恢复）
 
-受限 shell 只有 **`powershell` 工具**。在 Windows（pi >= 1.0.0）上，pi-sandbox 把受限 `bash` 以 `exposure: "hidden"` 注册——pi 的语义是 *registered but unreachable*：模型看不到它，显式点名（`defaultTools`、`--tools`、`setActiveTools()`）也无法激活它。保留这份注册是有意的：扩展工具按名覆盖内建定义，`bash` 这个名字被本包的拒绝壳占据，Windows 上不存在任何通往未受限内建 `bash` 的路径；若未来宿主改变 `hidden` 的兑现方式，该定义仍会拒绝受限模式下的每次调用（绝不 spawn，fail-closed）。除非显式切到 `danger-full-access`（唯一逃生门，与其他平台一样 `bash` 照常裸跑），沙箱绝不在 Windows 上非受限地运行 bash。
+受限 shell 只有 **`powershell` 工具**。在 Windows 上，pi-sandbox 把受限 `bash` 以 `exposure: "hidden"` 注册——pi 的语义是 *registered but unreachable*：模型看不到它，显式点名（`defaultTools`、`--tools`、`setActiveTools()`）也无法激活它。保留这份注册是有意的：扩展工具按名覆盖内建定义，`bash` 这个名字被本包的拒绝壳占据，Windows 上不存在任何通往未受限内建 `bash` 的路径；若未来宿主改变 `hidden` 的兑现方式，该定义仍会拒绝受限模式下的每次调用（绝不 spawn，fail-closed）。除非显式切到 `danger-full-access`（唯一逃生门，与其他平台一样 `bash` 照常裸跑），沙箱绝不在 Windows 上非受限地运行 bash。
 
-已知限制：**`defaultTools` 去不掉扩展注册的工具**（`-name` 条目只能移除内置工具；扩展工具除非在定义里声明退出，否则会被自动激活）。pi-sandbox 不要求用户为此配置：Windows 上 `bash` 这个名字在**定义层**就已从模型侧撤下（`exposure: "hidden"`），没有可配置掉的余地。若 `powershell` 未激活（低于 1.0.0 的老宿主——该版本没有 `powershell` 工具，或选择列表把它排除在外），`/permission` 状态行显示 `shell: powershell only (not activated)`，并在 `bash` 仍在活动列表时（老宿主）于激活期提示一次；`{ "defaultTools": ["+powershell"] }`（需要 pi >= 1.0.0）可把它加回来。
+已知限制：**`defaultTools` 去不掉扩展注册的工具**（`-name` 条目只能移除内置工具；扩展工具除非在定义里声明退出，否则会被自动激活）。pi-sandbox 不要求用户为此配置：Windows 上 `bash` 这个名字在**定义层**就已从模型侧撤下（`exposure: "hidden"`），没有可配置掉的余地。若 `powershell` 未激活（选择列表把它排除在外），`/permission` 状态行显示 `shell: powershell only (not activated)`；`{ "defaultTools": ["+powershell"] }` 可把它加回来。
 
 **支持范围。**与所移植的上游设计（deepseek-harness）一致：**不设新 OS 下限**——机制是 `WRITE_RESTRICTED` 受限令牌 + Low 强制标签，两者都是老 API（当初选它而不是 `mxc`，正是因为 mxc 要 Windows 11 24H2+）。本仓端到端验证在 **Windows 10 Enterprise LTSC 2019（build 17763.316）**上完成：自动化 e2e 与人工验收清单均绿。更新版本预期一致（后端不依赖新版本特性），但本仓尚未验证。注意：上游的**测试**跑在 Windows Server 2025 上，它的测试夹具不可移植到老 build；本包的 Windows 夹具刻意只用与版本无关的原语。
 
@@ -78,6 +82,8 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 - 占位符参数按字段归一化：省略或传 JSON `null` 都表示"不提权"，参数 schema 也显式声明了 `null`——因此 strict schema 提供商（pi 会把这两个字段标成必填）下的模型有一个合法的"不提权"取值可传；`justification` 上的 `"null"` / 空白字符串同样归一化为"未提供"。字符串占位符（`"null"` / 空串 / 纯空白）另有一层兜底：工具的 `prepareArguments` 在参数校验前把它们剥掉——strict 提供商下模型常把必填的可选字段写成字符串 `"null"`，这层兜底让普通调用照常执行，不再产生与沙箱无关的硬错误。
 
 弹窗提供 **Deny / Allow once**（Deny 在首位，误按回车不会授予任何权限）；选 Deny 后可再填一句**可选理由**（回车跳过），理由会随拒绝错误回传给模型，让它明白为什么被拒、不要换写法反复试探。subagent 子会话（前台与后台都算）的提权会转发到父会话弹窗（同进程 pi-subagents，且父会话需有 UI）；无父通道时（headless、跨进程子代理）提权一律拒绝（fail-closed），此时用 `/permission` 放宽进程档位解救。
+
+审批并发时由宿主管理弹窗。TUI 中最新弹窗获得焦点；早先弹窗仍留在宿主的对话框栈中，只是暂时隐藏而**不是已取消**，上层弹窗关闭后会重新显示。若新审批持续到达，早到的请求可能延后处理；pi-sandbox **不承诺处理顺序**。`/reload` 或切换会话可能让**当次**调用的审批保持 pending（宿主行为），但不影响其他审批。RPC 模式下，各审批请求独立结算。
 
 **缓存/数据目录搬迁属于越界行为。** 工具的常驻规则要求模型不得为了绕开沙箱把全局缓存/数据目录搬进 workspace——无论是环境变量覆盖（`XDG_CACHE_HOME`、`HOME`、`UV_CACHE_DIR`、`npm_config_cache`、`PNPM_HOME` 等）、改缓存的 flag（`--cache-dir`、`--store-dir` 等）还是配置文件——正确做法是原样运行工具，包括提权重试也不得夹带搬迁：搬迁是无声的，它会消掉本可上膛提权的那次拒绝。这条政策目前仅停留在提示词层：pi-sandbox 不检测、也不拒绝这类命令，用户显式要求搬迁时仍然成立。在 `workspace-write` 模式下，让工具在工作区外写入的合法途径是**用户**把该目录加入 `~/.pi/agent/sandbox-writable.json`；模型仍不得自行迁移缓存/数据目录。
 

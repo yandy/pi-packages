@@ -23,6 +23,8 @@ npm install
 pi -e ./index.ts
 ```
 
+Requires pi >= 1.5.0.
+
 ### Prerequisites
 
 - `websearch`: No config needed — Exa MCP free tier (150 calls/day). Optional: set `DEEPSEEK_API_KEY` (or configure a `deepseek` provider in pi) for the DeepSeek fallback slot; set `ALIYUN_API_KEY` (or configure an `aliyun` provider) for the Aliyun fallback slot.

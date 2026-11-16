@@ -108,8 +108,7 @@ describe("TranscriptBody", () => {
 
 		expect(getToolDefinition).toHaveBeenCalledTimes(1);
 		// The result reached the component the refresh kept alive. `bash` renders a
-		// preview of its output when collapsed, so the text is observable here;
-		// `read` would render nothing and make this assertion vacuous.
+		// preview of its output when collapsed, so the text is observable here.
 		expect(body.render(80).join("\n")).toContain("line 79 of file content");
 	});
 
@@ -163,14 +162,31 @@ describe("TranscriptBody", () => {
 		expect(rendered).toContain("now summarize the doc");
 	});
 
-	it("renders tool results collapsed by default", () => {
-		const { body } = makeTracker();
-		body.sync([assistantMessage("reading", READ_CALL), toolResultMessage(READ_CALL.id, BODY)]);
+	it("renders tool results through the generic fallback when the tool definition is unresolved", () => {
+		const assistant = assistantMessage("fetching", READ_CALL);
+		const result = toolResultMessage(READ_CALL.id, BODY);
+		const messages = [assistant, result];
+		const { body: incremental, getToolDefinition } = makeTracker();
+		incremental.sync([assistant]);
+		incremental.sync(messages);
 
-		const rendered = body.render(80).join("\n");
+		const firstRender = incremental.render(80);
+		const rendered = firstRender.join("\n");
 		expect(rendered).toContain("read");
-		// Pi's collapsed read renderer shows no output at all (read.js: collapsed → "").
-		expect(rendered).not.toContain("line 79 of file content");
+		expect(getToolDefinition).toHaveBeenCalledWith("read");
+		expect(rendered).toContain("line 79 of file content");
+
+		// Do not assert Pi's collapse default: on pi 1.5.2, an unresolved tool
+		// definition uses the generic fallback, which renders the read body even
+		// while collapsed (tool-execution.js: formatToolExecution). Assert only the
+		// body-owned contract: stable output for the same messages, and incremental
+		// rendering matching a from-scratch build.
+		expect(incremental.sync(messages)).toEqual({ appended: 0, refreshed: 0, rebuilt: 0 });
+		expect(incremental.render(80)).toEqual(firstRender);
+
+		const scratch = makeTracker().body;
+		scratch.sync(messages);
+		expect(incremental.render(80)).toEqual(scratch.render(80));
 	});
 });
 

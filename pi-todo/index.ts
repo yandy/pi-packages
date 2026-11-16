@@ -56,7 +56,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => reconstructState(ctx));
 	pi.on("session_tree", async (_event, ctx) => reconstructState(ctx));
 
-	// 计数只在这里累加：turn_end 在 0.80.2 是纯通知（返回 void），不能注入任何东西。
+	// 计数只在这里累加：turn_end 自 pi 0.87.0 起可返回结果，但本包的注入点是 context（见下），计数与注入分离。
 	pi.on("turn_end", async () => {
 		nagger.onTurn();
 	});

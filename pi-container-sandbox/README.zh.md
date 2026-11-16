@@ -25,6 +25,8 @@ npm install && npm run build-image
 pi -e ./index.ts
 ```
 
+需要 pi >= 1.5.0。
+
 首次使用时，扩展会自动使用本地 `docker/Dockerfile` 构建内置的 sandbox 镜像
 （`pi-container-sandbox:latest`）。后续运行会复用该镜像。
 

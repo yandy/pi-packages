@@ -24,6 +24,8 @@
 pi install npm:@yandy0725/pi-subagents
 ```
 
+需要 pi >= 1.5.0。
+
 ## 快速开始
 
 父代理使用 `subagent` 工具启动子代理：

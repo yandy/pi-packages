@@ -2,18 +2,14 @@ import { access as fsAccess, constants, mkdir as fsMkdir, readFile as fsReadFile
 import { Type, type TSchema } from "typebox";
 import {
 	type AgentToolResult,
-	type BashOperations,
 	createBashToolDefinition,
 	createEditToolDefinition,
+	createPowerShellToolDefinition,
 	createWriteToolDefinition,
 	type EditOperations,
-	type ExtensionContext,
-	type ToolDefinition,
+	type ExtensionToolContext,
 	type WriteOperations,
 } from "@earendil-works/pi-coding-agent";
-// 命名空间导入只用于版本门控探测（createPowerShellToolDefinition 是 pi ≥1.0.0 才有的导出）：
-// pi 是 ESM，静态具名导入一个老宿主不存在的导出会在**链接期**硬失败，属性读取最坏只是 undefined。
-import * as piHost from "@earendil-works/pi-coding-agent";
 import { createSandboxBashOps, type SpawnFn } from "./bash-ops";
 import { getSandboxConfig, type SandboxConfig } from "./config";
 import { getDenialLedger } from "./denial-ledger";
@@ -37,36 +33,15 @@ import { createSandboxPowerShellOps } from "./powershell-ops";
 import { selectRunner, type RunnerHooks } from "./runners";
 
 /**
- * 宿主 pwsh 工具工厂的结构类型（pi ≥1.0.0 导出 `createPowerShellToolDefinition(cwd, options)`）。
- * 本仓 pin 的 devDependency（0.80.2）没有该导出，所以这里不引用其类型、也不静态具名导入；
- * `ToolDefinition` 本身 0.80.2 就有，可以安全用作返回面。
- */
-type HostPowerShellToolDefinition = ToolDefinition<TSchema, unknown, unknown>;
-type HostCreatePowerShellToolDefinition = (
-	cwd: string,
-	options?: { operations?: BashOperations },
-) => HostPowerShellToolDefinition;
-
-/**
- * 宿主探测（lazy + 命名空间 + `typeof === "function"`）：只在 win32 装配时读一次属性。
- * 老宿主（<1.0.0，含本仓 devDependency 0.80.2）上是 undefined——那时 pi 本来就没有 powershell
- * 工具，缺省即“不注册、不报错、不阻断”。
- */
-function hostCreatePowerShellToolDefinition(): HostCreatePowerShellToolDefinition | undefined {
-	const candidate = (piHost as unknown as Record<string, unknown>).createPowerShellToolDefinition;
-	return typeof candidate === "function" ? (candidate as HostCreatePowerShellToolDefinition) : undefined;
-}
-
-/**
- * I2 fail-safe：宿主 builder 在**构造期**抛错时降级为“无 pwsh 覆盖”（undefined，与老宿主同一路径）。
+ * I2 fail-safe：宿主 builder 在**构造期**抛错时降级为“无 pwsh 覆盖”（undefined）。
  * `createSandboxTools` 绝不能因此抛出——pi 会把整个扩展置 null，bash/write/edit 随即无沙箱裸跑
  * （fail-open，见 index.ts 的 I2）。execute 期的 builder 抛错是另一回事：只影响那一次 pwsh 调用，
  * 不涉及扩展装配。
  */
 function buildHostPowerShellBase(
-	builder: HostCreatePowerShellToolDefinition | undefined,
+	builder: typeof createPowerShellToolDefinition | undefined,
 	cwd: string,
-): HostPowerShellToolDefinition | undefined {
+): ReturnType<typeof createPowerShellToolDefinition> | undefined {
 	if (builder === undefined) return undefined;
 	try {
 		return builder(cwd);
@@ -90,11 +65,9 @@ export interface SandboxToolDeps {
 	platform?: string;
 	/** 测试注入（testing.md「参数注入」）：替换缺省的 createSandboxBashOps；生产不传。 */
 	_buildBashOps?: typeof createSandboxBashOps;
-	/** 测试注入（testing.md「参数注入」）：替换宿主命名空间探测结果；生产不传。
-	 *  需要它是因为本仓 devDependency（0.80.2）的宿主没有 createPowerShellToolDefinition，
-	 *  win32 注册的正例路径在单测里无法自然到达。注入值走与探测同一条 `typeof === "function"` 口径，
-	 *  传非函数值（如 false）即模拟“老宿主无该导出”；传 undefined 则回落真实探测。 */
-	_hostCreatePowerShellToolDefinition?: unknown;
+	/** 纯测试注入：缺省用宿主的 createPowerShellToolDefinition；测试可注入抛错的 builder 或 spy。 */
+	_hostCreatePowerShellToolDefinition?: typeof createPowerShellToolDefinition
+		| ((...args: Parameters<typeof createPowerShellToolDefinition>) => never);
 	/** 测试注入（testing.md「参数注入」）：替换缺省的 "/tmp" + os.tmpdir() tmp 根；生产不传。 */
 	_tmpRoots?: readonly string[];
 	/** 测试注入：替换配置的 extraWritableDirs（额外可写根）；生产缺省用配置值。 */
@@ -120,14 +93,12 @@ function configForCall(deps: SandboxToolDeps): SandboxConfig {
 }
 
 /** 提权参数对（三个工具共用）。
- *  `Type.Null()` 是刻意的：strict 提供商（pi 的 `constrainedSampling: {type:"json_schema"}` + `compat.supportsStrictMode`）
- *  会把所有 property 塞进 `required`，并对“不允许 null”的字段补 `anyOf[X,{type:"null"}]`——模型于是必须给值。
- *  显式声明 null 后，“不提权”有一个 schema 认可、文案也认可的取值，而不是靠模型去猜字符串 `"null"`；
- *  同时 pi 的 strict 转换不再补包裹层（`schemaAllowsNull` 递归识别），JSON null 也不会被
- *  `normalizeOptionalNulls` 剥掉，而是原样送达 execute 的归一化。后两条是宿主（pi ≥1.0.0）行为：
- *  本仓 devDependency 是 0.80.2（无严格转换、无 `normalizeOptionalNulls`，但**有** declared-schema 参数校验
- *  ——实测字符串 `"null"` 在 0.80.2 上同样被硬拒），单测只能钉 declared schema——
- *  宿主链路的可复现验证配方与实测记录见 docs/superpowers/specs/2026-10-02-denial-first-escalation-design.md §4.3。 */
+ *  `Type.Null()` 是刻意的：1.5.x 默认启用 strict 转换，strict 提供商（pi 的
+ *  `constrainedSampling: {type:"json_schema"}` + `compat.supportsStrictMode`）会把所有 property 塞进
+ *  `required`，并对“不允许 null”的字段补 `anyOf[X,{type:"null"}]`——模型于是必须给值。
+ *  显式声明 null 后，“不提权”有一个 schema 认可、文案也认可的取值，而不是靠模型去猜字符串 `"null"`，
+ *  strict 转换也不再补包裹层。declared-schema 校验只在 optional 属性不允许 null 时丢弃 JSON null；
+ *  本仓显式允许，所以 JSON null 原样送达 execute 的归一化。字符串占位符的强转与硬拒边界见 spec §5.4。 */
 export const ESCALATION_PROPS = {
 	sandbox_permissions: Type.Optional(
 		Type.Union([Type.Literal("workspace-write"), Type.Literal("danger-full-access"), Type.Null()]),
@@ -166,37 +137,36 @@ function readSessionId(ctx: ToolCtxLike): string | null {
 
 /**
  * 审批通道解析（spec 2026-09-30 §4.3）：
- * - 本会话有 UI：优先用它自己注册的通道，经 broker 的同一条 FIFO 车道弹窗（Ruling 17）——宿主的
- *   对话框只有一个槽位且不排队，第二次调用会让前一个弹窗收不到按键、其 promise 变成孤儿。
- *   解析不到自己的通道（宿主未发 session_start、拿不到会话 id）才回落直连，回落行为与改动前逐字一致。
- * - 本会话无 UI（子会话）：沿 link 严格解析父通道（D3），解析不到就返回哑通道。
+ * - 本会话有 UI：直连自己的 `ctx.ui`。
+ * - 本会话无 UI（子会话）：沿 link 严格解析第一个已注册且 `hasUI()` 的父通道（D3），
+ *   解析不到就返回哑通道。
  * 哑通道让 approveEscalation 抛出既有 fail-closed 文案——不新增错误分支、不改变校验顺序。
- * 两条通道的 ask 都是两步式（select → Deny 时 input 收理由）：直连串行 await，broker 在同一个
- * FIFO 任务内完成，理由输入不会被排队中的下一个审批弹窗顶掉。signal 两条路径都透传（D6）：
- * 中断既能关掉在飞的弹窗，也能让排队中的请求根本不弹。
+ * 并发审批的可见顺序由宿主决定，本包不排队也不做承诺。两条通道的 ask 都是两步式
+ * （select → Deny 时 input 收理由），同一请求内串行 await。signal 两条路径都透传（D6）：
+ * 中断既能关掉在飞的弹窗，也能让调用前已 abort 的请求根本不弹。
  */
 function approvalChannelFor(ctx: ToolCtxLike, signal: AbortSignal | undefined): EscalationUI {
 	const opts = signal === undefined ? undefined : { signal };
 	const broker = getEscalationBroker();
-	const sessionId = readSessionId(ctx);
-	// 直连通道的两步式：select →（Deny 时）input，在同一条异步链上串行 await，天然原子。
+	// 直连通道的两步式：select →（Deny 时）input，同一请求内串行 await。
+	// 异常口径与 broker.request 一致：审批 UI 抛错一律按"取消"处理（返回 choice undefined），
+	// 绝不让宿主的内部报错冒泡成用户/模型看到的工具错误文本（理由同 index.ts 的 readHasUI）。
 	const directAsk = async (title: string, options: string[], denialReason?: DenialReasonPrompt): Promise<EscalationDecision> => {
-		const choice = await ctx.ui.select(title, options, opts);
-		if (choice !== "Deny" || denialReason === undefined || typeof ctx.ui.input !== "function") return { choice };
 		try {
-			const reason = await ctx.ui.input(denialReason.title, denialReason.placeholder, opts);
-			return { choice, reason };
+			const choice = await ctx.ui.select(title, options, opts);
+			if (choice !== "Deny" || denialReason === undefined || typeof ctx.ui.input !== "function") return { choice };
+			try {
+				const reason = await ctx.ui.input(denialReason.title, denialReason.placeholder, opts);
+				return { choice, reason };
+			} catch {
+				return { choice }; // 理由输入异常不影响拒绝语义（fail-closed）
+			}
 		} catch {
-			return { choice }; // 理由输入异常不影响拒绝语义（fail-closed）
+			return { choice: undefined }; // 审批 UI 异常按取消处理（与 broker.request 的父侧口径一致）
 		}
 	};
-	if (ctx.hasUI) {
-		const own = sessionId === null ? null : broker.resolveOwnChannel(sessionId);
-		if (own === null) {
-			return { hasUI: true, ask: directAsk };
-		}
-		return { hasUI: true, ask: (title, options, denialReason) => broker.request(own, title, options, signal, denialReason) };
-	}
+	if (ctx.hasUI) return { hasUI: true, ask: directAsk };
+	const sessionId = readSessionId(ctx);
 	const channel = sessionId === null ? null : broker.resolveChannel(sessionId);
 	if (channel === null) {
 		return { hasUI: false, ask: async () => ({ choice: undefined }) };
@@ -265,7 +235,7 @@ export async function resolveCallMode(
 	return (await resolveCall(params, ctx, deps, subject, summary, signal)).mode;
 }
 
-/** Ruling 15：对象 spread 保留 base schema 的自有 options（如 editSchema 的 additionalProperties:false）。 */
+/** 对象 spread 保留 base schema 的自有 options，避免重建时丢键。 */
 function extendParams(base: TSchema): TSchema {
 	const b = base as unknown as { properties: Record<string, unknown> };
 	return { ...base, properties: { ...b.properties, ...ESCALATION_PROPS } } as TSchema;
@@ -276,8 +246,9 @@ function extendParams(base: TSchema): TSchema {
  * base 侧不能丢——pi 内置 edit 的 `prepareEditArguments` 负责 legacy `oldText`/`newText` → `edits` 的规整，
  * 直接写自己的 `prepareArguments` 会把它静默覆盖（旧式输入兼容回归）；bash/write 在 pi 侧暂无钩子，
  * 写成串联后未来 base 新增钩子也自动生效。
- * 宿主契约（与 src/escalation.ts 的 stripEscalationPlaceholders 注释互为补充）：pi 的
- * `prepareToolCallArguments` 在 `validateToolArguments` 之前执行（0.80.2 与 1.0.0 均如此），剥离因此在校验前生效。
+ * 宿主契约（与 src/escalation.ts 的 stripEscalationPlaceholders 注释互为补充）：
+ * `pi-agent-core/dist/agent-loop.js` 的 `prepareToolCall` 先调用 `prepareToolCallArguments`，再调用
+ * `validateToolArguments`，剥离因此在校验前生效。
  */
 function withPlaceholderStripping<T>(base: ((args: unknown) => T) | undefined): (args: unknown) => T {
 	return (args: unknown): T => stripEscalationPlaceholders(base === undefined ? args : base(args)) as T;
@@ -382,14 +353,14 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 	const platform = deps.platform ?? process.platform;
 	// 测试注入优先；生产缺省为真实的 createSandboxBashOps。
 	const buildBashOps = deps._buildBashOps ?? createSandboxBashOps;
-	// pwsh 覆盖（spec §4.8）：仅 win32 且宿主确实导出工厂时装配；否则 undefined。
-	let createHostPowerShell: HostCreatePowerShellToolDefinition | undefined;
+	// pwsh 覆盖（spec §4.8）：仅 win32 装配；非 win32 为 undefined，且不触碰 builder。
+	let createHostPowerShell: typeof createPowerShellToolDefinition | undefined;
 	if (platform === "win32") {
-		const candidate = deps._hostCreatePowerShellToolDefinition ?? hostCreatePowerShellToolDefinition();
-		if (typeof candidate === "function") createHostPowerShell = candidate as HostCreatePowerShellToolDefinition;
+		const candidate = deps._hostCreatePowerShellToolDefinition ?? createPowerShellToolDefinition;
+		createHostPowerShell = candidate;
 	}
 	// Ruling 15：以 definition 工厂为 base——自带 promptSnippet/promptGuidelines，
-	// execute 第 5 参 ctx 类型正确（ExtensionContext），spread 后注册不丢系统提示元数据。
+	// execute 第 5 参 ctx 类型正确（ExtensionToolContext），spread 后注册不丢系统提示元数据。
 	const baseBash = createBashToolDefinition(deps.cwd);
 	const baseWrite = createWriteToolDefinition(deps.cwd);
 	const baseEdit = createEditToolDefinition(deps.cwd);
@@ -398,18 +369,16 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 	// I2 fail-safe：构造抛错降级为“无 pwsh 覆盖”，绝不冒泡出 createSandboxTools（fail-open 防线）。
 	const basePowerShell = buildHostPowerShellBase(createHostPowerShell, deps.cwd);
 
-	// Windows 工具装配（spec D3 第三版，pi 1.0.0 源码实证）：win32 上 bash 必须是“注册但模型不可达”。
-	// 机制两代教训：
-	//   ① `defaultActive: false` **无效**（真机证伪）：pi 1.0.0 的 _buildRuntime 把默认激活名写死为
-	//      ["read","bash","edit","write"]（agent-session.js:2889-2893），_refreshToolRegistry 按**名字**
-	//      从注册表取同名工具激活；而 `defaultActive:false` 的语义恰是“被命名即激活”
-	//      （_isActivatedOnRegistration，types.d.ts:471-475）——本包注册的同名 bash 照旧进入激活集。
-	//   ② 正解 `exposure: "hidden"`：_applyToolLoadout 构建声明集合时**丢弃** hidden
-	//      （agent-session.js:1124），_isDeclarable 对 hidden 返回 false → 自动激活与命名激活
-	//      （defaultTools / --tools / setActiveTools）都不生效；pi 文档：hidden = registered but unreachable。
-	// 同时**绝不能**“win32 上不注册 bash”：扩展工具按名覆盖内建定义（registry.set），不注册就会露出
-	// pi 内置的未受限 bash，显式启用即 fail-open。注册 + hidden = 名字被遮蔽、模型不可达，无 fail-open 路径。
-	// 非 win32 不设该键：bash 必须默认激活（既有行为不变）。
+	// Windows 工具装配（spec D3）：win32 上 bash 必须是“注册但模型不可达”。
+	// `defaultActive: false` 不能达成这个约束：`agent-session.js` 的 `_buildRuntime` 把内建默认激活名设为
+	// ["read","bash","edit","write"]（不含其他扩展工具），`_refreshToolRegistry` 又让扩展工具按名覆盖内建定义；
+	// `defaultActive: false` 只禁止注册时自动激活，defaultTools / --tools / setActiveTools 按名激活仍然有效，
+	// 所以默认名字 bash 会解析到本包注册的同名工具并进入激活集。
+	// 正解是 `exposure: "hidden"`：`dist/core/extensions/types.d.ts` 的 `ToolExposure` 定义为
+	// "registered but unreachable; activating it has no effect"；`_applyToolLoadout` 排除 hidden，
+	// `_isDeclarable` 也只接受 direct / model-only，自动激活与命名激活都无法把它声明给模型。
+	// 同时**绝不能**“win32 上不注册 bash”：不注册就会露出 pi 内置的未受限 bash，显式启用即 fail-open。
+	// 注册 + hidden = 名字被遮蔽、模型不可达，无 fail-open 路径。非 win32 不设该键：bash 必须默认激活。
 	const bash = {
 		...baseBash,
 		...(platform === "win32" ? { exposure: "hidden" as const } : {}),
@@ -418,7 +387,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 		promptGuidelines: [...(baseBash.promptGuidelines ?? []), ENV_REDIRECT_GUIDELINE, ESCALATION_GUIDELINE],
 		parameters: extendParams(baseBash.parameters),
 		prepareArguments: withPlaceholderStripping(baseBash.prepareArguments),
-		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
+		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionToolContext) {
 			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;
 			const workspaceRoot = workspaceRootFor(sessionCwd);
 			const config = configForCall(deps);
@@ -457,7 +426,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 		promptGuidelines: [...(baseWrite.promptGuidelines ?? []), ENV_REDIRECT_GUIDELINE, ESCALATION_GUIDELINE],
 		parameters: extendParams(baseWrite.parameters),
 		prepareArguments: withPlaceholderStripping(baseWrite.prepareArguments),
-		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
+		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionToolContext) {
 			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;
 			const workspaceRoot = workspaceRootFor(sessionCwd);
 			const sessionId = readSessionId(ctx);
@@ -484,7 +453,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 		promptGuidelines: [...(baseEdit.promptGuidelines ?? []), ENV_REDIRECT_GUIDELINE, ESCALATION_GUIDELINE],
 		parameters: extendParams(baseEdit.parameters),
 		prepareArguments: withPlaceholderStripping(baseEdit.prepareArguments),
-		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
+		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionToolContext) {
 			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;
 			const workspaceRoot = workspaceRootFor(sessionCwd);
 			const sessionId = readSessionId(ctx);
@@ -510,7 +479,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 		promptGuidelines: [...(basePowerShell.promptGuidelines ?? []), ENV_REDIRECT_GUIDELINE, ESCALATION_GUIDELINE],
 		parameters: extendParams(basePowerShell.parameters),
 		prepareArguments: withPlaceholderStripping(basePowerShell.prepareArguments),
-		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext) {
+		async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionToolContext) {
 			// 与 bash 完全同路径：同一 sessionCwd 解析、同一 resolveCall（subject 为 command）、同一 ledger 记账、
 			// 同一 prepareArguments/剥参与同档提权标记。
 			const sessionCwd = (ctx as { cwd?: string }).cwd ?? deps.cwd;

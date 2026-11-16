@@ -43,6 +43,8 @@
 pi install npm:@yandy0725/pi-ask-user
 ```
 
+需要 pi >= 1.5.0。
+
 ## 工具名称
 
 注册的工具名称为：
