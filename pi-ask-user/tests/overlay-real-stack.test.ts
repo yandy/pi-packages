@@ -98,6 +98,7 @@ async function setupOverlay(
 	const executePromise = registeredTool.execute("real-stack-test", params, undefined, undefined, {
 		hasUI: true,
 		ui: {
+			onTerminalInput: () => () => {},
 			custom: async (factory: any) => {
 				// The extension factory only reads theme.fg/bold from this
 				// argument; identity keeps assertions ANSI-free while the

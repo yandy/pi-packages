@@ -297,6 +297,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (_factory: any, options: any) => {
 						capturedOptions = options;
 						return null;
@@ -325,6 +326,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (_factory: any, options: any) => {
 						capturedOptions = options;
 						return null;
@@ -352,6 +354,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (factory: any) =>
 						await new Promise((resolve) => {
 							factory({ requestRender() {}, terminal: { rows: 24 } }, createTheme(), createKeybindings(), resolve);
@@ -381,6 +384,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (factory: any) =>
 						await new Promise((resolve) => {
 							factory({ requestRender() {}, terminal: { rows: 24 } }, createTheme(), createKeybindings(), resolve);
@@ -409,6 +413,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (_factory: any, options: any) => {
 						capturedOptions = options;
 						return null;
@@ -437,6 +442,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (_factory: any, options: any) => {
 						capturedOptions = options;
 						return null;
@@ -464,6 +470,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (_factory: any, options: any) => {
 						capturedOptions = options;
 						return null;
@@ -827,6 +834,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async () => null,
 				},
 			},
@@ -899,6 +907,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (factory: any) => {
 						let resolved: string | null | undefined;
 						const component = factory(
@@ -940,6 +949,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (factory: any) => {
 						let resolved: string | null | undefined;
 						const component = factory(
@@ -981,6 +991,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (factory: any) => {
 						let resolved: string | null | undefined;
 						const component = factory(
@@ -1019,6 +1030,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (factory: any) => {
 						let resolved: string | null | undefined;
 						const component = factory(
@@ -1059,6 +1071,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (factory: any) => {
 						let resolved: string | null | undefined;
 						const component = factory(
@@ -1097,6 +1110,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (factory: any) => {
 						let resolved: string | null | undefined;
 						const component = factory(
@@ -1136,6 +1150,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (factory: any) => {
 						let resolved: any;
 						const component = factory(
@@ -1175,6 +1190,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (factory: any) => {
 						let resolved: string | null | undefined;
 						const component = factory(
@@ -1216,6 +1232,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (factory: any) => {
 						let resolved: string | null | undefined;
 						const component = factory(
@@ -1265,6 +1282,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (factory: any) => {
 						const component = factory(
 							{ requestRender() {}, terminal: { rows: 24 } },
@@ -1308,6 +1326,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (factory: any) => {
 						const component = factory(
 							{ requestRender() {}, terminal: { rows: 24 } },
@@ -1344,6 +1363,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (factory: any) => {
 						const component = factory(
 							{ requestRender() {}, terminal: { rows: 24 } },
@@ -1383,6 +1403,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (factory: any) => {
 						const component = factory(
 							{ requestRender() {}, terminal: { rows: 24 } },
@@ -1418,6 +1439,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (factory: any) => {
 						let resolved: any;
 						const component = factory(
@@ -1456,6 +1478,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (factory: any) => {
 						let resolved: string | null | undefined;
 						const component = factory(
@@ -1494,6 +1517,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (factory: any) => {
 						let resolved: string | null | undefined;
 						const component = factory(
@@ -1534,6 +1558,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (factory: any) => {
 						const component = factory(
 							{ requestRender() {}, terminal: { rows: 24 } },
@@ -1578,6 +1603,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (factory: any) => {
 						const component = factory(
 							{ requestRender() {}, terminal: { rows: 24 } },
@@ -1627,6 +1653,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (factory: any) => {
 						const component = factory(
 							{ requestRender() {}, terminal: { rows: 24 } },
@@ -1664,6 +1691,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (factory: any) => {
 						let resolved: any;
 						const component = factory(
@@ -1711,6 +1739,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (factory: any) => {
 						let resolved: any;
 						const component = factory(
@@ -1767,6 +1796,7 @@ describe("ask_user", () => {
 			{
 				hasUI: true,
 				ui: {
+					onTerminalInput: () => () => {},
 					custom: async (factory: any) => {
 						let component: any;
 						try {
@@ -1815,6 +1845,7 @@ describe("ask_user", () => {
 				{
 					hasUI: true,
 					ui: {
+						onTerminalInput: () => () => {},
 						custom: async () => undefined,
 						select: async (title: string, opts: string[]) => {
 							selectTitle = title;
@@ -1849,6 +1880,7 @@ describe("ask_user", () => {
 				{
 					hasUI: true,
 					ui: {
+						onTerminalInput: () => () => {},
 						custom: async () => undefined,
 						select: async (_title: string, opts: string[]) => {
 							selectOptions = opts;
@@ -1883,6 +1915,7 @@ describe("ask_user", () => {
 				{
 					hasUI: true,
 					ui: {
+						onTerminalInput: () => () => {},
 						custom: async () => undefined,
 						select: async () => sentinel,
 						input: async () => {
@@ -1915,6 +1948,7 @@ describe("ask_user", () => {
 				{
 					hasUI: true,
 					ui: {
+						onTerminalInput: () => () => {},
 						custom: async () => undefined,
 						select: async () => undefined,
 						input: async (title: string) => {
@@ -1948,6 +1982,7 @@ describe("ask_user", () => {
 				{
 					hasUI: true,
 					ui: {
+						onTerminalInput: () => () => {},
 						custom: async () => undefined,
 						select: async () => "Blue",
 						input: async (title: string) => {
@@ -1982,6 +2017,7 @@ describe("ask_user", () => {
 				{
 					hasUI: true,
 					ui: {
+						onTerminalInput: () => () => {},
 						custom: async () => undefined,
 						select: async () => undefined,
 						input: async () => undefined,
@@ -2010,6 +2046,7 @@ describe("ask_user", () => {
 				{
 					hasUI: true,
 					ui: {
+						onTerminalInput: () => () => {},
 						custom: async () => undefined,
 						select: async (title: string) => {
 							selectTitle = title;
@@ -2040,6 +2077,7 @@ describe("ask_user", () => {
 				{
 					hasUI: true,
 					ui: {
+						onTerminalInput: () => () => {},
 						custom: async () => undefined,
 						select: async (_title: string, _opts: string[], opts: any) => {
 							capturedOpts = opts;
@@ -2069,6 +2107,7 @@ describe("ask_user", () => {
 					hasUI: true,
 					cwd: "/tmp/project",
 					ui: {
+						onTerminalInput: () => () => {},
 						custom: async (_factory: any, options: any) => {
 							capturedOptions = options;
 							return null;
@@ -2096,6 +2135,7 @@ describe("ask_user", () => {
 					hasUI: true,
 					cwd: "/tmp/project",
 					ui: {
+						onTerminalInput: () => () => {},
 						custom: async (_factory: any, options: any) => {
 							capturedOptions = options;
 							return null;
@@ -2123,6 +2163,7 @@ describe("ask_user", () => {
 					hasUI: true,
 					cwd: "/tmp/project",
 					ui: {
+						onTerminalInput: () => () => {},
 						custom: async (_factory: any, options: any) => {
 							capturedOptions = options;
 							return null;
@@ -2188,6 +2229,7 @@ describe("ask_user", () => {
 					hasUI: true,
 					cwd: "/tmp/project",
 					ui: {
+						onTerminalInput: () => () => {},
 						custom: async (_factory: any, options: any) => {
 							capturedOptions = options;
 							return null;

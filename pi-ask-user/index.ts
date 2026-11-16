@@ -51,13 +51,15 @@ const ASK_USER_VERSION: string = (_require("./package.json") as { version: strin
  * and crashes mid-render the first time pi-tui's Markdown calls
  * `mdTheme.bold(...)`.
  *
- * That broken-bag scenario shows up whenever this extension's bundled copy
- * of `@earendil-works/pi-coding-agent` is a different module instance than
- * the host's — e.g. an older Pi still on the legacy
- * `@mariozechner/pi-coding-agent` scope (≤ 0.73.1) where npm cannot dedupe
- * across scopes, so our copy's theme singleton is never initialised
- * (`globalThis[Symbol.for("@earendil-works/pi-coding-agent:theme")]` is
- * undefined). See https://github.com/edlsh/pi-ask-user/issues/17.
+ * That broken-bag scenario shows up whenever this extension's own copy of
+ * `@earendil-works/pi-coding-agent` is a different module instance than the
+ * host's. The theme singleton lives in a `globalThis` slot keyed by
+ * `Symbol.for("@earendil-works/pi-coding-agent:theme")`, so a copy the host
+ * never initialised — a foreign package identity keys the slot differently —
+ * reads it as undefined and every property access throws. Declaring the
+ * package as a peer dependency cannot rule this out: it constrains which
+ * version the host installs, not which module instance our import resolves
+ * to. See https://github.com/edlsh/pi-ask-user/issues/17.
  *
  * Probe `bold("")` to force the Proxy lookup eagerly; on throw, callers
  * fall back to plain `Text` rendering for context blocks.
@@ -1830,7 +1832,7 @@ export default function (pi: ExtensionAPI) {
 				// receive input). Inline mode does not need this because the prompt is
 				// already non-modal. Skipped entirely if the user disabled the shortcut.
 				const overlayToggle = shortcuts.overlayToggle;
-				if (effectiveDisplayMode === "overlay" && !overlayToggle.disabled && typeof ctx.ui.onTerminalInput === "function") {
+				if (effectiveDisplayMode === "overlay" && !overlayToggle.disabled) {
 					removeOverlayInputListener = ctx.ui.onTerminalInput((data) => {
 						if (!overlayToggle.matches(data) || !overlayHandle) return undefined;
 						// Ignore Kitty keyboard protocol key release events.
@@ -1843,7 +1845,7 @@ export default function (pi: ExtensionAPI) {
 						overlayHandle.setHidden(nextHidden);
 						if (nextHidden && !hasAnnouncedHide) {
 							hasAnnouncedHide = true;
-							ctx.ui.notify?.(`ask_user hidden — press ${overlayToggle.spec} to reopen`, "info");
+							ctx.ui.notify(`ask_user hidden — press ${overlayToggle.spec} to reopen`, "info");
 						}
 						return { consume: true };
 					});
