@@ -51,15 +51,18 @@ const ASK_USER_VERSION: string = (_require("./package.json") as { version: strin
  * and crashes mid-render the first time pi-tui's Markdown calls
  * `mdTheme.bold(...)`.
  *
- * That broken-bag scenario shows up whenever this extension's own copy of
- * `@earendil-works/pi-coding-agent` is a different module instance than the
- * host's. The theme singleton lives in a `globalThis` slot keyed by
- * `Symbol.for("@earendil-works/pi-coding-agent:theme")`, so a copy the host
- * never initialised — a foreign package identity keys the slot differently —
- * reads it as undefined and every property access throws. Declaring the
- * package as a peer dependency cannot rule this out: it constrains which
- * version the host installs, not which module instance our import resolves
- * to. See https://github.com/edlsh/pi-ask-user/issues/17.
+ * That broken bag has two independent causes: the host has not initialized
+ * the theme slot yet, or this package resolves a different package
+ * identity/scope (for example legacy `@mariozechner/*`) whose slot nobody
+ * initialized. The theme singleton lives in a `globalThis` slot keyed by
+ * `Symbol.for("@earendil-works/pi-coding-agent:theme")`. `Symbol.for` always
+ * returns the same key for the same string, so same-scope module duplication
+ * does not create a different slot; a different package identity does. In
+ * either case the slot read is undefined and every property access throws.
+ * Declaring the package as a peer dependency cannot rule this out: it
+ * constrains which version the host installs, not which package identity or
+ * module instance our import resolves to. See
+ * https://github.com/edlsh/pi-ask-user/issues/17.
  *
  * Probe `bold("")` to force the Proxy lookup eagerly; on throw, callers
  * fall back to plain `Text` rendering for context blocks.

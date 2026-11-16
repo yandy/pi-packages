@@ -108,8 +108,7 @@ describe("TranscriptBody", () => {
 
 		expect(getToolDefinition).toHaveBeenCalledTimes(1);
 		// The result reached the component the refresh kept alive. `bash` renders a
-		// preview of its output when collapsed, so the text is observable here;
-		// `read` would render nothing and make this assertion vacuous.
+		// preview of its output when collapsed, so the text is observable here.
 		expect(body.render(80).join("\n")).toContain("line 79 of file content");
 	});
 
@@ -163,17 +162,18 @@ describe("TranscriptBody", () => {
 		expect(rendered).toContain("now summarize the doc");
 	});
 
-	it("renders tool results through the host renderer", () => {
-		const assistant = assistantMessage("reading", READ_CALL);
+	it("renders tool results through the generic fallback when the tool definition is unresolved", () => {
+		const assistant = assistantMessage("fetching", READ_CALL);
 		const result = toolResultMessage(READ_CALL.id, BODY);
 		const messages = [assistant, result];
-		const incremental = makeTracker().body;
+		const { body: incremental, getToolDefinition } = makeTracker();
 		incremental.sync([assistant]);
 		incremental.sync(messages);
 
 		const firstRender = incremental.render(80);
 		const rendered = firstRender.join("\n");
 		expect(rendered).toContain("read");
+		expect(getToolDefinition).toHaveBeenCalledWith("read");
 		expect(rendered).toContain("line 79 of file content");
 
 		// Do not assert Pi's collapse default: on pi 1.5.2, an unresolved tool

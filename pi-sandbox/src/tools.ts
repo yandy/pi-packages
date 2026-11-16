@@ -235,7 +235,7 @@ export async function resolveCallMode(
 	return (await resolveCall(params, ctx, deps, subject, summary, signal)).mode;
 }
 
-/** Ruling 15：对象 spread 保留 base schema 的自有 options（如 editSchema 的 additionalProperties:false）。 */
+/** 对象 spread 保留 base schema 的自有 options，避免重建时丢键。 */
 function extendParams(base: TSchema): TSchema {
 	const b = base as unknown as { properties: Record<string, unknown> };
 	return { ...base, properties: { ...b.properties, ...ESCALATION_PROPS } } as TSchema;

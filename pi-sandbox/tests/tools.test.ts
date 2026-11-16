@@ -172,9 +172,11 @@ describe("createSandboxTools schemas", () => {
 			.toBe((baseWrite.parameters as { additionalProperties?: boolean }).additionalProperties);
 		expect((edit.parameters as { additionalProperties?: boolean }).additionalProperties)
 			.toBe((baseEdit.parameters as { additionalProperties?: boolean }).additionalProperties);
-		// 上面两条在“base 没这个 option”的宿主上恒真，故再钉一条不随宿主版本漂移的关系约束：
-		// extendParams 是对象 spread（不是 Type.Object 重建），包装后的顶层 schema options 键集合
-		// 必须与 base 逐字一致——重建会把 additionalProperties/required 一类自有 option 丢掉。
+		// 上面两条在「base 本就没有这个 option」的宿主上恒真，故再钉一条关系约束：顶层 schema options
+		// 键集合与 base 逐字一致。它只在两种情形下鉴别得出问题：① 手写 `{ type, properties }` 重建会丢
+		// `required` 键；② base 自带 `additionalProperties` 一类自有 option 的宿主版本。对 TypeBox 式
+		// 重建（`Type.Object({ ...base.properties })`）它无鉴别力——当前宿主上重建出的顶层键、`required`、
+		// `additionalProperties` 三项与 base 全同。
 		for (const [tool, base] of [[write, baseWrite], [edit, baseEdit]] as const) {
 			expect(Object.keys(tool.parameters as object).sort()).toEqual(Object.keys(base.parameters as object).sort());
 		}
