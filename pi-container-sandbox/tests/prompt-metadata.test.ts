@@ -94,8 +94,8 @@ describe("注册的 read/write/edit/bash 保留提示词元数据（spec 2026-10
 	it("保留 base schema 选项（不因重建对象而丢）", () => {
 		const registered = byName.get("edit");
 		const base = createEditToolDefinition(process.cwd());
-		// 钉包内性质（宿主 schema 会漂移：0.80.2 的 edit 带 additionalProperties:false，1.5.2 已无）：
-		// `...localEdit` 是对象 spread，包装后的它与 base 同值。
+		// 钉包内性质：宿主 schema 会漂移（`edit` 的 `additionalProperties` 在不同宿主版本间变过），
+		// 故这里只断言「与 base 同值」，不钉具体取值——`...localEdit` 是对象 spread，包装后的它必然带上 base 的顶层 option。
 		expect((registered?.parameters as { additionalProperties?: boolean }).additionalProperties).toBe(
 			(base.parameters as { additionalProperties?: boolean }).additionalProperties,
 		);
