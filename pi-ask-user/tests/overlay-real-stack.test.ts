@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { initTheme } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager, TuiMainScreen, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
-import type { Terminal, TUI } from "@earendil-works/pi-tui";
+import type { Terminal } from "@earendil-works/pi-tui";
 
 /**
  * Real-stack integration test: no vi.mock — the actual pi-tui differential
@@ -9,6 +9,10 @@ import type { Terminal, TUI } from "@earendil-works/pi-tui";
  * maxHeight = 85% of terminal rows), the real Text/Markdown/Spacer components
  * and the real keybinding parser all run. A fake Terminal captures written
  * frames so the rendered output can be asserted after ANSI stripping.
+ *
+ * 按键不走 `TUI.handleInput`（pi-tui 1.5.x 没有这个公开方法）：输入由 TUI 经
+ * `terminal.start(onInput, onResize)` 注册的回调注入，测试用 `sendInput` 把原始字节
+ * 送进同一个回调。resize 回调同样被接住，但当前无用例驱动它（见 `sendResize`）。
  */
 
 class FakeTerminal implements Terminal {
@@ -16,17 +20,25 @@ class FakeTerminal implements Terminal {
 	private readonly columnCount: number;
 	public buffer = "";
 	private inputHandler: ((data: string) => void) | undefined;
+	/** TUI 注册的 resize 回调。当前用例不模拟 resize，存下来只为让 harness 的模拟边界显式。 */
+	private resizeHandler: (() => void) | undefined;
 	constructor(rows: number, columns: number) {
 		this.rowCount = rows;
 		this.columnCount = columns;
 	}
-	start(onInput: (data: string) => void): void {
+	start(onInput: (data: string) => void, onResize: () => void): void {
 		this.inputHandler = onInput;
+		this.resizeHandler = onResize;
 	}
 	/** Feed raw bytes through the callback the TUI registered, as a real terminal does. */
 	sendInput(data: string): void {
 		if (!this.inputHandler) throw new Error("terminal was not started");
 		this.inputHandler(data);
+	}
+	/** 同 `sendInput` 的口径：把 resize 事件交给 TUI 注册的回调。 */
+	sendResize(): void {
+		if (!this.resizeHandler) throw new Error("terminal was not started");
+		this.resizeHandler();
 	}
 	stop(): void {}
 	async drainInput(): Promise<void> {}
@@ -63,8 +75,6 @@ async function setupOverlay(
 	rows = 24,
 ): Promise<{
 	terminal: FakeTerminal;
-	tui: TUI;
-	component: any;
 	frame: () => Promise<string>;
 	cleanup: () => Promise<void>;
 }> {
@@ -135,8 +145,6 @@ async function setupOverlay(
 
 	return {
 		terminal,
-		tui,
-		component,
 		frame,
 		cleanup: async () => {
 			handle.hide();
