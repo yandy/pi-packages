@@ -4,6 +4,7 @@ import { PassThrough } from "node:stream";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createEditToolDefinition, createWriteToolDefinition } from "@earendil-works/pi-coding-agent";
 import { createSandboxTools, ESCALATION_PROPS, resolveCall, resolveCallMode } from "../src/tools";
 import { canonicalizeTarget, isWithinRoots } from "../src/fence";
 import { writableRoots } from "../src/policy";
@@ -66,7 +67,14 @@ const TEST_SESSION = "test-session";
 function toolCtx(hasUI = true, choice: string | undefined = "Allow once") {
 	return {
 		hasUI,
-		sessionManager: { getSessionId: () => TEST_SESSION },
+		// 宿主 bash 工具（pi 1.5.x 的 dist/core/tools/bash.js resolveSpawnContext）会读
+		// sessionManager.getSessionFile()：缺失时 execute 内抛 TypeError，spawnFn 永远不被调用。
+		// 桩形状 = { getSessionId(): string; getSessionFile(): string }，后续走真实宿主 bash
+		// 链路的用例复用同一个桩。
+		sessionManager: {
+			getSessionId: () => TEST_SESSION,
+			getSessionFile: () => join(dir, "session.jsonl"),
+		},
 		ui: { select: vi.fn(async () => choice), input: vi.fn(async () => undefined), notify: vi.fn() },
 	} as never;
 }
@@ -145,11 +153,20 @@ describe("createSandboxTools schemas", () => {
 		expect(bash.promptSnippet).toBe("Execute bash commands (ls, grep, find, etc.)");
 		expect(write.promptGuidelines).toContain("Use write only for new files or complete rewrites.");
 		expect(write.promptGuidelines?.[write.promptGuidelines.length - 1]).toContain("sandbox_permissions");
-		// pi 0.80.2 dist 事实：editSchema 自带 additionalProperties:false，writeSchema 无该字段。
-		// spread 版 extendParams 如实保留 base options——edit 钉 false（Type.Object 重建即丢），
-		// write 钉 base 原样（undefined）；裁决原文假设 write 也为 false，与 dist 不符，按事实钉住。
-		expect((write.parameters as { additionalProperties?: boolean }).additionalProperties).toBeUndefined();
-		expect((edit.parameters as { additionalProperties?: boolean }).additionalProperties).toBe(false);
+		// Ruling 15 的包内性质（不钉宿主的 schema 事实，宿主版本会漂移）：spread 版 extendParams
+		// 如实保留 base schema 的自有 options——包装后与 base 同值。
+		const baseWrite = createWriteToolDefinition(ws);
+		const baseEdit = createEditToolDefinition(ws);
+		expect((write.parameters as { additionalProperties?: boolean }).additionalProperties)
+			.toBe((baseWrite.parameters as { additionalProperties?: boolean }).additionalProperties);
+		expect((edit.parameters as { additionalProperties?: boolean }).additionalProperties)
+			.toBe((baseEdit.parameters as { additionalProperties?: boolean }).additionalProperties);
+		// 上面两条在“base 没这个 option”的宿主上恒真，故再钉一条不随宿主版本漂移的关系约束：
+		// extendParams 是对象 spread（不是 Type.Object 重建），包装后的顶层 schema options 键集合
+		// 必须与 base 逐字一致——重建会把 additionalProperties/required 一类自有 option 丢掉。
+		for (const [tool, base] of [[write, baseWrite], [edit, baseEdit]] as const) {
+			expect(Object.keys(tool.parameters as object).sort()).toEqual(Object.keys(base.parameters as object).sort());
+		}
 	});
 	it("常驻规则禁止把全局缓存/数据目录搬进 workspace 作为沙箱绕行，且排在提权协议之前（β′）", () => {
 		const { deps } = makeDeps();
