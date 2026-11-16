@@ -14,6 +14,8 @@ pi install .
 
 需要 pi >= 1.5.0。
 
+低于 1.5.0 的宿主不受支持，且 pi 安装扩展时**不会校验或告警这个 peer 下限**。在这类宿主上，本扩展可能在 ESM 链接期加载失败，`bash` / `write` / `edit`（Windows 上还有 `powershell`）会回落到**未受限**的内建实现。请先升级 pi，再通过 `/permission` 与扩展加载状态确认 pi-sandbox 确实生效。
+
 ## 工作原理
 
 bash 命令被包装进平台沙箱 runner 后在本地 spawn（**路径透明**：宿主路径原样有效）；write/edit 工具在执行前做进程内写围栏；read 不受限。
@@ -56,8 +58,6 @@ PowerShell 语言模式取决于启动约束，不是 ACL 边界的一部分：`
 
 随包提供的 `diagnose-windows-sandbox-acl` 技能（诊断并修复“Windows 文件权限挡住 pi-sandbox 授权”的场景）**仅在 Windows 上**贡献给 pi。它的修复会修改安全描述符，必须由不受限的调用者执行——请通过一次已批准的 `danger-full-access`（或手工）运行。
 
-低于声明下限的宿主上本包可能加载失败，此时 pi 会回落到未受限的内建工具——请升级 pi，不要指望降级模式。
-
 ## 三档权限模式
 
 | 模式 | 文件效果 |
@@ -82,6 +82,8 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 - 占位符参数按字段归一化：省略或传 JSON `null` 都表示"不提权"，参数 schema 也显式声明了 `null`——因此 strict schema 提供商（pi 会把这两个字段标成必填）下的模型有一个合法的"不提权"取值可传；`justification` 上的 `"null"` / 空白字符串同样归一化为"未提供"。字符串占位符（`"null"` / 空串 / 纯空白）另有一层兜底：工具的 `prepareArguments` 在参数校验前把它们剥掉——strict 提供商下模型常把必填的可选字段写成字符串 `"null"`，这层兜底让普通调用照常执行，不再产生与沙箱无关的硬错误。
 
 弹窗提供 **Deny / Allow once**（Deny 在首位，误按回车不会授予任何权限）；选 Deny 后可再填一句**可选理由**（回车跳过），理由会随拒绝错误回传给模型，让它明白为什么被拒、不要换写法反复试探。subagent 子会话（前台与后台都算）的提权会转发到父会话弹窗（同进程 pi-subagents，且父会话需有 UI）；无父通道时（headless、跨进程子代理）提权一律拒绝（fail-closed），此时用 `/permission` 放宽进程档位解救。
+
+审批并发时由宿主管理弹窗。TUI 中最新弹窗获得焦点；早先弹窗仍留在宿主的对话框栈中，只是暂时隐藏而**不是已取消**，上层弹窗关闭后会重新显示。若新审批持续到达，早到的请求可能延后处理；pi-sandbox **不承诺处理顺序**。`/reload` 或切换会话可能让**当次**调用的审批保持 pending（宿主行为），但不影响其他审批。RPC 模式下，各审批请求独立结算。
 
 **缓存/数据目录搬迁属于越界行为。** 工具的常驻规则要求模型不得为了绕开沙箱把全局缓存/数据目录搬进 workspace——无论是环境变量覆盖（`XDG_CACHE_HOME`、`HOME`、`UV_CACHE_DIR`、`npm_config_cache`、`PNPM_HOME` 等）、改缓存的 flag（`--cache-dir`、`--store-dir` 等）还是配置文件——正确做法是原样运行工具，包括提权重试也不得夹带搬迁：搬迁是无声的，它会消掉本可上膛提权的那次拒绝。这条政策目前仅停留在提示词层：pi-sandbox 不检测、也不拒绝这类命令，用户显式要求搬迁时仍然成立。在 `workspace-write` 模式下，让工具在工作区外写入的合法途径是**用户**把该目录加入 `~/.pi/agent/sandbox-writable.json`；模型仍不得自行迁移缓存/数据目录。
 

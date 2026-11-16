@@ -14,6 +14,8 @@ pi install .
 
 Requires pi >= 1.5.0.
 
+Hosts older than 1.5.0 are unsupported, and pi does not check or warn about this peer floor when installing the extension. On such a host the extension may fail during ESM linking; pi then falls back to the **unconfined** built-in `bash`, `write`, and `edit` tools (and `powershell` on Windows). Upgrade pi first, then use `/permission` and the extension load status to confirm that pi-sandbox is active.
+
 ## How it works
 
 bash commands are wrapped in a platform sandbox runner and spawned locally (**path transparent**: host paths work as-is); the write/edit tools run an in-process write fence before execution; read is unrestricted.
@@ -56,8 +58,6 @@ PowerShell language mode follows startup constraints, not the ACL boundary: unde
 
 The bundled `diagnose-windows-sandbox-acl` skill (diagnoses and repairs cases where Windows file permissions block pi-sandbox's grants) is contributed to pi **on Windows only**. Its repair modifies security descriptors, so it needs an unconfined caller — run it from an approved `danger-full-access` (or by hand).
 
-On a host older than the declared floor the package may fail to load, and pi then falls back to the unconfined built-in tools — upgrade pi rather than relying on a degraded mode.
-
 ## Three permission modes
 
 | Mode | File effects |
@@ -82,6 +82,8 @@ bash/write/edit take two optional parameters: `sandbox_permissions` (`workspace-
 - placeholder parameters are normalized per field: omission and JSON `null` both mean "no request", and the parameter schema declares `null` explicitly — so models on strict-schema providers (where pi marks both fields as required) have a valid "no escalation" value to send; a `"null"` or blank string in `justification` is normalized the same way. String placeholders (`"null"` / empty / whitespace) get one more layer of protection: the tools' `prepareArguments` strips them **before** pi validates the arguments — strict-schema models often write the required-but-optional fields as the string `"null"`, and this keeps such calls running instead of failing with an error that has nothing to do with the sandbox.
 
 The prompt offers **Deny / Allow once**, Deny first so a stray Enter does not grant anything; after choosing Deny you may type an **optional reason** (press Enter to skip) that is passed back to the model with the rejection, so it understands why instead of retrying a rewritten command. A subagent child session's escalation (foreground or background) is forwarded to the parent session's prompt (in-process pi-subagents, and the parent must have UI); with no parent channel available (headless, cross-process subagents) escalation is always refused (fail-closed) — widen the process mode with `/permission` to unblock it.
+
+When approvals overlap, the host manages their dialogs. In the TUI, the newest dialog receives focus; earlier dialogs remain on the host's dialog stack, temporarily hidden rather than cancelled, and reappear when the dialogs above them close. If new approvals keep arriving, an earlier request may be handled later; pi-sandbox makes no ordering guarantee. `/reload` or switching sessions may leave the approval for the current call pending (host behavior) without affecting other approvals. In RPC mode, each approval request settles independently.
 
 **Cache/data relocation is out of policy.** The tools' rules instruct the model never to work around the sandbox by relocating global cache/data directories into the workspace — via environment-variable overrides (`XDG_CACHE_HOME`, `HOME`, `UV_CACHE_DIR`, `npm_config_cache`, `PNPM_HOME`, …), cache-relocating flags (`--cache-dir`, `--store-dir`, …), or config files — and to run tools unmodified instead, including on the escalated retry: a relocation is silent, it suppresses the denial that would have armed escalation. This is a prompt-level policy only: pi-sandbox does not detect or refuse such commands, and an explicit user request to relocate stays legitimate. The legitimate way to let a tool write outside the workspace in `workspace-write` mode is for the **user** to add that directory to `~/.pi/agent/sandbox-writable.json`; the model still must not relocate cache/data directories itself.
 
