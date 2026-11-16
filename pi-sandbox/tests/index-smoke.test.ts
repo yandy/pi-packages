@@ -11,10 +11,15 @@ import { aclSkillPaths } from "../src/win32/skill-paths";
  * 注册面：win32 上本包额外覆盖注册受限的 powershell（平台门控见 src/tools.ts 的 win32 装配与
  * index.ts 的 `tools.powershell !== undefined`），其余平台只有三个基础工具。
  * 名字已按字母序排好，可直接与 tools.sort() 做精确清单比对。
+ *
+ * 每次现读 `process.platform`（不是模块加载时的快照）：同文件的 `withPlatform()` 会临时改写它，
+ * 将来若在 `withPlatform("win32")` 里 activate，快照式常量会在 Linux 上错配成 3 vs 4。
  */
-const REGISTERED_TOOL_NAMES = process.platform === "win32"
-	? ["bash", "edit", "powershell", "write"]
-	: ["bash", "edit", "write"];
+function registeredToolNames(): string[] {
+	return process.platform === "win32"
+		? ["bash", "edit", "powershell", "write"]
+		: ["bash", "edit", "write"];
+}
 
 let dir: string;
 beforeEach(() => {
@@ -94,11 +99,11 @@ function parentCtx(sessionId: string, hasUI = true) {
 }
 
 describe("extension activate", () => {
-	it("registers sandboxed bash/write/edit tools, the /permission command and the lifecycle hooks, no flags", async () => {
+	it("registers the sandboxed bash/write/edit tools (plus win32-only powershell), the /permission command and the lifecycle hooks, no flags", async () => {
 		const { fakePi, tools, commands, hooks, channels } = makeFakePi();
 		const activate = (await import("../index")).default;
 		activate(fakePi as never);
-		expect(tools.sort()).toEqual(REGISTERED_TOOL_NAMES);
+		expect(tools.sort()).toEqual(registeredToolNames());
 		expect(commands).toEqual(["permission"]);
 		// T15 起多一个 resources_discover（技能平台门控）；其余注册面不变。
 		expect(Object.keys(hooks).sort()).toEqual(["resources_discover", "session_shutdown", "session_start"]);
@@ -137,7 +142,7 @@ describe("extension activate", () => {
 		try {
 			const activate = (await import("../index")).default;
 			expect(() => activate(fakePi as never)).not.toThrow();
-			expect(tools.sort()).toEqual(REGISTERED_TOOL_NAMES);
+			expect(tools.sort()).toEqual(registeredToolNames());
 			expect(commands).toEqual(["permission"]);
 			expect(warn.mock.calls.flat().join(" ")).toMatch(/falling back to defaults/u);
 		} finally {

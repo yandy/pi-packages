@@ -250,6 +250,23 @@ function createTheme() {
 	};
 }
 
+/**
+ * `ctx.ui` 的统一桩：宿主 1.5.x 把 `onTerminalInput` 变成必填成员后，每个内联 `ui: { ... }`
+ * 都要补一行；收拢到这里后，宿主再增必填成员只改一处。默认桩就是“用户立刻取消”：
+ * `custom` 返回 null、`select`/`input` 返回 undefined、`onTerminalInput` 登记即退订、`notify` 静默。
+ * 需要观察副作用时逐用例覆盖对应成员（覆盖项整体替换默认项，不做浅合并）。
+ */
+function makeUI(overrides: Record<string, unknown> = {}) {
+	return {
+		custom: async () => null,
+		select: async () => undefined,
+		input: async () => undefined,
+		notify: () => {},
+		onTerminalInput: () => () => {},
+		...overrides,
+	};
+}
+
 function createOverlayHandle() {
 	let hidden = false;
 	const calls: boolean[] = [];
@@ -296,13 +313,12 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (_factory: any, options: any) => {
 						capturedOptions = options;
 						return null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -325,13 +341,12 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (_factory: any, options: any) => {
 						capturedOptions = options;
 						return null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -353,14 +368,13 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (factory: any) =>
 						await new Promise((resolve) => {
 							factory({ requestRender() {}, terminal: { rows: 24 } }, createTheme(), createKeybindings(), resolve);
 							resolve({ kind: "selection", selections: ["A"] });
 						}),
-				},
+				}),
 			},
 		);
 
@@ -383,13 +397,12 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (factory: any) =>
 						await new Promise((resolve) => {
 							factory({ requestRender() {}, terminal: { rows: 24 } }, createTheme(), createKeybindings(), resolve);
 						}),
-				},
+				}),
 			},
 		);
 
@@ -412,13 +425,12 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (_factory: any, options: any) => {
 						capturedOptions = options;
 						return null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -441,13 +453,12 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (_factory: any, options: any) => {
 						capturedOptions = options;
 						return null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -469,13 +480,12 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (_factory: any, options: any) => {
 						capturedOptions = options;
 						return null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -491,7 +501,7 @@ describe("ask_user", () => {
 
 			await tool.execute("tool-call-id", { question: "Q", options: ["A"] }, undefined, undefined, {
 				hasUI: true,
-				ui: {
+				ui: makeUI({
 					custom: async (_factory: any, options: any) => {
 						capturedOptions = options;
 						return null;
@@ -502,8 +512,7 @@ describe("ask_user", () => {
 							unsubscribed = true;
 						};
 					},
-					notify: () => {},
-				},
+				}),
 			});
 
 			expect(typeof capturedOptions.onHandle).toBe("function");
@@ -522,13 +531,13 @@ describe("ask_user", () => {
 				undefined,
 				{
 					hasUI: true,
-					ui: {
+					ui: makeUI({
 						custom: async () => null,
 						onTerminalInput: () => {
 							registered = true;
 							return () => {};
 						},
-					},
+					}),
 				},
 			);
 
@@ -543,7 +552,7 @@ describe("ask_user", () => {
 
 			await tool.execute("tool-call-id", { question: "Q", options: ["A"] }, undefined, undefined, {
 				hasUI: true,
-				ui: {
+				ui: makeUI({
 					custom: async (_factory: any, options: any) => {
 						options.onHandle?.(handle);
 						// Simulate the user pressing alt+o twice while the overlay is shown.
@@ -560,7 +569,7 @@ describe("ask_user", () => {
 					notify: (message: string, type?: string) => {
 						notifications.push({ message, type });
 					},
-				},
+				}),
 			});
 
 			expect(calls).toEqual([true, false]);
@@ -576,7 +585,7 @@ describe("ask_user", () => {
 
 			await tool.execute("tool-call-id", { question: "Q", options: ["A"] }, undefined, undefined, {
 				hasUI: true,
-				ui: {
+				ui: makeUI({
 					custom: async (_factory: any, options: any) => {
 						options.onHandle?.(handle);
 						const result = inputHandler?.("ctrl+o");
@@ -587,8 +596,7 @@ describe("ask_user", () => {
 						inputHandler = handler;
 						return () => {};
 					},
-					notify: () => {},
-				},
+				}),
 			});
 
 			expect(calls).toEqual([]);
@@ -601,7 +609,7 @@ describe("ask_user", () => {
 
 			await tool.execute("tool-call-id", { question: "Q", options: ["A"] }, undefined, undefined, {
 				hasUI: true,
-				ui: {
+				ui: makeUI({
 					custom: async (_factory: any, options: any) => {
 						options.onHandle?.(handle);
 						// Hide and resolve while still hidden.
@@ -612,8 +620,7 @@ describe("ask_user", () => {
 						inputHandler = handler;
 						return () => {};
 					},
-					notify: () => {},
-				},
+				}),
 			});
 
 			expect(calls).toEqual([true]);
@@ -632,7 +639,7 @@ describe("ask_user", () => {
 
 			await tool.execute("tool-call-id", { question: "Q", options: ["A"] }, undefined, undefined, {
 				hasUI: true,
-				ui: {
+				ui: makeUI({
 					custom: async (_factory: any, options: any) => {
 						options.onHandle?.(handle);
 						// Simulate key-down (press) of alt+o → should hide the overlay.
@@ -651,7 +658,7 @@ describe("ask_user", () => {
 					notify: (message: string, type?: string) => {
 						notifications.push({ message, type });
 					},
-				},
+				}),
 			});
 
 			// Only one call: setHidden(true) for the press event.
@@ -673,7 +680,7 @@ describe("ask_user", () => {
 				undefined,
 				{
 					hasUI: true,
-					ui: {
+					ui: makeUI({
 						custom: async (_factory: any, options: any) => {
 							options.onHandle?.(handle);
 							const ignored = inputHandler?.("alt+o");
@@ -689,7 +696,7 @@ describe("ask_user", () => {
 						notify: (message: string, type?: string) => {
 							notifications.push({ message, type });
 						},
-					},
+					}),
 				},
 			);
 
@@ -706,7 +713,7 @@ describe("ask_user", () => {
 
 			await tool.execute("tool-call-id", { question: "Q", options: ["A"] }, undefined, undefined, {
 				hasUI: true,
-				ui: {
+				ui: makeUI({
 					custom: async (_factory: any, options: any) => {
 						options.onHandle?.(handle);
 						const ignored = inputHandler?.("alt+o");
@@ -719,8 +726,7 @@ describe("ask_user", () => {
 						inputHandler = handler;
 						return () => {};
 					},
-					notify: () => {},
-				},
+				}),
 			});
 
 			expect(calls).toEqual([true]);
@@ -739,7 +745,7 @@ describe("ask_user", () => {
 				undefined,
 				{
 					hasUI: true,
-					ui: {
+					ui: makeUI({
 						custom: async (_factory: any, options: any) => {
 							options.onHandle?.(handle);
 							const ignoredEnv = inputHandler?.("alt+h");
@@ -752,8 +758,7 @@ describe("ask_user", () => {
 							inputHandler = handler;
 							return () => {};
 						},
-						notify: () => {},
-					},
+					}),
 				},
 			);
 
@@ -771,13 +776,13 @@ describe("ask_user", () => {
 				undefined,
 				{
 					hasUI: true,
-					ui: {
+					ui: makeUI({
 						custom: async () => null,
 						onTerminalInput: () => {
 							registered = true;
 							return () => {};
 						},
-					},
+					}),
 				},
 			);
 
@@ -797,7 +802,7 @@ describe("ask_user", () => {
 				undefined,
 				{
 					hasUI: true,
-					ui: {
+					ui: makeUI({
 						custom: async (_factory: any, options: any) => {
 							options.onHandle?.(handle);
 							const consumed = inputHandler?.("alt+h");
@@ -808,8 +813,7 @@ describe("ask_user", () => {
 							inputHandler = handler;
 							return () => {};
 						},
-						notify: () => {},
-					},
+					}),
 				},
 			);
 
@@ -833,10 +837,9 @@ describe("ask_user", () => {
 			},
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async () => null,
-				},
+				}),
 			},
 		);
 
@@ -906,8 +909,7 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (factory: any) => {
 						let resolved: string | null | undefined;
 						const component = factory(
@@ -922,7 +924,7 @@ describe("ask_user", () => {
 						component.handleInput("x");
 						return resolved ?? null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -948,8 +950,7 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (factory: any) => {
 						let resolved: string | null | undefined;
 						const component = factory(
@@ -968,7 +969,7 @@ describe("ask_user", () => {
 
 						return resolved ?? null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -990,8 +991,7 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (factory: any) => {
 						let resolved: string | null | undefined;
 						const component = factory(
@@ -1007,7 +1007,7 @@ describe("ask_user", () => {
 						component.handleInput("enter");
 						return resolved ?? null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -1029,8 +1029,7 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (factory: any) => {
 						let resolved: string | null | undefined;
 						const component = factory(
@@ -1046,7 +1045,7 @@ describe("ask_user", () => {
 						component.handleInput("enter");
 						return resolved ?? null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -1070,8 +1069,7 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (factory: any) => {
 						let resolved: string | null | undefined;
 						const component = factory(
@@ -1087,7 +1085,7 @@ describe("ask_user", () => {
 						component.handleInput("enter");
 						return resolved ?? null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -1109,8 +1107,7 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (factory: any) => {
 						let resolved: string | null | undefined;
 						const component = factory(
@@ -1126,7 +1123,7 @@ describe("ask_user", () => {
 						component.handleInput("enter");
 						return resolved ?? null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -1149,8 +1146,7 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (factory: any) => {
 						let resolved: any;
 						const component = factory(
@@ -1167,7 +1163,7 @@ describe("ask_user", () => {
 						component.handleInput("enter");
 						return resolved ?? null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -1189,8 +1185,7 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (factory: any) => {
 						let resolved: string | null | undefined;
 						const component = factory(
@@ -1206,7 +1201,7 @@ describe("ask_user", () => {
 						component.handleInput("enter");
 						return resolved ?? null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -1231,8 +1226,7 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (factory: any) => {
 						let resolved: string | null | undefined;
 						const component = factory(
@@ -1252,7 +1246,7 @@ describe("ask_user", () => {
 						component.handleInput("enter");
 						return resolved ?? null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -1281,8 +1275,7 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (factory: any) => {
 						const component = factory(
 							{ requestRender() {}, terminal: { rows: 24 } },
@@ -1297,7 +1290,7 @@ describe("ask_user", () => {
 						helpText = (component as any).helpText.render().join("\n");
 						return null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -1325,8 +1318,7 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (factory: any) => {
 						const component = factory(
 							{ requestRender() {}, terminal: { rows: 24 } },
@@ -1337,7 +1329,7 @@ describe("ask_user", () => {
 						rendered = ((component as any).singleSelectList as any).render(120).join("\n");
 						return null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -1362,8 +1354,7 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (factory: any) => {
 						const component = factory(
 							{ requestRender() {}, terminal: { rows: 24 } },
@@ -1376,7 +1367,7 @@ describe("ask_user", () => {
 						rendered = ((component as any).singleSelectList as any).render(120).join("\n");
 						return null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -1402,8 +1393,7 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (factory: any) => {
 						const component = factory(
 							{ requestRender() {}, terminal: { rows: 24 } },
@@ -1414,7 +1404,7 @@ describe("ask_user", () => {
 						rendered = ((component as any).singleSelectList as any).render(60).join("\n");
 						return null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -1438,8 +1428,7 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (factory: any) => {
 						let resolved: any;
 						const component = factory(
@@ -1454,7 +1443,7 @@ describe("ask_user", () => {
 						component.handleInput("enter");
 						return resolved ?? null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -1477,8 +1466,7 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (factory: any) => {
 						let resolved: string | null | undefined;
 						const component = factory(
@@ -1493,7 +1481,7 @@ describe("ask_user", () => {
 						rendered = ((component as any).singleSelectList as any).render(120).join("\n");
 						return resolved ?? null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -1516,8 +1504,7 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (factory: any) => {
 						let resolved: string | null | undefined;
 						const component = factory(
@@ -1532,7 +1519,7 @@ describe("ask_user", () => {
 						rendered = ((component as any).singleSelectList as any).render(120).join("\n");
 						return resolved ?? null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -1557,8 +1544,7 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (factory: any) => {
 						const component = factory(
 							{ requestRender() {}, terminal: { rows: 24 } },
@@ -1573,7 +1559,7 @@ describe("ask_user", () => {
 						renderedAfter = ((component as any).singleSelectList as any).render(80).join("\n");
 						return null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -1602,8 +1588,7 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (factory: any) => {
 						const component = factory(
 							{ requestRender() {}, terminal: { rows: 24 } },
@@ -1622,7 +1607,7 @@ describe("ask_user", () => {
 						renderedAfterCustom = ((component as any).singleSelectList as any).render(80).join("\n");
 						return null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -1652,8 +1637,7 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (factory: any) => {
 						const component = factory(
 							{ requestRender() {}, terminal: { rows: 24 } },
@@ -1667,7 +1651,7 @@ describe("ask_user", () => {
 						renderedAfter = ((component as any).singleSelectList as any).render(80).join("\n");
 						return null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -1690,8 +1674,7 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (factory: any) => {
 						let resolved: any;
 						const component = factory(
@@ -1710,7 +1693,7 @@ describe("ask_user", () => {
 						component.handleInput("enter");
 						return resolved ?? null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -1738,8 +1721,7 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (factory: any) => {
 						let resolved: any;
 						const component = factory(
@@ -1762,7 +1744,7 @@ describe("ask_user", () => {
 						component.handleInput("enter");
 						return resolved ?? null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -1795,8 +1777,7 @@ describe("ask_user", () => {
 			undefined,
 			{
 				hasUI: true,
-				ui: {
-					onTerminalInput: () => () => {},
+				ui: makeUI({
 					custom: async (factory: any) => {
 						let component: any;
 						try {
@@ -1817,7 +1798,7 @@ describe("ask_user", () => {
 						}
 						return null;
 					},
-				},
+				}),
 			},
 		);
 
@@ -1844,8 +1825,7 @@ describe("ask_user", () => {
 				undefined,
 				{
 					hasUI: true,
-					ui: {
-						onTerminalInput: () => () => {},
+					ui: makeUI({
 						custom: async () => undefined,
 						select: async (title: string, opts: string[]) => {
 							selectTitle = title;
@@ -1853,7 +1833,7 @@ describe("ask_user", () => {
 							return "Blue";
 						},
 						input: async () => undefined,
-					},
+					}),
 				},
 			);
 
@@ -1879,15 +1859,14 @@ describe("ask_user", () => {
 				undefined,
 				{
 					hasUI: true,
-					ui: {
-						onTerminalInput: () => () => {},
+					ui: makeUI({
 						custom: async () => undefined,
 						select: async (_title: string, opts: string[]) => {
 							selectOptions = opts;
 							return "Red";
 						},
 						input: async () => undefined,
-					},
+					}),
 				},
 			);
 
@@ -1914,15 +1893,14 @@ describe("ask_user", () => {
 				undefined,
 				{
 					hasUI: true,
-					ui: {
-						onTerminalInput: () => () => {},
+					ui: makeUI({
 						custom: async () => undefined,
 						select: async () => sentinel,
 						input: async () => {
 							inputCalled = true;
 							return "Purple";
 						},
-					},
+					}),
 				},
 			);
 
@@ -1947,15 +1925,14 @@ describe("ask_user", () => {
 				undefined,
 				{
 					hasUI: true,
-					ui: {
-						onTerminalInput: () => () => {},
+					ui: makeUI({
 						custom: async () => undefined,
 						select: async () => undefined,
 						input: async (title: string) => {
 							inputTitle = title;
 							return "Red, Green";
 						},
-					},
+					}),
 				},
 			);
 
@@ -1981,15 +1958,14 @@ describe("ask_user", () => {
 				undefined,
 				{
 					hasUI: true,
-					ui: {
-						onTerminalInput: () => () => {},
+					ui: makeUI({
 						custom: async () => undefined,
 						select: async () => "Blue",
 						input: async (title: string) => {
 							inputTitles.push(title);
 							return "Prefer the darker shade.";
 						},
-					},
+					}),
 				},
 			);
 
@@ -2016,12 +1992,11 @@ describe("ask_user", () => {
 				undefined,
 				{
 					hasUI: true,
-					ui: {
-						onTerminalInput: () => () => {},
+					ui: makeUI({
 						custom: async () => undefined,
 						select: async () => undefined,
 						input: async () => undefined,
-					},
+					}),
 				},
 			);
 
@@ -2045,15 +2020,14 @@ describe("ask_user", () => {
 				undefined,
 				{
 					hasUI: true,
-					ui: {
-						onTerminalInput: () => () => {},
+					ui: makeUI({
 						custom: async () => undefined,
 						select: async (title: string) => {
 							selectTitle = title;
 							return "Blue";
 						},
 						input: async () => undefined,
-					},
+					}),
 				},
 			);
 
@@ -2076,15 +2050,14 @@ describe("ask_user", () => {
 				undefined,
 				{
 					hasUI: true,
-					ui: {
-						onTerminalInput: () => () => {},
+					ui: makeUI({
 						custom: async () => undefined,
 						select: async (_title: string, _opts: string[], opts: any) => {
 							capturedOpts = opts;
 							return "Red";
 						},
 						input: async () => undefined,
-					},
+					}),
 				},
 			);
 
@@ -2106,13 +2079,12 @@ describe("ask_user", () => {
 				{
 					hasUI: true,
 					cwd: "/tmp/project",
-					ui: {
-						onTerminalInput: () => () => {},
+					ui: makeUI({
 						custom: async (_factory: any, options: any) => {
 							capturedOptions = options;
 							return null;
 						},
-					},
+					}),
 				},
 			);
 
@@ -2134,13 +2106,12 @@ describe("ask_user", () => {
 				{
 					hasUI: true,
 					cwd: "/tmp/project",
-					ui: {
-						onTerminalInput: () => () => {},
+					ui: makeUI({
 						custom: async (_factory: any, options: any) => {
 							capturedOptions = options;
 							return null;
 						},
-					},
+					}),
 				},
 			);
 
@@ -2162,13 +2133,12 @@ describe("ask_user", () => {
 				{
 					hasUI: true,
 					cwd: "/tmp/project",
-					ui: {
-						onTerminalInput: () => () => {},
+					ui: makeUI({
 						custom: async (_factory: any, options: any) => {
 							capturedOptions = options;
 							return null;
 						},
-					},
+					}),
 				},
 			);
 
@@ -2193,7 +2163,7 @@ describe("ask_user", () => {
 				{
 					hasUI: true,
 					cwd: "/tmp/project",
-					ui: {
+					ui: makeUI({
 						custom: async (_factory: any, options: any) => {
 							options.onHandle?.(handle);
 							const consumed = inputHandler?.("alt+h");
@@ -2206,8 +2176,7 @@ describe("ask_user", () => {
 							inputHandler = handler;
 							return () => {};
 						},
-						notify: () => {},
-					},
+					}),
 				},
 			);
 
@@ -2228,13 +2197,12 @@ describe("ask_user", () => {
 				{
 					hasUI: true,
 					cwd: "/tmp/project",
-					ui: {
-						onTerminalInput: () => () => {},
+					ui: makeUI({
 						custom: async (_factory: any, options: any) => {
 							capturedOptions = options;
 							return null;
 						},
-					},
+					}),
 				},
 			);
 
@@ -2256,7 +2224,7 @@ describe("ask_user", () => {
 				{
 					hasUI: true,
 					cwd: "/tmp/project",
-					ui: {
+					ui: makeUI({
 						custom: async (_factory: any, options: any) => {
 							options.onHandle?.(handle);
 							const result = inputHandler?.("alt+o");
@@ -2268,8 +2236,7 @@ describe("ask_user", () => {
 							inputHandler = handler;
 							return () => {};
 						},
-						notify: () => {},
-					},
+					}),
 				},
 			);
 

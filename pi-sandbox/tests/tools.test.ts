@@ -4,7 +4,7 @@ import { PassThrough } from "node:stream";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createEditToolDefinition, createWriteToolDefinition } from "@earendil-works/pi-coding-agent";
+import { createBashToolDefinition, createEditToolDefinition, createWriteToolDefinition } from "@earendil-works/pi-coding-agent";
 import { createSandboxTools, ESCALATION_PROPS, resolveCall, resolveCallMode } from "../src/tools";
 import { canonicalizeTarget, isWithinRoots } from "../src/fence";
 import { writableRoots } from "../src/policy";
@@ -162,7 +162,14 @@ describe("createSandboxTools schemas", () => {
 		const { deps } = makeDeps();
 		const { bash, write, edit } = createSandboxTools(deps);
 		expect(bash.promptSnippet).toBe("Execute bash commands (ls, grep, find, etc.)");
-		expect(write.promptGuidelines).toContain("Use write only for new files or complete rewrites.");
+		// 包内性质（不钉宿主文案）：本包只在 base 之后追加系统规则，故注册清单必须以 base 逐条逐序为前缀。
+		// base 的文案随宿主版本漂移，这里一律与 base 定义对照，不写死宿主的字面量。
+		for (const [tool, base] of [[bash, createBashToolDefinition(ws)], [write, createWriteToolDefinition(ws)]] as const) {
+			const baseGuidelines = base.promptGuidelines ?? [];
+			expect(baseGuidelines.length, "base 定义没有 guideline").toBeGreaterThan(0);
+			expect(tool.promptGuidelines?.slice(0, baseGuidelines.length), "base guideline 被丢或被改写")
+				.toEqual(baseGuidelines);
+		}
 		expect(write.promptGuidelines?.[write.promptGuidelines.length - 1]).toContain("sandbox_permissions");
 		// Ruling 15 的包内性质（不钉宿主的 schema 事实，宿主版本会漂移）：spread 版 extendParams
 		// 如实保留 base schema 的自有 options——包装后与 base 同值。
@@ -541,21 +548,25 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 		expect(ctx.ui.select.mock.calls[0][2]).toBeUndefined();
 	});
 
-	it("direct 路径 ctx.ui.select 抛错 → 按取消处理，不冒泡宿主内部报错（与 broker.request 口径一致）", async () => {
-		const { deps } = makeDeps();
+	it("direct 路径 ctx.ui.select 抛错 → 按取消处理，命令不执行，不冒泡宿主内部报错（与 broker.request 口径一致）", async () => {
+		const { deps, spawnFn } = makeDeps();
+		const { bash } = createSandboxTools(deps);
 		const ctx = toolCtx(true) as ToolCtxTestDouble;
 		ctx.ui.select.mockRejectedValue(new Error("host UI internals exploded"));
 		seedDenial("command");
 		// 宿主 select 的内部报错绝不能变成用户/模型看到的工具错误文本：应落进 approveEscalation
-		// 既有的"取消"分支，且文案里不得出现宿主原文。
-		const settled = await resolveCallMode(
-			{ sandbox_permissions: "danger-full-access", justification: "j" },
-			ctx, deps, "command", () => "x",
-		).then(() => null, (error: Error) => error);
+		// 既有的"取消"分支，且文案里不得出现宿主原文。经真工具 execute 触发（而非只走到 resolveCallMode），
+		// 以独立覆盖 fail-closed 的另一半事实：审批异常即取消 → 命令根本没被执行（resolveCall 在装配 ops
+		// 与 spawn 之前）。生产顺序一变，本用例的 spawnFn 负向断言就会红。
+		const settled = await bash.execute("call-select-throws", {
+			command: "echo must-not-run",
+			sandbox_permissions: "danger-full-access", justification: "j",
+		}, undefined, undefined, ctx as never).then(() => null, (error: Error) => error);
 		expect(settled).toBeInstanceOf(Error);
 		expect(settled?.message).toMatch(/cancelled/);
 		expect(settled?.message).not.toContain("host UI internals exploded");
 		expect(ctx.ui.input).not.toHaveBeenCalled();
+		expect(spawnFn).not.toHaveBeenCalled();
 	});
 
 	it("hasUI 时直连 ctx.ui.select，即使本会话已注册通道也不经 broker.request", async () => {
