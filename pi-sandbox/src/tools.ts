@@ -137,20 +137,18 @@ function readSessionId(ctx: ToolCtxLike): string | null {
 
 /**
  * 审批通道解析（spec 2026-09-30 §4.3）：
- * - 本会话有 UI：优先用它自己注册的通道，经 broker 的同一条 FIFO 车道弹窗（Ruling 17）——宿主的
- *   对话框只有一个槽位且不排队，第二次调用会让前一个弹窗收不到按键、其 promise 变成孤儿。
- *   解析不到自己的通道（宿主未发 session_start、拿不到会话 id）才回落直连，回落行为与改动前逐字一致。
- * - 本会话无 UI（子会话）：沿 link 严格解析父通道（D3），解析不到就返回哑通道。
+ * - 本会话有 UI：直连自己的 `ctx.ui`。
+ * - 本会话无 UI（子会话）：沿 link 严格解析第一个已注册且 `hasUI()` 的父通道（D3），
+ *   解析不到就返回哑通道。
  * 哑通道让 approveEscalation 抛出既有 fail-closed 文案——不新增错误分支、不改变校验顺序。
- * 两条通道的 ask 都是两步式（select → Deny 时 input 收理由）：直连串行 await，broker 在同一个
- * FIFO 任务内完成，理由输入不会被排队中的下一个审批弹窗顶掉。signal 两条路径都透传（D6）：
- * 中断既能关掉在飞的弹窗，也能让排队中的请求根本不弹。
+ * 并发审批的可见顺序由宿主决定，本包不排队也不做承诺。两条通道的 ask 都是两步式
+ * （select → Deny 时 input 收理由），同一请求内串行 await。signal 两条路径都透传（D6）：
+ * 中断既能关掉在飞的弹窗，也能让调用前已 abort 的请求根本不弹。
  */
 function approvalChannelFor(ctx: ToolCtxLike, signal: AbortSignal | undefined): EscalationUI {
 	const opts = signal === undefined ? undefined : { signal };
 	const broker = getEscalationBroker();
-	const sessionId = readSessionId(ctx);
-	// 直连通道的两步式：select →（Deny 时）input，在同一条异步链上串行 await，天然原子。
+	// 直连通道的两步式：select →（Deny 时）input，同一请求内串行 await。
 	const directAsk = async (title: string, options: string[], denialReason?: DenialReasonPrompt): Promise<EscalationDecision> => {
 		const choice = await ctx.ui.select(title, options, opts);
 		if (choice !== "Deny" || denialReason === undefined || typeof ctx.ui.input !== "function") return { choice };
@@ -161,13 +159,8 @@ function approvalChannelFor(ctx: ToolCtxLike, signal: AbortSignal | undefined): 
 			return { choice }; // 理由输入异常不影响拒绝语义（fail-closed）
 		}
 	};
-	if (ctx.hasUI) {
-		const own = sessionId === null ? null : broker.resolveOwnChannel(sessionId);
-		if (own === null) {
-			return { hasUI: true, ask: directAsk };
-		}
-		return { hasUI: true, ask: (title, options, denialReason) => broker.request(own, title, options, signal, denialReason) };
-	}
+	if (ctx.hasUI) return { hasUI: true, ask: directAsk };
+	const sessionId = readSessionId(ctx);
 	const channel = sessionId === null ? null : broker.resolveChannel(sessionId);
 	if (channel === null) {
 		return { hasUI: false, ask: async () => ({ choice: undefined }) };

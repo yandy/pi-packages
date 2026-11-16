@@ -79,6 +79,17 @@ function toolCtx(hasUI = true, choice: string | undefined = "Allow once") {
 	} as never;
 }
 
+/** 需要定制共享 toolCtx 的 mock 时使用的完整结构视图；不另造审批 ctx 桩。 */
+type ToolCtxTestDouble = {
+	hasUI: boolean;
+	sessionManager: { getSessionId(): string; getSessionFile(): string };
+	ui: {
+		select: ReturnType<typeof vi.fn>;
+		input: ReturnType<typeof vi.fn>;
+		notify: ReturnType<typeof vi.fn>;
+	};
+};
+
 /** 播种一笔前置拒绝（denial-first 门禁的放行条件）。 */
 function seedDenial(kind: "command" | "operation" = "command", sessionId = TEST_SESSION) {
 	getDenialLedger().record(sessionId, kind);
@@ -528,29 +539,65 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 		expect(ctx.ui.select.mock.calls[0][2]).toBeUndefined();
 	});
 
-	it("direct 路径也排进 FIFO 车道：本会话已注册通道时经 broker.request（Ruling 17）", async () => {
+	it("hasUI 时直连 ctx.ui.select，即使本会话已注册通道也不经 broker.request", async () => {
 		const { deps } = makeDeps();
+		const broker = getEscalationBroker();
 		const ownSelect = vi.fn(async () => "Allow once");
-		getEscalationBroker().registerParent({ sessionId: "self", hasUI: () => true, select: ownSelect });
-		seedDenial("command", "self");
-		const ctx = {
-			hasUI: true,
-			sessionManager: { getSessionId: () => "self" },
-			ui: {
-				select: vi.fn(async () => {
-					throw new Error("must go through the broker lane");
-				}),
-			},
-		} as never;
-		const mode = await resolveCallMode(
-			{ sandbox_permissions: "danger-full-access", justification: "j" },
-			ctx, deps, "command", () => "x",
-		);
-		expect(mode).toBe("danger-full-access");
-		expect(ownSelect).toHaveBeenCalledTimes(1);
+		broker.registerParent({ sessionId: TEST_SESSION, hasUI: () => true, select: ownSelect });
+		const request = vi.spyOn(broker, "request");
+		const ctx = toolCtx(true, "Allow once") as ToolCtxTestDouble;
+		seedDenial("command");
+		try {
+			const mode = await resolveCallMode(
+				{ sandbox_permissions: "danger-full-access", justification: "j" },
+				ctx, deps, "command", () => "x",
+			);
+			expect(mode).toBe("danger-full-access");
+			expect(ctx.ui.select).toHaveBeenCalledTimes(1);
+			expect(ownSelect).not.toHaveBeenCalled();
+			expect(request).not.toHaveBeenCalled();
+		} finally {
+			request.mockRestore();
+		}
 	});
 
-	it("hasUI 但本会话未注册通道 → 回落直连 ctx.ui.select（行为与改动前一致）", async () => {
+	it("父会话自己的审批与子会话转发的审批并发时两者都结算", async () => {
+		const { deps } = makeDeps();
+		const parentCtx = toolCtx(true) as ToolCtxTestDouble;
+		let releaseDirect: ((value: string | undefined) => void) | undefined;
+		parentCtx.ui.select.mockImplementation(() => new Promise<string | undefined>((resolve) => {
+			releaseDirect = resolve;
+		}));
+		let releaseForwarded: ((value: string | undefined) => void) | undefined;
+		const forwardedSelect = vi.fn((_title: string) => new Promise<string | undefined>((resolve) => {
+			releaseForwarded = resolve;
+		}));
+		const broker = getEscalationBroker();
+		broker.registerParent({ sessionId: TEST_SESSION, hasUI: () => true, select: forwardedSelect });
+		broker.linkChild("child-concurrent", TEST_SESSION);
+		seedDenial("command");
+		seedDenial("command", "child-concurrent");
+		const direct = resolveCallMode(
+			{ sandbox_permissions: "danger-full-access", justification: "parent" },
+			parentCtx, deps, "command", () => "parent-command",
+		);
+		const forwarded = resolveCallMode(
+			{ sandbox_permissions: "danger-full-access", justification: "child" },
+			subagentCtx("child-concurrent"), deps, "command", () => "child-command",
+		);
+		// 直连与转发两个 UI 都必须先进入在飞状态，不要求谁的弹窗先出现。
+		await vi.waitFor(() => {
+			expect(parentCtx.ui.select).toHaveBeenCalledTimes(1);
+			expect(forwardedSelect).toHaveBeenCalledTimes(1);
+		});
+		if (releaseDirect === undefined || releaseForwarded === undefined) throw new Error("both approvals must be pending");
+		releaseDirect("Allow once");
+		releaseForwarded("Allow once");
+		await expect(direct).resolves.toBe("danger-full-access");
+		await expect(forwarded).resolves.toBe("danger-full-access");
+	});
+
+	it("hasUI 且本会话未注册通道 → 仍直连 ctx.ui.select", async () => {
 		const { deps } = makeDeps();
 		const select = vi.fn(async () => "Allow once");
 		const ctx = { hasUI: true, sessionManager: { getSessionId: () => "unregistered" }, ui: { select } } as never;

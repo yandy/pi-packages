@@ -8,6 +8,9 @@
  * 严格 fail-closed（spec §2 D3）：只有由 `subagents:child:session-created` 建立的 child→parent
  * link 才能路由审批；解析不到就返回 null，由调用方退回既有 "no approval channel is available"
  * 错误——绝不猜"进程内唯一的交互会话"。
+ *
+ * 并发对话框由宿主管理，本包不排队也不承诺顺序：TUI 让新弹窗获焦，早先的弹窗留在栈里，
+ * 栈顶关闭后重新显示并各自结算；RPC 的并发请求各自独立结算。
  */
 
 import type { DenialReasonPrompt, EscalationDecision } from "./escalation";
@@ -17,9 +20,6 @@ const BROKER_KEY = Symbol.for("@yandy0725/pi-sandbox:escalation-broker");
 
 /** 沿 link 向上查找祖先的深度上限：异常数据不得导致长链遍历或死循环。 */
 const MAX_ANCESTOR_DEPTH = 32;
-
-/** FIFO 链尾吞掉结算值：只为串行化，不关心结果。 */
-function noop(): void {}
 
 /**
  * 通道实现的 `hasUI()` 可能抛错（宿主 stale ctx 的 `assertActive()`、或同进程其他扩展注册的
@@ -39,6 +39,9 @@ function hasUIOf(channel: ParentApprovalChannel): boolean {
  * `opts.signal` 直通 pi 的 `ExtensionUIDialogOptions.signal`——子代理被中断时父弹窗被真正关闭，
  * 且已 abort 的请求根本不会弹窗。宿主实现见 TUI 的 `showExtensionSelector` 与 RPC 模式的
  * `createDialogPromise`：二者都在 signal abort 时关闭弹窗并 resolve `undefined`。
+ * TUI `interactive-mode.js` 的 `extensionDialogs` / `showTopExtensionDialog()` 让新弹窗获焦，
+ * 早先的弹窗留在栈里，栈顶关闭后重新显示并各自结算；RPC `rpc-mode.js` 的
+ * `pendingExtensionRequests` 按请求独立结算。并发审批顺序由宿主决定，本包不做承诺。
  * 此处不引 dist 行号——行号引用跨宿主版本即腐（Ruling 3）。
  */
 export interface ParentApprovalChannel {
@@ -60,11 +63,6 @@ export interface EscalationBroker {
 	unlinkChild(childSessionId: string): void;
 	/** 严格解析：沿 link 向上找第一个「已注册且 hasUI()」的祖先通道；找不到返回 null。 */
 	resolveChannel(childSessionId: string): ParentApprovalChannel | null;
-	/**
-	 * 本会话自己注册的通道：父会话用它把自己的提权也排进同一条 FIFO 车道（Ruling 17）——
-	 * 宿主的 select 只有一个对话框槽位且不排队，第二次调用会让前一个弹窗收不到按键、promise 变孤儿。
-	 */
-	resolveOwnChannel(sessionId: string): ParentApprovalChannel | null;
 	/** 提交一次审批；signal abort → choice 为 undefined，落进既有"取消"分支。 */
 	request(
 		channel: ParentApprovalChannel,
@@ -78,9 +76,6 @@ export interface EscalationBroker {
 class InProcessEscalationBroker implements EscalationBroker {
 	private readonly parents = new Map<string, ParentApprovalChannel>();
 	private readonly links = new Map<string, string>();
-
-	/** FIFO 链尾：每个请求串到它后面，保证父 TUI 一次只弹一个对话框（spec §4.6）。 */
-	private tail: Promise<unknown> = Promise.resolve();
 
 	registerParent(channel: ParentApprovalChannel): void {
 		if (!channel.sessionId) return;
@@ -116,12 +111,6 @@ class InProcessEscalationBroker implements EscalationBroker {
 		return null;
 	}
 
-	resolveOwnChannel(sessionId: string): ParentApprovalChannel | null {
-		const channel = this.parents.get(sessionId);
-		if (channel === undefined) return null;
-		return hasUIOf(channel) ? channel : null;
-	}
-
 	request(
 		channel: ParentApprovalChannel,
 		title: string,
@@ -131,14 +120,13 @@ class InProcessEscalationBroker implements EscalationBroker {
 	): Promise<EscalationDecision> {
 		const run = async (): Promise<EscalationDecision> => {
 			try {
-				// 排队期间已被中断：根本不弹窗，否则用户会看到没人接收结果的幽灵审批（Review Focus #2）。
+				// 调用前已被中断：根本不弹窗，否则用户会看到没人接收结果的幽灵审批（Review Focus #2）。
 				// 读取 aborted 也放在 try 内——病态 signal getter 抛错时仍须保证 request 从不 reject，
 				// 这条契约是 escalation.ts 能零改动的前提。
 				if (signal?.aborted === true) return { choice: undefined };
 				// 在飞时 abort 由 pi 的对话框自行关闭并 resolve undefined（opts.signal 已透传）。
 				const choice = await channel.select(title, options, signal === undefined ? undefined : { signal });
-				// select 与 input 必须在同一个 FIFO 任务内完成：宿主只有一个对话框槽位，
-				// 若把 input 放到任务外，排队中的下一个 select 会覆盖正在等待输入的弹窗。
+				// 同一请求内串行 await：先 select，Deny 时再 input 收理由。
 				if (choice !== "Deny" || denialReason === undefined || typeof channel.input !== "function") {
 					return { choice };
 				}
@@ -153,10 +141,7 @@ class InProcessEscalationBroker implements EscalationBroker {
 				return { choice: undefined };
 			}
 		};
-		// 前一个请求即使 reject 也要继续出队，否则队列会永久卡死。
-		const result = this.tail.then(run, run);
-		this.tail = result.then(noop, noop);
-		return result;
+		return run();
 	}
 }
 

@@ -121,9 +121,22 @@ describe("resolveChannel（严格路由，spec §2 D3）", () => {
 		broker.linkChild("child-1", "");
 		expect(broker.resolveChannel("child-1")).toBeNull();
 	});
+
+	it("已注册父的 hasUI() 抛错 → null，不冒泡（fail-closed）", () => {
+		const broker = getEscalationBroker();
+		broker.registerParent({
+			sessionId: "boom",
+			hasUI: () => {
+				throw new Error("This extension ctx is stale");
+			},
+			select: async () => undefined,
+		});
+		broker.linkChild("c", "boom");
+		expect(broker.resolveChannel("c")).toBeNull();
+	});
 });
 
-describe("request（FIFO + abort，spec §4.6）", () => {
+describe("request（并发结算 + abort）", () => {
 	it("透传 title/options，返回用户选择；无 signal 时第三参为 undefined", async () => {
 		const broker = getEscalationBroker();
 		const { channel, select } = fakeChannel("parent-1");
@@ -144,22 +157,23 @@ describe("request（FIFO + abort，spec §4.6）", () => {
 		expect(received).toBe(ac.signal);
 	});
 
-	it("FIFO：前一个 settle 前不弹第二个，结果不串（Review Focus #5）", async () => {
+	it("两个并发 request 各自结算且结果对应，不承诺顺序", async () => {
 		const broker = getEscalationBroker();
-		const titles: string[] = [];
-		const releases: ((value: string | undefined) => void)[] = [];
+		const releases = new Map<string, (value: string | undefined) => void>();
 		const select = vi.fn((title: string) => new Promise<string | undefined>((resolve) => {
-			titles.push(title);
-			releases.push(resolve);
+			releases.set(title, resolve);
 		}));
 		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select };
 		const first = broker.request(channel, "t1", ["Allow once", "Deny"]);
 		const second = broker.request(channel, "t2", ["Allow once", "Deny"]);
-		await vi.waitFor(() => expect(titles).toEqual(["t1"]));
-		releases[0]?.("Allow once");
+		// 两个 select 都必须先进入在飞状态；任一请求等待另一个 settle 都会在这里超时。
+		await vi.waitFor(() => expect(releases.size).toBe(2));
+		const releaseFirst = releases.get("t1");
+		const releaseSecond = releases.get("t2");
+		if (releaseFirst === undefined || releaseSecond === undefined) throw new Error("both deferred selects must be pending");
+		releaseFirst("Allow once");
+		releaseSecond("Deny");
 		await expect(first).resolves.toEqual({ choice: "Allow once" });
-		await vi.waitFor(() => expect(titles).toEqual(["t1", "t2"]));
-		releases[1]?.("Deny");
 		await expect(second).resolves.toEqual({ choice: "Deny" });
 	});
 
@@ -198,7 +212,7 @@ describe("request（FIFO + abort，spec §4.6）", () => {
 		await expect(broker.request(channel, "T", ["Allow once"])).resolves.toEqual({ choice: undefined });
 	});
 
-	it("前一个请求抛错不影响后续出队（Review Focus #5）", async () => {
+	it("一次 select 抛错不影响下一次请求", async () => {
 		const broker = getEscalationBroker();
 		let calls = 0;
 		const select = vi.fn(async () => {
@@ -209,49 +223,6 @@ describe("request（FIFO + abort，spec §4.6）", () => {
 		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select };
 		await expect(broker.request(channel, "t1", ["Allow once"])).resolves.toEqual({ choice: undefined });
 		await expect(broker.request(channel, "t2", ["Allow once"])).resolves.toEqual({ choice: "Allow once" });
-	});
-});
-
-describe("resolveOwnChannel（本会话自己的通道，Ruling 17）", () => {
-	it("已注册且 hasUI() 为真 → 返回自己", () => {
-		const broker = getEscalationBroker();
-		const { channel } = fakeChannel("self");
-		broker.registerParent(channel);
-		expect(broker.resolveOwnChannel("self")).toBe(channel);
-	});
-
-	it("未注册 → null", () => {
-		expect(getEscalationBroker().resolveOwnChannel("nobody")).toBeNull();
-	});
-
-	it("已注册但 hasUI() 为假 → null", () => {
-		const broker = getEscalationBroker();
-		const { channel } = fakeChannel("self", false);
-		broker.registerParent(channel);
-		expect(broker.resolveOwnChannel("self")).toBeNull();
-	});
-
-	it("hasUI() 抛错 → null，不冒泡（fail-closed，Minor 4）", () => {
-		const broker = getEscalationBroker();
-		broker.registerParent({
-			sessionId: "boom",
-			hasUI: () => {
-				throw new Error("This extension ctx is stale");
-			},
-			select: async () => undefined,
-		});
-		broker.linkChild("c", "boom");
-		expect(broker.resolveChannel("c")).toBeNull();
-		expect(broker.resolveOwnChannel("boom")).toBeNull();
-	});
-
-	it("不走 link：本会话即使有 link 也只按 sessionId 命中自己", () => {
-		const broker = getEscalationBroker();
-		const { channel: parent } = fakeChannel("parent");
-		broker.registerParent(parent);
-		broker.linkChild("self", "parent");
-		expect(broker.resolveOwnChannel("self")).toBeNull();
-		expect(broker.resolveChannel("self")).toBe(parent);
 	});
 });
 
@@ -268,7 +239,7 @@ describe("request 的\"从不 reject\"契约（病态输入，Minor 5）", () =>
 	});
 });
 
-describe("request：Deny 理由的两步式（select + input 同 FIFO 任务）", () => {
+describe("request：Deny 理由的两步式（select → input 串行）", () => {
 	const reasonPrompt = { title: "Why deny?", placeholder: "optional" };
 
 	it("Deny + denialReason + channel.input → 返回理由", async () => {
@@ -317,14 +288,14 @@ describe("request：Deny 理由的两步式（select + input 同 FIFO 任务）"
 		expect(inputSignal).toBe(ac.signal);
 	});
 
-	it("FIFO 原子性：A 的理由输入未 settle 前，B 不得弹出 select（宿主只有一个对话框槽位）", async () => {
+	it("同一 request 内 select → input 串行，理由输入不被并发请求打断", async () => {
 		const broker = getEscalationBroker();
 		const events: string[] = [];
-		let releaseInput: ((value: string | undefined) => void) | undefined;
+		const inputReleases = new Map<string, (value: string | undefined) => void>();
 		const input = vi.fn((title: string) => {
 			events.push(`input:${title}`);
 			return new Promise<string | undefined>((resolve) => {
-				releaseInput = resolve;
+				inputReleases.set(title, resolve);
 			});
 		});
 		const select = vi.fn(async (title: string) => {
@@ -332,14 +303,20 @@ describe("request：Deny 理由的两步式（select + input 同 FIFO 任务）"
 			return "Deny";
 		});
 		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select, input };
-		const first = broker.request(channel, "t1", ["Allow once", "Deny"], undefined, reasonPrompt);
-		const second = broker.request(channel, "t2", ["Allow once", "Deny"], undefined, reasonPrompt);
-		await vi.waitFor(() => expect(events).toEqual(["select:t1", "input:Why deny?"]));
-		expect(select).toHaveBeenCalledTimes(1);
-		releaseInput?.("r1");
+		const first = broker.request(channel, "t1", ["Allow once", "Deny"], undefined, { title: "Why deny t1?" });
+		const second = broker.request(channel, "t2", ["Allow once", "Deny"], undefined, { title: "Why deny t2?" });
+		// 两个理由输入可同时处于在飞状态；这里不比较不同 request 的事件先后。
+		await vi.waitFor(() => expect(inputReleases.size).toBe(2));
+		for (const title of ["t1", "t2"]) {
+			expect(events).toContain(`select:${title}`);
+			expect(events.indexOf(`select:${title}`)).toBeLessThan(events.indexOf(`input:Why deny ${title}?`));
+		}
+		const releaseFirst = inputReleases.get("Why deny t1?");
+		const releaseSecond = inputReleases.get("Why deny t2?");
+		if (releaseFirst === undefined || releaseSecond === undefined) throw new Error("both denial reasons must be pending");
+		releaseFirst("r1");
+		releaseSecond("r2");
 		await expect(first).resolves.toEqual({ choice: "Deny", reason: "r1" });
-		await vi.waitFor(() => expect(events).toEqual(["select:t1", "input:Why deny?", "select:t2", "input:Why deny?"]));
-		releaseInput?.("r2");
 		await expect(second).resolves.toEqual({ choice: "Deny", reason: "r2" });
 	});
 });
