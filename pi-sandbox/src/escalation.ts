@@ -45,18 +45,14 @@ export function validateEscalationArgs(sandboxPermissions: string | undefined, j
  * 提权参数的占位符归一化：`null` / `"null"`（trim、大小写无关）/ 空串 / 纯空白都不是提权请求，而是“没填”。
  * 归一化成 undefined 后走无提权路径：报 MALFORMED 会让模型误判为“沙箱拒绝了我”，转而升级成真正的最大档提权。
  *
- * 可达性按字段不同（实测：**pi 0.80.2 与 1.0.0 都跑 `validateToolArguments`**，校验对象是 declared schema
- * ——0.80.2 无 strict wire schema 转换、无 `normalizeOptionalNulls`，1.0.0 两者都有；
- * 工具侧的 `prepareArguments`（`stripEscalationPlaceholders`）在校验前先剥掉占位符字符串）：
+ * 可达性按字段不同（spec §5.4；工具侧的 `prepareArguments` 在校验前先剥掉占位符字符串）：
  * - `justification` 的字符串臂是 `Type.String()`（字段本身为 `string | null`）：字符串占位符（`"null"` / `""`）是合法值，
- *   未走钩子的调用路径下会真的到达 execute，
- *   所以这几个分支是 load-bearing 的（否则一笔普通调用会被误判成 MALFORMED，真提权还会带着
- *   `Reason: null` 进审批弹窗）；
- * - `sandbox_permissions` 是两个字面量枚举：字符串占位符若不剥就在 pi 的参数校验期被硬拒（execute 不会跑）。
- *   钩子上线前这是一次硬错误 + 错误回放（模型把自己的 `"null"` 当样本，噪声自我强化）；
- *   钩子上线后占位符在校验前出局，实际能到达 execute 的只剩“省略”、schema 显式声明的 JSON `null`
- *   与两个合法档位——非字符串分支同样是 load-bearing 的（1.0.0 下 JSON `null` 原样送达，0.80.2 下被
- *   `Value.Convert` 转成 `""`，两者都靠本函数归一化；数字/布尔被强转成字符串、对象/数组在校验期被拒）。
+ *   未走钩子的调用路径下会原样到达 execute，所以这几个分支是 load-bearing 的（否则一笔普通调用会被误判成
+ *   MALFORMED，真提权还会带着 `Reason: null` 进审批弹窗）；
+ * - `sandbox_permissions` 显式声明 `Type.Null()`：`"null"` / `"NULL"` / `""` 在 1.5.x declared-schema 校验中
+ *   被强转成 JSON `null` 并放行，带空白的 `" null "` / `"   "` 仍被硬拒；钩子覆盖这两类字符串。
+ *   未走钩子的调用路径下，JSON `null` 原样送达 execute，由本函数归一化。optional 属性若不允许 `null`，
+ *   宿主会丢弃 JSON `null`；本仓 schema 允许，所以这一分支可达。
  * 只识别占位符；真正的畸形（如只给 justification）仍交 validateEscalationArgs 报错。
  */
 export function normalizeEscalationValue(value: unknown): string | undefined {
@@ -71,19 +67,25 @@ export const PLACEHOLDER_KEYS = ["sandbox_permissions", "justification"] as cons
 
 /**
  * pi 的 `prepareArguments` 钩子体（接线见 `src/tools.ts` 的 `withPlaceholderStripping`）：
- * 在 pi 的参数校验（`validateToolArguments`，pi 0.80.2 与 1.0.0 都有）之前，把模型写错的占位符字符串
+ * 在 pi 的参数校验（`validateToolArguments`）之前，把模型写错的占位符字符串
  * （`"null"` / `""` / 纯空白，判定复用 `normalizeEscalationValue`）从提权字段上剥掉。
  *
  * 为什么需要：strict 提供商（如 deepseek-flash，`compat.supportsStrictMode`）下 pi 会把所有 property
  * 塞进 `required`，模型在协议上无法省略这两个字段；而 schema 文本里 `null` 只以带引号的 `{"type":"null"}`
- * 出现（JSON Schema 的类型名是字符串），模型于是常写字符串 `"null"`。它在 `sandbox_permissions` 的
- * 两字面量枚举上于校验期被硬拒（execute 不跑，**0.80.2 与 1.0.0 实测同**），错误消息又把原参数 JSON 回放进上下文，
- * 成为下一轮最强的模仿样本——在校验前剥掉，既让普通调用照常执行，也掐断这条自我强化循环。
+ * 出现（JSON Schema 的类型名是字符串），模型于是常写字符串 `"null"`。1.5.x 下 `sandbox_permissions` 的
+ * `"null"` / `"NULL"` / `""` 会被强转成 JSON `null` 并放行，带空白的 `" null "` / `"   "` 仍被硬拒；
+ * `justification` 的字符串臂则原样接受占位符。校验前统一剥掉，普通调用不依赖各字段的强转分支，
+ * 带空白形态也不会触发“错误消息回放原参数 → 模型继续模仿”的循环。
  *
- * 本钩子依赖两个宿主契约（删掉它即回退到错误回放循环）：
- * ① `prepareToolCallArguments` 在 `validateToolArguments` **之前**执行（0.80.2 与 1.0.0 均如此）；
- * ② 校验按 **declared schema** 做，而不是下发给模型的 strict wire schema——若未来宿主改为按 strict wire
- * schema 校验，本钩子的“删键”反而会让普通调用失败（strict 下 required 全含），需同步改设计。
+ * 本钩子依赖两个宿主契约：
+ * ① `prepareToolCallArguments` 在 `validateToolArguments` **之前**执行（证据：`pi-agent-core/dist/agent-loop.js`
+ *   的 `prepareToolCall` 按此次序调用两者）；
+ * ② 校验按 **declared schema** 做，而不是下发给模型的 strict wire schema（证据：`pi-ai/dist/utils/validation.js`
+ *   的 `validateToolArguments` 读取 `tool.parameters`；`pi-ai/dist/api/constrained-sampling.js` 的
+ *   `getJsonSchemaToolParameters` 通过 `makeStrictJsonSchema` 克隆 declared schema，
+ *   `pi-ai/dist/api/openai-completions.js` 的 `convertTools` 只把克隆用于 provider 请求参数，不回写工具定义）。
+ *   若未来宿主改为按 strict wire schema 校验，
+ *   本钩子的“删键”反而会让普通调用失败（strict 下 required 全含），需同步改设计。
  *
  * 只剥占位符字符串：
  * - JSON `null` 与“省略”原样通过（`Type.Null()` 声明的合法取值仍由 `resolveCall` 归一化，本钩子不改这条路）；

@@ -99,11 +99,11 @@ describe("createSandboxTools schemas", () => {
 	it("提权参数显式声明 null：strict 模式下模型拿到的是 schema 认可的“不提权”取值（而非猜字符串）", () => {
 		const { deps } = makeDeps();
 		const { bash, write, edit } = createSandboxTools(deps);
-		// 背景（pi 1.0.0 实测）：strict 提供商（如 deepseek-flash，compat.supportsStrictMode=true）下 pi 会把
+		// 1.5.x 默认启用 strict 转换：strict 提供商（如 deepseek-flash，compat.supportsStrictMode=true）下 pi 会把
 		// 所有 property 塞进 required，并对“不允许 null”的字段补 anyOf[X,{type:"null"}]。声明 null 后：
 		// ① 模型有显式的合法取值（JSON null）来表达“不提权”，不必与 “never null” 的文案打架去写字符串 "null"；
-		// ② pi 的 strict 转换不再补一层包裹（schemaAllowsNull 递归识别）；
-		// ③ JSON null 不会被 pi 的 normalizeOptionalNulls 剥掉，而是原样送达 execute（归一化分支保持可达）。
+		// ② pi 的 strict 转换不再补一层包裹；
+		// ③ declared schema 允许 null，所以 optional 的 JSON null 会保留并原样送达 execute（归一化分支保持可达）。
 		for (const tool of [bash, write, edit]) {
 			const props = (tool.parameters as { properties: Record<string, unknown> }).properties;
 			expect(JSON.parse(JSON.stringify(props.sandbox_permissions))).toEqual({
@@ -199,11 +199,17 @@ describe("prepareArguments（pi 校验前的占位符剥离；edit 必须串联 
 		expect(Object.keys(ESCALATION_PROPS)).toEqual([...PLACEHOLDER_KEYS]);
 	});
 
-	it('bash：字符串 "null" 被剥掉（pi ≥0.80.2 校验期不再硬拒；0.80.2 实测同拒），command/timeout 原样保留', () => {
+	it('bash：字符串 "null" 被剥掉，command/timeout 原样保留', () => {
 		const { deps } = makeDeps();
 		const { bash } = createSandboxTools(deps);
 		expect(bash.prepareArguments?.({ command: "ls", timeout: null, sandbox_permissions: "null", justification: "null" }))
 			.toEqual({ command: "ls", timeout: null });
+	});
+
+	it('bash：带空白的 sandbox_permissions " null " 也被剥掉', () => {
+		const { deps } = makeDeps();
+		const { bash } = createSandboxTools(deps);
+		expect(bash.prepareArguments?.({ command: "ls", sandbox_permissions: " null " })).toEqual({ command: "ls" });
 	});
 
 	it("write：占位符剥掉，path/content 原样保留", () => {
@@ -660,7 +666,7 @@ describe("denial-first 硬门禁（未经真实拒绝不提权）", () => {
 	it("占位符归一化按字段可达性：JSON null 与 justification 的字符串形态是真实输入", async () => {
 		const { deps } = makeDeps();
 		const plain = { mode: "workspace-write" as const, escalated: false, ignoredEscalation: false };
-		// JSON null：strict 提供商在声明 Type.Null() 后会原样送达 execute（不再被 pi 剥掉）→ 视作未提供。
+		// JSON null：schema 显式声明 Type.Null()，declared-schema 校验会保留并原样送达 execute → 视作未提供。
 		expect(await resolveCall({ sandbox_permissions: null, justification: null }, toolCtx(), deps, "command", () => "x"))
 			.toEqual(plain);
 		// justification 的字符串臂是 Type.String()（字段本身为 string | null）：字符串 "null"/"" 在未走钩子的
@@ -769,9 +775,9 @@ describe("windows tool wiring", () => {
 	});
 
 	it("registers bash with exposure:hidden on win32 and leaves the key unset elsewhere", () => {
-		// win32 工具接线（D3 第三版）：pi 1.0.0 的默认激活列表按**名字**激活 ["read","bash","edit","write"]，
-		// 而 `defaultActive: false` 的语义恰是“被命名即激活”→ 挡不住默认列表（真机证伪）。因此改用
-		// `exposure: "hidden"`：_applyToolLoadout 丢弃 hidden、命名激活也不生效（registered but unreachable）。
+		// win32 工具接线（D3）：内建默认激活列表按**名字**激活 ["read","bash","edit","write"]，扩展同名工具
+		// 覆盖内建定义；`defaultActive: false` 仍允许命名激活，挡不住默认列表。因此改用 `exposure: "hidden"`：
+		// _applyToolLoadout 丢弃 hidden、命名激活也不生效（registered but unreachable）。
 		// 但绝不能跳过注册（那会露出 pi 内置的未受限 bash，显式启用即 fail-open），所以是“注册 + hidden”。
 		const win32 = createSandboxTools({ cwd: process.cwd(), permission: processPermissionState, platform: "win32" });
 		expect((win32.bash as { exposure?: string }).exposure).toBe("hidden");

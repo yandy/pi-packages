@@ -358,8 +358,8 @@ describe("T15: 平台门控与 PowerShell 状态行（Ruling 8/9）", () => {
 	});
 
 	it("registers the powershell tool only when createSandboxTools provides one", async () => {
-		// 宿主 0.80.2 没有 createPowerShellToolDefinition，win32 的正例分支单测里无法自然到达；
-		// 这里 mock 掉 ../src/tools 的返回值，只钉 index.ts 的 `!== undefined` 门控本身。
+		// 这里 mock 掉 ../src/tools 的返回值，只钉 index.ts 的 `!== undefined` 门控本身，
+		// 不把 win32 builder 与平台装配耦合进这个注册门控用例。
 		// （缺省分支由本文件首个用例的 tools 精确集合覆盖：undefined 必须跳过注册而不是注册 undefined。）
 		vi.doMock("../src/tools", () => ({
 			createSandboxTools: () => ({
