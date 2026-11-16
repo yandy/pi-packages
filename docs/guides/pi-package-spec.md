@@ -467,6 +467,15 @@ Pure Skills 类型虽无测试脚本，仍需添加 filters 条目，否则 PR �
 
 **统一使用 `typebox`**（当前 1.x 主线，与宿主自身依赖和官方示例一致）。`@sinclair/typebox`（0.x LTS）宿主也能识别，但它会被宿主映射到自己的 1.x 实现，而本地安装的是 0.34.x，形成「类型按 0.34 检查、运行时是 1.x」的 skew；新代码不要再用，存量代码建议迁移。
 
+**工具参数校验口径**（自 pi 1.5.0 起）：工具参数由宿主的 `@earendil-works/pi-schema` 按 **JSON Schema** 校验，不论 schema 由谁构建——TypeBox 节点本身就是 JSON Schema，写法不受影响；受影响的是 TypeBox 里**超出 JSON Schema 的那部分特性**，它们对工具参数一律不生效：
+
+- `Type.Refine()` 的精细校验不会跑。
+- `Type.BigInt()`、`Type.Undefined()`、`Type.Void()` 会拒绝任何参数（JSON 没有这些值）。
+- codecs（`Type.Codec()`）不解码，`execute()` 拿到的是 JSON 原值。
+- `Format.Set()` 注册的自定义格式不校验（标准格式以及 `url`、`json-pointer-uri-fragment` 仍校验）。
+
+校验前宿主会做**强制转换**，因此 `execute()` 里可能收到被「修好」的入参：数字串→数字、`"true"`→`true`、单值→单元素数组、optional 属性里 schema 不接受的 `null` 被丢弃。校验失败时模型看到的是 pi-schema 口径的错误消息，例如 `- path: missing`。需要上述这类约束（精细校验、BigInt、自定义格式等）就在 `execute()` 里自己查。宿主侧说明见 `@earendil-works/pi-coding-agent` 的 `docs/extensions.md#tool-parameter-schemas-and-typebox`。
+
 ### devDependencies
 
 所有 Extension 包统一使用以下 devDependencies（**版本锁定见根 `package.json`**）：

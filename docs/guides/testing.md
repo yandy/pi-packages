@@ -237,6 +237,7 @@ node -e 'const {win32}=require("node:path"); console.log(win32.join("/g","memory
 - [ ] 负向断言（"没被调用"）没有套用 `waitFor`；确有固定等待处注明了原因
 - [ ] 断言里的路径由 `join()` / `dirname()` / `relative()` 派生，没有写死 POSIX 字面量（见[路径断言必须跨平台](#路径断言必须跨平台)）
 - [ ] 涉及分隔符的正则同时接受 `/` 与 `\`；切分路径用 `/[/\\]/` 而不是 `"/"`
+- [ ] 不钉宿主 dist 的内部事实（schema 的 `additionalProperties`、`promptGuidelines` 条数、渲染折叠默认值、dist 行号），只钉包内性质（base 的每条 guideline 都在、schema options 与 base 同值、增量渲染 == 从头渲染）——宿主补丁版本就能让这些断言假红
 
 ---
 

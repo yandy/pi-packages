@@ -102,6 +102,8 @@ pi 默认工具集只有 `read`/`bash`/`edit`/`write`，因此 0.6.0 之后 `ls`
 | `src/tools/lsp-tools.ts` 的 `promptGuidelines` 仍写 "use grep instead"，而 `grep` 不再由本包激活 | 措辞待维护者定夺（模型仍能看到真实工具列表，影响低） |
 | `refreshTools` 会覆盖 `--tools` 排除、与其它扩展 `session_start` 的顺序耦合、`loadConfig` 按 cwd 缓存、`coding-tools.json` 未知键无校验 | pre-existing，本设计有意不动 |
 
+> **已关闭（2026-11-16）**：按「抬高 peer 下限」处置，下限现为 >=1.5.0，+name 语法恒可用——见 docs/superpowers/specs/2026-11-16-peer-floor-1.5-design.md §8。
+
 ## 与既有 spec 的关系
 
 - 取代 `2026-06-21-pi-coding-tools-design.md` 中「激活默认未激活的内置工具 ls/find/grep」的部分（该 spec 已标注 superseded，且 `apply_patch` 未实现）。
