@@ -163,14 +163,30 @@ describe("TranscriptBody", () => {
 		expect(rendered).toContain("now summarize the doc");
 	});
 
-	it("renders tool results collapsed by default", () => {
-		const { body } = makeTracker();
-		body.sync([assistantMessage("reading", READ_CALL), toolResultMessage(READ_CALL.id, BODY)]);
+	it("renders tool results through the host renderer", () => {
+		const assistant = assistantMessage("reading", READ_CALL);
+		const result = toolResultMessage(READ_CALL.id, BODY);
+		const messages = [assistant, result];
+		const incremental = makeTracker().body;
+		incremental.sync([assistant]);
+		incremental.sync(messages);
 
-		const rendered = body.render(80).join("\n");
+		const firstRender = incremental.render(80);
+		const rendered = firstRender.join("\n");
 		expect(rendered).toContain("read");
-		// Pi's collapsed read renderer shows no output at all (read.js: collapsed → "").
-		expect(rendered).not.toContain("line 79 of file content");
+		expect(rendered).toContain("line 79 of file content");
+
+		// Do not assert Pi's collapse default: on pi 1.5.2, an unresolved tool
+		// definition uses the generic fallback, which renders the read body even
+		// while collapsed (tool-execution.js: formatToolExecution). Assert only the
+		// body-owned contract: stable output for the same messages, and incremental
+		// rendering matching a from-scratch build.
+		expect(incremental.sync(messages)).toEqual({ appended: 0, refreshed: 0, rebuilt: 0 });
+		expect(incremental.render(80)).toEqual(firstRender);
+
+		const scratch = makeTracker().body;
+		scratch.sync(messages);
+		expect(incremental.render(80)).toEqual(scratch.render(80));
 	});
 });
 
