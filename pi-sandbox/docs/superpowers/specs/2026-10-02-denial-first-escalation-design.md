@@ -151,11 +151,10 @@ interface DenialLedger {
 - `EscalationUI` 从 `{ hasUI, select }` 收敛为 `{ hasUI, ask(title, options, denialReason?) → { choice, reason? } }`；
 - **直连通道**：`select` → 若 `Deny` 且 `ctx.ui.input` 存在 → `input(DENIAL_REASON_PROMPT)`；同一条异步链上串行 await，天然原子；
 - **broker 通道**：`ParentApprovalChannel` 增加可选 `input`；`request` 在**同一个 FIFO 任务**内完成 select+input（否则排队中的下一个审批会顶掉正开着的理由弹窗——Ruling 17 的槽位约束对 input 同样成立）；
-
-> **已修订（2026-11-16）**：「select+input 必须在同一个 FIFO 任务内」的槽位前提消失，退化为「同一请求内串行 await」——见 docs/superpowers/specs/2026-11-16-peer-floor-1.5-design.md §7.2。
-
 - 理由 `sanitizeDenialReason`：折叠空白、trim、截断 500 字符；空 / 占位符 → 无后缀（拒绝文案逐字回退原样）；
 - Deny 文案追加 `. The user's reason: <reason>`（前缀文案逐字不变，既有判例正则继续匹配）。
+
+> **已修订（2026-11-16）**：「select+input 必须在同一个 FIFO 任务内」的槽位前提消失，退化为「同一请求内串行 await」——见 docs/superpowers/specs/2026-11-16-peer-floor-1.5-design.md §7.2。
 
 ### 4.6 提示词面（软约束同步强化）
 

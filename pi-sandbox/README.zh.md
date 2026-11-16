@@ -40,7 +40,7 @@ bash 命令被包装进平台沙箱 runner 后在本地 spawn（**路径透明**
 
 受限 shell 只有 **`powershell` 工具**。在 Windows 上，pi-sandbox 把受限 `bash` 以 `exposure: "hidden"` 注册——pi 的语义是 *registered but unreachable*：模型看不到它，显式点名（`defaultTools`、`--tools`、`setActiveTools()`）也无法激活它。保留这份注册是有意的：扩展工具按名覆盖内建定义，`bash` 这个名字被本包的拒绝壳占据，Windows 上不存在任何通往未受限内建 `bash` 的路径；若未来宿主改变 `hidden` 的兑现方式，该定义仍会拒绝受限模式下的每次调用（绝不 spawn，fail-closed）。除非显式切到 `danger-full-access`（唯一逃生门，与其他平台一样 `bash` 照常裸跑），沙箱绝不在 Windows 上非受限地运行 bash。
 
-已知限制：**`defaultTools` 去不掉扩展注册的工具**（`-name` 条目只能移除内置工具；扩展工具除非在定义里声明退出，否则会被自动激活）。pi-sandbox 不要求用户为此配置：Windows 上 `bash` 这个名字在**定义层**就已从模型侧撤下（`exposure: "hidden"`），没有可配置掉的余地。若 `powershell` 未激活（选择列表把它排除在外），`/permission` 状态行显示 `shell: powershell only (not activated)`；`{ "defaultTools": ["+powershell"] }` 可把它加回来。
+已知限制：**`defaultTools` 去不掉扩展注册的工具**（`-name` 条目只能移除内置工具；扩展工具除非在定义里声明退出，否则会被自动激活）。pi-sandbox 不要求用户为此配置：Windows 上 `bash` 这个名字在**定义层**就已从模型侧撤下（`exposure: "hidden"`），没有可配置掉的余地。若 `powershell` 未激活（选择列表把它排除在外），`/permission` 状态行显示 `shell: powershell only (not activated)`；`{ "defaultTools": ["+powershell"] }` 可把它加回来。完全无法判断激活状态时——会话替换 / reload 后扩展 ctx 已陈旧，或读取激活工具列表抛错——状态行写 `shell: powershell only (activation unknown)` 而不是猜：裸露的 `shell: powershell only` 会被读成「已启用」。
 
 **支持范围。**与所移植的上游设计（deepseek-harness）一致：**不设新 OS 下限**——机制是 `WRITE_RESTRICTED` 受限令牌 + Low 强制标签，两者都是老 API（当初选它而不是 `mxc`，正是因为 mxc 要 Windows 11 24H2+）。本仓端到端验证在 **Windows 10 Enterprise LTSC 2019（build 17763.316）**上完成：自动化 e2e 与人工验收清单均绿。更新版本预期一致（后端不依赖新版本特性），但本仓尚未验证。注意：上游的**测试**跑在 Windows Server 2025 上，它的测试夹具不可移植到老 build；本包的 Windows 夹具刻意只用与版本无关的原语。
 
