@@ -127,8 +127,7 @@ export default function (pi: ExtensionAPI) {
 	// Ruling 9：技能按平台**追加**贡献（pi 侧是 mergePaths 合并语义）。只返回本包的技能路径，
 	// 或空数组 = 什么也不加（非 win32 上零目录条目）；绝不返回“完整集合”而抹掉其他来源。
 	pi.on("resources_discover", () => ({ skillPaths: aclSkillPaths() }));
-	// 老宿主（含本仓 devDependency 0.80.2）没有 createPowerShellToolDefinition → tools.powershell
-	// 为 undefined：跳过注册即可，不报错（此时宿主本来也没有 powershell 工具可覆盖）。
+	// 非 win32 平台不装配 pwsh 覆盖 → tools.powershell 为 undefined：跳过注册。
 	if (tools.powershell !== undefined) pi.registerTool(tools.powershell as never);
 
 	pi.registerCommand("permission", createPermissionCommand({

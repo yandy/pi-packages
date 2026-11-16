@@ -2,18 +2,14 @@ import { access as fsAccess, constants, mkdir as fsMkdir, readFile as fsReadFile
 import { Type, type TSchema } from "typebox";
 import {
 	type AgentToolResult,
-	type BashOperations,
 	createBashToolDefinition,
 	createEditToolDefinition,
+	createPowerShellToolDefinition,
 	createWriteToolDefinition,
 	type EditOperations,
 	type ExtensionToolContext,
-	type ToolDefinition,
 	type WriteOperations,
 } from "@earendil-works/pi-coding-agent";
-// 命名空间导入只用于版本门控探测（createPowerShellToolDefinition 是 pi ≥1.0.0 才有的导出）：
-// pi 是 ESM，静态具名导入一个老宿主不存在的导出会在**链接期**硬失败，属性读取最坏只是 undefined。
-import * as piHost from "@earendil-works/pi-coding-agent";
 import { createSandboxBashOps, type SpawnFn } from "./bash-ops";
 import { getSandboxConfig, type SandboxConfig } from "./config";
 import { getDenialLedger } from "./denial-ledger";
@@ -37,36 +33,15 @@ import { createSandboxPowerShellOps } from "./powershell-ops";
 import { selectRunner, type RunnerHooks } from "./runners";
 
 /**
- * 宿主 pwsh 工具工厂的结构类型（pi ≥1.0.0 导出 `createPowerShellToolDefinition(cwd, options)`）。
- * 本仓 pin 的 devDependency（0.80.2）没有该导出，所以这里不引用其类型、也不静态具名导入；
- * `ToolDefinition` 本身 0.80.2 就有，可以安全用作返回面。
- */
-type HostPowerShellToolDefinition = ToolDefinition<TSchema, unknown, unknown>;
-type HostCreatePowerShellToolDefinition = (
-	cwd: string,
-	options?: { operations?: BashOperations },
-) => HostPowerShellToolDefinition;
-
-/**
- * 宿主探测（lazy + 命名空间 + `typeof === "function"`）：只在 win32 装配时读一次属性。
- * 老宿主（<1.0.0，含本仓 devDependency 0.80.2）上是 undefined——那时 pi 本来就没有 powershell
- * 工具，缺省即“不注册、不报错、不阻断”。
- */
-function hostCreatePowerShellToolDefinition(): HostCreatePowerShellToolDefinition | undefined {
-	const candidate = (piHost as unknown as Record<string, unknown>).createPowerShellToolDefinition;
-	return typeof candidate === "function" ? (candidate as HostCreatePowerShellToolDefinition) : undefined;
-}
-
-/**
- * I2 fail-safe：宿主 builder 在**构造期**抛错时降级为“无 pwsh 覆盖”（undefined，与老宿主同一路径）。
+ * I2 fail-safe：宿主 builder 在**构造期**抛错时降级为“无 pwsh 覆盖”（undefined）。
  * `createSandboxTools` 绝不能因此抛出——pi 会把整个扩展置 null，bash/write/edit 随即无沙箱裸跑
  * （fail-open，见 index.ts 的 I2）。execute 期的 builder 抛错是另一回事：只影响那一次 pwsh 调用，
  * 不涉及扩展装配。
  */
 function buildHostPowerShellBase(
-	builder: HostCreatePowerShellToolDefinition | undefined,
+	builder: typeof createPowerShellToolDefinition | undefined,
 	cwd: string,
-): HostPowerShellToolDefinition | undefined {
+): ReturnType<typeof createPowerShellToolDefinition> | undefined {
 	if (builder === undefined) return undefined;
 	try {
 		return builder(cwd);
@@ -90,11 +65,9 @@ export interface SandboxToolDeps {
 	platform?: string;
 	/** 测试注入（testing.md「参数注入」）：替换缺省的 createSandboxBashOps；生产不传。 */
 	_buildBashOps?: typeof createSandboxBashOps;
-	/** 测试注入（testing.md「参数注入」）：替换宿主命名空间探测结果；生产不传。
-	 *  需要它是因为本仓 devDependency（0.80.2）的宿主没有 createPowerShellToolDefinition，
-	 *  win32 注册的正例路径在单测里无法自然到达。注入值走与探测同一条 `typeof === "function"` 口径，
-	 *  传非函数值（如 false）即模拟“老宿主无该导出”；传 undefined 则回落真实探测。 */
-	_hostCreatePowerShellToolDefinition?: unknown;
+	/** 纯测试注入：缺省用宿主的 createPowerShellToolDefinition；测试可注入抛错的 builder 或 spy。 */
+	_hostCreatePowerShellToolDefinition?: typeof createPowerShellToolDefinition
+		| ((...args: Parameters<typeof createPowerShellToolDefinition>) => never);
 	/** 测试注入（testing.md「参数注入」）：替换缺省的 "/tmp" + os.tmpdir() tmp 根；生产不传。 */
 	_tmpRoots?: readonly string[];
 	/** 测试注入：替换配置的 extraWritableDirs（额外可写根）；生产缺省用配置值。 */
@@ -382,11 +355,11 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 	const platform = deps.platform ?? process.platform;
 	// 测试注入优先；生产缺省为真实的 createSandboxBashOps。
 	const buildBashOps = deps._buildBashOps ?? createSandboxBashOps;
-	// pwsh 覆盖（spec §4.8）：仅 win32 且宿主确实导出工厂时装配；否则 undefined。
-	let createHostPowerShell: HostCreatePowerShellToolDefinition | undefined;
+	// pwsh 覆盖（spec §4.8）：仅 win32 装配；非 win32 为 undefined，且不触碰 builder。
+	let createHostPowerShell: typeof createPowerShellToolDefinition | undefined;
 	if (platform === "win32") {
-		const candidate = deps._hostCreatePowerShellToolDefinition ?? hostCreatePowerShellToolDefinition();
-		if (typeof candidate === "function") createHostPowerShell = candidate as HostCreatePowerShellToolDefinition;
+		const candidate = deps._hostCreatePowerShellToolDefinition ?? createPowerShellToolDefinition;
+		createHostPowerShell = candidate;
 	}
 	// Ruling 15：以 definition 工厂为 base——自带 promptSnippet/promptGuidelines，
 	// execute 第 5 参 ctx 类型正确（ExtensionToolContext），spread 后注册不丢系统提示元数据。

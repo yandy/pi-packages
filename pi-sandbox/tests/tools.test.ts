@@ -762,15 +762,10 @@ describe("windows tool wiring", () => {
 		});
 	}
 
-	it("builds the tool set on win32 and exposes a powershell tool when the host provides the builder", () => {
+	it("builds the tool set on win32 and exposes a powershell tool", () => {
 		const tools = createSandboxTools({ cwd: process.cwd(), permission: processPermissionState, platform: "win32" });
 		for (const name of ["bash", "write", "edit"] as const) expect(tools[name]).toBeDefined();
-		if (tools.powershell === undefined) {
-			// 宿主 <1.0.0（本仓 devDependency 0.80.2 即如此）时合法缺省：不报错、不阻断
-			expect(typeof tools.powershell).toBe("undefined");
-			return;
-		}
-		expect((tools.powershell as { name?: string }).name).toBe("powershell");
+		expect(tools.powershell?.label).toBe("powershell (sandboxed)");
 	});
 
 	it("registers bash with exposure:hidden on win32 and leaves the key unset elsewhere", () => {
@@ -795,7 +790,7 @@ describe("windows tool wiring", () => {
 			_hostCreatePowerShellToolDefinition: build,
 		});
 		expect(tools.powershell).toBeUndefined();
-		// 平台门控先于宿主探测/构造：非 win32 上连 builder 都不该被摸（老宿主上该键本来也不存在）。
+		// 平台门控先于 builder 构造：非 win32 上连注入的 spy 都不该被调用。
 		expect(build).not.toHaveBeenCalled();
 	});
 
@@ -810,8 +805,7 @@ describe("windows tool wiring", () => {
 	});
 
 	it("win32 + host builder: powershell carries the same escalation surface and builds ops per call", async () => {
-		// 宿主 0.80.2 没有 createPowerShellToolDefinition → 正例分支靠测试注入到达；
-		// 注入值走与生产命名空间探测同一条 `typeof === "function"` 口径。
+		// 注入 builder spy，观察 base 元数据装配与 execute 时的受限 ops 构造。
 		const calls: { cwd: string; opts?: unknown }[] = [];
 		const builder = fakePowerShellBuilder(calls);
 		const { deps } = makeDeps({ platform: "win32", _hostCreatePowerShellToolDefinition: builder });
@@ -848,7 +842,7 @@ describe("windows tool wiring", () => {
 	});
 
 	it("a throwing host pwsh builder degrades to no powershell tool without breaking bash/write/edit", () => {
-		// I2 fail-open 回归闸：构造期抛错若冒泡出 createSandboxTools，pi 会把整个扩展置 null，
+		// I2 fail-open 回归闸：经注入缝传入抛错的 builder；构造期抛错若冒泡出 createSandboxTools，pi 会把整个扩展置 null，
 		// bash/write/edit 随即无沙箱裸跑。必须降级为“无 pwsh 覆盖”，三个基础工具照常注册。
 		const builder = vi.fn(() => {
 			throw new Error("host builder exploded");
