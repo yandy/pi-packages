@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+	createEditToolDefinition,
+	createReadToolDefinition,
+	createWriteToolDefinition,
+	type ExtensionAPI,
+} from "@earendil-works/pi-coding-agent";
 import { assertPromptHygiene } from "../../scripts/prompt-hygiene";
 import register from "../index";
 
@@ -22,6 +27,14 @@ interface CapturedTool {
 	promptSnippet?: string;
 	promptGuidelines?: string[];
 	parameters: { additionalProperties?: boolean; properties?: Record<string, unknown> };
+}
+
+/** 宿主 base 定义的 guideline：断言一律与它对照，不写死宿主的条数或文案（宿主版本会漂移）。 */
+function baseGuidelines(name: "read" | "write" | "edit"): string[] {
+	const cwd = process.cwd();
+	if (name === "read") return createReadToolDefinition(cwd).promptGuidelines ?? [];
+	if (name === "write") return createWriteToolDefinition(cwd).promptGuidelines ?? [];
+	return createEditToolDefinition(cwd).promptGuidelines ?? [];
 }
 
 function captureTools(): CapturedTool[] {
@@ -64,17 +77,35 @@ describe("注册的 read/write/edit/bash 保留提示词元数据（spec 2026-10
 	});
 
 	it("保留内置 guideline（read/write/edit 各自的行为纪律）", () => {
+		// 钉包内性质：`...localRead` 这类对象 spread 必须把 base 定义的每条 guideline 原样带上。
+		// 不钉宿主的条数与文案——它们随宿主版本漂移（1.5.2 的 edit 从 4 条改成 2 条，措辞也重写过）。
+		for (const name of ["read", "write", "edit"] as const) {
+			const registeredGuidelines = byName.get(name)?.promptGuidelines ?? [];
+			const base = baseGuidelines(name);
+			expect(base.length, `${name} 的 base 定义没有 guideline`).toBeGreaterThan(0);
+			for (const guideline of base) {
+				expect(registeredGuidelines, `${name} 丢了 base guideline：${guideline}`).toContain(guideline);
+			}
+		}
 		expect(byName.get("read")?.promptGuidelines).toContain("Use read to examine files instead of cat or sed.");
 		expect(byName.get("write")?.promptGuidelines).toContain("Use write only for new files or complete rewrites.");
-		const editGuidelines = byName.get("edit")?.promptGuidelines ?? [];
-		expect(editGuidelines.length).toBeGreaterThanOrEqual(4);
-		expect(editGuidelines[0]).toContain("Use edit for precise changes");
-		expect(editGuidelines.join("\n")).toContain("Do not emit overlapping or nested edits");
 	});
 
-	it("保留 base schema 选项（edit 的 additionalProperties:false 不能因重建对象而丢）", () => {
-		expect(byName.get("edit")?.parameters.additionalProperties).toBe(false);
-		expect(byName.get("edit")?.parameters.properties).toHaveProperty("edits");
+	it("保留 base schema 选项（不因重建对象而丢）", () => {
+		const registered = byName.get("edit");
+		const base = createEditToolDefinition(process.cwd());
+		// 钉包内性质（宿主 schema 会漂移：0.80.2 的 edit 带 additionalProperties:false，1.5.2 已无）：
+		// `...localEdit` 是对象 spread，包装后的它与 base 同值。
+		expect((registered?.parameters as { additionalProperties?: boolean }).additionalProperties).toBe(
+			(base.parameters as { additionalProperties?: boolean }).additionalProperties,
+		);
+		expect(registered?.parameters.properties).toHaveProperty("edits");
+		// 上一条在「base 本就没有这个 option」的宿主上恒真，故再钉一条关系约束：顶层 schema options
+		// 键集合与 base 逐字一致。它只在两种情形下鉴别得出问题：① 手写 `{ type, properties }` 重建会丢
+		// `required` 键；② base 自带 `additionalProperties` 一类自有 option 的宿主版本。对 TypeBox 式
+		// 重建（`Type.Object({ ...base.properties })`）它无鉴别力——1.5.2 上重建出的顶层键、`required`、
+		// `additionalProperties` 三项与 base 全同。
+		expect(Object.keys(registered?.parameters ?? {}).sort()).toEqual(Object.keys(base.parameters).sort());
 	});
 
 	it("description 仍是内置描述（本包不额外追加提示词）", () => {
