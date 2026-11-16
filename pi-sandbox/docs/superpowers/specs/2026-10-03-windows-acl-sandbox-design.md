@@ -42,7 +42,7 @@
 | D7 | 依赖下限 | peer 保持 `>=0.80.2`，powershell 覆盖靠**运行时探测** `createPowerShellToolDefinition` → 版本走 **1.4.0** |
 | D8 | 诊断技能 | **本次包含**：`resources/skills/diagnose-windows-sandbox-acl/`（SKILL.md + 保真移植的 PowerShell 修复脚本）；**仅 Windows 加载**，经 `resources_discover` 事件按平台注册（见 Ruling 9） |
 
-> **已废止（2026-11-16）**：peer 下限抬到 >=1.5.0 后，三个被探测的宿主 API 恒可用，「不得静态具名导入」规则作废——见 docs/superpowers/specs/2026-11-16-peer-floor-1.5-design.md §6.1/§6.4。
+> **已废止（2026-11-16）**：D7 与「宿主版本差异的接入规则」：peer 下限抬到 >=1.5.0 后，三个被探测的宿主 API 恒可用，「不得静态具名导入」规则作废——见 docs/superpowers/specs/2026-11-16-peer-floor-1.5-design.md §6.1/§6.4。
 
 **D3 修订 1（第二版，2026-10-03 首轮真机实测后，用户确认；已被 D3 修订 2 取代）**：原指定文案 `{ "defaultTools": ["-bash", "+powershell"] }` **无效且无必要** —— pi 1.0.0 在 Windows 默认只激活 `powershell`；用户看到的 `bash` 是 pi-sandbox 自己覆盖注册的（扩展注册的工具会被自动激活，而 `defaultTools` 的 `-name` 无法取消扩展工具）。因此改为：
 
@@ -187,7 +187,7 @@ parseArgs → requireDirectory(ws, temp) → win32()（koffi 懒加载）
 | `src/powershell-ops.ts`（新） | PowerShell 专用 ops：`getPowerShellConfig()` 取 argv + pi 的 UTF-8 输出前缀。被拒时经与 bash **同一条** denial 记账路径（`onDenial` → ledger 的 `command` 类），使 pwsh 的拒绝能驱动 denial-first 提权重试 |
 | `src/tools.ts` | 注册 `powershell` 工具覆盖（运行时探测 `createPowerShellToolDefinition`）；win32 下 bash 覆盖以 `exposure: "hidden"` 注册（D3 修订 2：不声明、不可命名激活、仍按名遮蔽内建）+ 受限模式拒绝壳（Ruling 2，纵深防御） |
 
-> **已废止（2026-11-16）**：peer 下限抬到 >=1.5.0 后，三个被探测的宿主 API 恒可用，「不得静态具名导入」规则作废——见 docs/superpowers/specs/2026-11-16-peer-floor-1.5-design.md §6.1/§6.4。
+> **已废止（2026-11-16）**：D7 与「宿主版本差异的接入规则」：peer 下限抬到 >=1.5.0 后，三个被探测的宿主 API 恒可用，「不得静态具名导入」规则作废——见 docs/superpowers/specs/2026-11-16-peer-floor-1.5-design.md §6.1/§6.4。
 
 **宿主版本差异的接入规则（D7 的必然要求）**：pi 是 ESM（`"type": "module"`），因此对**版本门控**的宿主 API（`createPowerShellToolDefinition`、`getPowerShellConfig`、`getActiveTools`）**不得**用静态具名导入——在 0.80.2 上运行时会因缺失导出而链接失败（连扩展都加载不了）。一律用命名空间导入 + 属性访问 + `typeof === "function"` 探测：
 

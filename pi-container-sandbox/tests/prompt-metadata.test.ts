@@ -103,7 +103,7 @@ describe("注册的 read/write/edit/bash 保留提示词元数据（spec 2026-10
 		// 上一条在「base 本就没有这个 option」的宿主上恒真，故再钉一条关系约束：顶层 schema options
 		// 键集合与 base 逐字一致。它只在两种情形下鉴别得出问题：① 手写 `{ type, properties }` 重建会丢
 		// `required` 键；② base 自带 `additionalProperties` 一类自有 option 的宿主版本。对 TypeBox 式
-		// 重建（`Type.Object({ ...base.properties })`）它无鉴别力——1.5.2 上重建出的顶层键、`required`、
+		// 重建（`Type.Object({ ...base.properties })`）它无鉴别力——当前宿主上重建出的顶层键、`required`、
 		// `additionalProperties` 三项与 base 全同。
 		expect(Object.keys(registered?.parameters ?? {}).sort()).toEqual(Object.keys(base.parameters).sort());
 	});
