@@ -48,7 +48,9 @@ export interface ParentApprovalChannel {
 	readonly sessionId: string;
 	hasUI(): boolean;
 	select(title: string, options: string[], opts?: { signal?: AbortSignal }): Promise<string | undefined>;
-	/** 可选：Deny 后的理由输入（两步式的第二步）。缺失/抛错时请求照常返回 Deny（无理由）。 */
+	/** 可选：Deny 后的理由输入（两步式的第二步）。缺失/抛错时请求照常返回 Deny（无理由）。
+	 *  宿主的 `ctx.ui.input` 本就是必填成员，此处仍声明为可选：通道是**跨会话注册**的抽象，
+	 *  注册方可能拿不到 `input`（异常 ctx）；缺失时跳过理由追问是 fail-closed 方向。 */
 	input?(title: string, placeholder?: string, opts?: { signal?: AbortSignal }): Promise<string | undefined>;
 }
 

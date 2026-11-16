@@ -539,6 +539,23 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 		expect(ctx.ui.select.mock.calls[0][2]).toBeUndefined();
 	});
 
+	it("direct 路径 ctx.ui.select 抛错 → 按取消处理，不冒泡宿主内部报错（与 broker.request 口径一致）", async () => {
+		const { deps } = makeDeps();
+		const ctx = toolCtx(true) as ToolCtxTestDouble;
+		ctx.ui.select.mockRejectedValue(new Error("host UI internals exploded"));
+		seedDenial("command");
+		// 宿主 select 的内部报错绝不能变成用户/模型看到的工具错误文本：应落进 approveEscalation
+		// 既有的"取消"分支，且文案里不得出现宿主原文。
+		const settled = await resolveCallMode(
+			{ sandbox_permissions: "danger-full-access", justification: "j" },
+			ctx, deps, "command", () => "x",
+		).then(() => null, (error: Error) => error);
+		expect(settled).toBeInstanceOf(Error);
+		expect(settled?.message).toMatch(/cancelled/);
+		expect(settled?.message).not.toContain("host UI internals exploded");
+		expect(ctx.ui.input).not.toHaveBeenCalled();
+	});
+
 	it("hasUI 时直连 ctx.ui.select，即使本会话已注册通道也不经 broker.request", async () => {
 		const { deps } = makeDeps();
 		const broker = getEscalationBroker();

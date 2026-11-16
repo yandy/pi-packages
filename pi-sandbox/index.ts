@@ -149,8 +149,9 @@ export default function (pi: ExtensionAPI) {
 			// hasUI 现查而非快照：注册后父会话可能因 reload / 会话替换失去 UI，或使 ctx 失效
 			hasUI: () => readHasUI(ctx),
 			select: (title, options, opts) => ctx.ui.select(title, options, opts),
-			// 两步式的第二步：Deny 后的可选理由。旧宿主/异常 ctx 可能没有 input——缺失时 broker 跳过追问。
-			input: typeof ctx.ui.input === "function" ? (title, placeholder, opts) => ctx.ui.input(title, placeholder, opts) : undefined,
+			// 两步式的第二步：Deny 后的可选理由。异常 ctx 可能缺 input——缺失/抛错时 broker 跳过理由追问
+			// （拒绝照常结算）。
+			input: (title, placeholder, opts) => ctx.ui.input(title, placeholder, opts),
 		});
 	});
 	pi.on("session_shutdown", () => {

@@ -202,6 +202,8 @@ function approvalChannelFor(ctx: ToolCtxLike, signal: AbortSignal | undefined): 
 - **direct 路径（一致性）**：注意弹窗抢焦点后 ESC 已经能取消它（§4.1），所以这里唯一的可观察差异是：当父 run 被**非 ESC 途径**中断（`ctx.abort()`、session 切换/reload）时，弹窗自动关闭并落进现有 `was cancelled` 分支，而不是留在屏幕上。收益小、风险也小，且与转发路径共用同一段代码（不必在 `approvalChannelFor` 里分叉）。
 - 两条路径都恒传第三参 `opts`（无 `signal` 时其值为 `undefined`，与省略在运行时不可区分：宿主签名为 `opts?`，dist 内无 `arguments.length` 判断），headless 行为逐字不变。
 
+> **已废止（2026-11-16）**：宿主自 pi 1.4.0 起把并发扩展对话框改成栈（新弹窗覆盖可见性，旧弹窗留在栈里、栈顶关闭后重新显示并结算），单槽位孤儿化的前提不成立。FIFO 车道与 resolveOwnChannel 已删除，审批顺序由宿主决定——见 docs/superpowers/specs/2026-11-16-peer-floor-1.5-design.md §3.4/§7。
+
 **direct 路径也排进 FIFO 车道（Ruling 17，整分支审查后追加）**：宿主的 `showExtensionSelector` 只有一个对话框槽位且不排队——第二次调用会清掉容器并覆盖该字段，第一个弹窗从此收不到按键，其 promise 只能靠自己的 `signal` abort 才结算。可达路径不需要任何异常：父会话自己的一次提权弹窗正开着，此时后台子代理提权 → broker 出队 → 第二次调用父 `ctx.ui.select` → 父自己那次审批被孤儿化并静默变成 `was cancelled`。因此 `ctx.hasUI` 分支先用 `resolveOwnChannel(本会话 id)` 找自己注册的通道，命中就走 `broker.request`（与转发请求共用同一条车道，"一次只弹一个"成为包内不变量）；解析不到（宿主未发 `session_start`、拿不到会话 id）才回落直连，回落行为与改动前逐字一致。这不触碰 D1–D6：不新增终止来源、不改文案、不加诊断行、不动严格路由。
 
 按 D4，**标题与选项文案一字不改**（`escalation.ts:78-86` 现有拼接：`Sandbox escalation: allow this <subject> under "<mode>"?` + 空行 + `Reason:` + `Command:`/`Path:`；选项 `Allow once` / `Deny`）。

@@ -149,14 +149,20 @@ function approvalChannelFor(ctx: ToolCtxLike, signal: AbortSignal | undefined): 
 	const opts = signal === undefined ? undefined : { signal };
 	const broker = getEscalationBroker();
 	// 直连通道的两步式：select →（Deny 时）input，同一请求内串行 await。
+	// 异常口径与 broker.request 一致：审批 UI 抛错一律按"取消"处理（返回 choice undefined），
+	// 绝不让宿主的内部报错冒泡成用户/模型看到的工具错误文本（理由同 index.ts 的 readHasUI）。
 	const directAsk = async (title: string, options: string[], denialReason?: DenialReasonPrompt): Promise<EscalationDecision> => {
-		const choice = await ctx.ui.select(title, options, opts);
-		if (choice !== "Deny" || denialReason === undefined || typeof ctx.ui.input !== "function") return { choice };
 		try {
-			const reason = await ctx.ui.input(denialReason.title, denialReason.placeholder, opts);
-			return { choice, reason };
+			const choice = await ctx.ui.select(title, options, opts);
+			if (choice !== "Deny" || denialReason === undefined || typeof ctx.ui.input !== "function") return { choice };
+			try {
+				const reason = await ctx.ui.input(denialReason.title, denialReason.placeholder, opts);
+				return { choice, reason };
+			} catch {
+				return { choice }; // 理由输入异常不影响拒绝语义（fail-closed）
+			}
 		} catch {
-			return { choice }; // 理由输入异常不影响拒绝语义（fail-closed）
+			return { choice: undefined }; // 审批 UI 异常按取消处理（与 broker.request 的父侧口径一致）
 		}
 	};
 	if (ctx.hasUI) return { hasUI: true, ask: directAsk };

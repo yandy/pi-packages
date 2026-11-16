@@ -278,16 +278,21 @@ describe("escalation approval forwarding wiring (spec 2026-09-30 §4.5)", () => 
 		expect(input).toHaveBeenCalledWith("Why deny?", "optional", { signal: ac.signal });
 	});
 
-	it("旧宿主 ctx.ui 无 input → 通道 input 为 undefined（broker 跳过理由追问）", async () => {
+	it("异常 ctx 无 input → broker 跳过理由追问（Deny 照常结算，不抛错）", async () => {
 		const { fakePi, hooks } = makeFakePi();
 		const activate = (await import("../index")).default;
 		activate(fakePi as never);
-		const ctx = { hasUI: true, sessionManager: { getSessionId: () => "p" }, ui: { select: async () => "Allow once" } };
+		// 1.5.x 的 ctx.ui.input 是必填成员，所以通道的 input 总是被注册；但注册方是跨会话抽象，
+		// 异常 ctx 仍可能拿不到它。缺失时取用会抛 TypeError——broker 必须包住，跳过理由追问、
+		// 保住 Deny 语义（不得退化成“取消”）。
+		const ctx = { hasUI: true, sessionManager: { getSessionId: () => "p" }, ui: { select: async () => "Deny" } };
 		hooks.session_start?.({ type: "session_start" }, ctx);
 		getEscalationBroker().linkChild("c", "p");
 		const resolved = getEscalationBroker().resolveChannel("c");
 		expect(resolved).not.toBeNull();
-		expect(resolved?.input).toBeUndefined();
+		if (resolved === null) throw new Error("channel must resolve");
+		await expect(getEscalationBroker().request(resolved, "T", ["Allow once", "Deny"], undefined, { title: "Why deny?", placeholder: "optional" }))
+			.resolves.toEqual({ choice: "Deny" });
 	});
 
 	it("ctx 失效（hasUI 取值器抛错）→ 通道失效并 fail-closed，不冒泡宿主报错", async () => {
