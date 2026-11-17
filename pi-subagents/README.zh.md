@@ -47,7 +47,7 @@ subagent({
 | 类型 | 工具 | 模型 | 描述 |
 |------|------|------|------|
 | `general-purpose` | 全部 | 继承父级 | harness 按子代理自身工具集渲染的提示词——沿用相同约定，外加子代理桥接段 |
-| `Explore` | read, bash, grep, find, ls | `deepseek/deepseek-v4-flash`（不可用时回退父级模型） | 快速代码库探索（只读） |
+| `Explore` | read, bash, grep, find, ls | 继承父级模型（可按调用覆盖） | 快速代码库探索（只读） |
 
 ## 自定义代理
 
