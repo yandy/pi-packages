@@ -1,6 +1,6 @@
 import type { AgentConfigLookup } from "../config/agent-types";
 import { getLifetimeTotal, type LifetimeUsage } from "../lifecycle/usage";
-import { type AgentDetails, formatTokens } from "../ui/display";
+import { type AgentDetails, formatCost, formatTokens } from "../ui/display";
 
 /** Parenthetical status note for completed agent result text. */
 export function getStatusNote(status: string): string {
@@ -27,6 +27,7 @@ export function buildDetails(
 		error?: string;
 		id?: string;
 		lifetimeUsage: LifetimeUsage;
+		lifetimeCost?: number;
 		/** Live-activity counters — exposed as getters on Subagent (Phase 18 Step 2). */
 		turnCount?: number;
 		maxTurns?: number;
@@ -37,6 +38,7 @@ export function buildDetails(
 		...base,
 		toolUses: record.toolUses,
 		tokens: formatLifetimeTokens(record),
+		cost: formatLifetimeCost(record),
 		turnCount: record.turnCount,
 		maxTurns: record.maxTurns,
 		durationMs: (record.completedAt ?? Date.now()) - record.startedAt,
@@ -56,6 +58,12 @@ export function textResult(msg: string, details?: unknown) {
 export function formatLifetimeTokens(o: { lifetimeUsage: LifetimeUsage }): string {
 	const t = getLifetimeTotal(o.lifetimeUsage);
 	return t > 0 ? formatTokens(t) : "";
+}
+
+/** Format an agent's lifetime USD cost, or "" when zero. */
+export function formatLifetimeCost(o: { lifetimeCost?: number }): string {
+	const cost = o.lifetimeCost ?? 0;
+	return cost > 0 ? formatCost(cost) : "";
 }
 
 /**

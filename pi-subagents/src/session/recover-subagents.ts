@@ -18,6 +18,7 @@
 import { join } from "node:path";
 import { type CustomEntry, parseSessionEntries } from "@earendil-works/pi-coding-agent";
 import type { EvictedSubagent } from "../lifecycle/subagent-manager";
+import type { LifetimeUsage } from "../lifecycle/usage";
 import type { SubagentStatus } from "../lifecycle/subagent-state";
 import type { SubagentType } from "../types";
 import { deriveSubagentSessionDir } from "./session-dir";
@@ -39,6 +40,8 @@ interface PersistedSubagentRecord {
 	modelName?: string;
 	thinking?: string;
 	outputFile?: string;
+	lifetimeUsage?: LifetimeUsage;
+	lifetimeCost?: number;
 }
 
 /**
@@ -103,6 +106,8 @@ export function recoverEvictedSubagents(
 			modelName: data.modelName,
 			thinking: data.thinking,
 			outputFile,
+			lifetimeUsage: data.lifetimeUsage,
+			lifetimeCost: data.lifetimeCost,
 		});
 	}
 	// Most-recent-first, matching listEvicted()'s ordering.

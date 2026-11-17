@@ -105,5 +105,6 @@ export function renderStats(details: AgentDetails, theme: Theme): string {
 	}
 	if (details.toolUses > 0) parts.push(`${details.toolUses} tool use${details.toolUses === 1 ? "" : "s"}`);
 	if (details.tokens) parts.push(details.tokens);
+	if (details.cost) parts.push(details.cost);
 	return parts.map((p) => theme.fg("dim", p)).join(` ${theme.fg("dim", "\u00B7")} `);
 }

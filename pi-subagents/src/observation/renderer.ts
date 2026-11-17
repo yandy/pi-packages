@@ -1,6 +1,6 @@
 import { Text } from "@earendil-works/pi-tui";
 import type { NotificationDetails } from "../observation/notification";
-import { formatMs, formatTokens, formatTurns } from "../ui/display";
+import { formatCost, formatMs, formatTokens, formatTurns } from "../ui/display";
 
 /** Narrow theme interface — only the methods the renderer actually calls. */
 interface RendererTheme {
@@ -40,6 +40,7 @@ export function createNotificationRenderer() {
 		if (d.turnCount > 0) parts.push(formatTurns(d.turnCount, d.maxTurns));
 		if (d.toolUses > 0) parts.push(`${d.toolUses} tool use${d.toolUses === 1 ? "" : "s"}`);
 		if (d.totalTokens > 0) parts.push(formatTokens(d.totalTokens));
+		if (d.totalCost > 0) parts.push(formatCost(d.totalCost));
 		if (d.durationMs > 0) parts.push(formatMs(d.durationMs));
 		if (parts.length) {
 			line += `\n  ${parts.map((p) => theme.fg("dim", p)).join(` ${theme.fg("dim", "·")} `)}`;

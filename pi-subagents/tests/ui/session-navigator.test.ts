@@ -2,6 +2,7 @@ import { getMarkdownTheme, initTheme } from "@earendil-works/pi-coding-agent";
 import { type Component, type TUI, visibleWidth } from "@earendil-works/pi-tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { AgentTypeRegistry } from "../../src/config/agent-types";
+import type { LifetimeUsage } from "../../src/lifecycle/usage";
 import type { SessionMessage } from "../../src/types";
 import { liveSource, type TranscriptSource } from "../../src/ui/session-navigation";
 import { SessionNavigatorHandler, TranscriptOverlay } from "../../src/ui/session-navigator";
@@ -47,7 +48,13 @@ function countLayouts(overlay: TranscriptOverlay): () => number {
 }
 
 function makeOverlay(
-	opts: { source?: TranscriptSource; done?: (r: undefined) => void; tui?: TUI; modelName?: string } = {},
+	opts: {
+		source?: TranscriptSource;
+		done?: (r: undefined) => void;
+		tui?: TUI;
+		modelName?: string;
+		usage?: { lifetimeUsage: LifetimeUsage; lifetimeCost: number };
+	} = {},
 ) {
 	return new TranscriptOverlay({
 		tui: opts.tui ?? mockTui(),
@@ -57,6 +64,7 @@ function makeOverlay(
 		cwd: "/test/cwd",
 		markdownTheme: getMarkdownTheme(),
 		modelName: opts.modelName,
+		getUsage: () => opts.usage,
 	});
 }
 
@@ -567,6 +575,16 @@ describe("TranscriptOverlay", () => {
 		const out = makeOverlay({ modelName: "haiku" }).render(80).join("\n");
 		expect(out).toContain("haiku");
 	});
+
+	it("shows lifetime tokens and cost in the header", () => {
+		const out = makeOverlay({
+			usage: { lifetimeUsage: { input: 500, output: 500, cacheWrite: 0 }, lifetimeCost: 0.1234 },
+		})
+			.render(80)
+			.join("\n");
+		expect(out).toContain("1.0k token");
+		expect(out).toContain("$0.123");
+	});
 });
 
 describe("SessionNavigatorHandler", () => {
@@ -649,6 +667,28 @@ describe("SessionNavigatorHandler", () => {
 		expect(record.getToolDefinition).not.toHaveBeenCalled();
 		// Invoke the captured component factory and render to confirm it is sourced from the picked record.
 		expect(renderCapturedOverlay(ui).some((l) => l.includes("picked agent reply"))).toBe(true);
+	});
+
+	it("passes the picked record's live usage to the overlay header", async () => {
+		const record = makeNavigable({
+			lifetimeUsage: { input: 500, output: 500, cacheWrite: 0 },
+			lifetimeCost: 0.1234,
+		});
+		const ui = makeUI();
+		ui.select.mockImplementation((_title, options) => Promise.resolve(options[0]));
+
+		await new SessionNavigatorHandler().handle({
+			ui,
+			agents: [record],
+			evicted: [],
+			registry,
+			cwd: "/test/cwd",
+			readFile: noReadFile,
+		});
+
+		const header = renderCapturedOverlay(ui).join("\n");
+		expect(header).toContain("1.0k token");
+		expect(header).toContain("$0.123");
 	});
 
 	it("opens an overlay sourced from the persisted file when an evicted agent is picked", async () => {

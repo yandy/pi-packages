@@ -18,7 +18,7 @@
  * session-event observer be unit-tested without constructing an executor.
  */
 
-import type { LifetimeUsage } from "../lifecycle/usage";
+import type { LifetimeUsage, LifetimeUsageDelta } from "../lifecycle/usage";
 import { addUsage } from "../lifecycle/usage";
 import type { SessionMessage } from "../types";
 
@@ -70,6 +70,11 @@ export class SubagentState {
 		return this._lifetimeUsage;
 	}
 
+	private _lifetimeCost = 0;
+	get lifetimeCost(): number {
+		return this._lifetimeCost;
+	}
+
 	private _compactionCount = 0;
 	get compactionCount(): number {
 		return this._compactionCount;
@@ -107,8 +112,9 @@ export class SubagentState {
 	}
 
 	/** Accumulate a usage delta into lifetimeUsage. Called by record-observer on message_end. */
-	addUsage(delta: { input: number; output: number; cacheWrite: number }): void {
+	addUsage(delta: LifetimeUsageDelta): void {
 		addUsage(this._lifetimeUsage, delta);
+		this._lifetimeCost += delta.cost?.total ?? 0;
 	}
 
 	/** Increment compaction count. Called by record-observer on compaction_end. */

@@ -97,6 +97,7 @@ describe("SubagentEventsObserver", () => {
 				startedAt: 1000,
 				completedAt: 2000,
 				invocation: { runInBackground: true, modelName: "haiku", thinking: "high" },
+				lifetimeUsage: { input: 500, output: 500, cacheWrite: 0, cost: { total: 0.1234 } },
 			});
 
 			observer.onSubagentCompleted(record);
@@ -114,6 +115,8 @@ describe("SubagentEventsObserver", () => {
 				modelName: "haiku",
 				thinking: "high",
 				outputFile: record.outputFile,
+				lifetimeUsage: { input: 500, output: 500, cacheWrite: 0 },
+				lifetimeCost: 0.1234,
 			});
 		});
 

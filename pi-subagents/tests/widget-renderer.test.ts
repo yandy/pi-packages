@@ -60,6 +60,12 @@ describe("renderFinishedLine", () => {
 		expect(line).not.toContain("stopped");
 	});
 
+	it("includes lifetime cost in finished stats", () => {
+		const agent = makeAgent({ lifetimeCost: 0.1234 });
+		const line = renderFinishedLine(agent, testRegistry, theme);
+		expect(line).toContain("$0.123");
+	});
+
 	it("renders singular tool use", () => {
 		const agent = makeAgent({ toolUses: 1 });
 		const line = renderFinishedLine(agent, testRegistry, theme);
@@ -229,6 +235,18 @@ describe("renderRunningLines", () => {
 		expect(header).toContain("45%");
 		// Compaction count
 		expect(header).toContain("↻1");
+	});
+
+	it("includes lifetime cost alongside running token usage", () => {
+		const agent = makeAgent({
+			status: "running",
+			completedAt: undefined,
+			lifetimeUsage: { input: 5000, output: 2000, cacheWrite: 1000 },
+			lifetimeCost: 0.1234,
+		});
+		const [header] = renderRunningLines(agent, testRegistry, 0, theme);
+		expect(header).toContain("8.0k token");
+		expect(header).toContain("$0.123");
 	});
 
 	it("omits token display when lifetimeUsage totals zero", () => {

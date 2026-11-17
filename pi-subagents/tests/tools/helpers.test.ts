@@ -213,6 +213,11 @@ describe("buildDetails", () => {
 		expect(details.maxTurns).toBeUndefined();
 	});
 
+	it("maps lifetime cost to the display stats", () => {
+		const details = buildDetails(base, { ...record, lifetimeCost: 0.1234 });
+		expect(details.cost).toBe("$0.123");
+	});
+
 	it("applies overrides on top of computed fields", () => {
 		const details = buildDetails(base, record, { tokens: "99.9k token" });
 		expect(details.tokens).toBe("99.9k token");

@@ -80,6 +80,11 @@ describe("renderStats", () => {
 		expect(renderStats(details, theme)).toContain("[dim:33.8k token]");
 	});
 
+	it("includes cost", () => {
+		const details = makeDetails({ cost: "$0.123" });
+		expect(renderStats(details, theme)).toContain("[dim:$0.123]");
+	});
+
 	it("joins multiple parts with dim separator", () => {
 		const details = makeDetails({ modelName: "haiku", toolUses: 2 });
 		expect(renderStats(details, theme)).toBe("[dim:haiku] [dim:·] [dim:2 tool uses]");

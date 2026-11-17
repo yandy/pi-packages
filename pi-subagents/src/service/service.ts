@@ -29,6 +29,7 @@ export interface SubagentRecord {
 	startedAt: number;
 	completedAt?: number;
 	lifetimeUsage: LifetimeUsage;
+	lifetimeCost: number;
 	compactionCount: number;
 	/** Short display model name (always shown; falls back to parent model when unset). */
 	modelName?: string;
@@ -69,7 +70,6 @@ export interface SubagentsService {
 
 	/** Whether any agents are running or queued. */
 	hasRunning(): boolean;
-
 }
 
 /** Event channel constants for pi.events subscriptions. */

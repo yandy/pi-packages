@@ -18,6 +18,7 @@ function makeDetails(overrides: Partial<NotificationDetails> = {}): Notification
 		toolUses: 3,
 		turnCount: 5,
 		totalTokens: 1000,
+		totalCost: 0,
 		durationMs: 5000,
 		resultPreview: "All done.",
 		...overrides,
@@ -103,6 +104,16 @@ describe("createNotificationRenderer", () => {
 		const text = renderText(result);
 		expect(text).toContain("7 tool uses");
 		expect(text).toContain("5.0k token");
+	});
+
+	it("includes lifetime cost in the stats line", () => {
+		const renderer = createNotificationRenderer();
+		const result = renderer(
+			{ details: makeDetails({ totalCost: 0.1234 }) },
+			{ expanded: false },
+			stubTheme(),
+		);
+		expect(renderText(result)).toContain("$0.123");
 	});
 
 	it("shows model name in stats line when set", () => {

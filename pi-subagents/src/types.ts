@@ -2,7 +2,7 @@
  * types.ts — Type definitions for the subagent system.
  */
 
-import type { ThinkingLevel } from "@earendil-works/pi-ai";
+import type { ThinkingLevel, Usage } from "@earendil-works/pi-ai";
 import type { AgentSessionEvent, SessionContext as SdkSessionContext } from "@earendil-works/pi-coding-agent";
 import type { ModelRegistry } from "./session/model-resolver";
 
@@ -91,6 +91,8 @@ export interface SessionContext {
 		getSessionFile(): string | undefined;
 		getSessionId(): string;
 		getBranch(): unknown[];
+		/** Persist non-context usage so child LLM calls join footer and session totals. */
+		appendUsage?(kind: string, provider: string, model: string, usage: Usage, note?: string): unknown;
 	};
 }
 

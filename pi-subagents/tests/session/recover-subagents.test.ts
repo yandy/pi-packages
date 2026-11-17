@@ -40,6 +40,8 @@ describe("recoverEvictedSubagents", () => {
 				modelName: "haiku",
 				thinking: "high",
 				outputFile: "/tasks/a1.jsonl",
+				lifetimeUsage: { input: 500, output: 500, cacheWrite: 0 },
+				lifetimeCost: 0.1234,
 			}),
 		]);
 		const readFile = vi.fn(() => jsonl);
@@ -60,6 +62,8 @@ describe("recoverEvictedSubagents", () => {
 			modelName: "haiku",
 			thinking: "high",
 			outputFile: "/tasks/a1.jsonl",
+			lifetimeUsage: { input: 500, output: 500, cacheWrite: 0 },
+			lifetimeCost: 0.1234,
 		};
 		expect(entry).toEqual(expected);
 	});

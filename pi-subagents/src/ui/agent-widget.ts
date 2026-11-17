@@ -174,6 +174,7 @@ export class AgentWidget implements SubagentManagerObserver {
 			completedAt: record.completedAt,
 			error: record.error,
 			lifetimeUsage: record.lifetimeUsage,
+			lifetimeCost: record.lifetimeCost,
 			compactionCount: record.compactionCount,
 			turnCount: record.turnCount,
 			maxTurns: record.maxTurns,

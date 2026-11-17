@@ -22,6 +22,8 @@ export interface AgentDetails {
 	subagentType: string;
 	toolUses: number;
 	tokens: string;
+	/** Formatted lifetime USD cost, or empty/undefined when no cost has been recorded. */
+	cost?: string;
 	durationMs: number;
 	status: "queued" | "running" | "completed" | "steered" | "aborted" | "stopped" | "error" | "background";
 	/** Human-readable description of what the agent is currently doing. */
@@ -66,6 +68,11 @@ export function formatTokens(count: number): string {
 	if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M token`;
 	if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k token`;
 	return `${count} token`;
+}
+
+/** Format USD cost consistently with Pi's session footer. */
+export function formatCost(cost: number): string {
+	return `$${cost.toFixed(3)}`;
 }
 
 /**

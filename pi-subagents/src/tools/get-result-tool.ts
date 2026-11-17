@@ -1,7 +1,7 @@
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { AgentConfigLookup } from "../config/agent-types";
-import { formatLifetimeTokens, textResult } from "../tools/helpers";
+import { formatLifetimeCost, formatLifetimeTokens, textResult } from "../tools/helpers";
 import type { Subagent } from "../types";
 import { formatDuration, getDisplayName } from "../ui/display";
 
@@ -51,9 +51,11 @@ export class GetResultTool {
 		const displayName = getDisplayName(record.type, this.registry);
 		const duration = formatDuration(record.startedAt, record.completedAt);
 		const tokens = formatLifetimeTokens(record);
+		const cost = formatLifetimeCost(record);
 		const contextPercent = record.getContextPercent();
 		const statsParts = [`Tool uses: ${record.toolUses}`];
 		if (tokens) statsParts.push(tokens);
+		if (cost) statsParts.push(cost);
 		if (contextPercent !== null) statsParts.push(`Context: ${Math.round(contextPercent)}%`);
 		if (record.compactionCount) statsParts.push(`Compactions: ${record.compactionCount}`);
 		statsParts.push(`Duration: ${duration}`);

@@ -21,14 +21,21 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { AgentConfigLookup } from "../config/agent-types";
 import type { EvictedSubagent } from "../lifecycle/subagent-manager";
+import { getLifetimeTotal, type LifetimeUsage } from "../lifecycle/usage";
 import type { SubagentStatus } from "../lifecycle/subagent-state";
 import type { SessionMessage, SubagentType } from "../types";
-import { formatDuration, getDisplayName } from "../ui/display";
+import { formatCost, formatDuration, formatTokens, getDisplayName } from "../ui/display";
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Lifetime token/cost fields shared by live records and persisted descriptors. */
+export interface UsageDisplayFields {
+	readonly lifetimeUsage?: Readonly<LifetimeUsage>;
+	readonly lifetimeCost?: number;
+}
+
 /** The record fields the navigator reads to label and live-source a transcript. */
-export interface NavigableSubagent {
+export interface NavigableSubagent extends UsageDisplayFields {
 	readonly id: string;
 	readonly type: SubagentType;
 	readonly description: string;
@@ -57,10 +64,18 @@ export interface NavigableSubagent {
  */
 export type NavigationEntry =
 	| { readonly kind: "live"; readonly label: string; readonly record: NavigableSubagent }
-	| { readonly kind: "evicted"; readonly label: string; readonly outputFile: string; readonly modelName?: string; readonly thinking?: string };
+	| {
+			readonly kind: "evicted";
+			readonly label: string;
+			readonly outputFile: string;
+			readonly lifetimeUsage?: Readonly<LifetimeUsage>;
+			readonly lifetimeCost?: number;
+			readonly modelName?: string;
+			readonly thinking?: string;
+	  };
 
 /** The fields `buildLabel` reads — shared by a live record and an evicted descriptor. */
-interface LabelFields {
+interface LabelFields extends UsageDisplayFields {
 	readonly type: SubagentType;
 	readonly description: string;
 	readonly status: SubagentStatus;
@@ -108,6 +123,8 @@ export function listNavigableAgents(
 			(descriptor): NavigationEntry => ({
 				kind: "evicted",
 				outputFile: descriptor.outputFile,
+				lifetimeUsage: descriptor.lifetimeUsage,
+				lifetimeCost: descriptor.lifetimeCost,
 				modelName: descriptor.modelName,
 				thinking: descriptor.thinking,
 				label: buildLabel(descriptor, registry, true),
@@ -166,8 +183,18 @@ function buildLabel(fields: LabelFields, registry: AgentConfigLookup, evicted = 
 	const name = getDisplayName(fields.type, registry);
 	const duration = formatDuration(fields.startedAt, fields.completedAt);
 	const modelTag = fields.modelName
-		? fields.thinking ? ` · ${fields.modelName} (${fields.thinking})` : ` · ${fields.modelName}`
-		: fields.thinking ? ` · think:${fields.thinking}` : "";
+		? fields.thinking
+			? ` · ${fields.modelName} (${fields.thinking})`
+			: ` · ${fields.modelName}`
+		: fields.thinking
+			? ` · think:${fields.thinking}`
+			: "";
 	const marker = evicted ? " · evicted (snapshot)" : "";
-	return `${name} (${fields.description}) · ${fields.toolUses} tools · ${fields.status} · ${duration}${modelTag}${marker}`;
+	const tokens = getLifetimeTotal(fields.lifetimeUsage);
+	const lifetimeCost = fields.lifetimeCost ?? 0;
+	const usageParts: string[] = [];
+	if (tokens > 0) usageParts.push(formatTokens(tokens));
+	if (lifetimeCost > 0) usageParts.push(formatCost(lifetimeCost));
+	const usageTag = usageParts.length > 0 ? ` · ${usageParts.join(" · ")}` : "";
+	return `${name} (${fields.description}) · ${fields.toolUses} tools${usageTag} · ${fields.status} · ${duration}${modelTag}${marker}`;
 }

@@ -12,6 +12,7 @@ import {
 	toSubagentSession,
 } from "../helpers/mock-session";
 import { STUB_SNAPSHOT } from "../helpers/stub-ctx";
+import { makeUsage } from "../helpers/usage";
 
 type SessionFactory = (params: CreateSubagentSessionParams) => Promise<SubagentSession>;
 
@@ -751,6 +752,76 @@ describe("Subagent.scheduleVia() — eager promise capture", () => {
 		await agent.promise;
 		expect(thunkRan).toBe(true);
 		expect(agent.status).toBe("stopped");
+	});
+});
+
+// ── Parent usage accounting ──────────────────────────────────────────────────
+
+describe("Subagent — parent usage accounting", () => {
+	it("forwards assistant usage from initial and resumed runs with response-model attribution", async () => {
+		const session = createMockSession();
+		const stub = createSubagentSessionStub(session);
+		const firstUsage = makeUsage();
+		const secondUsage = makeUsage({ cacheRead: 30, totalTokens: 190, cost: { total: 0.1 } });
+		stub.runTurnLoop.mockImplementation(async () => {
+			session.emit({
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [],
+					api: "anthropic-messages",
+					provider: "ark",
+					model: "configured-model",
+					responseModel: "response-model",
+					usage: firstUsage,
+					stopReason: "stop",
+					timestamp: 1,
+				},
+			});
+			return { responseText: "first", aborted: false, steered: false };
+		});
+		stub.resumeTurnLoop.mockImplementation(async () => {
+			session.emit({
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [],
+					api: "anthropic-messages",
+					provider: "ark",
+					model: "configured-model",
+					responseModel: "response-model",
+					usage: secondUsage,
+					stopReason: "stop",
+					timestamp: 2,
+				},
+			});
+			return "second";
+		});
+		const recorded: unknown[] = [];
+		const agent = makeSubagent({
+			execution: makeStubExecution({
+				createSubagentSession: async () => toSubagentSession(stub),
+				snapshot: { ...STUB_SNAPSHOT, recordUsage: (entry: unknown) => recorded.push(entry) },
+			}),
+		});
+
+		await agent.run();
+		await agent.resume("continue");
+
+		expect(recorded).toEqual([
+			{
+				provider: "ark",
+				model: "response-model",
+				usage: firstUsage,
+				note: "Subagent 1: test",
+			},
+			{
+				provider: "ark",
+				model: "response-model",
+				usage: secondUsage,
+				note: "Subagent 1: test",
+			},
+		]);
 	});
 });
 

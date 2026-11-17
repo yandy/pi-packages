@@ -1,7 +1,7 @@
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import type { ParentSnapshot } from "../lifecycle/parent-snapshot";
 import type { AgentSpawnConfig } from "../lifecycle/subagent-manager";
-import { buildDetails, formatLifetimeTokens, getStatusNote, textResult } from "../tools/helpers";
+import { buildDetails, formatLifetimeCost, formatLifetimeTokens, getStatusNote, textResult } from "../tools/helpers";
 import type { ResolvedSpawnConfig } from "../tools/spawn-config";
 import type { ParentSessionInfo, Subagent } from "../types";
 import { type AgentDetails, describeActivity, formatMs, SPINNER } from "../ui/display";
@@ -45,6 +45,7 @@ export async function runForeground(
 			...presentation.detailBase,
 			toolUses,
 			tokens: recordRef ? formatLifetimeTokens(recordRef) : "",
+			cost: recordRef ? formatLifetimeCost(recordRef) : "",
 			// Read activity off the record; fall back to safe defaults before onSessionCreated fires
 			turnCount: recordRef?.turnCount ?? 1,
 			maxTurns: recordRef?.maxTurns ?? execution.effectiveMaxTurns,
@@ -107,6 +108,8 @@ export async function runForeground(
 	const durationMs = (record.completedAt ?? Date.now()) - record.startedAt;
 	const statsParts = [`${record.toolUses} tool uses`];
 	if (tokenText) statsParts.push(tokenText);
+	const costText = formatLifetimeCost(record);
+	if (costText) statsParts.push(costText);
 	return textResult(
 		`${fallbackNote}Agent completed in ${formatMs(durationMs)} (${statsParts.join(", ")})${getStatusNote(record.status)}.\n\n` +
 			(record.result?.trim() ?? "No output."),

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { SubagentState } from "../../src/lifecycle/subagent-state";
 import { subscribeSubagentObserver } from "../../src/observation/record-observer";
 import { createMockSession } from "../helpers/mock-session";
+import { makeUsage } from "../helpers/usage";
 
 function makeState() {
 	return new SubagentState({ status: "running" });
@@ -20,22 +21,27 @@ describe("subscribeSubagentObserver", () => {
 		expect(state.toolUses).toBe(2);
 	});
 
-	it("accumulates lifetimeUsage on message_end with assistant usage", () => {
+	it("accumulates lifetimeUsage and lifetimeCost on assistant message_end", () => {
 		const session = createMockSession();
 		const state = makeState();
 		subscribeSubagentObserver(session, state);
 
 		session.emit({
 			type: "message_end",
-			message: { role: "assistant", usage: { input: 100, output: 50, cacheWrite: 10 } },
+			message: { role: "assistant", usage: makeUsage() },
 		});
 		expect(state.lifetimeUsage).toEqual({ input: 100, output: 50, cacheWrite: 10 });
+		expect(state.lifetimeCost).toBeCloseTo(0.036);
 
 		session.emit({
 			type: "message_end",
-			message: { role: "assistant", usage: { input: 200, output: 80, cacheWrite: 20 } },
+			message: {
+				role: "assistant",
+				usage: makeUsage({ input: 200, output: 80, cacheWrite: 20, cost: { total: 0.1 } }),
+			},
 		});
 		expect(state.lifetimeUsage).toEqual({ input: 300, output: 130, cacheWrite: 30 });
+		expect(state.lifetimeCost).toBeCloseTo(0.136);
 	});
 
 	it("ignores message_end from non-assistant roles", () => {

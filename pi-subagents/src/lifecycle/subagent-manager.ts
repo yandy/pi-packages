@@ -15,6 +15,7 @@ import type { ParentSnapshot } from "../lifecycle/parent-snapshot";
 import { Subagent, type SubagentLifecycleObserver } from "../lifecycle/subagent";
 import type { SubagentSession } from "../lifecycle/subagent-session";
 import { SubagentState, type SubagentStatus } from "../lifecycle/subagent-state";
+import type { LifetimeUsage } from "../lifecycle/usage";
 
 import type { RunConfig } from "../runtime";
 import type { AgentInvocation, CompactionInfo, ParentSessionInfo, SubagentType, ThinkingLevel } from "../types";
@@ -35,6 +36,8 @@ export interface EvictedSubagent {
 	readonly startedAt: number;
 	readonly completedAt: number | undefined;
 	readonly toolUses: number;
+	readonly lifetimeUsage?: Readonly<LifetimeUsage>;
+	readonly lifetimeCost?: number;
 	/** Short display model name (always shown; falls back to parent model when unset). */
 	readonly modelName?: string;
 	/** Thinking level when explicitly set (e.g. "high", "off"). */
@@ -346,6 +349,8 @@ function toEvictedSubagent(record: Subagent, outputFile: string): EvictedSubagen
 		startedAt: record.startedAt,
 		completedAt: record.completedAt,
 		toolUses: record.toolUses,
+		lifetimeUsage: { ...record.lifetimeUsage },
+		lifetimeCost: record.lifetimeCost,
 		modelName: record.invocation?.modelName,
 		thinking: record.thinking,
 		outputFile,
