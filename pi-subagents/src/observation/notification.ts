@@ -11,6 +11,7 @@ export interface NotificationDetails {
 	turnCount: number;
 	maxTurns?: number;
 	totalTokens: number;
+	totalCost: number;
 	durationMs: number;
 	outputFile?: string;
 	error?: string;
@@ -47,6 +48,7 @@ export function formatTaskNotification(record: Subagent, resultMaxLen: number): 
 	const status = getStatusLabel(record.status, record.error);
 	const durationMs = record.completedAt ? record.completedAt - record.startedAt : 0;
 	const totalTokens = getLifetimeTotal(record.lifetimeUsage);
+	const totalCost = record.lifetimeCost;
 	const contextPercent = record.getContextPercent();
 	const ctxXml = contextPercent !== null ? `<context_percent>${Math.round(contextPercent)}</context_percent>` : "";
 	const compactXml = record.compactionCount ? `<compactions>${record.compactionCount}</compactions>` : "";
@@ -67,7 +69,7 @@ export function formatTaskNotification(record: Subagent, resultMaxLen: number): 
 		`<status>${escapeXml(status)}</status>`,
 		`<summary>Subagent "${escapeXml(record.description)}" ${record.status}</summary>`,
 		`<result>${escapeXml(resultPreview)}</result>`,
-		`<usage><total_tokens>${totalTokens}</total_tokens><tool_uses>${record.toolUses}</tool_uses>${ctxXml}${compactXml}<duration_ms>${durationMs}</duration_ms></usage>`,
+		`<usage><total_tokens>${totalTokens}</total_tokens><cost_usd>${totalCost}</cost_usd><tool_uses>${record.toolUses}</tool_uses>${ctxXml}${compactXml}<duration_ms>${durationMs}</duration_ms></usage>`,
 		"</task-notification>",
 	]
 		.filter(Boolean)
@@ -86,6 +88,7 @@ export function buildNotificationDetails(record: Subagent, resultMaxLen: number)
 		turnCount: record.turnCount,
 		maxTurns: record.maxTurns,
 		totalTokens,
+		totalCost: record.lifetimeCost,
 		durationMs: record.completedAt ? record.completedAt - record.startedAt : 0,
 		outputFile: record.outputFile,
 		error: record.error,

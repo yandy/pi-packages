@@ -2,6 +2,7 @@ import type { CreateSubagentSessionParams } from "../../src/lifecycle/create-sub
 import { Subagent, type SubagentExecution } from "../../src/lifecycle/subagent";
 import type { SubagentSession } from "../../src/lifecycle/subagent-session";
 import { SubagentState, type SubagentStatus } from "../../src/lifecycle/subagent-state";
+import type { LifetimeUsageDelta } from "../../src/lifecycle/usage";
 import type { AgentInvocation, SubagentType } from "../../src/types";
 import { createSubagentSessionStub, toSubagentSession } from "../helpers/mock-session";
 import { STUB_SNAPSHOT } from "../helpers/stub-ctx";
@@ -37,7 +38,7 @@ export interface TestSubagentOptions {
 	/** Set toolUses via incrementToolUses(). */
 	toolUses?: number;
 	/** Set lifetimeUsage via addUsage(). */
-	lifetimeUsage?: { input: number; output: number; cacheWrite: number };
+	lifetimeUsage?: LifetimeUsageDelta;
 	/** Set compactionCount via incrementCompactions(). */
 	compactionCount?: number;
 	/**

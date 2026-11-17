@@ -9,6 +9,9 @@
  */
 export type LifetimeUsage = { input: number; output: number; cacheWrite: number };
 
+/** Assistant usage may carry cost in addition to the billed-token subset retained for display. */
+export type LifetimeUsageDelta = LifetimeUsage & { cost?: { total: number } };
+
 /** Sum of lifetime usage components, or 0 if undefined. */
 export function getLifetimeTotal(u?: LifetimeUsage): number {
 	return u ? u.input + u.output + u.cacheWrite : 0;

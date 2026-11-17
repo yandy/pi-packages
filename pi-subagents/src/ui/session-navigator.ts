@@ -25,7 +25,8 @@ import {
 } from "@earendil-works/pi-tui";
 import type { AgentConfigLookup } from "../config/agent-types";
 import type { EvictedSubagent } from "../lifecycle/subagent-manager";
-import { describeActivity, type Theme } from "../ui/display";
+import { getLifetimeTotal } from "../lifecycle/usage";
+import { describeActivity, formatCost, formatTokens, type Theme } from "../ui/display";
 import { TranscriptBody } from "../ui/transcript-body";
 import {
 	fileSnapshotSource,
@@ -33,6 +34,7 @@ import {
 	liveSource,
 	type NavigableSubagent,
 	type TranscriptSource,
+	type UsageDisplayFields,
 } from "../ui/session-navigation";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -82,6 +84,8 @@ export interface TranscriptOverlayOptions {
 	modelName?: string;
 	/** Thinking level to show alongside model name, or undefined to omit. */
 	thinking?: string;
+	/** Read the latest lifetime usage on each render so a running overlay stays current. */
+	getUsage?: () => UsageDisplayFields | undefined;
 }
 
 /**
@@ -126,7 +130,17 @@ export class SessionNavigatorHandler {
 		const markdownTheme = getMarkdownTheme();
 		await ui.custom<undefined>(
 			(tui, theme, _keybindings, done) =>
-				new TranscriptOverlay({ tui, theme, source, done, cwd, markdownTheme, modelName, thinking }),
+				new TranscriptOverlay({
+					tui,
+					theme,
+					source,
+					done,
+					cwd,
+					markdownTheme,
+					modelName,
+					thinking,
+					getUsage: () => (entry.kind === "live" ? entry.record : entry),
+				}),
 			{
 				overlay: true,
 				overlayOptions: { anchor: "center", width: "90%", maxHeight: `${VIEWPORT_HEIGHT_PCT}%` },
@@ -176,6 +190,7 @@ export class TranscriptOverlay implements Component {
 	private readonly done: (result: undefined) => void;
 	private readonly modelName?: string;
 	private readonly thinking?: string;
+	private readonly getUsage?: () => UsageDisplayFields | undefined;
 	private readonly body: TranscriptBody;
 
 	/** Throttle bookkeeping for coalescing live-source syncs. */
@@ -191,13 +206,24 @@ export class TranscriptOverlay implements Component {
 	/** Running-agent indicator baked into `renderedLines` — invalidates the cache when it changes. */
 	private renderedIndicator = "";
 
-	constructor({ tui, theme, source, done, cwd, markdownTheme, modelName, thinking }: TranscriptOverlayOptions) {
+	constructor({
+		tui,
+		theme,
+		source,
+		done,
+		cwd,
+		markdownTheme,
+		modelName,
+		thinking,
+		getUsage,
+	}: TranscriptOverlayOptions) {
 		this.tui = tui;
 		this.theme = theme;
 		this.source = source;
 		this.done = done;
 		this.modelName = modelName;
 		this.thinking = thinking;
+		this.getUsage = getUsage;
 		this.body = new TranscriptBody({
 			tui,
 			cwd,
@@ -279,9 +305,18 @@ export class TranscriptOverlay implements Component {
 
 		lines.push(hrTop);
 		const modelPart = this.modelName
-			? this.thinking ? ` · ${this.modelName} (${this.thinking})` : ` · ${this.modelName}`
+			? this.thinking
+				? ` · ${this.modelName} (${this.thinking})`
+				: ` · ${this.modelName}`
 			: "";
-		const title = modelPart ? `Subagent session${modelPart}` : "Subagent session";
+		const usage = this.getUsage?.();
+		const tokens = getLifetimeTotal(usage?.lifetimeUsage);
+		const lifetimeCost = usage?.lifetimeCost ?? 0;
+		const usageParts: string[] = [];
+		if (tokens > 0) usageParts.push(formatTokens(tokens));
+		if (lifetimeCost > 0) usageParts.push(formatCost(lifetimeCost));
+		const usagePart = usageParts.length > 0 ? ` · ${usageParts.join(" · ")}` : "";
+		const title = `Subagent session${modelPart}${usagePart}`;
 		lines.push(row(th.bold(title)));
 		lines.push(hrMid);
 
@@ -426,4 +461,3 @@ export class TranscriptOverlay implements Component {
 		return streaming ? `◍ ${describeActivity(streaming.activeTools, streaming.streamingMessage)}` : "";
 	}
 }
-

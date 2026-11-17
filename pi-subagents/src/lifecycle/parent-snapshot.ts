@@ -2,8 +2,17 @@
  * parent-snapshot.ts — Capture parent session state as a plain data snapshot.
  */
 
+import type { Usage } from "@earendil-works/pi-ai";
 import { buildParentContext } from "../session/context";
 import type { SessionContext } from "../types";
+
+/** One model-attributed child usage delta destined for the parent's session totals. */
+export interface ParentUsageRecord {
+	provider: string;
+	model: string;
+	usage: Usage;
+	note?: string;
+}
 
 /**
  * Plain data snapshot of the parent session state captured at spawn time.
@@ -19,6 +28,8 @@ export interface ParentSnapshot {
 		find(provider: string, modelId: string): unknown;
 		getAvailable?(): Array<{ provider: string; id: string }>;
 	};
+	/** Append child usage to the captured parent session, including background completions. */
+	recordUsage?: (entry: ParentUsageRecord) => void;
 	/** Pre-built parent conversation text (when inheritContext was requested). */
 	parentContext?: string;
 }
@@ -31,11 +42,16 @@ export interface ParentSnapshot {
  */
 export function buildParentSnapshot(ctx: SessionContext, inheritContext?: boolean): ParentSnapshot {
 	const parentContext = inheritContext ? buildParentContext(ctx) : undefined;
+	const sessionManager = ctx.sessionManager;
+	const appendUsage = sessionManager.appendUsage?.bind(sessionManager);
 	return {
 		cwd: ctx.cwd,
 		model: ctx.model,
 
 		modelRegistry: ctx.modelRegistry!,
+		recordUsage: appendUsage
+			? ({ provider, model, usage, note }) => appendUsage("subagent", provider, model, usage, note)
+			: undefined,
 		// eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- || intentional: converts empty string to undefined as well as null/undefined
 		parentContext: parentContext || undefined,
 	};

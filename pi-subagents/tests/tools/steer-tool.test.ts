@@ -74,6 +74,17 @@ describe("SteerTool", () => {
 		expect(result.content[0].text).toContain("3 tool uses");
 	});
 
+	it("includes lifetime cost in the current state text", async () => {
+		const record = createTestSubagent({
+			status: "running",
+			lifetimeUsage: { input: 500, output: 500, cacheWrite: 0, cost: { total: 0.1234 } },
+		});
+		record.subagentSession = toSubagentSession(createSubagentSessionStub(createMockSession()));
+		const records = new Map([["agent-1", record]]);
+		const result = await execute(makeManager(records), makeEvents(), { agent_id: "agent-1", message: "continue" });
+		expect(result.content[0].text).toContain("$0.123");
+	});
+
 	it("returns error message when steer fails", async () => {
 		const record = createTestSubagent({ status: "running" });
 		const mockSession = createMockSession();

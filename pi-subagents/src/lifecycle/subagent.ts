@@ -12,11 +12,11 @@
 import type { Model } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { CreateSubagentSessionParams } from "../lifecycle/create-subagent-session";
-import type { ParentSnapshot } from "../lifecycle/parent-snapshot";
+import type { ParentSnapshot, ParentUsageRecord } from "../lifecycle/parent-snapshot";
 import { RunListeners } from "../lifecycle/run-listeners";
 import type { SubagentSession, TurnLoopResult } from "../lifecycle/subagent-session";
 import { SubagentState, type SubagentStatus } from "../lifecycle/subagent-state";
-import type { LifetimeUsage } from "../lifecycle/usage";
+import type { LifetimeUsage, LifetimeUsageDelta } from "../lifecycle/usage";
 import { NotificationState } from "../observation/notification-state";
 import { subscribeSubagentObserver } from "../observation/record-observer";
 import type { RunConfig } from "../runtime";
@@ -111,6 +111,9 @@ export class Subagent {
 	}
 	get lifetimeUsage(): Readonly<LifetimeUsage> {
 		return this.state.lifetimeUsage;
+	}
+	get lifetimeCost(): number {
+		return this.state.lifetimeCost;
 	}
 	get compactionCount(): number {
 		return this.state.compactionCount;
@@ -290,6 +293,7 @@ export class Subagent {
 		this.listeners.attachObserver(
 			subscribeSubagentObserver(this.subagentSession, this.state, {
 				onCompact: (info) => this.execution.observer?.onCompacted?.(this, info),
+				onUsage: (entry) => this.recordParentUsage(entry),
 				onChange: () => this.notifyChange(),
 			}),
 		);
@@ -357,6 +361,7 @@ export class Subagent {
 		this.listeners.attachObserver(
 			subscribeSubagentObserver(subagentSession, this.state, {
 				onCompact: (info) => this.execution.observer?.onCompacted?.(this, info),
+				onUsage: (entry) => this.recordParentUsage(entry),
 				onChange: () => this.notifyChange(),
 			}),
 		);
@@ -377,8 +382,12 @@ export class Subagent {
 	}
 
 	/** Accumulate a usage delta into lifetimeUsage. Called by record-observer on message_end. */
-	addUsage(delta: { input: number; output: number; cacheWrite: number }): void {
+	addUsage(delta: LifetimeUsageDelta): void {
 		this.state.addUsage(delta);
+	}
+
+	private recordParentUsage(entry: ParentUsageRecord): void {
+		this.execution.snapshot.recordUsage?.({ ...entry, note: `Subagent ${this.id}: ${this.description}` });
 	}
 
 	/** Increment compaction count. Called by record-observer on compaction_end. */

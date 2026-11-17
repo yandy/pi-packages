@@ -10,6 +10,7 @@ vi.mock("../../src/session/context", () => ({
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { buildParentSnapshot } from "../../src/lifecycle/parent-snapshot";
+import { makeUsage } from "../helpers/usage";
 
 function makeCtx(overrides: Record<string, unknown> = {}) {
 	return {
@@ -42,6 +43,35 @@ describe("buildParentSnapshot", () => {
 		const registry = { find: vi.fn(), getAvailable: vi.fn(() => []) };
 		const snapshot = buildParentSnapshot(makeCtx({ modelRegistry: registry }));
 		expect(snapshot.modelRegistry).toBe(registry);
+	});
+
+	it("forwards subagent usage to the captured parent session manager", () => {
+		const appended: unknown[] = [];
+		const sessionManager = {
+			getBranch: vi.fn(() => []),
+			appendUsage: (kind: string, provider: string, model: string, usage: unknown, note?: string) => {
+				appended.push({ kind, provider, model, usage, note });
+			},
+		};
+		const snapshot = buildParentSnapshot(makeCtx({ sessionManager }));
+		const usage = makeUsage();
+
+		snapshot.recordUsage?.({
+			provider: "ark",
+			model: "kimi-k3",
+			usage,
+			note: "Subagent agent-1: Inspect costs",
+		});
+
+		expect(appended).toEqual([
+			{
+				kind: "subagent",
+				provider: "ark",
+				model: "kimi-k3",
+				usage,
+				note: "Subagent agent-1: Inspect costs",
+			},
+		]);
 	});
 
 	it("sets parentContext to undefined when inheritContext is undefined", () => {

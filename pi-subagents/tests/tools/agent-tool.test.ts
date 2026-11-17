@@ -258,6 +258,24 @@ describe("AgentTool — foreground execution", () => {
 		});
 	});
 
+	it("returns completion message with cost in text and render details", async () => {
+		const deps = createToolDeps();
+		deps.manager.spawnAndWait = vi.fn().mockResolvedValue(
+			createTestSubagent({
+				result: "Task complete.",
+				toolUses: 5,
+				lifetimeUsage: { input: 500, output: 500, cacheWrite: 0, cost: { total: 0.1234 } },
+			}),
+		);
+		const result = await execute(deps, {
+			prompt: "do task",
+			description: "fg task",
+			subagent_type: "general-purpose",
+		});
+		expect(result.content[0].text).toContain("(5 tool uses, 1.0k token, $0.123)");
+		expect(result.details).toMatchObject({ tokens: "1.0k token", cost: "$0.123" });
+	});
+
 	it("returns error message when agent fails", async () => {
 		const deps = createToolDeps();
 		deps.manager.spawnAndWait = vi

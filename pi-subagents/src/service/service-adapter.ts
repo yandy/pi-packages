@@ -130,6 +130,7 @@ export function toSubagentRecord(record: Subagent): SubagentRecord {
 		toolUses: record.toolUses,
 		startedAt: record.startedAt,
 		lifetimeUsage: record.lifetimeUsage,
+		lifetimeCost: record.lifetimeCost,
 		compactionCount: record.compactionCount,
 	};
 

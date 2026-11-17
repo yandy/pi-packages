@@ -88,6 +88,20 @@ describe("listNavigableAgents", () => {
 		expect(entry.label).toBe("Agent (Investigate the bug) · 3 tools · completed · 3.0s · evicted (snapshot)");
 	});
 
+	it("includes token usage and cost in live and evicted labels", () => {
+		const usage = {
+			lifetimeUsage: { input: 500, output: 500, cacheWrite: 0 },
+			lifetimeCost: 0.1234,
+		};
+		const live = listNavigableAgents([makeNavigable(usage)], [], registry)[0];
+		const evicted = listNavigableAgents([], [makeEvicted(usage)], registry)[0];
+
+		expect(live.label).toContain("1.0k token");
+		expect(live.label).toContain("$0.123");
+		expect(evicted.label).toContain("1.0k token");
+		expect(evicted.label).toContain("$0.123");
+	});
+
 	it("orders live entries before evicted ones", () => {
 		const live = makeNavigable({ id: "live-1" });
 		const evicted = makeEvicted({ id: "evicted-1" });

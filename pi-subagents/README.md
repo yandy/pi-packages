@@ -6,7 +6,8 @@ A [pi](https://pi.dev) extension providing a focused, in-process sub-agent core 
 
 - **In-process & native** — agents share the same pi runtime: same tool names, calling conventions, and UI patterns
 - **Parallel background agents** — spawn multiple agents with automatic queuing (configurable concurrency, default 4)
-- **Live widget UI** — persistent widget showing animated spinners, live tool activity, token counts, and colored status icons
+- **Live widget UI** — persistent widget showing animated spinners, live tool activity, token counts, USD cost, and colored status icons
+- **Parent-session accounting** — child model usage joins the parent footer, `/session`, and `/usage` totals, including background and resumed agents
 - **Custom agent types** — define agents in `.pi/agents/<name>.md` with YAML frontmatter: system prompts, model, thinking, tools
 - **Mid-run steering** — inject messages into running agents to redirect work without restarting
 - **Session resume** — pick up where an agent left off, preserving full conversation context

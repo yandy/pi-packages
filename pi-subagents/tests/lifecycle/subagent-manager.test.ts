@@ -282,12 +282,16 @@ describe("SubagentManager — evicted descriptors", () => {
 	});
 
 	/** Spawn, await completion, then evict via the 10-minute cleanup sweep. */
-	async function spawnAndEvict(outputFile?: string): Promise<string> {
+	async function spawnAndEvict(
+		outputFile?: string,
+		usage?: { input: number; output: number; cacheWrite: number; cost?: { total: number } },
+	): Promise<string> {
 		const { factory } = createSessionFactory(createMockSession(), outputFile);
 		({ manager } = createManager({ createSubagentSession: factory }));
 		const id = spawnBg(manager, "test", "investigate the bug");
 		const record = manager.getRecord(id)!;
 		await record.promise;
+		if (usage) record.addUsage(usage);
 		const completedAt = record.completedAt!;
 		vi.spyOn(Date, "now").mockReturnValue(completedAt + 11 * 60_000);
 		(manager as any).cleanup();
@@ -309,6 +313,15 @@ describe("SubagentManager — evicted descriptors", () => {
 			outputFile: "/tasks/agent.jsonl",
 		});
 		expect(typeof evicted[0].startedAt).toBe("number");
+	});
+
+	it("retains lifetime usage and cost in an evicted descriptor", async () => {
+		await spawnAndEvict("/tasks/agent.jsonl", { input: 500, output: 500, cacheWrite: 0, cost: { total: 0.1234 } });
+
+		expect(manager.listEvicted()[0]).toMatchObject({
+			lifetimeUsage: { input: 500, output: 500, cacheWrite: 0 },
+			lifetimeCost: 0.1234,
+		});
 	});
 
 	it("does not retain a descriptor for an evicted agent without an outputFile", async () => {

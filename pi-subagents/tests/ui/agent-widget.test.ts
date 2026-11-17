@@ -178,6 +178,7 @@ describe("AgentWidget — projection reads activity off Subagent records", () =>
 			startedAt: Date.now() - 100,
 			turnCount: 3,
 			activeTools: ["read"],
+			lifetimeUsage: { input: 500, output: 500, cacheWrite: 0, cost: { total: 0.1234 } },
 			invocation: { runInBackground: true },
 		});
 		const manager = { listAgents: () => [record] } as unknown as SubagentManager;
@@ -203,6 +204,7 @@ describe("AgentWidget — projection reads activity off Subagent records", () =>
 		expect(allText).toContain("⟳3");
 		// Active tool "read" → "reading…"
 		expect(allText).toContain("reading");
+		expect(allText).toContain("$0.123");
 	});
 
 	it("surfaces the invocation model name from the record via renderWidget", () => {

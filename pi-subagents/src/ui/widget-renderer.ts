@@ -12,6 +12,7 @@ import { getLifetimeTotal } from "../lifecycle/usage";
 import type { SessionMessage, SubagentType } from "../types";
 import {
 	describeActivity,
+	formatCost,
 	formatMs,
 	formatSessionTokens,
 	formatTurns,
@@ -34,6 +35,7 @@ export interface WidgetAgent {
 	readonly completedAt?: number;
 	readonly error?: string;
 	readonly lifetimeUsage?: Readonly<LifetimeUsage>;
+	readonly lifetimeCost?: number;
 	readonly compactionCount: number;
 	// Live activity (folded from the former WidgetActivity — precomputed by AgentWidget)
 	readonly turnCount: number;
@@ -55,6 +57,7 @@ export function renderFinishedLine(agent: WidgetAgent, registry: AgentConfigLook
 	const name = getDisplayName(agent.type, registry);
 	const modeLabel = getPromptModeLabel(agent.type, registry);
 	const duration = formatMs((agent.completedAt ?? Date.now()) - agent.startedAt);
+	const lifetimeCost = agent.lifetimeCost ?? 0;
 
 	let icon: string;
 	let statusText: string;
@@ -85,6 +88,7 @@ export function renderFinishedLine(agent: WidgetAgent, registry: AgentConfigLook
 	}
 	parts.push(formatTurns(agent.turnCount, agent.maxTurns));
 	if (agent.toolUses > 0) parts.push(`${agent.toolUses} tool use${agent.toolUses === 1 ? "" : "s"}`);
+	if (lifetimeCost > 0) parts.push(formatCost(lifetimeCost));
 	parts.push(duration);
 
 	const modeTag = modeLabel ? ` ${theme.fg("dim", `(${modeLabel})`)}` : "";
@@ -104,6 +108,7 @@ export function renderRunningLines(
 	const elapsed = formatMs(Date.now() - agent.startedAt);
 
 	const tokens = getLifetimeTotal(agent.lifetimeUsage);
+	const lifetimeCost = agent.lifetimeCost ?? 0;
 	const tokenText = tokens > 0 ? formatSessionTokens(tokens, agent.contextPercent, theme, agent.compactionCount) : "";
 
 	const parts: string[] = [];
@@ -115,6 +120,7 @@ export function renderRunningLines(
 	parts.push(formatTurns(agent.turnCount, agent.maxTurns));
 	if (agent.toolUses > 0) parts.push(`${agent.toolUses} tool use${agent.toolUses === 1 ? "" : "s"}`);
 	if (tokenText) parts.push(tokenText);
+	if (lifetimeCost > 0) parts.push(formatCost(lifetimeCost));
 	parts.push(elapsed);
 	const statsText = parts.join(" · ");
 

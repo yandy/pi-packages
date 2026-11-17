@@ -66,6 +66,8 @@ export class SubagentEventsObserver implements SubagentManagerObserver {
 			modelName: record.modelName,
 			thinking: record.thinking,
 			outputFile: record.outputFile,
+			lifetimeUsage: { ...record.lifetimeUsage },
+			lifetimeCost: record.lifetimeCost,
 		});
 
 		// Skip notification if result was already consumed via get_subagent_result.

@@ -9,11 +9,14 @@
  * the caller forwards itself to its own lifecycle observer via onCompact.
  */
 
+import type { ParentUsageRecord } from "../lifecycle/parent-snapshot";
 import type { SubagentState } from "../lifecycle/subagent-state";
 import type { CompactionInfo, SubscribableSession } from "../types";
 
 export interface SubagentObserverOptions {
 	onCompact?: (info: CompactionInfo) => void;
+	/** Forward each child assistant usage delta to the parent session's persisted totals. */
+	onUsage?: (entry: ParentUsageRecord) => void;
 	/** Called after every event's state mutation, so consumers always read post-mutation state. */
 	onChange?: () => void;
 }
@@ -69,6 +72,12 @@ export function subscribeSubagentObserver(
 				input: u.input,
 				output: u.output,
 				cacheWrite: u.cacheWrite,
+				cost: u.cost,
+			});
+			options?.onUsage?.({
+				provider: event.message.provider,
+				model: event.message.responseModel ?? event.message.model,
+				usage: u,
 			});
 		}
 

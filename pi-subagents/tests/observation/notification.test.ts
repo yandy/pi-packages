@@ -54,6 +54,14 @@ describe("formatTaskNotification", () => {
 		expect(xml).toContain("<status>Done</status>");
 	});
 
+	it("includes lifetime cost in the model-facing usage block", () => {
+		const record = createTestSubagent({
+			lifetimeUsage: { input: 100, output: 200, cacheWrite: 0, cost: { total: 0.036 } },
+		});
+		const xml = formatTaskNotification(record, 500);
+		expect(xml).toContain("<cost_usd>0.036</cost_usd>");
+	});
+
 	it("truncates long results", () => {
 		const longResult = "x".repeat(600);
 		const record = createTestSubagent({ result: longResult });
@@ -86,7 +94,7 @@ describe("buildNotificationDetails", () => {
 		result: "Done.",
 		toolUses: 2,
 		completedAt: 3000,
-		lifetimeUsage: { input: 100, output: 200, cacheWrite: 0 },
+		lifetimeUsage: { input: 100, output: 200, cacheWrite: 0, cost: { total: 0.036 } },
 	});
 
 	it("maps record fields to notification shape", () => {
@@ -97,6 +105,7 @@ describe("buildNotificationDetails", () => {
 		expect(details.toolUses).toBe(2);
 		expect(details.durationMs).toBe(2000);
 		expect(details.totalTokens).toBe(300);
+		expect(details.totalCost).toBeCloseTo(0.036);
 		expect(details.resultPreview).toBe("Done.");
 	});
 

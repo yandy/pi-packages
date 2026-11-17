@@ -49,6 +49,15 @@ describe("GetResultTool", () => {
 		expect(text).toContain("All done.");
 	});
 
+	it("includes lifetime cost in the status line", async () => {
+		const record = createTestSubagent({
+			lifetimeUsage: { input: 500, output: 500, cacheWrite: 0, cost: { total: 0.1234 } },
+		});
+		const records = new Map([["agent-1", record]]);
+		const result = await execute(makeManager(records), makeNotifications(), { agent_id: "agent-1" });
+		expect(result.content[0].text).toContain("$0.123");
+	});
+
 	it("shows running message for in-progress agent", async () => {
 		const records = new Map([["agent-1", createTestSubagent({ status: "running", completedAt: undefined })]]);
 		const result = await execute(makeManager(records), makeNotifications(), { agent_id: "agent-1" });

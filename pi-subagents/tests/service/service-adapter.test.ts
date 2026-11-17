@@ -16,7 +16,7 @@ describe("toSubagentRecord", () => {
 			description: "Check stale TODOs",
 			result: "Found 3 stale TODOs",
 			toolUses: 5,
-			lifetimeUsage: { input: 100, output: 200, cacheWrite: 50 },
+			lifetimeUsage: { input: 100, output: 200, cacheWrite: 50, cost: { total: 0.036 } },
 			compactionCount: 1,
 		});
 		return r;
@@ -34,6 +34,7 @@ describe("toSubagentRecord", () => {
 			startedAt: 1000,
 			completedAt: 2000,
 			lifetimeUsage: { input: 100, output: 200, cacheWrite: 50 },
+			lifetimeCost: 0.036,
 			compactionCount: 1,
 		});
 	});
@@ -84,6 +85,7 @@ describe("toSubagentRecord", () => {
 			toolUses: 0,
 			startedAt: 500,
 			lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
+			lifetimeCost: 0,
 			compactionCount: 0,
 		});
 		expect(result).not.toHaveProperty("result");

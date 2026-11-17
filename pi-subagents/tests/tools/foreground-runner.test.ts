@@ -104,6 +104,32 @@ describe("runForeground", () => {
 		await runPromise;
 	});
 
+	it("includes live cost in streaming result details", async () => {
+		const record = createTestSubagent({
+			status: "running",
+			completedAt: undefined,
+			lifetimeUsage: { input: 500, output: 500, cacheWrite: 0, cost: { total: 0.1234 } },
+		});
+		const pending = Promise.withResolvers<any>();
+		const deps = createToolDeps({
+			manager: {
+				...createToolDeps().manager,
+				spawnAndWait: vi.fn().mockImplementation((_snapshot, _type, _prompt, opts) => {
+					opts.observer?.onSessionCreated?.(record);
+					return pending.promise;
+				}),
+			},
+		});
+		const onUpdate = vi.fn();
+		const runPromise = runForeground(deps.manager, makeParams(), undefined, onUpdate);
+
+		await vi.advanceTimersByTimeAsync(100);
+
+		expect(onUpdate.mock.calls.some((call) => call[0]?.details?.cost === "$0.123")).toBe(true);
+		pending.resolve(record);
+		await runPromise;
+	});
+
 	it("streams the record's in-flight message text as the activity line", async () => {
 		const state = new SubagentState({ status: "running", startedAt: Date.now() - 100 });
 		const partial = {
