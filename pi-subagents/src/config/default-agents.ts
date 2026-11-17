@@ -28,7 +28,7 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 		{
 			name: "Explore",
 			displayName: "Explore",
-			description: "Fast file and content search agent (read-only)",
+			description: "Fast codebase exploration agent (read-only)",
 			builtinToolNames: READ_ONLY_TOOLS,
 			// model omitted — inherit the parent model, and let callers override it per call.
 			// A hardcoded default would win over the `model` param and, when the exact
