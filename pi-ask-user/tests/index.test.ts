@@ -2022,7 +2022,7 @@ describe("ask_user", () => {
 			expect(selectTitle).toContain("The sky is blue today.");
 		});
 
-		it("passes timeout to dialog methods", async () => {
+		it("passes timeout and an abort signal to dialog methods", async () => {
 			const tool = await setupTool();
 			let capturedOpts: any;
 
@@ -2049,7 +2049,441 @@ describe("ask_user", () => {
 				},
 			);
 
-			expect(capturedOpts).toEqual({ timeout: 5000 });
+			expect(capturedOpts.timeout).toBe(5000);
+			expect(capturedOpts.signal).toBeInstanceOf(AbortSignal);
+		});
+	});
+
+	// issue #246: RPC 宿主漏实现 select/input 时应答永不到达。宿主的 createDialogPromise 只在
+	// opts.timeout / opts.signal 存在时才注册结算通道，所以工具必须自带 deadline 与 abort 通路，
+	// 否则 executionMode: "sequential" 会把整轮 turn 永久挂死。
+	describe("dialog settlement without a responding host (issue #246)", () => {
+		const DEFAULT_DEADLINE_MS = 300_000;
+
+		/** 永不 settle 的 dialog：模拟漏实现该方法的 RPC 宿主。 */
+		function hangingDialog<T>(): Promise<T> {
+			return new Promise<T>(() => {});
+		}
+
+		function dialogCtx(ui: Record<string, unknown>, mode = "rpc") {
+			return {
+				hasUI: true,
+				mode,
+				cwd: "/tmp/project",
+				ui: makeUI({ custom: async () => undefined, ...ui }),
+			};
+		}
+
+		/** 在假时钟下跑 execute，返回「是否已结算」探针与结果 promise。 */
+		function runWithFakeTimers(execute: () => Promise<any>) {
+			let settled = false;
+			const promise = execute().then((result: any) => {
+				settled = true;
+				return result;
+			});
+			return { promise, isSettled: () => settled };
+		}
+
+		it("auto-cancels with a timeout reason when the host never answers select()", async () => {
+			vi.useFakeTimers();
+			try {
+				const tool = await setupTool();
+				const { promise, isSettled } = runWithFakeTimers(() =>
+					tool.execute(
+						"tool-call-id",
+						{ question: "Pick a color", options: ["Red", "Blue"], allowFreeform: false, allowComment: false },
+						undefined,
+						undefined,
+						dialogCtx({ select: () => hangingDialog<string>() }),
+					),
+				);
+
+				await vi.advanceTimersByTimeAsync(DEFAULT_DEADLINE_MS);
+
+				expect(isSettled()).toBe(true);
+				const result = await promise;
+				expect(result.details.cancelled).toBe(true);
+				expect(result.details.cancelReason).toBe("timeout");
+				expect(result.content[0].text).toContain("Timed out");
+				expect(result.content[0].text).toContain(String(DEFAULT_DEADLINE_MS));
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("keeps waiting until the default deadline elapses", async () => {
+			vi.useFakeTimers();
+			try {
+				const tool = await setupTool();
+				const { promise, isSettled } = runWithFakeTimers(() =>
+					tool.execute(
+						"tool-call-id",
+						{ question: "Pick a color", options: ["Red", "Blue"], allowFreeform: false, allowComment: false },
+						undefined,
+						undefined,
+						dialogCtx({ select: () => hangingDialog<string>() }),
+					),
+				);
+
+				await vi.advanceTimersByTimeAsync(DEFAULT_DEADLINE_MS - 1);
+				expect(isSettled()).toBe(false);
+
+				await vi.advanceTimersByTimeAsync(1);
+				expect(isSettled()).toBe(true);
+				await promise;
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("uses an explicit timeout instead of the default deadline", async () => {
+			vi.useFakeTimers();
+			try {
+				const tool = await setupTool();
+				const { promise, isSettled } = runWithFakeTimers(() =>
+					tool.execute(
+						"tool-call-id",
+						{
+							question: "Pick a color",
+							options: ["Red", "Blue"],
+							allowFreeform: false,
+							allowComment: false,
+							timeout: 1000,
+						},
+						undefined,
+						undefined,
+						dialogCtx({ select: () => hangingDialog<string>() }),
+					),
+				);
+
+				await vi.advanceTimersByTimeAsync(1000);
+
+				expect(isSettled()).toBe(true);
+				const result = await promise;
+				expect(result.details.cancelReason).toBe("timeout");
+				expect(result.content[0].text).toContain("1000");
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("falls back to the default deadline when timeout is not a positive number", async () => {
+			vi.useFakeTimers();
+			try {
+				const tool = await setupTool();
+				const { promise, isSettled } = runWithFakeTimers(() =>
+					tool.execute(
+						"tool-call-id",
+						{
+							question: "Pick a color",
+							options: ["Red", "Blue"],
+							allowFreeform: false,
+							allowComment: false,
+							timeout: 0,
+						},
+						undefined,
+						undefined,
+						dialogCtx({ select: () => hangingDialog<string>() }),
+					),
+				);
+
+				await vi.advanceTimersByTimeAsync(DEFAULT_DEADLINE_MS);
+
+				expect(isSettled()).toBe(true);
+				const result = await promise;
+				expect(result.details.cancelReason).toBe("timeout");
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("aborts the dialog signal on timeout so a well-behaved host dismisses its prompt", async () => {
+			vi.useFakeTimers();
+			try {
+				const tool = await setupTool();
+				let capturedSignal: AbortSignal | undefined;
+				const { promise } = runWithFakeTimers(() =>
+					tool.execute(
+						"tool-call-id",
+						{ question: "Pick a color", options: ["Red", "Blue"], allowFreeform: false, allowComment: false },
+						undefined,
+						undefined,
+						dialogCtx({
+							select: (_title: string, _options: string[], opts: any) => {
+								capturedSignal = opts?.signal;
+								return hangingDialog<string>();
+							},
+						}),
+					),
+				);
+
+				await vi.advanceTimersByTimeAsync(DEFAULT_DEADLINE_MS);
+				await promise;
+
+				expect(capturedSignal).toBeInstanceOf(AbortSignal);
+				expect(capturedSignal?.aborted).toBe(true);
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("settles as cancelled when the tool signal aborts and the host ignores it", async () => {
+			const tool = await setupTool();
+			const controller = new AbortController();
+			let opened: (() => void) | undefined;
+			const dialogOpened = new Promise<void>((resolve) => {
+				opened = resolve;
+			});
+			const promise = tool.execute(
+				"tool-call-id",
+				{ question: "Pick a color", options: ["Red", "Blue"], allowFreeform: false, allowComment: false },
+				controller.signal,
+				undefined,
+				dialogCtx({
+					select: () => {
+						opened?.();
+						return hangingDialog<string>();
+					},
+				}),
+			);
+
+			// 弹窗已打开后才 abort：测的是在飞中断，不是「调用前已中断」。
+			await dialogOpened;
+			controller.abort();
+			const result = await promise;
+
+			expect(result.details.cancelled).toBe(true);
+			expect(result.details.cancelReason).toBe("abort");
+		});
+
+		it("forwards the tool signal to the host dialog", async () => {
+			const tool = await setupTool();
+			const controller = new AbortController();
+			let capturedSignal: AbortSignal | undefined;
+			let opened: (() => void) | undefined;
+			const dialogOpened = new Promise<void>((resolve) => {
+				opened = resolve;
+			});
+			const promise = tool.execute(
+				"tool-call-id",
+				{ question: "Pick a color", options: ["Red", "Blue"], allowFreeform: false, allowComment: false },
+				controller.signal,
+				undefined,
+				dialogCtx({
+					select: (_title: string, _options: string[], opts: any) => {
+						capturedSignal = opts?.signal;
+						opened?.();
+						return hangingDialog<string>();
+					},
+				}),
+			);
+
+			await dialogOpened;
+			expect(capturedSignal?.aborted).toBe(false);
+			controller.abort();
+			await promise;
+
+			expect(capturedSignal?.aborted).toBe(true);
+		});
+
+		it("does not open a dialog when the signal is already aborted", async () => {
+			const tool = await setupTool();
+			const controller = new AbortController();
+			controller.abort();
+			let selectCalls = 0;
+
+			const result = await tool.execute(
+				"tool-call-id",
+				{ question: "Pick a color", options: ["Red", "Blue"] },
+				controller.signal,
+				undefined,
+				dialogCtx({
+					select: () => {
+						selectCalls += 1;
+						return hangingDialog<string>();
+					},
+				}),
+			);
+
+			expect(selectCalls).toBe(0);
+			expect(result.details.cancelled).toBe(true);
+		});
+
+		it("reports a host-side cancel as a plain cancel, not a timeout", async () => {
+			const tool = await setupTool();
+
+			const result = await tool.execute(
+				"tool-call-id",
+				{ question: "Pick a color", options: ["Red", "Blue"], allowFreeform: false, allowComment: false },
+				undefined,
+				undefined,
+				dialogCtx({ select: async () => undefined }),
+			);
+
+			expect(result.details.cancelled).toBe(true);
+			expect(result.details.cancelReason).toBeUndefined();
+			expect(result.content[0].text).toBe("User cancelled the question");
+		});
+
+		it("cancels when the comment step times out instead of silently dropping the comment", async () => {
+			vi.useFakeTimers();
+			try {
+				const tool = await setupTool();
+				const { promise, isSettled } = runWithFakeTimers(() =>
+					tool.execute(
+						"tool-call-id",
+						{ question: "Pick a color", options: ["Red", "Blue"], allowFreeform: false, allowComment: true },
+						undefined,
+						undefined,
+						dialogCtx({ select: async () => "Red", input: () => hangingDialog<string>() }),
+					),
+				);
+
+				await vi.advanceTimersByTimeAsync(DEFAULT_DEADLINE_MS);
+
+				expect(isSettled()).toBe(true);
+				const result = await promise;
+				expect(result.details.cancelled).toBe(true);
+				expect(result.details.cancelReason).toBe("timeout");
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("auto-cancels the multi-select select rounds when the host never answers", async () => {
+			vi.useFakeTimers();
+			try {
+				const tool = await setupTool();
+				const { promise, isSettled } = runWithFakeTimers(() =>
+					tool.execute(
+						"tool-call-id",
+						{ question: "Pick colors", options: ["Red", "Blue"], allowMultiple: true },
+						undefined,
+						undefined,
+						dialogCtx({ select: () => hangingDialog<string>() }),
+					),
+				);
+
+				await vi.advanceTimersByTimeAsync(DEFAULT_DEADLINE_MS);
+
+				expect(isSettled()).toBe(true);
+				const result = await promise;
+				expect(result.details.cancelReason).toBe("timeout");
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("auto-cancels a later multi-select round when the host stops answering mid-pick", async () => {
+			vi.useFakeTimers();
+			try {
+				const tool = await setupTool();
+				let round = 0;
+				const { promise, isSettled } = runWithFakeTimers(() =>
+					tool.execute(
+						"tool-call-id",
+						{ question: "Pick colors", options: ["Red", "Blue"], allowMultiple: true, allowFreeform: false },
+						undefined,
+						undefined,
+						dialogCtx({
+							select: (_title: string, options: string[]) => {
+								round += 1;
+								// 第一轮勾选 Red，第二轮宿主不再应答。
+								if (round === 1) return Promise.resolve(options[0]);
+								return hangingDialog<string>();
+							},
+						}),
+					),
+				);
+
+				await vi.advanceTimersByTimeAsync(DEFAULT_DEADLINE_MS);
+
+				expect(isSettled()).toBe(true);
+				const result = await promise;
+				expect(round).toBe(2);
+				expect(result.details.cancelled).toBe(true);
+				expect(result.details.cancelReason).toBe("timeout");
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("auto-cancels the option-less freeform input in non-TUI modes", async () => {
+			vi.useFakeTimers();
+			try {
+				const tool = await setupTool();
+				const { promise, isSettled } = runWithFakeTimers(() =>
+					tool.execute(
+						"tool-call-id",
+						{ question: "What is your name?" },
+						undefined,
+						undefined,
+						dialogCtx({ input: () => hangingDialog<string>() }),
+					),
+				);
+
+				await vi.advanceTimersByTimeAsync(DEFAULT_DEADLINE_MS);
+
+				expect(isSettled()).toBe(true);
+				const result = await promise;
+				expect(result.details.cancelled).toBe(true);
+				expect(result.details.cancelReason).toBe("timeout");
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("imposes no default deadline on the option-less input in TUI mode", async () => {
+			vi.useFakeTimers();
+			try {
+				const tool = await setupTool();
+				let answer: ((value: string) => void) | undefined;
+				const { promise, isSettled } = runWithFakeTimers(() =>
+					tool.execute(
+						"tool-call-id",
+						{ question: "What is your name?" },
+						undefined,
+						undefined,
+						dialogCtx(
+							{
+								input: () =>
+									new Promise<string>((resolve) => {
+										answer = resolve;
+									}),
+							},
+							"tui",
+						),
+					),
+				);
+
+				await vi.advanceTimersByTimeAsync(DEFAULT_DEADLINE_MS * 2);
+				expect(isSettled()).toBe(false);
+
+				answer?.("Ada");
+				const result = await promise;
+				expect(result.details.response).toEqual({ kind: "freeform", text: "Ada" });
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("clears the deadline timer once the host answers", async () => {
+			vi.useFakeTimers();
+			try {
+				const tool = await setupTool();
+				const result = await tool.execute(
+					"tool-call-id",
+					{ question: "Pick a color", options: ["Red", "Blue"], allowFreeform: false, allowComment: false },
+					undefined,
+					undefined,
+					dialogCtx({ select: async () => "Red" }),
+				);
+
+				expect(result.details.cancelled).toBe(false);
+				expect(vi.getTimerCount()).toBe(0);
+			} finally {
+				vi.useRealTimers();
+			}
 		});
 	});
 
@@ -2193,7 +2627,7 @@ describe("ask_user", () => {
 			expect(result.details.response).toBeNull();
 		});
 
-		it("passes the timeout to every select round", async () => {
+		it("passes the timeout and an abort signal to every select round", async () => {
 			const tool = await setupTool();
 			const host = scriptedSelect(["Red", "Done"]);
 
@@ -2212,7 +2646,10 @@ describe("ask_user", () => {
 				{ hasUI: true, ui: makeUI({ custom: async () => undefined, select: host.select }) },
 			);
 
-			expect(host.calls.map((call) => call.opts)).toEqual([{ timeout: 5000 }, { timeout: 5000 }]);
+			expect(host.calls.map((call) => call.opts.timeout)).toEqual([5000, 5000]);
+			for (const call of host.calls) {
+				expect(call.opts.signal).toBeInstanceOf(AbortSignal);
+			}
 		});
 	});
 
