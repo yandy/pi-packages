@@ -117,6 +117,8 @@ Two files are read from the agent dir (`~/.pi/agent/`): `sandbox.json` for the s
 
 Extra writable roots apply in `workspace-write` mode only, beyond the workspace and tmp. Entries must be absolute paths; `~` / `~/` (Win32 `~\`) expand to your home, `~user` is unsupported. Non-absolute, missing, or non-directory entries are warned about at load and ignored one by one; a file that is not a JSON array of strings (including invalid JSON) is warned about and ignored as a whole, leaving no extra roots. A missing file means no extra roots, silently — the same as `[]`. `extraWritableDirs` inside `sandbox.json` is a leftover from 1.7.x: it is warned about and ignored — move the list to `sandbox-writable.json`.
 
+Config warnings never go straight to the terminal: the config is read before any UI context exists, so warnings are buffered and then delivered by the first session with a UI — in the TUI they show up in the chat as a `Warning: …` line (rather than being painted over by the interface), while `-p` / JSON mode writes them to stderr.
+
 ### Example: writable cache directories for common tools
 
 Tools that keep a global cache or store outside the workspace fail (or re-download every time) in `workspace-write` mode. Listing those directories in `~/.pi/agent/sandbox-writable.json` is the intended fix: the user authorizes the storage directories once, and the model then runs the tools unmodified — no `UV_CACHE_DIR` / `PNPM_HOME` / `npm_config_cache` relocation (see "Cache/data relocation is out of policy" above).

@@ -2,6 +2,7 @@ import { readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve as resolvePath, sep } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { reportConfigWarning } from "./config-warnings";
 import { isSandboxMode, type SandboxMode } from "./policy";
 
 /** sandbox.json schema v2（spec §5）。1.x 的 image/runtime/host 组已删除。 */
@@ -46,7 +47,10 @@ export function validateSandboxConfig(raw: Record<string, unknown>, source: stri
 	let mode: SandboxMode = DEFAULT_SANDBOX_CONFIG.mode;
 	if (raw.mode !== undefined) {
 		if (isSandboxMode(raw.mode)) mode = raw.mode;
-		else console.warn(`sandbox: invalid mode ${JSON.stringify(raw.mode)} in ${source}, falling back to "${DEFAULT_SANDBOX_CONFIG.mode}"`);
+		else
+			reportConfigWarning(
+				`sandbox: invalid mode ${JSON.stringify(raw.mode)} in ${source}, falling back to "${DEFAULT_SANDBOX_CONFIG.mode}"`,
+			);
 	}
 
 	const runnerCommand = raw.runnerCommand ?? null;
@@ -115,7 +119,9 @@ export function resolveExtraWritableDirs(entries: readonly string[], source: str
 	for (const raw of entries) {
 		const expanded = expandHome(raw);
 		if (!isAbsolute(expanded)) {
-			console.warn(`sandbox: extraWritableDirs entry is not an absolute path: ${JSON.stringify(raw)} in ${source}, ignoring it`);
+			reportConfigWarning(
+				`sandbox: extraWritableDirs entry is not an absolute path: ${JSON.stringify(raw)} in ${source}, ignoring it`,
+			);
 			continue;
 		}
 		let canonical: string;
@@ -123,14 +129,18 @@ export function resolveExtraWritableDirs(entries: readonly string[], source: str
 			if (!statSync(expanded).isDirectory()) throw new Error("not a directory");
 			canonical = realpathSync.native(expanded);
 		} catch {
-			console.warn(`sandbox: extraWritableDirs entry is not an existing directory: ${JSON.stringify(expanded)} in ${source}, ignoring it`);
+			reportConfigWarning(
+				`sandbox: extraWritableDirs entry is not an existing directory: ${JSON.stringify(expanded)} in ${source}, ignoring it`,
+			);
 			continue;
 		}
 		// 保护 pi 自己的 agent 目录：条目等于/包含/被包含于它时，受限模型可能改写
 		// sandbox.json（下次启动即 danger-full-access）、AGENTS.md 或扩展。按仓库的
 		// warn-don't-guess 风格只告警、保留该条目，绝不擅自丢弃。
 		if (isSameOrUnder(canonical, agentDir) || isSameOrUnder(agentDir, canonical)) {
-			console.warn(`sandbox: extraWritableDirs entry ${canonical} covers pi's agent dir (${agentDir}); a confined model could rewrite the sandbox config with it`);
+			reportConfigWarning(
+				`sandbox: extraWritableDirs entry ${canonical} covers pi's agent dir (${agentDir}); a confined model could rewrite the sandbox config with it`,
+			);
 		}
 		if (!seen.has(canonical)) {
 			seen.add(canonical);
@@ -156,18 +166,18 @@ export function loadWritableDirs(): string[] {
 		// 却拿不到授权，必须告警，否则是无提示的失败。
 		const code = (err as NodeJS.ErrnoException).code;
 		if (code === "ENOENT" || code === "ENOTDIR") return [];
-		console.warn(`sandbox: cannot read ${path} (${code ?? String(err)}), ignoring extra writable dirs`);
+		reportConfigWarning(`sandbox: cannot read ${path} (${code ?? String(err)}), ignoring extra writable dirs`);
 		return [];
 	}
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(text);
 	} catch {
-		console.warn(`sandbox: ${path} is not valid JSON, ignoring extra writable dirs`);
+		reportConfigWarning(`sandbox: ${path} is not valid JSON, ignoring extra writable dirs`);
 		return [];
 	}
 	if (!isStringArray(parsed)) {
-		console.warn(`sandbox: ${path} must be a JSON array of path strings, ignoring extra writable dirs`);
+		reportConfigWarning(`sandbox: ${path} must be a JSON array of path strings, ignoring extra writable dirs`);
 		return [];
 	}
 	return resolveExtraWritableDirs(parsed, path);
@@ -184,12 +194,17 @@ export function loadSandboxConfig(): SandboxConfig {
 	const globalRaw = readJsonFile(globalPath) ?? {};
 
 	for (const key of LEGACY_GROUPS) {
-		if (key in globalRaw) console.warn(`sandbox: ignoring legacy "${key}" section in ${globalPath} (removed in 2.0; see README migration notes)`);
+		if (key in globalRaw)
+			reportConfigWarning(
+				`sandbox: ignoring legacy "${key}" section in ${globalPath} (removed in 2.0; see README migration notes)`,
+			);
 	}
 
 	const writablePath = resolvePath(getAgentDir(), "sandbox-writable.json");
 	if ("extraWritableDirs" in globalRaw) {
-		console.warn(`sandbox: ignoring "extraWritableDirs" in ${globalPath} (moved to ${writablePath}; see README migration notes)`);
+		reportConfigWarning(
+			`sandbox: ignoring "extraWritableDirs" in ${globalPath} (moved to ${writablePath}; see README migration notes)`,
+		);
 	}
 
 	const validated = validateSandboxConfig(globalRaw, globalPath);
@@ -204,7 +219,9 @@ export function getSandboxConfig(): SandboxConfig {
 		try {
 			cachedConfig = loadSandboxConfig();
 		} catch (err) {
-			console.warn(`sandbox: failed to load config, falling back to defaults (mode "${DEFAULT_SANDBOX_CONFIG.mode}"): ${err instanceof Error ? err.message : String(err)}`);
+			reportConfigWarning(
+				`sandbox: failed to load config, falling back to defaults (mode "${DEFAULT_SANDBOX_CONFIG.mode}"): ${err instanceof Error ? err.message : String(err)}`,
+			);
 			// 失败隔离是双向的：sandbox.json 坏了只回落它自己的字段，额外可写根仍从独立文件取
 			// （该文件自身不 throw），绝不让一边的手误吞掉另一边的授权。
 			cachedConfig = { ...DEFAULT_SANDBOX_CONFIG, extraWritableDirs: loadWritableDirs() };
