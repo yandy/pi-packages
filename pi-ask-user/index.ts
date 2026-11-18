@@ -112,6 +112,12 @@ interface AskToolDetails {
 	options: QuestionOption[];
 	response: AskResponse | null;
 	cancelled: boolean;
+	/** Set when the rich TUI was unavailable and the RPC/headless dialog protocol collected the answer. */
+	fallback?: "dialogs";
+	/** Failure description. A failed ask is never a cancellation, so `cancelled` stays false. */
+	error?: string;
+	/** Verbatim dialog answer that matched none of the offered choices. */
+	rawInput?: string;
 }
 
 type AskUIResult = AskResponse;
@@ -170,13 +176,6 @@ function buildCommentPrompt(prompt: string, selections: string[]): string {
 	const label = selections.length === 1 ? "Selected option" : "Selected options";
 	const lines = selections.map((selection) => `- ${selection}`).join("\n");
 	return `${prompt}\n\n${label}:\n${lines}`;
-}
-
-function parseDialogSelections(input: string): string[] {
-	return input
-		.split(",")
-		.map((selection) => selection.trim())
-		.filter(Boolean);
 }
 
 function isCancelledInput(value: unknown): value is null | undefined {
@@ -1597,13 +1596,94 @@ class AskComponent extends Container {
 	}
 }
 
+/** Sentinel row that finishes a dialog multi-select; only offered once something is checked. */
+const DIALOG_DONE_SENTINEL = "\u2713 Done selecting";
+
+/** The dialog UI returned a value that is not one of the choices we offered. */
+class DialogAnswerError extends Error {
+	constructor(
+		readonly value: string,
+		readonly offered: string[],
+	) {
+		super(
+			`ask_user received an answer that matches none of the choices it offered.\n` +
+				`Raw answer: ${JSON.stringify(value)}\n` +
+				`Offered choices:\n${offered.map((choice) => `- ${choice}`).join("\n")}\n` +
+				`This is a dialog UI failure, not a user cancellation. Ask the question again.`,
+		);
+		this.name = "DialogAnswerError";
+	}
+}
+
+// biome-ignore lint/complexity/noBannedTypes: pi-coding-agent dialog API
+type DialogUI = { select: Function; input: Function };
+
+type DialogOptions = { timeout: number } | undefined;
+
+/**
+ * Structured multi-select over the single-choice dialog protocol: every round offers the option
+ * rows with their checkbox state, picking a row toggles it, and a sentinel row finishes the pick.
+ * Mirrors the TUI multi-select (checkbox rows + freeform row) so both modes collect the same shape.
+ */
+async function askMultipleViaDialogs(
+	ui: DialogUI,
+	prompt: string,
+	options: QuestionOption[],
+	allowFreeform: boolean,
+	allowComment: boolean,
+	dialogOpts: DialogOptions,
+): Promise<AskUIResult | null> {
+	const checked = new Set<number>();
+	const optionList = formatOptionsForMessage(options);
+
+	for (;;) {
+		const rows = options.map((option, index) => `${index + 1}. [${checked.has(index) ? "\u2713" : " "}] ${option.title}`);
+		const rowToIndex = new Map(rows.map((row, index) => [row, index]));
+		const selections = options.filter((_option, index) => checked.has(index)).map((option) => option.title);
+
+		const choices = [...rows];
+		if (selections.length > 0) choices.push(DIALOG_DONE_SENTINEL);
+		if (allowFreeform) choices.push(FREEFORM_SENTINEL);
+
+		const title =
+			`${prompt}\n\nOptions (pick one or more; pick a checked option again to uncheck it):\n${optionList}\n\n` +
+			`Selected: ${selections.length > 0 ? selections.join(", ") : "(none)"}`;
+
+		const value = (await ui.select(title, choices, dialogOpts)) as string | undefined;
+		if (isCancelledInput(value)) return null;
+
+		if (value === DIALOG_DONE_SENTINEL) {
+			if (!allowComment) return createSelectionResponse(selections);
+			const comment = (await ui.input(
+				buildCommentPrompt(prompt, selections),
+				"Optional comment (press Enter to skip)...",
+				dialogOpts,
+			)) as string | undefined;
+			return createSelectionResponse(selections, comment);
+		}
+
+		if (value === FREEFORM_SENTINEL) {
+			const answer = (await ui.input(prompt, "Type your answer...", dialogOpts)) as string | undefined;
+			if (isCancelledInput(answer)) return null;
+			return createFreeformResponse(answer);
+		}
+
+		const index = rowToIndex.get(value);
+		if (index === undefined) throw new DialogAnswerError(value, choices);
+		if (checked.has(index)) checked.delete(index);
+		else checked.add(index);
+	}
+}
+
 /**
  * RPC/headless fallback: use dialog methods (select/input) instead of the rich TUI overlay.
  * ctx.ui.custom() returns undefined in RPC mode, so we degrade gracefully.
+ *
+ * Both selection modes stay structured: the user only ever picks from the strings we offered,
+ * so an unusable answer is reported as a diagnosable error instead of a user cancellation.
  */
 async function askViaDialogs(
-	// biome-ignore lint/complexity/noBannedTypes: pi-coding-agent dialog API
-	ui: { select: Function; input: Function },
+	ui: DialogUI,
 	question: string,
 	context: string | undefined,
 	options: QuestionOption[],
@@ -1616,27 +1696,7 @@ async function askViaDialogs(
 	const prompt = context ? `${question}\n\nContext:\n${context}` : question;
 
 	if (allowMultiple) {
-		const optionList = formatOptionsForMessage(options);
-		const rawSelections = (await ui.input(
-			`${prompt}\n\nOptions (select one or more):\n${optionList}`,
-			"Type your selection(s)...",
-			dialogOpts,
-		)) as string | undefined;
-		if (isCancelledInput(rawSelections)) return null;
-
-		const selections = parseDialogSelections(rawSelections);
-		if (selections.length === 0) return null;
-
-		if (!allowComment) {
-			return createSelectionResponse(selections);
-		}
-
-		const comment = (await ui.input(
-			buildCommentPrompt(prompt, selections),
-			"Optional comment (press Enter to skip)...",
-			dialogOpts,
-		)) as string | undefined;
-		return createSelectionResponse(selections, comment);
+		return askMultipleViaDialogs(ui, prompt, options, allowFreeform, allowComment, dialogOpts);
 	}
 
 	const selectOptions = options.map((o) => o.title);
@@ -1650,6 +1710,8 @@ async function askViaDialogs(
 		if (isCancelledInput(answer)) return null;
 		return createFreeformResponse(answer);
 	}
+
+	if (!selectOptions.includes(selected)) throw new DialogAnswerError(selected, selectOptions);
 
 	if (!allowComment) {
 		return createSelectionResponse([selected]);
@@ -1795,6 +1857,7 @@ export default function (pi: ExtensionAPI) {
 			});
 
 			let result: AskUIResult | null;
+			let usedDialogFallback = false;
 			let overlayHandle: OverlayHandle | undefined;
 			let removeOverlayInputListener: (() => void) | undefined;
 			let hasAnnouncedHide = false;
@@ -1865,6 +1928,7 @@ export default function (pi: ExtensionAPI) {
 					result = customResult;
 				} else {
 					// RPC/headless mode: degrade to select()/input() dialog protocol
+					usedDialogFallback = true;
 					result = await askViaDialogs(
 						ctx.ui,
 						question,
@@ -1877,6 +1941,22 @@ export default function (pi: ExtensionAPI) {
 					);
 				}
 			} catch (error) {
+				if (error instanceof DialogAnswerError) {
+					return {
+						content: [{ type: "text", text: error.message }],
+						isError: true,
+						details: {
+							question,
+							context: normalizedContext,
+							options,
+							response: null,
+							cancelled: false,
+							fallback: "dialogs",
+							error: error.message,
+							rawInput: error.value,
+						} as AskToolDetails,
+					};
+				}
 				const message = error instanceof Error ? `${error.message}\n${error.stack ?? ""}` : String(error);
 				return {
 					content: [{ type: "text", text: `Ask tool failed: ${message}` }],
@@ -1887,11 +1967,20 @@ export default function (pi: ExtensionAPI) {
 				removeOverlayInputListener?.();
 			}
 
+			const fallbackFields = usedDialogFallback ? { fallback: "dialogs" as const } : {};
+
 			if (result === null) {
 				pi.events.emit("ask:cancelled", { question, context: normalizedContext, options });
 				return {
 					content: [{ type: "text", text: "User cancelled the question" }],
-					details: { question, context: normalizedContext, options, response: null, cancelled: true } as AskToolDetails,
+					details: {
+						question,
+						context: normalizedContext,
+						options,
+						response: null,
+						cancelled: true,
+						...fallbackFields,
+					} as AskToolDetails,
 				};
 			}
 
@@ -1908,6 +1997,7 @@ export default function (pi: ExtensionAPI) {
 					options,
 					response: result,
 					cancelled: false,
+					...fallbackFields,
 				} as AskToolDetails,
 			};
 		},
@@ -1931,7 +2021,7 @@ export default function (pi: ExtensionAPI) {
 		},
 
 		renderResult(result, options, theme) {
-			const details = result.details as (AskToolDetails & { error?: string }) | undefined;
+			const details = result.details as AskToolDetails | undefined;
 
 			if (details?.error) {
 				return new Text(theme.fg("error", `✗ ${details.error}`), 0, 0);

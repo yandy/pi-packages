@@ -17,7 +17,7 @@
 - 通过 `promptSnippet` 和 `promptGuidelines` 集成系统提示词
 - 叠加层和回退输入模式下均支持可选的超时自动关闭
 - 所有结果均包含结构化 `details` 用于会话状态重建
-- 交互式 UI 不可用时的优雅回退
+- 交互式 UI 不可用时的优雅回退：RPC/headless 会话仍通过对话协议保持结构化单选与多选
 - 内置 `ask-user` 技能，用于高风险或模糊任务中的强制决策门控
 
 ## 内置技能: `ask-user`
@@ -136,6 +136,19 @@ export PI_ASK_USER_COMMENT_TOGGLE_KEY=alt+c
 
 如果你始终不希望看到叠加层，请全局设置 `PI_ASK_USER_DISPLAY_MODE=inline`，或在 `ask-user.json` 中设置 `"displayMode": "inline"`。
 
+## RPC / headless 回退
+
+当富 TUI 不可用时（`ctx.ui.custom()` 返回 `undefined`，例如 `pi --rpc`），工具改由对话协议（`select` / `input`）收集同样的答案：
+
+- **单选**——一次 `select` 对话列出选项标题；`allowFreeform` 开启时追加一行自由文本入口。
+- **多选**——多轮 `select`。每轮把选项列成带编号的复选行（`1. [✓] Red`、`2. [ ] Blue`）；选中某行即勾选，再选一次即取消勾选。至少勾选一项后出现 `✓ Done selecting` 结束行，`allowFreeform` 开启时出现自由文本行。对话标题里带完整选项列表（含描述）与当前已选。
+- **注释**——`allowComment` 开启时，选择之后再走一次 `input`；直接提交空内容即跳过。
+- **取消**——只有对话被取消（或超时）才产生 `cancelled: true`。
+
+用户不需要手打选项标题，因此不存在“解析失败被当成取消”。若对话宿主返回的值不在 offered 列表里，工具返回 `isError: true` 且 `cancelled: false`，在 `details.rawInput` 回显原始答案，并在错误文本里列出可选项。
+
+走这条路径得到的结果带 `details.fallback: "dialogs"`。
+
 ## 结果详情
 
 所有工具结果均包含结构化的 `details` 对象，用于渲染和会话状态重建：
@@ -151,6 +164,12 @@ interface AskToolDetails {
   options: QuestionOption[];
   response: AskResponse | null;
   cancelled: boolean;
+  /** 由 RPC/headless 对话协议收集答案时出现。 */
+  fallback?: "dialogs";
+  /** 失败描述；失败的提问保持 `cancelled: false`。 */
+  error?: string;
+  /** 对话返回的、与任何可选项都不匹配的原始答案。 */
+  rawInput?: string;
 }
 ```
 
