@@ -83,7 +83,9 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 
 弹窗提供 **Deny / Allow once**（Deny 在首位，误按回车不会授予任何权限）；选 Deny 后可再填一句**可选理由**（回车跳过），理由会随拒绝错误回传给模型，让它明白为什么被拒、不要换写法反复试探。subagent 子会话（前台与后台都算）的提权会转发到父会话弹窗（同进程 pi-subagents，且父会话需有 UI）；无父通道时（headless、跨进程子代理）提权一律拒绝（fail-closed），此时用 `/permission` 放宽进程档位解救。
 
-审批并发时由宿主管理弹窗。TUI 中最新弹窗获得焦点；早先弹窗仍留在宿主的对话框栈中，只是暂时隐藏而**不是已取消**，上层弹窗关闭后会重新显示。若新审批持续到达，早到的请求可能延后处理；pi-sandbox **不承诺处理顺序**。`/reload` 或切换会话可能让**当次**调用的审批保持 pending（宿主行为），但不影响其他审批。RPC 模式下，各审批请求独立结算。
+只有逐字 **Allow once** 才批准提权；`Deny` 保持既有拒绝文案（可带可选理由），`undefined` 表示 *cancelled*。从 UI/RPC 边界回来的其它任何值（RPC 客户端回 `"Allow"`、`null`、对象）都算无效审批应答，一律 fail-closed 并报 `nothing was executed`。宿主不是 TUI 时每个弹窗另有 300 秒本地 deadline 与一条本地中断通道：客户端始终不应答时按 *cancelled* 结算（**不是**拒绝），命令与文件写入都不会发生；此后到达的结果一律丢弃。
+
+审批并发时由宿主管理弹窗。TUI 中最新弹窗获得焦点；早先弹窗仍留在宿主的对话框栈中，只是暂时隐藏而**不是已取消**，上层弹窗关闭后会重新显示。若新审批持续到达，早到的请求可能延后处理；pi-sandbox **不承诺处理顺序**。`/reload` 或切换会话可能让**当次**调用的审批保持 pending（宿主行为），但不影响其他审批。RPC 模式下，各审批请求独立结算；无人应答的请求在 300 秒本地 deadline 处按 *cancelled* 结算。
 
 **缓存/数据目录搬迁属于越界行为。** 工具的常驻规则要求模型不得为了绕开沙箱把全局缓存/数据目录搬进 workspace——无论是环境变量覆盖（`XDG_CACHE_HOME`、`HOME`、`UV_CACHE_DIR`、`npm_config_cache`、`PNPM_HOME` 等）、改缓存的 flag（`--cache-dir`、`--store-dir` 等）还是配置文件——正确做法是原样运行工具，包括提权重试也不得夹带搬迁：搬迁是无声的，它会消掉本可上膛提权的那次拒绝。这条政策目前仅停留在提示词层：pi-sandbox 不检测、也不拒绝这类命令，用户显式要求搬迁时仍然成立。在 `workspace-write` 模式下，让工具在工作区外写入的合法途径是**用户**把该目录加入 `~/.pi/agent/sandbox-writable.json`；模型仍不得自行迁移缓存/数据目录。
 
@@ -207,7 +209,7 @@ cd <可写项目目录> && PI_CODING_AGENT_DIR="$AG" pi
 
 | 方法 | 守卫 | 非 TUI（RPC / headless） |
 |---|---|---|
-| `select` + `input`（`sandbox_permissions` / `file_operation` 提权审批；`input` 是拒绝时的可选理由） | `hasUI`；子会话会沿 link 解析到最近一个仍有 UI 的父通道 | 以 `extension_ui_request` 转发。只透传工具调用的 `AbortSignal`，没有任何超时：客户端不应答时工具调用一直挂着（fail-closed，未应答的请求永远不会被自动批准） |
+| `select` + `input`（`sandbox_permissions` / `file_operation` 提权审批；`input` 是拒绝时的可选理由） | `hasUI` 决定通道；`mode` 决定 deadline —— 只有 `tui` 视为有人值守。子会话沿 link 解析到最近一个仍有 UI 的父通道，并用**父会话的** `ctx.mode`，不看子会话 | 以 `extension_ui_request` 转发，带派生 `AbortSignal` 与 `timeout`。非 `tui` 宿主上每个弹窗有 300 秒本地 deadline，且本地结算与宿主 promise 竞争：客户端静默丢弃请求时按 *cancelled* 结算而不是挂住整轮，deadline 之后到达的任何结果（包括迟到的 `"Allow once"`）一律丢弃。只有逐字 `"Allow once"` 才批准提权（`"Deny"` 与取消各走自己的分支）；其它任何值（`"Allow"`、`null`、对象）一律 fail-closed 并报 `nothing was executed`。该 deadline 只取消本次审批：绝不批准，也不记作用户拒绝 |
 | `notify`（配置告警、`/permission` 反馈） | 告警路径用 `hasUI` | 告警出口：有 UI 时走 `notify`；只有本进程从未出现过 UI（`pi -p`、JSON）才退 stderr；无 UI 的子会话留在缓冲里，不盖掉父会话的 TUI |
 
 ## License

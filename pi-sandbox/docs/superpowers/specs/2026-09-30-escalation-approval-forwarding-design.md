@@ -29,7 +29,9 @@
 | **D4** | 转发弹窗的文案**完全沿用**现有 escalation 标题与选项，**不加**任何子代理来源标识（不显示子 sessionId / agentName / cwd） |
 | **D5** | `/permission` 状态块**不加**转发通道诊断行（因此 broker 接口不含 `describe()`） |
 | **D6** | direct 与转发**两条路径都透传 `signal`**。转发路径必须透传（子代理已死时父弹窗要能自动关闭、排队中的请求不再弹出）；direct 路径的唯一可观察差异是——父 run 被**非 ESC 途径**中断（`ctx.abort()`、session 切换/reload）时弹窗自动关闭并记为 `was cancelled`（ESC 取消弹窗本来就能工作：弹窗抢焦点后 `escape` = `tui.select.cancel`）。第三参恒传，无 `signal` 时其值为 `undefined`（与省略在运行时不可区分：宿主签名为 `opts?`，dist 内无 `arguments.length` 判断），headless 行为逐字不变 |
+headless 行为逐字不变 |
 
+**现行契约（issue #253 起，替代 D2 / D6 中关于超时与 opts 的两条结论）**：审批在 `src/approval-dialog.ts` 结算——非 TUI（`ctx.mode !== "tui"`，判定用**弹窗实际显示的会话**的 mode，转发路径即父会话 mode）每个弹窗有 300 秒本地 deadline，并向宿主传**派生** `AbortSignal` + `timeout`（调用方没有 signal 时也有这个本地 deadline）；本地裁决与宿主 promise 竞争，先落裁决再 abort 弹窗，因此宿主完全忽略 opts、或在 abort 监听里同步 reject，结果仍是 `was cancelled`。TUI 依旧不设默认上限。授权判定同时收窄为逐字白名单（只有 `"Allow once"` 批准）。下文 §4/§8/§11 中"不设固定超时"、"opts 第三参为 `undefined`"、"宿主收到与调用方同一个 signal"的描述属于本文落地当时的状态，已被本段替代。
 ## 3. 方案选择：为什么是内存 broker 而不是文件邮箱
 
 被删除的 `pi-permission-system` 用的是**文件邮箱 + 双向 250ms 轮询**：子代理原子写 `requests/<id>.json`，父会话定时扫收件箱、弹窗、写回 `responses/<id>.json`，子代理轮询回执（10 分钟超时）。两方案对比：
@@ -360,7 +362,7 @@ abort 的两种时机：
 
 **D1（不做跨进程）的后果**：使用进程型子代理扩展（如 nicobailon/pi-subagents、HazAT/pi-interactive-subagents）时，子代理提权仍 fail-closed，解救路径与今天一致（`/permission` + `steer_subagent`）。
 
-**D2（无固定超时）的后果**：若父用户长期不理会弹窗，该子代理的这次工具调用会一直挂着，直到用户 ESC（弹窗抢焦点，ESC = `tui.select.cancel`，直接取消）、子代理被中断（signal 关弹窗）、或父会话关闭。可接受的依据：这与父会话自己提权时用户不理会弹窗的行为完全一致，且中断链路已存在（§4.1）。pi 的 `ExtensionUIDialogOptions.timeout` 能做自动消失倒计时，但按 D2 **不使用**。
+**D2（无固定超时）的后果 —— 已被 §2 末尾的现行契约替代**：非 TUI 宿主（RPC 客户端可能静默丢弃 `extension_ui_request`）在每个弹窗上都有 300 秒本地 deadline，到期按 `was cancelled` 结算并关闭弹窗，不再无限挂住；TUI 仍按 D2 处理（用户 ESC / 子代理中断 / 父会话关闭），因为终端前有人值守，自动到期只会把一次真实的人工决策变成误取消。
 
 **依赖 pi-subagents 的事件契约（非稳定 API）**：`subagents:child:session-created` / `:disposed` 的通道名与载荷形状是约定而非编译期契约（两包刻意不相互依赖）。上游改名或改形状的后果是**退回今天的 fail-closed 行为**（link 缺失 → 抛错），不会造成误放行——失败方向安全。契约当前由 `pi-subagents/tests/lifecycle/child-lifecycle.test.ts` 钉住。
 
@@ -385,6 +387,8 @@ abort 的两种时机：
 | 双语 README 的 /permission 一节 | 曾按 Ruling 19 追加"异 cwd 子会话下覆盖可能不及"的已知限制；该缺陷已由 PR #143 修复，据此删除该限制表述 |
 
 ## 11. 测试计划
+
+下表记录落地当时的断言基线。**issue #253 起**，凡涉及 `opts` 细节的行按现行契约读：宿主收到的是派生 `AbortSignal` 与 `timeout`（非 TUI 为 300 秒），`signal` / mode 的传递与 deadline 判据见 `tests/approval-dialog.test.ts`、`tests/escalation-broker.test.ts` 与 `tests/index-smoke.test.ts`。
 
 遵循 `docs/guides/testing.md`：纯内存、无 fs/网络依赖；每个测试用 `resetEscalationBrokerForTests()` 复位全局槽位。
 

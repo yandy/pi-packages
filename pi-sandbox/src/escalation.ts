@@ -18,8 +18,15 @@ export function isStrictlyWider(effective: SandboxMode, requested: string): bool
 /** 封闭的提权目标词汇（read-only 是底线，不可作为目标）。 */
 export const ESCALATION_TARGETS = ["workspace-write", "danger-full-access"] as const;
 
+/**
+ * 审批应答的逐字白名单。应答值来自扩展 UI / RPC 边界（宿主原样透传客户端的 `value`），
+ * 所以只有这两个字面量有语义，其余任何运行时值（`"Allow"`、`null`、对象……）都必须 fail-closed。
+ */
+export const APPROVAL_DENY = "Deny";
+export const APPROVAL_ALLOW = "Allow once";
+
 /** 审批弹窗选项，Deny 在首位：宿主 select 默认停在首项，拒绝应是失手时的默认值。 */
-export const ESCALATION_OPTIONS = ["Deny", "Allow once"] as const;
+export const ESCALATION_OPTIONS = [APPROVAL_DENY, APPROVAL_ALLOW] as const;
 
 /**
  * 畸形提权参数的错误文案（按需付费：只在模型发了畸形参数时进上下文）。三要素缺一不可——
@@ -145,9 +152,11 @@ export interface DenialReasonPrompt {
 	placeholder: string;
 }
 
-/** 一次审批对话的结算：choice 为 undefined 表示取消/无通道；reason 为 Deny 时的可选理由。 */
+/** 一次审批对话的结算：choice 为 undefined 表示取消/无通道；reason 为 Deny 时的可选理由。
+ *  choice 声明为 unknown 是刻意的：值来自扩展 UI / RPC 边界，类型收窄不能代替运行时校验，
+ *  只有 approveEscalation 的白名单能把它变成批准。 */
 export interface EscalationDecision {
-	choice: string | undefined;
+	choice: unknown;
 	reason?: string;
 }
 
@@ -226,9 +235,15 @@ export async function approveEscalation(request: EscalationRequest, ui: Escalati
 	if (decision.choice === undefined) {
 		throw new Error(`approval for escalating to "${requestedMode}" was cancelled — nothing was executed`);
 	}
-	if (decision.choice === "Deny") {
+	if (decision.choice === APPROVAL_DENY) {
 		throw new Error(
 			`the user rejected escalating this ${subject} to "${requestedMode}"; it stays denied, so stop and explain instead of working around it — do not retry with a different mode or a rewritten command${denialReasonSuffix(decision.reason)}`,
+		);
+	}
+	// 白名单之外的一切（任何其它字符串、null、对象、数组……）都不是批准：不信任宿主只返回预期字符串。
+	if (decision.choice !== APPROVAL_ALLOW) {
+		throw new Error(
+			`sandbox escalation to "${requestedMode}" was not approved: the approval channel returned a response that is not one of the offered options ("${APPROVAL_DENY}" | "${APPROVAL_ALLOW}") — nothing was executed. Ask the user to run /permission ${requestedMode} and retry, or do the work inside the writable roots.`,
 		);
 	}
 	return requestedMode as SandboxMode;
