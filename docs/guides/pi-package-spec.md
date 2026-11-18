@@ -76,7 +76,7 @@ README 至少包含：功能简介、安装方式、工具/命令/参数的完�
 /*/LICENSE
 ```
 
-`*` 不跨 `/`，所以这条只匹配 `<pkg>/LICENSE` 这一层：根 `LICENSE` 照常跟踪，`pi-superpowers/skills/<name>/LICENSE` 这类第三方许可也不会被意外忽略。
+`*` 不跨 `/`，所以这条只匹配 `<pkg>/LICENSE` 这一层：根 `LICENSE` 照常跟踪，`<pkg>/skills/<name>/LICENSE` 这类更深的第三方许可也不会被意外忽略。
 
 为什么必须用钩子：npm 只打包以包目录为根的子树，`files` 不能引用上一级目录，符号链接指向包外的 `LICENSE` 也会被排除在 tarball 之外。
 

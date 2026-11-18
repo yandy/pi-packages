@@ -36,8 +36,6 @@ jobs:
               - "pi-coding-tools/**"
             pi-subagents:
               - "pi-subagents/**"
-            pi-superpowers:
-              - "pi-superpowers/**"
             pi-todo:
               - "pi-todo/**"
             pi-vision-tools:

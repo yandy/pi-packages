@@ -9,8 +9,7 @@
 		"pi-todo",
 		"pi-vision-tools",
 		"pi-sandbox",
-		"pi-subagents",
-		"pi-superpowers"
+		"pi-subagents"
 	],
 	"scripts": {
 		"test": "npm run test --workspaces --if-present",

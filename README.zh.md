@@ -10,13 +10,13 @@
 | [pi-coding-tools](./pi-coding-tools/README.zh.md) | AST/LSP 代码智能工具（ast_grep_search/ast_grep_replace/lsp_symbols/lsp_hover/lsp_navigate） | `@yandy0725/pi-coding-tools` |
 | [pi-sandbox](./pi-sandbox/README.zh.md) | 进程级沙箱扩展（bwrap/landlock/seatbelt/windows-acl）：工作目录可写、其余宿主文件可读，fail-closed | `@yandy0725/pi-sandbox` |
 | [pi-subagents](./pi-subagents/README.zh.md) | 进程内子代理核心，支持后台执行和类型化 API | `@yandy0725/pi-subagents` |
-| [pi-superpowers](./pi-superpowers/README.zh.md) | Superpowers 结构化开发工作流（brainstorming、TDD、调试等） | `@yandy0725/pi-superpowers` |
 | [pi-todo](./pi-todo/README.zh.md) | 极简 todo 工具，带编辑器嵌入式小组件 | `@yandy0725/pi-todo` |
 | [pi-vision-tools](./pi-vision-tools/README.zh.md) | `describe_image` 工具——将图像分析委托给视觉模型 | `@yandy0725/pi-vision-tools` |
 | [pi-web-tools](./pi-web-tools/README.zh.md) | websearch + webfetch 工具 | `@yandy0725/pi-web-tools` |
 
 > `pi-memory` 已迁往 [simple-memory](https://github.com/yandy/simple-memory)。
 > `pi-container-sandbox` 已退役：npm 包标记为 deprecated，源码保留在 git 历史中（`pi-container-sandbox-v1.3.0`）。
+> `pi-superpowers` 已退役：npm 包标记为 deprecated，源码保留在 git 历史中（`pi-superpowers-v0.7.3`）；skills 请改用上游 [obra/superpowers](https://github.com/obra/superpowers)。
 
 ## 开发
 
