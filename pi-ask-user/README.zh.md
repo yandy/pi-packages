@@ -145,7 +145,7 @@ export PI_ASK_USER_COMMENT_TOGGLE_KEY=alt+c
 - **注释**——`allowComment` 开启时，选择之后再走一次 `input`；直接提交空内容即跳过。
 - **取消**——只有对话被取消（或超时）才产生 `cancelled: true`。
 
-用户不需要手打选项标题，因此不存在“解析失败被当成取消”。若对话宿主返回的值不在 offered 列表里，工具返回 `isError: true` 且 `cancelled: false`，在 `details.rawInput` 回显原始答案，并在错误文本里列出可选项。
+用户不需要手打选项标题，因此不存在“解析失败被当成取消”。若对话宿主返回的值不在 offered 列表里，工具返回 `isError: true` 且 `cancelled: false`，在 `details.rawInput` 回显原始答案，并在错误文本里列出可选项。`✓ Done selecting` 与自由文本行同样校验：只有当轮确实提供了它们才被接受，因此未提供的 `Done` 不会被当成取消，未提供的自由文本行也无法绕过 `allowFreeform: false`。
 
 走这条路径得到的结果带 `details.fallback: "dialogs"`。
 
@@ -170,7 +170,7 @@ interface AskToolDetails {
   error?: string;
   /** 对话返回的、与任何可选项都不匹配的原始答案。 */
   rawInput?: string;
-  /** 工具自行结算时给出；用户（或宿主）主动取消时缺省。 */
+  /** 工具自行结算时给出（`"timeout"` 或 `"abort"`）；用户（或宿主）主动取消时缺省。 */
   cancelReason?: "timeout" | "abort";
 }
 ```
@@ -193,7 +193,12 @@ RPC 模式（`pi --mode rpc`）下 `ctx.ui.custom()` 返回 `undefined`，`ask_u
 - 工具还会用本地 deadline 与工具 abort signal 与宿主 promise 赛跑，宿主完全忽略这两个选项时也能结算。
   超时会 abort 传给宿主的 signal，让守规矩的宿主撤掉弹窗。
 - 结算结果为 `cancelled: true` 加 `details.cancelReason`：到期为 `"timeout"`，被中断为 `"abort"`，
-  用户（或宿主）主动取消时缺省。
+  用户（或宿主）主动取消时缺省。本地原因拥有最终裁决权：宿主在 abort 监听里 reject（或超出
+  截止时间后才作答）都不能把本地取消改成错误或采纳迟到的答案。只有未记录本地取消时宿主抛出的
+  异常才作为 `isError: true` 上报。
+- 富 TUI 走同一套契约：显式 `timeout` 以 `cancelReason: "timeout"` 与 `Timed out` 文案结算，中断记为
+  `"abort"`，用户主动取消不带原因。任何结局都只结算一次并清掉 timer 与 abort 监听，迟到回调
+  不会再结算一次。
 
 ## 致谢
 
@@ -205,7 +210,7 @@ RPC 模式（`pi --mode rpc`）下 `ctx.ui.custom()` 返回 `undefined`，`ask_u
 
 | 方法 | 守卫 | 非 TUI（RPC / headless） |
 |---|---|---|
-| `custom`（富交互的内联 / 浮层提问组件） | `hasUI` | RPC 直接返回 `undefined`，工具退回下面的 `select` / `input` 对话协议 |
+| `custom`（富交互的内联 / 浮层提问组件） | `hasUI` | RPC 直接返回 `undefined`，工具退回下面的 `select` / `input` 对话协议。显式 `timeout` 与工具 abort signal 经一次性 `done` 包装结算组件，同时记录 `details.cancelReason` 并清掉 timer / 监听 |
 | `onTerminalInput`（浮层切换键） | `mode === "tui"`（只在组件路径里注册） | 不注册 |
 | `select` / `input`（对话降级、无选项的自由提问） | `hasUI` | 以 `extension_ui_request` 转发，客户端应当应答。每次调用都带 `timeout` + `signal`，工具另用本地 deadline（非 TUI 默认 300000 ms）与工具 abort signal 赛跑，客户端不响应时结算为 `cancelled: true` 加 `details.cancelReason: "timeout"`，不会挂死整轮 |
 | `notify`（`ask_user hidden — press …` 提示） | `mode === "tui"` | 不会触发 |

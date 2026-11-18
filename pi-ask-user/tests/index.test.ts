@@ -2485,6 +2485,433 @@ describe("ask_user", () => {
 				vi.useRealTimers();
 			}
 		});
+
+		// issue #255：宿主可能在 opts.signal 的 abort 监听里同步 reject。本地取消原因一旦记录，
+		// 结算结果就必须固定为本地取消——宿主 rejection 不得抢先赢得 race，也不能被当成真实错误。
+		describe("local cancel owns the settlement (issue #255)", () => {
+			/** 宿主在 dialog signal 的 abort 监听里同步 reject。 */
+			function hostRejectingOnAbort(opts: any): Promise<never> {
+				return new Promise<never>((_resolve, reject) => {
+					opts?.signal?.addEventListener("abort", () => reject(new Error("host rejected abort")), { once: true });
+				});
+			}
+
+			it("timeout: a select() that rejects inside the abort listener still settles as a local timeout", async () => {
+				vi.useFakeTimers();
+				try {
+					const tool = await setupTool();
+					const { promise } = runWithFakeTimers(() =>
+						tool.execute(
+							"tool-call-id",
+							{ question: "Pick a color", options: ["Red", "Blue"], allowFreeform: false, allowComment: false },
+							undefined,
+							undefined,
+							dialogCtx({ select: (_title: string, _choices: string[], opts: any) => hostRejectingOnAbort(opts) }),
+						),
+					);
+
+					await vi.advanceTimersByTimeAsync(DEFAULT_DEADLINE_MS);
+
+					const result = await promise;
+					expect(result.isError).not.toBe(true);
+					expect(result.details.cancelled).toBe(true);
+					expect(result.details.cancelReason).toBe("timeout");
+					expect(result.content[0].text).toContain("Timed out");
+				} finally {
+					vi.useRealTimers();
+				}
+			});
+
+			it("abort: an option-less input that rejects inside the abort listener still settles as a local abort", async () => {
+				const tool = await setupTool();
+				const controller = new AbortController();
+				let opened: (() => void) | undefined;
+				const dialogOpened = new Promise<void>((resolve) => {
+					opened = resolve;
+				});
+				const promise = tool.execute(
+					"tool-call-id",
+					{ question: "What is your name?" },
+					controller.signal,
+					undefined,
+					dialogCtx({
+						input: (_title: string, _placeholder: string, opts: any) => {
+							opened?.();
+							return hostRejectingOnAbort(opts);
+						},
+					}),
+				);
+
+				await dialogOpened;
+				controller.abort();
+				const result = await promise;
+
+				expect(result.isError).not.toBe(true);
+				expect(result.details.cancelled).toBe(true);
+				expect(result.details.cancelReason).toBe("abort");
+			});
+
+			it("timeout: a comment follow-up that rejects inside the abort listener still settles as a local timeout", async () => {
+				vi.useFakeTimers();
+				try {
+					const tool = await setupTool();
+					const { promise } = runWithFakeTimers(() =>
+						tool.execute(
+							"tool-call-id",
+							{ question: "Pick a color", options: ["Red", "Blue"], allowFreeform: false },
+							undefined,
+							undefined,
+							dialogCtx({
+								select: async () => "Red",
+								input: (_title: string, _placeholder: string, opts: any) => hostRejectingOnAbort(opts),
+							}),
+						),
+					);
+
+					await vi.advanceTimersByTimeAsync(DEFAULT_DEADLINE_MS);
+
+					const result = await promise;
+					expect(result.isError).not.toBe(true);
+					expect(result.details.cancelled).toBe(true);
+					expect(result.details.cancelReason).toBe("timeout");
+					expect(result.details.response).toBeNull();
+				} finally {
+					vi.useRealTimers();
+				}
+			});
+
+			it("timeout: a later multi-select round that rejects inside the abort listener still settles as a local timeout", async () => {
+				vi.useFakeTimers();
+				try {
+					const tool = await setupTool();
+					let round = 0;
+					const { promise } = runWithFakeTimers(() =>
+						tool.execute(
+							"tool-call-id",
+							{
+								question: "Pick colors",
+								options: ["Red", "Blue"],
+								allowMultiple: true,
+								allowFreeform: false,
+								allowComment: false,
+							},
+							undefined,
+							undefined,
+							dialogCtx({
+								select: (_title: string, choices: string[], opts: any) => {
+									round += 1;
+									if (round === 1) return Promise.resolve(choices[0] ?? "");
+									return hostRejectingOnAbort(opts);
+								},
+							}),
+						),
+					);
+
+					await vi.advanceTimersByTimeAsync(DEFAULT_DEADLINE_MS);
+
+					const result = await promise;
+					expect(round).toBe(2);
+					expect(result.isError).not.toBe(true);
+					expect(result.details.cancelled).toBe(true);
+					expect(result.details.cancelReason).toBe("timeout");
+				} finally {
+					vi.useRealTimers();
+				}
+			});
+
+			it("ignores a host answer that arrives after the local deadline settled the prompt", async () => {
+				vi.useFakeTimers();
+				try {
+					const tool = await setupTool();
+					let answer: ((value: string) => void) | undefined;
+					const { promise } = runWithFakeTimers(() =>
+						tool.execute(
+							"tool-call-id",
+							{ question: "Pick a color", options: ["Red", "Blue"], allowFreeform: false, allowComment: false },
+							undefined,
+							undefined,
+							dialogCtx({
+								select: () =>
+									new Promise<string>((resolve) => {
+										answer = resolve;
+									}),
+							}),
+						),
+					);
+
+					await vi.advanceTimersByTimeAsync(DEFAULT_DEADLINE_MS);
+					const result = await promise;
+					answer?.("Red");
+					await Promise.resolve();
+
+					expect(result.details.cancelled).toBe(true);
+					expect(result.details.response).toBeNull();
+					expect(result.details.cancelReason).toBe("timeout");
+				} finally {
+					vi.useRealTimers();
+				}
+			});
+
+			it("does not surface an unhandled rejection when the host rejects after a local cancel", async () => {
+				const tool = await setupTool();
+				const rejections: unknown[] = [];
+				const onUnhandled = (reason: unknown) => rejections.push(reason);
+				process.on("unhandledRejection", onUnhandled);
+				try {
+					let rejectHost: ((error: Error) => void) | undefined;
+					const result = await tool.execute(
+						"tool-call-id",
+						{ question: "Pick a color", options: ["Red", "Blue"], allowFreeform: false, allowComment: false, timeout: 5 },
+						undefined,
+						undefined,
+						dialogCtx({
+							select: () =>
+								new Promise<string>((_resolve, reject) => {
+									rejectHost = reject;
+								}),
+						}),
+					);
+
+					expect(result.details.cancelReason).toBe("timeout");
+					rejectHost?.(new Error("late host rejection"));
+					await new Promise((resolve) => setTimeout(resolve, 0));
+					expect(rejections).toHaveLength(0);
+				} finally {
+					process.off("unhandledRejection", onUnhandled);
+				}
+			});
+
+			it("reports a plain host rejection as a structured error, not as a timeout or abort", async () => {
+				const tool = await setupTool();
+
+				const result = await tool.execute(
+					"tool-call-id",
+					{ question: "Pick a color", options: ["Red", "Blue"], allowFreeform: false, allowComment: false },
+					undefined,
+					undefined,
+					dialogCtx({
+						select: async () => {
+							throw new Error("boom from host");
+						},
+					}),
+				);
+
+				expect(result.isError).toBe(true);
+				expect(result.details.cancelled).not.toBe(true);
+				expect(result.details.cancelReason).toBeUndefined();
+				expect(result.content[0].text).toContain("boom from host");
+			});
+		});
+	});
+
+	// issue #255：富 TUI 的 done 也必须是一次性结算——取消原因进入 details.cancelReason，
+	// timer 与 abort 监听在任意结局（作答 / 取消 / timeout / abort / 抛错）后都要清掉。
+	describe("rich TUI cancellation lifecycle (issue #255)", () => {
+		const customTui = { requestRender() {}, terminal: { rows: 24 } };
+
+		function richCtx(custom: any) {
+			return { hasUI: true, mode: "tui", cwd: "/tmp/project", ui: makeUI({ custom }) };
+		}
+
+		/** 打开富 TUI 并把宿主自己的 done 交给测试：模拟组件作答或用户取消。 */
+		function openRichUI(doneCalls: any[]) {
+			return async (factory: any) =>
+				new Promise((resolve) => {
+					factory(customTui, createTheme(), createKeybindings(), (result: any) => {
+						doneCalls.push(result);
+						resolve(result);
+					});
+				});
+		}
+
+		it("explicit timeout settles once with a timeout reason and the Timed out wording", async () => {
+			vi.useFakeTimers();
+			try {
+				const tool = await setupTool();
+				const doneCalls: any[] = [];
+				const promise = tool.execute(
+					"tool-call-id",
+					{ question: "Pick a color", options: ["Red", "Blue"], timeout: 1000 },
+					undefined,
+					undefined,
+					richCtx(openRichUI(doneCalls)),
+				);
+
+				await vi.advanceTimersByTimeAsync(1000);
+				const result = await promise;
+
+				expect(doneCalls).toEqual([null]);
+				expect(result.details.cancelled).toBe(true);
+				expect(result.details.cancelReason).toBe("timeout");
+				expect(result.content[0].text).toContain("Timed out");
+				expect(result.content[0].text).toContain("1000");
+				const rendered = tool.renderResult(result, { isPartial: false }, createTheme()).render().join("\n");
+				expect(rendered).toContain("Timed out");
+				expect(vi.getTimerCount()).toBe(0);
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("an in-flight abort settles once with an abort reason", async () => {
+			const tool = await setupTool();
+			const controller = new AbortController();
+			const doneCalls: any[] = [];
+			let opened: (() => void) | undefined;
+			const uiOpened = new Promise<void>((resolve) => {
+				opened = resolve;
+			});
+
+			const promise = tool.execute(
+				"tool-call-id",
+				{ question: "Pick a color", options: ["Red", "Blue"] },
+				controller.signal,
+				undefined,
+				richCtx(async (factory: any) => {
+					opened?.();
+					return await openRichUI(doneCalls)(factory);
+				}),
+			);
+
+			await uiOpened;
+			controller.abort();
+			const result = await promise;
+
+			expect(doneCalls).toEqual([null]);
+			expect(result.details.cancelled).toBe(true);
+			expect(result.details.cancelReason).toBe("abort");
+			const rendered = tool.renderResult(result, { isPartial: false }, createTheme()).render().join("\n");
+			expect(rendered).toContain("Cancelled");
+		});
+
+		it("a user cancel carries no cancel reason and the plain Cancelled wording", async () => {
+			vi.useFakeTimers();
+			try {
+				const tool = await setupTool();
+				const doneCalls: any[] = [];
+				const result = await tool.execute(
+					"tool-call-id",
+					{ question: "Pick a color", options: ["Red", "Blue"], timeout: 1000 },
+					undefined,
+					undefined,
+					richCtx(
+						async (factory: any) =>
+							await new Promise((resolve) => {
+								const done = (answer: any) => {
+									doneCalls.push(answer);
+									resolve(answer);
+								};
+								factory(customTui, createTheme(), createKeybindings(), done);
+								// 用户按 esc：组件用同一个 done 取消，不是本地 timeout。
+								done(null);
+							}),
+					),
+				);
+
+				expect(doneCalls).toEqual([null]);
+				expect(result.details.cancelled).toBe(true);
+				expect(result.details.cancelReason).toBeUndefined();
+				expect(result.content[0].text).toBe("User cancelled the question");
+				const rendered = tool.renderResult(result, { isPartial: false }, createTheme()).render().join("\n");
+				expect(rendered).toContain("Cancelled");
+				expect(vi.getTimerCount()).toBe(0);
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("a normal answer clears the timer and no late timeout or abort settles the tool again", async () => {
+			vi.useFakeTimers();
+			try {
+				const tool = await setupTool();
+				const controller = new AbortController();
+				const doneCalls: any[] = [];
+				let answer: ((result: any) => void) | undefined;
+
+				const promise = tool.execute(
+					"tool-call-id",
+					{ question: "Pick a color", options: ["Red", "Blue"], timeout: 1000 },
+					controller.signal,
+					undefined,
+					richCtx(
+						async (factory: any) =>
+							await new Promise((resolve) => {
+								answer = (result: any) => {
+									doneCalls.push(result);
+									resolve(result);
+								};
+								factory(customTui, createTheme(), createKeybindings(), answer);
+							}),
+					),
+				);
+
+				await Promise.resolve();
+				answer?.({ kind: "selection", selections: ["Red"] });
+				const result = await promise;
+
+				expect(doneCalls).toHaveLength(1);
+				expect(result.details.response).toEqual({ kind: "selection", selections: ["Red"] });
+				expect(vi.getTimerCount()).toBe(0);
+
+				// 迟到回调：推进假时钟再 abort，都不得再 settle 一次。
+				controller.abort();
+				await vi.advanceTimersByTimeAsync(5000);
+				expect(doneCalls).toHaveLength(1);
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("clears the timer when the rich TUI fails after arming it", async () => {
+			vi.useFakeTimers();
+			try {
+				const tool = await setupTool();
+				const controller = new AbortController();
+				const doneCalls: any[] = [];
+
+				const result = await tool.execute(
+					"tool-call-id",
+					{ question: "Pick a color", options: ["Red", "Blue"], timeout: 1000 },
+					controller.signal,
+					undefined,
+					richCtx(async (factory: any) => {
+						factory(customTui, createTheme(), createKeybindings(), (answer: any) => doneCalls.push(answer));
+						throw new Error("custom host failed after opening");
+					}),
+				);
+
+				expect(result.isError).toBe(true);
+				expect(vi.getTimerCount()).toBe(0);
+
+				controller.abort();
+				await vi.advanceTimersByTimeAsync(5000);
+				expect(doneCalls).toHaveLength(0);
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("does not open the rich TUI when the signal is already aborted", async () => {
+			const tool = await setupTool();
+			const controller = new AbortController();
+			controller.abort();
+			let customCalls = 0;
+
+			const result = await tool.execute(
+				"tool-call-id",
+				{ question: "Pick a color", options: ["Red", "Blue"] },
+				controller.signal,
+				undefined,
+				richCtx(async () => {
+					customCalls += 1;
+					return null;
+				}),
+			);
+
+			expect(customCalls).toBe(0);
+			expect(result.details.cancelled).toBe(true);
+			expect(result.details.cancelReason).toBe("abort");
+		});
 	});
 
 	describe("RPC fallback multi-select", () => {
@@ -2653,7 +3080,7 @@ describe("ask_user", () => {
 		});
 	});
 
-	describe("RPC fallback answer validation (issue #247)", () => {
+	describe("RPC fallback answer validation (issues #247, #255)", () => {
 		it("multi-select: an answer matching no offered row is a diagnosable error, not a cancellation", async () => {
 			const tool = await setupTool();
 
@@ -2745,6 +3172,135 @@ describe("ask_user", () => {
 
 			expect(result.details.cancelled).toBe(false);
 			expect(result.details.fallback).toBeUndefined();
+		});
+
+		// issue #255：Done / Freeform 哨兵也必须属于当轮 offered 集合。先校验再分派，
+		// 否则未提供的哨兵会绕过答案校验——要么被当成用户取消，要么跳过 allowFreeform: false。
+		it("multi-select: an unoffered Done row is an error, not a cancellation and not a comment prompt", async () => {
+			for (const allowComment of [false, true]) {
+				const tool = await setupTool();
+				let inputCalls = 0;
+
+				const result = await tool.execute(
+					"tool-call-id",
+					{ question: "Pick colors", options: ["Red", "Blue"], allowMultiple: true, allowComment },
+					undefined,
+					undefined,
+					{
+						hasUI: true,
+						ui: makeUI({
+							custom: async () => undefined,
+							select: async () => "\u2713 Done selecting",
+							input: async () => {
+								inputCalls += 1;
+								return "should never be asked";
+							},
+						}),
+					},
+				);
+
+				expect(result.isError).toBe(true);
+				expect(result.details.cancelled).toBe(false);
+				expect(result.details.response).toBeNull();
+				expect(result.details.rawInput).toBe("\u2713 Done selecting");
+				expect(result.details.fallback).toBe("dialogs");
+				expect(inputCalls).toBe(0);
+				const text = result.content.map((part: any) => part.text).join("\n");
+				expect(text).toContain("Done selecting");
+				expect(text).toContain("Red");
+			}
+		});
+
+		it("single-select: the freeform row is rejected when allowFreeform is false", async () => {
+			const tool = await setupTool();
+			let inputCalls = 0;
+
+			const result = await tool.execute(
+				"tool-call-id",
+				{ question: "Pick a color", options: ["Red", "Blue"], allowFreeform: false },
+				undefined,
+				undefined,
+				{
+					hasUI: true,
+					ui: makeUI({
+						custom: async () => undefined,
+						select: async () => "\u270f\ufe0f Type custom response...",
+						input: async () => {
+							inputCalls += 1;
+							return "Purple";
+						},
+					}),
+				},
+			);
+
+			expect(result.isError).toBe(true);
+			expect(result.details.cancelled).toBe(false);
+			expect(result.details.rawInput).toBe("\u270f\ufe0f Type custom response...");
+			expect(inputCalls).toBe(0);
+		});
+
+		it("multi-select: the freeform row is rejected when allowFreeform is false", async () => {
+			const tool = await setupTool();
+			let inputCalls = 0;
+
+			const result = await tool.execute(
+				"tool-call-id",
+				{ question: "Pick colors", options: ["Red", "Blue"], allowMultiple: true, allowFreeform: false, allowComment: false },
+				undefined,
+				undefined,
+				{
+					hasUI: true,
+					ui: makeUI({
+						custom: async () => undefined,
+						select: async () => "\u270f\ufe0f Type custom response...",
+						input: async () => {
+							inputCalls += 1;
+							return "Purple";
+						},
+					}),
+				},
+			);
+
+			expect(result.isError).toBe(true);
+			expect(result.details.cancelled).toBe(false);
+			expect(result.details.rawInput).toBe("\u270f\ufe0f Type custom response...");
+			expect(inputCalls).toBe(0);
+		});
+
+		it("multi-select: a row left over from the previous round is a diagnosable error", async () => {
+			const tool = await setupTool();
+			let round = 0;
+			let staleRow = "";
+
+			const result = await tool.execute(
+				"tool-call-id",
+				{ question: "Pick colors", options: ["Red", "Blue"], allowMultiple: true, allowFreeform: false, allowComment: false },
+				undefined,
+				undefined,
+				{
+					hasUI: true,
+					ui: makeUI({
+						custom: async () => undefined,
+						select: async (_title: string, choices: string[]) => {
+							round += 1;
+							if (round === 1) {
+								staleRow = choices[0] ?? "";
+								return staleRow;
+							}
+							return staleRow;
+						},
+					}),
+				},
+			);
+
+			expect(round).toBe(2);
+			expect(result.isError).toBe(true);
+			expect(result.details.cancelled).toBe(false);
+			expect(result.details.rawInput).toBe(staleRow);
+			const text = result.content.map((part: any) => part.text).join("\n");
+			expect(text).toContain(staleRow);
+			// 错误文本列出的是当轮 actually offered 的行（Red 已勾选）。
+			expect(text).toContain("1. [\u2713] Red");
 		});
 	});
 

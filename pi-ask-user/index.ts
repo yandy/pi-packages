@@ -1637,34 +1637,43 @@ function createDialogGuard(signal: AbortSignal | undefined, timeout: number | un
 		},
 		async run<T>(call: (opts: DialogCallOptions) => Promise<T>): Promise<T | undefined> {
 			if (signal?.aborted) {
-				reason = "abort";
+				reason ??= "abort";
 				return undefined;
 			}
 			const controller = new AbortController();
-			let settle: (() => void) | undefined;
-			const settled = new Promise<void>((resolve) => {
-				settle = resolve;
+			// 本地取消通道直接参与 race，不经过 `settled.then(...)` 的额外 microtask：
+			// 否则宿主在 abort 监听里同步 reject 时会先赢得 race，把本地取消改写成错误。
+			let settledLocally = false;
+			let settleLocal: (() => void) | undefined;
+			const localCancel = new Promise<undefined>((resolve) => {
+				settleLocal = () => resolve(undefined);
 			});
-			const onAbort = () => {
-				reason = "abort";
+			const cancel = (why: "timeout" | "abort") => {
+				if (settledLocally) return;
+				settledLocally = true;
+				reason ??= why;
+				// 先结算本地通道再 abort 宿主：宿主同步 reject 时结果已被本地取消钉住。
+				settleLocal?.();
 				controller.abort();
-				settle?.();
 			};
+			const onAbort = () => cancel("abort");
 			signal?.addEventListener("abort", onAbort, { once: true });
 			const hasDeadline = timeout !== undefined && timeout > 0;
-			const timer = hasDeadline
-				? setTimeout(() => {
-						reason = "timeout";
-						controller.abort();
-						settle?.();
-					}, timeout)
-				: undefined;
+			const timer = hasDeadline ? setTimeout(() => cancel("timeout"), timeout) : undefined;
 			try {
 				const opts: DialogCallOptions = hasDeadline
 					? { signal: controller.signal, timeout }
 					: { signal: controller.signal };
-				// race 已订阅宿主 promise：超时后宿主迟到的 reject 不会变成 unhandled rejection。
-				return await Promise.race([call(opts), settled.then(() => undefined)]);
+				// 宿主 promise 立即订阅：本地取消后它的 resolve/reject 都只落在这里，
+				// 迟到的选择值被忽略，迟到的 rejection 不会变成 unhandled rejection。
+				const host = Promise.resolve(call(opts)).then(
+					(value) => (settledLocally ? undefined : value),
+					(error: unknown) => {
+						if (settledLocally) return undefined;
+						throw error;
+					},
+				);
+				return await Promise.race([host, localCancel]);
 			} finally {
 				if (timer !== undefined) clearTimeout(timer);
 				signal?.removeEventListener("abort", onAbort);
@@ -1736,6 +1745,9 @@ async function askMultipleViaDialogs(
 		const value = (await guard.run((opts) => ui.select(title, choices, opts))) as string | undefined;
 		if (isCancelledInput(value)) return null;
 
+		// 先校验当轮 offered 集合，再分派哨兵：未提供的 Done / Freeform 不能绕过答案校验。
+		if (!choices.includes(value)) throw new DialogAnswerError(value, choices);
+
 		if (value === DIALOG_DONE_SENTINEL) {
 			if (!allowComment) return createSelectionResponse(selections);
 			const comment = (await guard.run((opts) =>
@@ -1789,13 +1801,14 @@ async function askViaDialogs(
 	const selected = (await guard.run((opts) => ui.select(prompt, selectOptions, opts))) as string | undefined;
 	if (isCancelledInput(selected)) return null;
 
+	// 先校验当轮 offered 集合：allowFreeform: false 时自由文本哨兵并未提供，不得被当成选项接受。
+	if (!selectOptions.includes(selected)) throw new DialogAnswerError(selected, selectOptions);
+
 	if (selected === FREEFORM_SENTINEL) {
 		const answer = (await guard.run((opts) => ui.input(prompt, "Type your answer...", opts))) as string | undefined;
 		if (isCancelledInput(answer)) return null;
 		return createFreeformResponse(answer);
 	}
-
-	if (!selectOptions.includes(selected)) throw new DialogAnswerError(selected, selectOptions);
 
 	if (!allowComment) {
 		return createSelectionResponse([selected]);
@@ -1862,7 +1875,13 @@ export default function (pi: ExtensionAPI) {
 			if (signal?.aborted) {
 				return {
 					content: [{ type: "text", text: "Cancelled" }],
-					details: { question: params.question, options: [], response: null, cancelled: true } as AskToolDetails,
+					details: {
+						question: params.question,
+						options: [],
+						response: null,
+						cancelled: true,
+						cancelReason: "abort",
+					} as AskToolDetails,
 				};
 			}
 
@@ -1960,6 +1979,10 @@ export default function (pi: ExtensionAPI) {
 			let result: AskUIResult | null;
 			let usedDialogFallback = false;
 			let dialogGuard: DialogGuard | undefined;
+			/** 富 TUI 本地结算的原因；undefined = 用户主动取消或正常作答。 */
+			let customCancelReason: "timeout" | "abort" | undefined;
+			/** 富 TUI 组件异常退出时的清理入口（正常结算后调用也无害）。 */
+			let disposeCustomSettlement: (() => void) | undefined;
 			let overlayHandle: OverlayHandle | undefined;
 			let removeOverlayInputListener: (() => void) | undefined;
 			let hasAnnouncedHide = false;
@@ -1968,15 +1991,36 @@ export default function (pi: ExtensionAPI) {
 					tui: TUI,
 					theme: Theme,
 					keybindings: KeybindingsManager,
-					done: (result: AskUIResult | null) => void,
+					hostDone: (result: AskUIResult | null) => void,
 				) => {
-					if (signal) {
-						const onAbort = () => done(null);
-						signal.addEventListener("abort", onAbort, { once: true });
-					}
+					// 一次性结算：显式 timeout / 工具 abort 记录原因后自己 done(null)，
+					// 首 次结算后清掉 timer 与 abort 监听，迟到的回调不得重复 settle。
+					let settled = false;
+					let timer: ReturnType<typeof setTimeout> | undefined;
+					const cleanup = () => {
+						if (timer !== undefined) {
+							clearTimeout(timer);
+							timer = undefined;
+						}
+						signal?.removeEventListener("abort", onAbort);
+					};
+					const settle = (settledResult: AskUIResult | null, reason?: "timeout" | "abort") => {
+						if (settled) return;
+						settled = true;
+						if (reason) customCancelReason = reason;
+						cleanup();
+						hostDone(settledResult);
+					};
+					const onAbort = () => settle(null, "abort");
 
-					if (timeout && timeout > 0) {
-						setTimeout(() => done(null), timeout);
+					disposeCustomSettlement = () => {
+						settled = true;
+						cleanup();
+					};
+
+					signal?.addEventListener("abort", onAbort, { once: true });
+					if (explicitTimeout !== undefined) {
+						timer = setTimeout(() => settle(null, "timeout"), explicitTimeout);
 					}
 
 					return new AskComponent(
@@ -1991,7 +2035,7 @@ export default function (pi: ExtensionAPI) {
 						theme,
 						keybindings,
 						shortcuts,
-						done,
+						(answer) => settle(answer),
 					);
 				};
 
@@ -2069,15 +2113,16 @@ export default function (pi: ExtensionAPI) {
 				};
 			} finally {
 				removeOverlayInputListener?.();
+				disposeCustomSettlement?.();
 			}
 
 			const fallbackFields = usedDialogFallback ? { fallback: "dialogs" as const } : {};
 
 			if (result === null) {
-				const cancelReason = dialogGuard?.reason;
+				const cancelReason = dialogGuard?.reason ?? customCancelReason;
 				pi.events.emit("ask:cancelled", { question, context: normalizedContext, options, reason: cancelReason });
 				return {
-					content: [{ type: "text", text: describeCancel(cancelReason, dialogGuard?.timeout) }],
+					content: [{ type: "text", text: describeCancel(cancelReason, dialogGuard?.timeout ?? explicitTimeout) }],
 					details: {
 						question,
 						context: normalizedContext,

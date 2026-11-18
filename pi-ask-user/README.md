@@ -163,7 +163,7 @@ When the rich TUI is unavailable (`ctx.ui.custom()` returns `undefined`, e.g. `p
 - **Comment** — with `allowComment`, an `input` dialog follows the selection; submitting nothing skips it.
 - **Cancellation** — only a cancelled dialog (or a timeout) produces `cancelled: true`.
 
-The user never types option titles, so a mismatch cannot be mistaken for a cancellation. If the dialog host returns a value that is not one of the offered choices, the tool returns `isError: true` with `cancelled: false`, echoes the raw answer in `details.rawInput`, and lists the offered choices in the error text.
+The user never types option titles, so a mismatch cannot be mistaken for a cancellation. If the dialog host returns a value that is not one of the offered choices, the tool returns `isError: true` with `cancelled: false`, echoes the raw answer in `details.rawInput`, and lists the offered choices in the error text. The `✓ Done selecting` and freeform rows are validated the same way: they are only accepted when that round actually offered them, so an unoffered `Done` cannot pass as a cancellation and an unoffered freeform row cannot bypass `allowFreeform: false`.
 
 Results collected this way carry `details.fallback: "dialogs"`.
 
@@ -188,7 +188,7 @@ interface AskToolDetails {
   error?: string;
   /** Verbatim dialog answer that matched none of the offered choices. */
   rawInput?: string;
-  /** Set when the tool settled the prompt itself; absent for a user/host cancel. */
+  /** Set when the tool settled the prompt itself (`"timeout"` or `"abort"`); absent for a user/host cancel. */
   cancelReason?: "timeout" | "abort";
 }
 ```
@@ -216,6 +216,12 @@ See the host's `docs/rpc-extension-ui.md` for the wire format.
   conforming host tears down its prompt.
 - Settlement is reported as `cancelled: true` plus `details.cancelReason`: `"timeout"` when the
   deadline expired, `"abort"` when the call was interrupted, and absent when the user (or host) cancelled.
+  The local reason owns the result: a host that rejects its promise from inside the abort listener (or
+  answers after the deadline) cannot turn a local cancel into an error or a late answer. Only a host
+  error that arrives while no local cancel was recorded is reported as `isError: true`.
+- The rich TUI path uses the same contract: an explicit `timeout` settles with `cancelReason: "timeout"`
+  and the `Timed out` wording, an interrupt settles with `"abort"`, and a user cancel stays reason-less.
+  Every settlement clears the timer and the abort listener once, so late callbacks cannot settle twice.
 
 ## Credits
 
@@ -227,7 +233,7 @@ This project is based on [pi-ask-user](https://github.com/edlsh/pi-ask-user) by 
 
 | Method | Guard | Outside TUI (RPC / headless) |
 |---|---|---|
-| `custom` (rich inline / overlay question component) | `hasUI` | RPC returns `undefined` immediately, so the tool falls back to the `select` / `input` dialog protocol below |
+| `custom` (rich inline / overlay question component) | `hasUI` | RPC returns `undefined` immediately, so the tool falls back to the `select` / `input` dialog protocol below. An explicit `timeout` and the tool's abort signal settle the component through a one-shot `done` wrapper, which records `details.cancelReason` and clears the timer/listener |
 | `onTerminalInput` (overlay toggle key) | `mode === "tui"` (registered only inside the component path) | Not registered |
 | `select` / `input` (dialog fallback, freeform questions) | `hasUI` | Forwarded as `extension_ui_request`; the client should answer. Every call carries `timeout` + `signal`, and the tool races its own deadline (default 300000 ms outside TUI) and the tool's abort signal, so an unresponsive client settles as `cancelled: true` with `details.cancelReason: "timeout"` instead of hanging the turn |
 | `notify` (`ask_user hidden — press …`) | `mode === "tui"` | Not reached |
