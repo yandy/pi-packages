@@ -203,6 +203,13 @@ cd <可写项目目录> && PI_CODING_AGENT_DIR="$AG" pi
 
 观察点与验证记录见 `docs/superpowers/specs/2026-09-30-escalation-approval-forwarding-design.md` §11。
 
+## UI 能力
+
+| 方法 | 守卫 | 非 TUI（RPC / headless） |
+|---|---|---|
+| `select` + `input`（`sandbox_permissions` / `file_operation` 提权审批；`input` 是拒绝时的可选理由） | `hasUI`；子会话会沿 link 解析到最近一个仍有 UI 的父通道 | 以 `extension_ui_request` 转发。只透传工具调用的 `AbortSignal`，没有任何超时：客户端不应答时工具调用一直挂着（fail-closed，未应答的请求永远不会被自动批准） |
+| `notify`（配置告警、`/permission` 反馈） | 告警路径用 `hasUI` | 告警出口：有 UI 时走 `notify`；只有本进程从未出现过 UI（`pi -p`、JSON）才退 stderr；无 UI 的子会话留在缓冲里，不盖掉父会话的 TUI |
+
 ## License
 
 MIT

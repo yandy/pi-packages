@@ -290,6 +290,66 @@ export default function (pi: ExtensionAPI) {
 
 回归闸门：每个 Extension 包写一个 `tests/prompt-meta.test.ts`，调用仓库根 `scripts/prompt-hygiene.ts` 的 `assertPromptHygiene({ pkg, budget, tools, authored })`。它检查 snippet 长度/前缀/标点/祈使句、单条 guideline 长度与逐字重复、以及包内三通道合计预算（去重后）。`budget` 用该包当前实测值向上取整，防漂移。
 
+### UI 能力与跨模式降级
+
+宿主只暴露两个粗粒度信号：`ctx.mode`（`"tui" | "rpc" | "json" | "print"`）与 `ctx.hasUI`。它们**不能**表达「某个 UI 方法在这个宿主里真的有用」——RPC 的 UI 支持是**分级**的，而 `hasUI` 在 RPC 下恒为 `true`。
+
+依据（宿主 1.5.0）：`ctx.hasUI` 的实现是「uiContext 不是 noOpUIContext」（`dist/core/extensions/runner.js`），RPC 模式在 `bindExtensions()` 时传入了一个**真实**的 uiContext（`dist/modes/rpc/rpc-mode.js` 的 `createExtensionUIContext()`）；只有 print / json 模式不带 uiContext（`dist/modes/print-mode.js`），退回 noOp。所以 `hasUI === false` 只覆盖 print / json，**不**表示「RPC 里 UI 都可用」。宿主目前没有能力探测接口（没有 `capabilities` 集合），只能按下面两张表推导。
+
+#### 判据表：按需求选信号
+
+| 需求 | 相关方法 | 判据 | 不满足时怎么办 |
+|---|---|---|---|
+| 自定义组件 / overlay / widget 组件 / 页眉页脚 / 终端按键 | `custom`、`onTerminalInput`、`setWidget(factory)`、`setFooter`、`setHeader`、`setEditorComponent`、`addAutocompleteProvider` | **必须** `ctx.mode === "tui"` | 降级为纯文本（`notify`、`setWidget(string[])`，或整条跳过） |
+| 弹对话框 | `select`、`confirm`、`input`、`editor` | 可以用 `ctx.hasUI`，但必须给 `timeout`（至少 `signal`） | 显式超时后按「用户取消」处理；**没有超时就会被无限挂住** |
+| 一次性提示 / 状态标签 / 标题 / 编辑器文本 | `notify`、`setStatus`、`setTitle`、`setEditorText` | 两个信号都不够，只能 best-effort | 允许被静默丢弃，**功能正确性不得押在它们上** |
+| 读回终端状态 | `getEditorText`、`getToolsExpanded`、`getAllThemes`、`getTheme`、`setTheme`、`pasteToEditor` | 不可依赖 | RPC 下返回空值 / `false` / `{ success: false }` |
+| 完全没有 UI（print / json） | 全部 | `ctx.hasUI === false` | 必须有纯文本降级路径（参考 `pi-ask-user` 的 `"Ask requires interactive mode"`） |
+
+两条硬规则：
+
+- **不要用 `hasUI` 守卫终端组件。** 它在 RPC 下为真，守卫会放行，然后组件被静默丢弃：用户既看不到东西，也得不到任何提示。
+- **`hasUI` 为真不代表对话框会被回答。** 请求只是转发给客户端，客户端可以不实现、也可以静默丢弃（实例：T3 Code 的 PiDriver 只处理 `notify` / `setStatus` / `select` / `confirm` / `input` / `editor`，其余一律 `logDebug("Ignoring pi extension UI update.")`）。
+
+#### RPC 能力矩阵
+
+逐条核对自 `dist/modes/rpc/rpc-mode.js` 的 `createExtensionUIContext()`（宿主 1.5.0）。
+
+| 方法 | RPC 行为 | 扩展侧要求 |
+|---|---|---|
+| `select` / `confirm` / `input` | 发 `extension_ui_request`，等 `extension_ui_response`；支持 `signal` + `timeout` | 必须传 `timeout` |
+| `editor` | 发请求后无限等待，**签名里没有 `opts`**（无法超时、无法中断） | 不可用；需要文本输入时改用带 timeout 的 `input` |
+| `notify` / `setStatus` / `setTitle` / `set_editor_text` | fire-and-forget（`setEditorText` 走 `set_editor_text` 这条路） | 允许静默丢弃 |
+| `setWidget(key, string[])` | 转发 `setWidget` 请求（`widgetLines`），客户端自行排版 | 可用，但宿主可丢弃 |
+| `setWidget(key, factory)` | **不转发，静默丢弃** | 只在 `mode === "tui"` 分支使用 |
+| `custom` | 立即 `return undefined` | 必须处理 `undefined`（`pi-ask-user` 在此退回 `select` / `input`） |
+| `onTerminalInput` | 返回空 unsubscribe（无按键通道） | 只在 tui 使用 |
+| `setFooter` / `setHeader` / `setWorkingMessage` / `setWorkingVisible` / `setWorkingIndicator` / `setHiddenThinkingLabel` / `setEditorComponent` / `addAutocompleteProvider` / `setToolsExpanded` | 全空实现 | 只在 tui 使用 |
+| `getEditorText` | 返回 `""`（同步方法无法等 RPC 响应） | 不可依赖 |
+| `getEditorComponent` / `getTheme` | `undefined` | 不可依赖 |
+| `getAllThemes` | `[]` | 不可依赖 |
+| `setTheme` | `{ success: false, error: "Theme switching not supported in RPC mode" }` | 不可依赖 |
+| `getToolsExpanded` | `false` | 不可依赖 |
+| `theme` | 返回宿主内置的静态默认主题，不是客户端配置的主题 | 只用来取色，不要当成「用户的主题」 |
+| `pasteToEditor` | 退化为 `setEditorText` | —— |
+
+#### README 声明
+
+凡是调用 `ctx.ui.*`、或对 `ctx.mode` / `ctx.hasUI` 分支的包，必须在 `README.md` 与 `README.zh.md` 各写一节 **`## UI surface`** / **`## UI 能力`**，用一张三列表声明每个方法：
+
+| 列 | 内容 |
+|---|---|
+| `Method` | 用到的方法名（可合并同判据的方法） |
+| `Guard` | 守卫用的信号：``mode === "tui"`` / `hasUI` / `none` |
+| `Outside TUI` | 非 TUI 宿主里的实际行为（转发后可能被丢弃、退回纯文本、静默无输出……） |
+
+目的：安装者在选宿主（TUI / RPC / `-p`）之前就能知道某功能会退化到什么程度，不必翻源码。列名可本地化（中文 README 用「方法 / 守卫 / 非 TUI」），行内容两语言必须一致。样板见 `pi-todo/README.md` 的 `## UI surface` 与其 `src/` 里的 `refreshWidget`。
+
+两个已踩过的反例，改包前先看一眼：
+
+- `pi-todo` 的看板最初用 `if (!ctx.hasUI) return;` 守卫，RPC 下继续调 `setWidget(factory)`，结果在 Studio / T3 里完全不可见且无任何提示。现在按 `ctx.mode === "tui"` 分支：tui 走组件（需要 `render(width)` 才能按显示宽度裁行），其他模式走字符串数组，`/todos` 全量视图在非 tui 下退回一条 `notify`。
+- `pi-sandbox` 的配置告警不能直写终端（`console.warn` 会被随后的 TUI 绘制覆盖），改为「缓冲 + `session_start` 时安装出口」：有 UI 就 `notify`，本进程从未出现过 UI（`-p` / JSON）才退 stderr，其余无 UI 会话（父会话是 TUI 的子会话）宁可留在缓冲里等下一个有 UI 的会话。
+
 ### 测试
 
 - 文件放在 `tests/`，命名为 `<module>.test.ts`
@@ -545,6 +605,7 @@ npm 的 `package.json` 没有 `extends`/继承机制。workspaces 发现、`npm 
 - [ ] 源码放在 `src/`，测试放在 `tests/`
 - [ ] 根 `vitest.config.ts` `projects` 已添加
 - [ ] 如有 skills，`pi.skills` 已声明，`files` 已包含 `"skills/"`
+- [ ] 如调用 `ctx.ui.*` 或对 `ctx.mode` / `ctx.hasUI` 分支：按 [UI 能力与跨模式降级](#ui-能力与跨模式降级) 的判据表选信号，并在 `README.md` / `README.zh.md` 各写一节 `## UI surface` / `## UI 能力`
 
 ### Pure Skills
 

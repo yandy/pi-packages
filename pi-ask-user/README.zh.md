@@ -177,6 +177,18 @@ interface AskToolDetails {
 
 本项目基于 [pi-ask-user](https://github.com/edlsh/pi-ask-user)（作者 [Enzo Lucchesi](https://github.com/edlsh)）。感谢原作者的出色工作。
 
+## UI 能力
+
+`ask_user` 依赖宿主的 UI 原语，各方法在不同运行模式下的支持并不一致：
+
+| 方法 | 守卫 | 非 TUI（RPC / headless） |
+|---|---|---|
+| `custom`（富交互的内联 / 浮层提问组件） | `hasUI` | RPC 直接返回 `undefined`，工具退回下面的 `select` / `input` 对话协议 |
+| `onTerminalInput`（浮层切换键） | `mode === "tui"`（只在组件路径里注册） | 不注册 |
+| `select` / `input`（对话降级、无选项的自由提问） | `hasUI` | 以 `extension_ui_request` 转发，客户端必须应答；只有调用方给了 `timeout` 才能限定等待时间，否则客户端不响应时工具调用一直挂着 |
+| `notify`（`ask_user hidden — press …` 提示） | `mode === "tui"` | 不会触发 |
+| `hasUI === false`（print / json） | `hasUI` | 返回 `Ask requires interactive mode …` 错误结果，让模型改用纯文本提问 |
+
 ## 许可证
 
 MIT

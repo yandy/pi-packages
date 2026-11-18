@@ -275,6 +275,14 @@ bash tests/e2e.sh        # 运行 E2E 测试（需要 Docker + pi CLI）
 扩展支持 Docker 和 Podman 两种容器引擎，通过 `runtime.engine` 配置选择
 或自动检测。如果容器运行时不可达，扩展会优雅降级到 pi 的默认宿主机工具并发出通知。
 
+## UI 能力
+
+| 方法 | 守卫 | 非 TUI（RPC / headless） |
+|---|---|---|
+| `notify`（`/sandbox` 命令反馈、镜像构建结果） | 无 | 以请求转发给客户端，可能被静默丢弃 |
+| `select`（选择 Dockerfile、外部路径读取审批） | `/sandbox build` 无守卫；外部路径读取用 `hasUI`，没有 UI 时报错拒绝而不是弹窗 | 以 `extension_ui_request` 转发；没有传 `timeout`，客户端不响应时命令或工具调用一直挂着 |
+| `setStatus`（镜像构建进度） | 无 | fire-and-forget，可能被丢弃 |
+
 ## 许可证
 
 MIT

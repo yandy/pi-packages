@@ -203,6 +203,13 @@ cd <writable project dir> && PI_CODING_AGENT_DIR="$AG" pi
 
 Observations and the verification record live in `docs/superpowers/specs/2026-09-30-escalation-approval-forwarding-design.md` §11.
 
+## UI surface
+
+| Method | Guard | Outside TUI (RPC / headless) |
+|---|---|---|
+| `select` + `input` (escalation approval for `sandbox_permissions` / `file_operation` requests; the `input` step collects an optional denial reason) | `hasUI`; a subagent session resolves the nearest registered parent channel that still has UI | Forwarded as `extension_ui_request`. Only the tool call's `AbortSignal` is passed — nothing bounds the wait, so a client that never answers keeps the tool call pending (fail-closed: an unanswered request is never auto-approved) |
+| `notify` (config warnings, `/permission` feedback) | `hasUI` for warnings | Warning routing: `notify` when a UI is available; stderr only when no UI has ever appeared in the process (`pi -p`, JSON); a no-UI subagent session buffers them instead of printing over the parent's TUI |
+
 ## License
 
 MIT
