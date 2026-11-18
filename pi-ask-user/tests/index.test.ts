@@ -2701,6 +2701,27 @@ describe("ask_user", () => {
 				expect(result.details.cancelReason).toBeUndefined();
 				expect(result.content[0].text).toContain("boom from host");
 			});
+
+			it("reports a plain host rejection on the option-less input as a structured error too", async () => {
+				const tool = await setupTool();
+
+				const result = await tool.execute(
+					"tool-call-id",
+					{ question: "What is your name?" },
+					undefined,
+					undefined,
+					dialogCtx({
+						input: async () => {
+							throw new Error("optionless boom");
+						},
+					}),
+				);
+
+				expect(result.isError).toBe(true);
+				expect(result.details.cancelled).not.toBe(true);
+				expect(result.details.cancelReason).toBeUndefined();
+				expect(result.content[0].text).toContain("optionless boom");
+			});
 		});
 	});
 
@@ -2712,16 +2733,20 @@ describe("ask_user", () => {
 		function richCtx(custom: any) {
 			return { hasUI: true, mode: "tui", cwd: "/tmp/project", ui: makeUI({ custom }) };
 		}
-
-		/** 打开富 TUI 并把宿主自己的 done 交给测试：模拟组件作答或用户取消。 */
+		/**
+		 * 打开富 TUI 并把组件暴露给测试：宿主 done 只负责结算宿主 promise，
+		 * 组件作答 / 取消必须走组件自己的入口（`handleInput`），才经过 `(answer) => settle(answer)`。
+		 */
 		function openRichUI(doneCalls: any[]) {
-			return async (factory: any) =>
-				new Promise((resolve) => {
-					factory(customTui, createTheme(), createKeybindings(), (result: any) => {
+			let component: any;
+			const custom = async (factory: any) =>
+				await new Promise((resolve) => {
+					component = factory(customTui, createTheme(), createKeybindings(), (result: any) => {
 						doneCalls.push(result);
 						resolve(result);
 					});
 				});
+			return { custom, component: () => component };
 		}
 
 		it("explicit timeout settles once with a timeout reason and the Timed out wording", async () => {
@@ -2729,12 +2754,13 @@ describe("ask_user", () => {
 			try {
 				const tool = await setupTool();
 				const doneCalls: any[] = [];
+				const ui = openRichUI(doneCalls);
 				const promise = tool.execute(
 					"tool-call-id",
 					{ question: "Pick a color", options: ["Red", "Blue"], timeout: 1000 },
 					undefined,
 					undefined,
-					richCtx(openRichUI(doneCalls)),
+					richCtx(ui.custom),
 				);
 
 				await vi.advanceTimersByTimeAsync(1000);
@@ -2748,6 +2774,10 @@ describe("ask_user", () => {
 				const rendered = tool.renderResult(result, { isPartial: false }, createTheme()).render().join("\n");
 				expect(rendered).toContain("Timed out");
 				expect(vi.getTimerCount()).toBe(0);
+
+				// 迟到的组件回调不得覆盖已产生的 timeout 结果。
+				ui.component().handleInput("enter");
+				expect(doneCalls).toEqual([null]);
 			} finally {
 				vi.useRealTimers();
 			}
@@ -2761,6 +2791,7 @@ describe("ask_user", () => {
 			const uiOpened = new Promise<void>((resolve) => {
 				opened = resolve;
 			});
+			const ui = openRichUI(doneCalls);
 
 			const promise = tool.execute(
 				"tool-call-id",
@@ -2769,7 +2800,7 @@ describe("ask_user", () => {
 				undefined,
 				richCtx(async (factory: any) => {
 					opened?.();
-					return await openRichUI(doneCalls)(factory);
+					return await ui.custom(factory);
 				}),
 			);
 
@@ -2782,6 +2813,10 @@ describe("ask_user", () => {
 			expect(result.details.cancelReason).toBe("abort");
 			const rendered = tool.renderResult(result, { isPartial: false }, createTheme()).render().join("\n");
 			expect(rendered).toContain("Cancelled");
+
+			// 组件迟到的作答同样被忽略。
+			ui.component().handleInput("enter");
+			expect(doneCalls).toEqual([null]);
 		});
 
 		it("a user cancel carries no cancel reason and the plain Cancelled wording", async () => {
@@ -2797,13 +2832,12 @@ describe("ask_user", () => {
 					richCtx(
 						async (factory: any) =>
 							await new Promise((resolve) => {
-								const done = (answer: any) => {
+								const component = factory(customTui, createTheme(), createKeybindings(), (answer: any) => {
 									doneCalls.push(answer);
 									resolve(answer);
-								};
-								factory(customTui, createTheme(), createKeybindings(), done);
-								// 用户按 esc：组件用同一个 done 取消，不是本地 timeout。
-								done(null);
+								});
+								// 用户按 esc：组件调 onDone(null)，不是本地 timeout。
+								component.handleInput("escape");
 							}),
 					),
 				);
@@ -2826,27 +2860,18 @@ describe("ask_user", () => {
 				const tool = await setupTool();
 				const controller = new AbortController();
 				const doneCalls: any[] = [];
-				let answer: ((result: any) => void) | undefined;
+				const ui = openRichUI(doneCalls);
 
 				const promise = tool.execute(
 					"tool-call-id",
 					{ question: "Pick a color", options: ["Red", "Blue"], timeout: 1000 },
 					controller.signal,
 					undefined,
-					richCtx(
-						async (factory: any) =>
-							await new Promise((resolve) => {
-								answer = (result: any) => {
-									doneCalls.push(result);
-									resolve(result);
-								};
-								factory(customTui, createTheme(), createKeybindings(), answer);
-							}),
-					),
+					richCtx(ui.custom),
 				);
 
-				await Promise.resolve();
-				answer?.({ kind: "selection", selections: ["Red"] });
+				// 组件作答：回车确认当前高亮项，经 (answer) => settle(answer) 结算。
+				ui.component().handleInput("enter");
 				const result = await promise;
 
 				expect(doneCalls).toHaveLength(1);
@@ -2861,6 +2886,7 @@ describe("ask_user", () => {
 				vi.useRealTimers();
 			}
 		});
+
 
 		it("clears the timer when the rich TUI fails after arming it", async () => {
 			vi.useFakeTimers();

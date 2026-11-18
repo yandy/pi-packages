@@ -1690,6 +1690,19 @@ function describeCancel(reason: "timeout" | "abort" | undefined, timeoutMs: numb
 	return "User cancelled the question";
 }
 
+/**
+ * 宿主抛出的真实错误：结构化上报。没有本地取消时它不得被吞成用户取消，
+ * 也不得让 `execute` 直接 reject——每条 dialog 路径都返回同一形状。
+ */
+function toolFailureResult(error: unknown) {
+	const message = error instanceof Error ? `${error.message}\n${error.stack ?? ""}` : String(error);
+	return {
+		content: [{ type: "text" as const, text: `Ask tool failed: ${message}` }],
+		isError: true as const,
+		details: { error: message },
+	};
+}
+
 /** Sentinel row that finishes a dialog multi-select; only offered once something is checked. */
 const DIALOG_DONE_SENTINEL = "\u2713 Done selecting";
 
@@ -1947,7 +1960,13 @@ export default function (pi: ExtensionAPI) {
 					signal,
 					explicitTimeout ?? (ctx.mode === "tui" ? undefined : DEFAULT_DIALOG_TIMEOUT_MS),
 				);
-				const answer = await guard.run((opts) => ctx.ui.input(prompt, "Type your answer...", opts));
+				let answer: string | undefined;
+				try {
+					answer = await guard.run((opts) => ctx.ui.input(prompt, "Type your answer...", opts));
+				} catch (error) {
+					// 无本地取消时的宿主异常与其它 dialog 路径一致：结构化上报，不让 execute 直接 reject。
+					return toolFailureResult(error);
+				}
 				const response = createFreeformResponse(answer);
 
 				if (!response) {
@@ -2105,12 +2124,7 @@ export default function (pi: ExtensionAPI) {
 						} as AskToolDetails,
 					};
 				}
-				const message = error instanceof Error ? `${error.message}\n${error.stack ?? ""}` : String(error);
-				return {
-					content: [{ type: "text", text: `Ask tool failed: ${message}` }],
-					isError: true,
-					details: { error: message },
-				};
+				return toolFailureResult(error);
 			} finally {
 				removeOverlayInputListener?.();
 				disposeCustomSettlement?.();
