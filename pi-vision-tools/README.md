@@ -145,6 +145,13 @@ Input can be:
 - A `data:` URL (`data:image/png;base64,...`)
 - Raw base64 (string >100 characters, auto-detected)
 
+## UI surface
+
+| Method | Guard | Outside TUI (RPC / headless) |
+|---|---|---|
+| `setStatus` (footer label with the routed vision model) | `hasUI` | Forwarded fire-and-forget; a client that ignores status updates shows no label |
+| `notify` (`/vision` feedback, usage errors) | none | Forwarded fire-and-forget; may be dropped. print / json produce no output |
+
 ## License
 
 MIT

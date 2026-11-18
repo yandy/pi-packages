@@ -145,6 +145,13 @@ describe_image(image_path: string, prompt: string, compress?: boolean, thinkLeve
 - `data:` URL（`data:image/png;base64,...`）
 - 原始 base64（字符串 >100 字符，自动检测）
 
+## UI 能力
+
+| 方法 | 守卫 | 非 TUI（RPC / headless） |
+|---|---|---|
+| `setStatus`（底栏显示当前路由到的视觉模型） | `hasUI` | fire-and-forget 转发；客户端不处理状态更新就看不到标签 |
+| `notify`（`/vision` 命令反馈、用法错误） | 无 | fire-and-forget 转发，可能被丢弃；print / json 不产生输出 |
+
 ## 许可证
 
 MIT

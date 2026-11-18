@@ -211,6 +211,18 @@ npm test                 # vitest run
 
 本项目是 [@gotgenes/pi-subagents](https://github.com/gotgenes/pi-packages/tree/main/packages/pi-subagents)（作者 [Chris Lasher](https://github.com/gotgenes)）的友好分支，后者源自 [tintinweb/pi-subagents](https://github.com/tintinweb/pi-subagents)。感谢所有原作者的工作使本包成为可能。
 
+## UI 能力
+
+两个斜杠命令和「运行中 agent」widget 都直接调用宿主的 UI 原语。widget 注册的是**组件工厂**，只有 TUI 接受这种形式；命令用的是对话框，RPC 会转发，但客户端可能不应答或直接丢弃：
+
+| 方法 | 守卫 | 非 TUI（RPC / headless） |
+|---|---|---|
+| `setWidget(factory)`（运行中 / 已完成 agent 的 widget） | 无 | RPC 静默丢弃组件工厂，widget 不会出现；print / json 根本没有 UI |
+| `setStatus`（agent 汇总行） | 无 | fire-and-forget，可能被丢弃 |
+| `select` / `input` / `notify`（`/subagents:settings`） | 无 | 会转发；没有传 `timeout`，客户端不响应时命令一直挂着。print / json 下对话皆为空实现，菜单直接退出 |
+| `select`（`/subagents:sessions`） | 无 | 会转发；没有超时 |
+| `custom`（会话记录浮层） | 无 | RPC 直接返回 `undefined`：选中一个会话后什么都不显示；print / json 同理 |
+
 ## 许可证
 
 MIT

@@ -308,6 +308,14 @@ The container is torn down on `session_shutdown` / SIGINT / process exit
 available, the extension gracefully degrades to pi's default host tools with
 a notification.
 
+## UI surface
+
+| Method | Guard | Outside TUI (RPC / headless) |
+|---|---|---|
+| `notify` (`/sandbox` feedback, image build results) | none | Fire-and-forget request to the client; may be dropped silently |
+| `select` (Dockerfile choice, external-read approval) | none for `/sandbox build`; `hasUI` for external reads, which are refused with an error instead of prompting when no UI exists | Forwarded as `extension_ui_request`; no `timeout` is passed, so an unresponsive client keeps the command or tool call pending |
+| `setStatus` (image build progress) | none | Fire-and-forget; may be dropped |
+
 ## License
 
 MIT

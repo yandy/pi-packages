@@ -219,6 +219,18 @@ npm test                 # vitest run
 
 This project is a friendly fork of [@gotgenes/pi-subagents](https://github.com/gotgenes/pi-packages/tree/main/packages/pi-subagents) by [Chris Lasher](https://github.com/gotgenes), which began as a fork of [tintinweb/pi-subagents](https://github.com/tintinweb/pi-subagents). Thank you to all original authors for their work that made this package possible.
 
+## UI surface
+
+Both slash commands and the running-agents widget call host UI primitives directly. The widget registers a **component factory**, which only TUI mode accepts; the commands use dialogs, which RPC forwards but the client may ignore:
+
+| Method | Guard | Outside TUI (RPC / headless) |
+|---|---|---|
+| `setWidget(factory)` (running / finished agents widget) | none | RPC drops component factories silently, so the widget never appears. print / json have no UI at all |
+| `setStatus` (agents summary line) | none | Forwarded fire-and-forget; may be dropped |
+| `select` / `input` / `notify` (`/subagents:settings`) | none | Forwarded; no `timeout` is passed, so an unresponsive client keeps the command pending. print / json get no-op dialogs, so the menu exits silently |
+| `select` (`/subagents:sessions`) | none | Forwarded; no timeout |
+| `custom` (transcript overlay) | none | RPC returns `undefined` immediately: picking a session shows nothing. Same in print / json |
+
 ## License
 
 MIT

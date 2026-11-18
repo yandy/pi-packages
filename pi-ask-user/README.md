@@ -176,6 +176,18 @@ interface AskToolDetails {
 
 This project is based on [pi-ask-user](https://github.com/edlsh/pi-ask-user) by [Enzo Lucchesi](https://github.com/edlsh). Thank you to the original author for the excellent work.
 
+## UI surface
+
+`ask_user` builds on host UI primitives whose support differs per run mode:
+
+| Method | Guard | Outside TUI (RPC / headless) |
+|---|---|---|
+| `custom` (rich inline / overlay question component) | `hasUI` | RPC returns `undefined` immediately, so the tool falls back to the `select` / `input` dialog protocol below |
+| `onTerminalInput` (overlay toggle key) | `mode === "tui"` (registered only inside the component path) | Not registered |
+| `select` / `input` (dialog fallback, freeform questions) | `hasUI` | Forwarded as `extension_ui_request`; the client must answer. Only a caller-supplied `timeout` bounds the wait — without it an unresponsive client keeps the tool call pending |
+| `notify` (`ask_user hidden — press …`) | `mode === "tui"` | Not reached |
+| `hasUI === false` (print / json) | `hasUI` | Returns an `Ask requires interactive mode …` error result so the model can ask in plain text instead |
+
 ## License
 
 MIT
