@@ -1650,16 +1650,21 @@ function createDialogGuard(signal: AbortSignal | undefined, timeout: number | un
 				reason ??= "abort";
 				return undefined;
 			}
+			// 本次提问已在更早的轮次本地结算：不再开新的对话框。
+			if (reason !== undefined) return undefined;
 			const controller = new AbortController();
 			let settleLocal: ((value: DialogLocalCancel) => void) | undefined;
 			// 直接参与 race，不套 `.then`：本地取消不需要额外的 microtask 才能被 race 看见。
 			const localCancel = new Promise<DialogLocalCancel>((resolve) => {
 				settleLocal = resolve;
 			});
+			// 本轮自己的结算开关：整次提问的 reason 不该兼任本轮是否已取消。
+			let settledLocally = false;
 			const cancelLocally = (next: "timeout" | "abort") => {
-				if (reason !== undefined) return;
+				if (settledLocally) return;
+				settledLocally = true;
 				// 先记录原因：abort listener 里同步 reject 的宿主走的也是同一条判定。
-				reason = next;
+				reason ??= next;
 				controller.abort();
 				settleLocal?.(DIALOG_LOCAL_CANCEL);
 			};
@@ -1672,13 +1677,20 @@ function createDialogGuard(signal: AbortSignal | undefined, timeout: number | un
 					? { signal: controller.signal, timeout }
 					: { signal: controller.signal };
 				// 立即订阅宿主 promise：本地取消后迟到的 resolve / reject 都落在这条链上。
-				const host = call(opts).then(
-					(value): T | DialogLocalCancel => (reason === undefined ? value : DIALOG_LOCAL_CANCEL),
-					(error): T | DialogLocalCancel => {
-						if (reason !== undefined) return DIALOG_LOCAL_CANCEL;
-						throw error;
-					},
-				);
+				let host: Promise<T | DialogLocalCancel>;
+				try {
+					host = call(opts).then(
+						(value): T | DialogLocalCancel => (reason === undefined ? value : DIALOG_LOCAL_CANCEL),
+						(error): T | DialogLocalCancel => {
+							if (reason !== undefined) return DIALOG_LOCAL_CANCEL;
+							throw error;
+						},
+					);
+				} catch (error) {
+					// 同步抛错同样让位于已记录的本地取消；没有本地原因时它是真实宿主故障。
+					if (reason !== undefined) return undefined;
+					throw error;
+				}
 				const outcome = await Promise.race([host, localCancel]);
 				return outcome === DIALOG_LOCAL_CANCEL ? undefined : outcome;
 			} finally {
