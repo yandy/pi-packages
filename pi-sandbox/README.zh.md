@@ -207,7 +207,7 @@ cd <可写项目目录> && PI_CODING_AGENT_DIR="$AG" pi
 
 | 方法 | 守卫 | 非 TUI（RPC / headless） |
 |---|---|---|
-| `select` + `input`（`sandbox_permissions` / `file_operation` 提权审批；`input` 是拒绝时的可选理由） | `hasUI`；子会话会沿 link 解析到最近一个仍有 UI 的父通道 | 以 `extension_ui_request` 转发。只透传工具调用的 `AbortSignal`，没有任何超时：客户端不应答时工具调用一直挂着（fail-closed，未应答的请求永远不会被自动批准） |
+| `select` + `input`（`sandbox_permissions` / `file_operation` 提权审批；`input` 是拒绝时的可选理由） | `hasUI`；子会话会沿 link 解析到最近一个仍有 UI 的父通道。只有逐字 `Allow once` 才批准——其他任何应答（`"Allow"`、`null`、对象）都按无效应答 fail-closed | 以 `extension_ui_request` 转发。每次对话都带派生 `AbortSignal` 与 `timeout`，工具另用自己的 deadline 与调用 signal 赛跑：客户端不应答时结算为*取消*（`nothing was executed`），不会挂住工具调用。非 TUI 的本地 deadline 是 300000 ms；TUI 弹窗不设默认上限（Esc / Ctrl-C 是用户出口）。deadline 由**实际显示弹窗的会话**决定——转发的审批看父会话 UI 模式，绝不看子会话的 |
 | `notify`（配置告警、`/permission` 反馈） | 告警路径用 `hasUI` | 告警出口：有 UI 时走 `notify`；只有本进程从未出现过 UI（`pi -p`、JSON）才退 stderr；无 UI 的子会话留在缓冲里，不盖掉父会话的 TUI |
 
 ## License

@@ -276,6 +276,33 @@ describe("escalation approval forwarding wiring (spec 2026-09-30 §4.5)", () => 
 		expect(select).toHaveBeenCalledWith("T", ["Allow once", "Deny"], { signal: ac.signal });
 	});
 
+	it("注册的父通道报告父会话 UI 模式（broker 按它定 deadline；读不到时 undefined）", async () => {
+		const { fakePi, hooks } = makeFakePi();
+		const activate = (await import("../index")).default;
+		activate(fakePi as never);
+		const ctx = { hasUI: true, mode: "rpc", sessionManager: { getSessionId: () => "p" }, ui: { select: async () => "Allow once" } };
+		hooks.session_start?.({ type: "session_start" }, ctx);
+		getEscalationBroker().linkChild("c", "p");
+		const resolved = getEscalationBroker().resolveChannel("c");
+		expect(resolved?.mode?.()).toBe("rpc"); // 弹窗实际出现在父会话：deadline 跟父会话走
+		ctx.mode = "tui";
+		expect(resolved?.mode?.()).toBe("tui");
+		const staleCtx = { hasUI: true, sessionManager: { getSessionId: () => "stale" }, ui: { select: async () => "Allow once" } } as unknown as {
+			hasUI: boolean;
+			sessionManager: { getSessionId(): string };
+			ui: { select(): Promise<string | undefined> };
+		} & Record<string, unknown>;
+		Object.defineProperty(staleCtx, "mode", {
+			get() {
+				throw new Error("This extension ctx is stale after session replacement or reload.");
+			},
+		});
+		hooks.session_start?.({ type: "session_start" }, staleCtx);
+		getEscalationBroker().linkChild("c2", "stale");
+		// 读不到模式 → undefined → broker 按非 TUI 兜底（有 deadline），绝不因为读不到而挂死
+		expect(getEscalationBroker().resolveChannel("c2")?.mode?.()).toBeUndefined();
+	});
+
 	it("注册的父通道把 opts 透传给 ctx.ui.input（Deny 理由两步式的第二步）", async () => {
 		const { fakePi, hooks } = makeFakePi();
 		const activate = (await import("../index")).default;

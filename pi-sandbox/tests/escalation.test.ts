@@ -230,4 +230,25 @@ describe("approveEscalation", () => {
 			.rejects.toThrow(/no approval channel is available.*nothing was executed.*\/permission danger-full-access/s);
 		expect(u.ask).not.toHaveBeenCalled();
 	});
+
+	// choice 来自扩展 UI / RPC 边界（宿主原样透传客户端的 value），类型断言不是运行时保证：
+	// 只有逐字 "Allow once" 能批准，其余任何值都必须 fail-closed。
+	describe("授权边界只接受逐字 Allow once（运行时白名单，不是类型收窄）", () => {
+		const invalidChoices: Array<[string, unknown]> = [
+			["前缀相同的 Allow", "Allow"],
+			["任意非选项字符串", "not-a-choice"],
+			["首尾带空白的 Allow once", " Allow once "],
+			["空字符串", ""],
+			["null", null],
+			["对象", { value: "Allow once" }],
+			["true", true],
+		];
+		for (const [label, choice] of invalidChoices) {
+			it(`${label} 不得批准：无效应答 fail-closed 且不执行`, async () => {
+				const u = ui(true, choice as string);
+				await expect(approveEscalation({ ...base, requestedMode: "danger-full-access" }, u))
+					.rejects.toThrow(/unrecognized answer.*nothing was executed/s);
+			});
+		}
+	});
 });

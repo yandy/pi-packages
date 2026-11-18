@@ -10,15 +10,14 @@ import {
 	type ExtensionToolContext,
 	type WriteOperations,
 } from "@earendil-works/pi-coding-agent";
+import { type ApprovalDialogOptions, dialogTimeoutMs, runApprovalDialog } from "./approval-dialog";
 import { createSandboxBashOps, type SpawnFn } from "./bash-ops";
 import { getSandboxConfig, type SandboxConfig } from "./config";
 import { getDenialLedger } from "./denial-ledger";
 import {
 	approveEscalation,
-	type DenialReasonPrompt,
 	escalationAppliedMarker,
 	escalationIgnoredMarker,
-	type EscalationDecision,
 	type EscalationUI,
 	isStrictlyWider,
 	normalizeEscalationValue,
@@ -115,10 +114,12 @@ interface EscalationParams {
 interface ToolCtxLike {
 	hasUI: boolean;
 	cwd?: string;
+	/** UI 模式（tui/rpc/json/print）：决定审批 dialog 是否有默认 deadline。读取失败/缺失按非 TUI 兜底。 */
+	mode?: string;
 	ui: {
-		select(title: string, options: string[], opts?: { signal?: AbortSignal }): Promise<string | undefined>;
+		select(title: string, options: string[], opts?: ApprovalDialogOptions): Promise<string | undefined>;
 		/** 可选：Deny 后的理由输入（两步式第二步）。缺失时仅跳过一次理由追问。 */
-		input?(title: string, placeholder?: string, opts?: { signal?: AbortSignal }): Promise<string | undefined>;
+		input?(title: string, placeholder?: string, opts?: ApprovalDialogOptions): Promise<string | undefined>;
 	};
 	/** 子会话身份来源。可选：既有测试的窄 ctx 与异常宿主都可能没有它，
 	 *  缺失时按"无法路由"fail-closed，绝不得抛 TypeError（Review Focus #1）。 */
@@ -136,36 +137,42 @@ function readSessionId(ctx: ToolCtxLike): string | null {
 }
 
 /**
+ * 防御性读取 UI 模式：陈旧 ctx / 老宿主取值器可能抛错或缺失。缺失按非 TUI 处理
+ * （即享受默认 deadline）——宁可超时取消，也不要因读不到模式而挂死。
+ */
+function readCtxMode(ctx: ToolCtxLike): string | undefined {
+	try {
+		const mode = ctx.mode;
+		return typeof mode === "string" ? mode : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
  * 审批通道解析（spec 2026-09-30 §4.3）：
  * - 本会话有 UI：直连自己的 `ctx.ui`。
  * - 本会话无 UI（子会话）：沿 link 严格解析第一个已注册且 `hasUI()` 的父通道（D3），
  *   解析不到就返回哑通道。
  * 哑通道让 approveEscalation 抛出既有 fail-closed 文案——不新增错误分支、不改变校验顺序。
- * 并发审批的可见顺序由宿主决定，本包不排队也不做承诺。两条通道的 ask 都是两步式
- * （select → Deny 时 input 收理由），同一请求内串行 await。signal 两条路径都透传（D6）：
- * 中断既能关掉在飞的弹窗，也能让调用前已 abort 的请求根本不弹。
+ * 并发审批的可见顺序由宿主决定，本包不排队也不做承诺。两条通道的 ask 都委托共享的
+ * runApprovalDialog（两步式 select → Deny 时 input，同一请求内串行），异常口径也一致
+ * （审批 UI 抛错按取消处理）。非 TUI 每次 dialog 有默认 deadline，派生 signal + timeout
+ * 一并交给宿主，本地再 race 一层——宿主静默丢弃 extension_ui_request 时也不会永久挂起。
+ * deadline 只看**实际弹窗的会话**模式：直连看本 ctx，broker 父通道看父 ctx。
  */
 function approvalChannelFor(ctx: ToolCtxLike, signal: AbortSignal | undefined): EscalationUI {
-	const opts = signal === undefined ? undefined : { signal };
 	const broker = getEscalationBroker();
-	// 直连通道的两步式：select →（Deny 时）input，同一请求内串行 await。
-	// 异常口径与 broker.request 一致：审批 UI 抛错一律按"取消"处理（返回 choice undefined），
-	// 绝不让宿主的内部报错冒泡成用户/模型看到的工具错误文本（理由同 index.ts 的 readHasUI）。
-	const directAsk = async (title: string, options: string[], denialReason?: DenialReasonPrompt): Promise<EscalationDecision> => {
-		try {
-			const choice = await ctx.ui.select(title, options, opts);
-			if (choice !== "Deny" || denialReason === undefined || typeof ctx.ui.input !== "function") return { choice };
-			try {
-				const reason = await ctx.ui.input(denialReason.title, denialReason.placeholder, opts);
-				return { choice, reason };
-			} catch {
-				return { choice }; // 理由输入异常不影响拒绝语义（fail-closed）
-			}
-		} catch {
-			return { choice: undefined }; // 审批 UI 异常按取消处理（与 broker.request 的父侧口径一致）
-		}
-	};
-	if (ctx.hasUI) return { hasUI: true, ask: directAsk };
+	if (ctx.hasUI) {
+		// 直连通道：共享实现里完成 select →（Deny 时）input 的两步式与全部结算。
+		// 方法仍以 ctx.ui 为接收者调用——宿主实现可能依赖 this。
+		const ui = ctx.ui;
+		const timeoutMs = dialogTimeoutMs(readCtxMode(ctx));
+		return {
+			hasUI: true,
+			ask: (title, options, denialReason) => runApprovalDialog(ui, title, options, denialReason, { signal, timeoutMs }),
+		};
+	}
 	const sessionId = readSessionId(ctx);
 	const channel = sessionId === null ? null : broker.resolveChannel(sessionId);
 	if (channel === null) {

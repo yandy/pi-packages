@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { APPROVAL_DIALOG_DEFAULT_TIMEOUT_MS } from "../src/approval-dialog";
 import { getEscalationBroker, type ParentApprovalChannel, resetEscalationBrokerForTests } from "../src/escalation-broker";
 
-/** 造一个父通道假件：hasUI 可切换，select/input 记录调用并返回固定值。 */
-function fakeChannel(sessionId: string, hasUI = true, choice: string | undefined = "Allow once") {
+/** 造一个父通道假件：hasUI 可切换，select/input 记录调用并返回固定值。mode 缺省 = 非 TUI。 */
+function fakeChannel(sessionId: string, hasUI = true, choice: string | undefined = "Allow once", mode?: string) {
 	const select = vi.fn(async () => choice);
 	const input = vi.fn(async (_title: string, _placeholder?: string) => "because");
-	const channel: ParentApprovalChannel = { sessionId, hasUI: () => hasUI, select, input };
+	const channel: ParentApprovalChannel = { sessionId, hasUI: () => hasUI, select, input, ...(mode === undefined ? {} : { mode: () => mode }) };
 	return { channel, select, input };
 }
 
@@ -137,14 +138,18 @@ describe("resolveChannel（严格路由，spec §2 D3）", () => {
 });
 
 describe("request（并发结算 + abort）", () => {
-	it("透传 title/options，返回用户选择；无 signal 时第三参为 undefined", async () => {
+	it("无外部 signal 时仍向父通道传派生 signal 与默认 deadline", async () => {
 		const broker = getEscalationBroker();
 		const { channel, select } = fakeChannel("parent-1");
 		await expect(broker.request(channel, "T", ["Allow once", "Deny"])).resolves.toEqual({ choice: "Allow once" });
-		expect(select).toHaveBeenCalledWith("T", ["Allow once", "Deny"], undefined);
+		expect(select.mock.calls[0][0]).toBe("T");
+		expect(select.mock.calls[0][1]).toEqual(["Allow once", "Deny"]);
+		const opts = select.mock.calls[0][2] as { signal?: AbortSignal; timeout?: number } | undefined;
+		expect(opts?.signal).toBeInstanceOf(AbortSignal);
+		expect(opts?.timeout).toBe(APPROVAL_DIALOG_DEFAULT_TIMEOUT_MS);
 	});
 
-	it("有 signal 时以 opts.signal 透传（父弹窗可被中断关闭）", async () => {
+	it("外部 signal 不直接交给宿主：交的是派生 signal（abort 会传播，正常应答后不残留中断）", async () => {
 		const broker = getEscalationBroker();
 		const ac = new AbortController();
 		let received: AbortSignal | undefined;
@@ -154,7 +159,9 @@ describe("request（并发结算 + abort）", () => {
 		});
 		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select };
 		await expect(broker.request(channel, "T", ["Allow once", "Deny"], ac.signal)).resolves.toEqual({ choice: "Deny" });
-		expect(received).toBe(ac.signal);
+		expect(received).toBeInstanceOf(AbortSignal);
+		expect(received).not.toBe(ac.signal);
+		expect(received?.aborted).toBe(false); // 正常应答不把宿主的弹窗当成被中断
 	});
 
 	it("两个并发 request 各自结算且结果对应，不承诺顺序", async () => {
@@ -186,7 +193,7 @@ describe("request（并发结算 + abort）", () => {
 		expect(select).not.toHaveBeenCalled();
 	});
 
-	it("在飞时 abort → select 收到同一 signal，resolve undefined", async () => {
+	it("在飞时 abort → 派生 signal 被打断，request 结算为取消", async () => {
 		const broker = getEscalationBroker();
 		const ac = new AbortController();
 		let received: AbortSignal | undefined;
@@ -198,9 +205,10 @@ describe("request（并发结算 + abort）", () => {
 			}));
 		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select };
 		const pending = broker.request(channel, "T", ["Allow once", "Deny"], ac.signal);
-		await vi.waitFor(() => expect(received).toBe(ac.signal));
+		await vi.waitFor(() => expect(received).toBeDefined());
 		ac.abort();
 		await expect(pending).resolves.toEqual({ choice: undefined });
+		expect(received?.aborted).toBe(true);
 	});
 
 	it("父侧 select 抛错 → resolve undefined（按取消处理，不冒泡打断子代理工具调用）", async () => {
@@ -247,7 +255,10 @@ describe("request：Deny 理由的两步式（select → input 串行）", () =>
 		const { channel, input } = fakeChannel("p", true, "Deny");
 		await expect(broker.request(channel, "T", ["Allow once", "Deny"], undefined, reasonPrompt))
 			.resolves.toEqual({ choice: "Deny", reason: "because" });
-		expect(input).toHaveBeenCalledWith("Why deny?", "optional", undefined);
+		expect(input).toHaveBeenCalledWith("Why deny?", "optional", expect.objectContaining({
+			signal: expect.any(AbortSignal),
+			timeout: APPROVAL_DIALOG_DEFAULT_TIMEOUT_MS,
+		}));
 	});
 
 	it("Allow once → 不追问理由（input 零调用）", async () => {
@@ -274,7 +285,7 @@ describe("request：Deny 理由的两步式（select → input 串行）", () =>
 		await expect(broker.request(channel, "T", ["Allow once", "Deny"], undefined, reasonPrompt)).resolves.toEqual({ choice: "Deny" });
 	});
 
-	it("signal abort 透传到 input（在飞时关闭理由弹窗）", async () => {
+	it("外部 abort 传播到理由步的派生 signal（在飞时关闭理由弹窗）", async () => {
 		const broker = getEscalationBroker();
 		const ac = new AbortController();
 		let inputSignal: AbortSignal | undefined;
@@ -285,7 +296,8 @@ describe("request：Deny 理由的两步式（select → input 串行）", () =>
 		});
 		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select, input };
 		await broker.request(channel, "T", ["Allow once", "Deny"], ac.signal, reasonPrompt);
-		expect(inputSignal).toBe(ac.signal);
+		expect(inputSignal).toBeInstanceOf(AbortSignal);
+		expect(inputSignal).not.toBe(ac.signal);
 	});
 
 	it("同一 request 内 select → input 串行，理由输入不被并发请求打断", async () => {
@@ -297,8 +309,7 @@ describe("request：Deny 理由的两步式（select → input 串行）", () =>
 			return new Promise<string | undefined>((resolve) => {
 				inputReleases.set(title, resolve);
 			});
-		});
-		const select = vi.fn(async (title: string) => {
+		});		const select = vi.fn(async (title: string) => {
 			events.push(`select:${title}`);
 			return "Deny";
 		});
@@ -318,5 +329,83 @@ describe("request：Deny 理由的两步式（select → input 串行）", () =>
 		releaseSecond("r2");
 		await expect(first).resolves.toEqual({ choice: "Deny", reason: "r1" });
 		await expect(second).resolves.toEqual({ choice: "Deny", reason: "r2" });
+	});
+});
+
+describe("request：非 TUI 的本地 deadline 与父会话 UI 模式", () => {
+	/** 永不应答的父通道：结算只能靠本包的本地 deadline。 */
+	function silentChannel(mode?: string | (() => string | undefined)): { channel: ParentApprovalChannel; select: ReturnType<typeof vi.fn> } {
+		const select = vi.fn(() => new Promise<string | undefined>(() => {}));
+		const channel: ParentApprovalChannel = {
+			sessionId: "p",
+			hasUI: () => true,
+			select,
+			...(mode === undefined ? {} : { mode: typeof mode === "function" ? mode : () => mode }),
+		};
+		return { channel, select };
+	}
+
+	it("父会话非 TUI 且客户端永不应答：默认 deadline 到期结算为取消", async () => {
+		vi.useFakeTimers();
+		try {
+			const broker = getEscalationBroker();
+			const { channel } = silentChannel("rpc");
+			const pending = broker.request(channel, "T", ["Allow once", "Deny"]);
+			let settled = false;
+			void pending.then(() => {
+				settled = true;
+			});
+			await vi.advanceTimersByTimeAsync(APPROVAL_DIALOG_DEFAULT_TIMEOUT_MS - 1);
+			expect(settled).toBe(false);
+			await vi.advanceTimersByTimeAsync(1);
+			await expect(pending).resolves.toEqual({ choice: undefined });
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("模式读不出来（mode() 抛错 / 缺失）：按非 TUI 兜底，仍有 deadline", async () => {
+		vi.useFakeTimers();
+		try {
+			const broker = getEscalationBroker();
+			const throwing = silentChannel(() => {
+				throw new Error("This extension ctx is stale");
+			});
+			const throwingPending = broker.request(throwing.channel, "T", ["Allow once", "Deny"]);
+			const missing = silentChannel();
+			const missingPending = broker.request(missing.channel, "T", ["Allow once", "Deny"]);
+			await vi.advanceTimersByTimeAsync(APPROVAL_DIALOG_DEFAULT_TIMEOUT_MS);
+			await expect(throwingPending).resolves.toEqual({ choice: undefined });
+			await expect(missingPending).resolves.toEqual({ choice: undefined });
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("父会话是 TUI：推进超过默认 deadline 仍不自动结算，人工回答后正常完成", async () => {
+		vi.useFakeTimers();
+		try {
+			const broker = getEscalationBroker();
+			let answer: ((value: string | undefined) => void) | undefined;
+			const select = vi.fn((_title: string, _options: string[], _opts?: { timeout?: number }) =>
+				new Promise<string | undefined>((resolve) => {
+					answer = resolve;
+				}));
+			const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, mode: () => "tui", select };
+			const pending = broker.request(channel, "T", ["Allow once", "Deny"]);
+			await vi.advanceTimersByTimeAsync(0);
+			expect(select).toHaveBeenCalledTimes(1);
+			expect((select.mock.calls[0][2] as { timeout?: number }).timeout).toBeUndefined();
+			let settled = false;
+			void pending.then(() => {
+				settled = true;
+			});
+			await vi.advanceTimersByTimeAsync(APPROVAL_DIALOG_DEFAULT_TIMEOUT_MS + 1);
+			expect(settled).toBe(false);
+			answer?.("Allow once");
+			await expect(pending).resolves.toEqual({ choice: "Allow once" });
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });

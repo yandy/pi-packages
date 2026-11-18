@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createBashToolDefinition, createEditToolDefinition, createWriteToolDefinition } from "@earendil-works/pi-coding-agent";
 import { createSandboxTools, ESCALATION_PROPS, resolveCall, resolveCallMode } from "../src/tools";
+import { APPROVAL_DIALOG_DEFAULT_TIMEOUT_MS } from "../src/approval-dialog";
 import { canonicalizeTarget, isWithinRoots } from "../src/fence";
 import { writableRoots } from "../src/policy";
 import { createPermissionState, processPermissionState } from "../src/permission";
@@ -436,7 +437,7 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 	function subagentCtx(sessionId: string) {
 		return {
 			hasUI: false,
-			sessionManager: { getSessionId: () => sessionId },
+			sessionManager: { getSessionId: () => sessionId, getSessionFile: () => join(dir, "session.jsonl") },
 			ui: {
 				select: vi.fn(async () => {
 					throw new Error("child session must not prompt locally");
@@ -445,9 +446,14 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 		} as never;
 	}
 
-	function registerParent(sessionId: string, choice: string | undefined = "Allow once") {
+	function registerParent(sessionId: string, choice: string | undefined = "Allow once", mode?: string) {
 		const select = vi.fn(async () => choice);
-		getEscalationBroker().registerParent({ sessionId, hasUI: () => true, select });
+		getEscalationBroker().registerParent({
+			sessionId,
+			hasUI: () => true,
+			select,
+			...(mode === undefined ? {} : { mode: () => mode }),
+		});
 		return select;
 	}
 
@@ -523,9 +529,10 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 		expect(parentSelect).not.toHaveBeenCalled();
 	});
 
-	it("direct 路径透传 signal（D6）", async () => {
+	it("direct 路径：signal 以派生 signal 交给宿主（不轰外部对象，abort 会传播且带 timeout）", async () => {
 		const { deps } = makeDeps();
-		const ctx = toolCtx(true, "Allow once") as { ui: { select: ReturnType<typeof vi.fn> } };
+		const ctx = toolCtx(true, "Allow once") as ToolCtxTestDouble & { mode?: string };
+		ctx.mode = "rpc";
 		const ac = new AbortController();
 		seedDenial("command");
 		await resolveCallMode(
@@ -533,19 +540,25 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 			ctx as never,
 			deps, "command", () => "x", ac.signal,
 		);
-		expect(ctx.ui.select.mock.calls[0][2]).toEqual({ signal: ac.signal });
+		const opts = ctx.ui.select.mock.calls[0][2] as { signal?: AbortSignal; timeout?: number };
+		expect(opts.signal).toBeInstanceOf(AbortSignal);
+		expect(opts.signal).not.toBe(ac.signal);
+		expect(opts.timeout).toBe(APPROVAL_DIALOG_DEFAULT_TIMEOUT_MS);
 	});
 
-	it("direct 路径无 signal → 第三参为 undefined（headless 行为逐字不变，D6）", async () => {
+	it("direct 路径无外部 signal：仍传派生 signal + timeout（不再是无超时的裸等待）", async () => {
 		const { deps } = makeDeps();
-		const ctx = toolCtx(true, "Allow once") as { ui: { select: ReturnType<typeof vi.fn> } };
+		const ctx = toolCtx(true, "Allow once") as ToolCtxTestDouble & { mode?: string };
+		ctx.mode = "json";
 		seedDenial("command");
 		await resolveCallMode(
 			{ sandbox_permissions: "danger-full-access", justification: "j" },
 			ctx as never,
 			deps, "command", () => "x",
 		);
-		expect(ctx.ui.select.mock.calls[0][2]).toBeUndefined();
+		const opts = ctx.ui.select.mock.calls[0][2] as { signal?: AbortSignal; timeout?: number };
+		expect(opts.signal).toBeInstanceOf(AbortSignal);
+		expect(opts.timeout).toBe(APPROVAL_DIALOG_DEFAULT_TIMEOUT_MS);
 	});
 
 	it("direct 路径 ctx.ui.select 抛错 → 按取消处理，命令不执行，不冒泡宿主内部报错（与 broker.request 口径一致）", async () => {
@@ -688,6 +701,206 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 			justification: "probe",
 		}, ac.signal, undefined, subagentCtx("child-e3"))).rejects.toThrow(/cancelled/);
 		expect(parentSelect).not.toHaveBeenCalled();
+	});
+});
+
+describe("审批的本地 deadline 与父会话 UI 模式（issue #253）", () => {
+	/** 子会话 ctx：hasUI=false，本地 select 一旦被调用就响亮失败（审批必须走父通道）。 */
+	function subagentCtx(sessionId: string) {
+		return {
+			hasUI: false,
+			sessionManager: { getSessionId: () => sessionId, getSessionFile: () => join(dir, "session.jsonl") },
+			ui: {
+				select: vi.fn(async () => {
+					throw new Error("child session must not prompt locally");
+				}),
+			},
+		} as never;
+	}
+
+	function registerParent(sessionId: string, choice: string | undefined = "Allow once", mode?: string) {
+		const select = vi.fn(async () => choice);
+		getEscalationBroker().registerParent({
+			sessionId,
+			hasUI: () => true,
+			select,
+			...(mode === undefined ? {} : { mode: () => mode }),
+		});
+		return select;
+	}
+
+	it("直连 RPC：客户端永不应答 → 默认 deadline 到期按取消结算，命令不执行、前置拒绝不恢复", async () => {
+		vi.useFakeTimers();
+		try {
+			const { deps, spawnFn } = makeDeps();
+			const { bash } = createSandboxTools(deps);
+			const ctx = toolCtx(true) as ToolCtxTestDouble & { mode?: string };
+			ctx.mode = "rpc";
+			ctx.ui.select.mockImplementation(() => new Promise<string | undefined>(() => {}));
+			seedDenial("command");
+			const settled = bash.execute("call-deadline", {
+				command: "echo must-not-run",
+				sandbox_permissions: "danger-full-access",
+				justification: "j",
+			}, undefined, undefined, ctx as never).then(() => null, (error: Error) => error);
+			let done = false;
+			void settled.then(() => {
+				done = true;
+			});
+			await vi.advanceTimersByTimeAsync(APPROVAL_DIALOG_DEFAULT_TIMEOUT_MS - 1);
+			expect(done).toBe(false);
+			await vi.advanceTimersByTimeAsync(1);
+			const error = await settled;
+			expect(error).toBeInstanceOf(Error);
+			expect(error?.message).toMatch(/cancelled/);
+			expect(spawnFn).not.toHaveBeenCalled();
+
+			// 一次性语义：超时是取消不是拒绝，不恢复也不新增账本记录 → 下一次同类提权被门禁忽略
+			const retry = await resolveCall(
+				{ sandbox_permissions: "danger-full-access", justification: "j" },
+				ctx as never, deps, "command", () => "x",
+			);
+			expect(retry).toEqual({ mode: "workspace-write", escalated: false, ignoredEscalation: true });
+			expect(ctx.ui.select).toHaveBeenCalledTimes(1);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("直连 RPC 的 write：deadline 到期按取消结算，目标文件根本没被写", async () => {
+		vi.useFakeTimers();
+		try {
+			const { deps } = makeDeps();
+			const { write } = createSandboxTools(deps);
+			const ctx = toolCtx(true) as ToolCtxTestDouble & { mode?: string };
+			ctx.mode = "rpc";
+			ctx.ui.select.mockImplementation(() => new Promise<string | undefined>(() => {}));
+			seedDenial("operation");
+			const target = join(outsideDir, `deadline-${process.pid}-${Date.now()}.txt`);
+			const settled = write.execute("call-deadline-write", {
+				path: target,
+				content: "x",
+				sandbox_permissions: "danger-full-access",
+				justification: "j",
+			}, undefined, undefined, ctx as never).then(() => null, (error: Error) => error);
+			await vi.advanceTimersByTimeAsync(APPROVAL_DIALOG_DEFAULT_TIMEOUT_MS);
+			const error = await settled;
+			expect(error?.message).toMatch(/cancelled/);
+			expect(existsSync(target)).toBe(false);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("直连 TUI：推进超过默认 deadline 仍不自动结算，人工回答后正常批准", async () => {
+		vi.useFakeTimers();
+		try {
+			const { deps } = makeDeps();
+			const ctx = toolCtx(true) as ToolCtxTestDouble & { mode?: string };
+			ctx.mode = "tui";
+			let answer: ((value: string | undefined) => void) | undefined;
+			ctx.ui.select.mockImplementation(() => new Promise<string | undefined>((resolve) => {
+				answer = resolve;
+			}));
+			seedDenial("command");
+			const pending = resolveCallMode(
+				{ sandbox_permissions: "danger-full-access", justification: "j" },
+				ctx as never, deps, "command", () => "x",
+			);
+			await vi.advanceTimersByTimeAsync(0);
+			expect(ctx.ui.select).toHaveBeenCalledTimes(1);
+			expect((ctx.ui.select.mock.calls[0][2] as { timeout?: number }).timeout).toBeUndefined();
+			let done = false;
+			void pending.then(() => {
+				done = true;
+			});
+			await vi.advanceTimersByTimeAsync(APPROVAL_DIALOG_DEFAULT_TIMEOUT_MS + 1);
+			expect(done).toBe(false);
+			answer?.("Allow once");
+			await expect(pending).resolves.toBe("danger-full-access");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("broker 转发：deadline 按实际弹窗的父会话模式（父 TUI + 子 rpc → 不自动取消）", async () => {
+		vi.useFakeTimers();
+		try {
+			const { deps } = makeDeps();
+			let answer: ((value: string | undefined) => void) | undefined;
+			const parentSelect = vi.fn((_title: string, _options: string[], _opts?: { timeout?: number }) =>
+				new Promise<string | undefined>((resolve) => {
+					answer = resolve;
+				}));
+			getEscalationBroker().registerParent({ sessionId: "parent-mode", hasUI: () => true, mode: () => "tui", select: parentSelect });
+			getEscalationBroker().linkChild("child-mode", "parent-mode");
+			seedDenial("command", "child-mode");
+			const childCtx = subagentCtx("child-mode") as { mode?: string };
+			childCtx.mode = "rpc"; // 子会话模式与弹窗无关，不能拿它定 deadline
+			const pending = resolveCallMode(
+				{ sandbox_permissions: "danger-full-access", justification: "j" },
+				childCtx as never, deps, "command", () => "x",
+			);
+			await vi.advanceTimersByTimeAsync(0);
+			expect(parentSelect).toHaveBeenCalledTimes(1);
+			expect((parentSelect.mock.calls[0][2] as { timeout?: number }).timeout).toBeUndefined();
+			let done = false;
+			void pending.then(() => {
+				done = true;
+			});
+			await vi.advanceTimersByTimeAsync(APPROVAL_DIALOG_DEFAULT_TIMEOUT_MS + 1);
+			expect(done).toBe(false);
+			answer?.("Allow once");
+			await expect(pending).resolves.toBe("danger-full-access");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("broker 转发：父会话 RPC 且客户端永不应答 → deadline 到期取消，命令不执行", async () => {
+		vi.useFakeTimers();
+		try {
+			const { deps, spawnFn } = makeDeps();
+			const { bash } = createSandboxTools(deps);
+			const parentSelect = vi.fn(() => new Promise<string | undefined>(() => {}));
+			getEscalationBroker().registerParent({ sessionId: "parent-deaf", hasUI: () => true, mode: () => "rpc", select: parentSelect });
+			getEscalationBroker().linkChild("child-deaf", "parent-deaf");
+			seedDenial("command", "child-deaf");
+			const settled = bash.execute("call-broker-deadline", {
+				command: "echo must-not-run",
+				sandbox_permissions: "danger-full-access",
+				justification: "j",
+			}, undefined, undefined, subagentCtx("child-deaf")).then(() => null, (error: Error) => error);
+			await vi.advanceTimersByTimeAsync(APPROVAL_DIALOG_DEFAULT_TIMEOUT_MS - 1);
+			await vi.advanceTimersByTimeAsync(1);
+			const error = await settled;
+			expect(parentSelect).toHaveBeenCalledTimes(1);
+			expect(error?.message).toMatch(/cancelled/);
+			expect(spawnFn).not.toHaveBeenCalled();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("非法选择经直连通道不得批准：无效应答 fail-closed，命令不执行，前置拒绝不被恢复", async () => {
+		const { deps, spawnFn } = makeDeps();
+		const { bash } = createSandboxTools(deps);
+		const ctx = toolCtx(true) as ToolCtxTestDouble;
+		ctx.ui.select.mockResolvedValue("Allow" as never);
+		seedDenial("command");
+		const settled = await bash.execute("call-invalid-choice", {
+			command: "echo must-not-run",
+			sandbox_permissions: "danger-full-access",
+			justification: "j",
+		}, undefined, undefined, ctx as never).then(() => null, (error: Error) => error);
+		expect(settled?.message).toMatch(/unrecognized answer.*nothing was executed/s);
+		expect(spawnFn).not.toHaveBeenCalled();
+		const retry = await resolveCall(
+			{ sandbox_permissions: "danger-full-access", justification: "j" },
+			ctx as never, deps, "command", () => "x",
+		);
+		expect(retry).toEqual({ mode: "workspace-write", escalated: false, ignoredEscalation: true });
+		expect(ctx.ui.select).toHaveBeenCalledTimes(1);
 	});
 });
 
