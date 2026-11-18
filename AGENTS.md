@@ -11,3 +11,5 @@ monorepo 中所有 pi package 的统一规范请参考 [docs/guides/pi-package-s
 ## Git Worktree
 
 本项目使用 `.worktrees/` 目录存放 git worktree，已加入 `.gitignore`。创建 worktree 时无需重复检查。
+
+除 release 流程外，任何改代码操作**必须**在 worktree 中进行
