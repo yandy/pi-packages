@@ -17,7 +17,7 @@ A Pi package that adds an interactive `ask_user` tool for collecting user decisi
 - System prompt integration via `promptSnippet` and `promptGuidelines`
 - Optional timeout for auto-dismiss in both overlay and fallback input modes
 - Structured `details` on all results for session state reconstruction
-- Graceful fallback when interactive UI is unavailable
+- Graceful fallback when interactive UI is unavailable: RPC/headless sessions keep structured single- and multi-select via the dialog protocol
 - Bundled `ask-user` skill for mandatory decision-gating in high-stakes or ambiguous tasks
 
 ## Bundled skill: `ask-user`
@@ -154,6 +154,19 @@ While an `ask_user` prompt is open:
 
 If you prefer never to see the overlay, set `PI_ASK_USER_DISPLAY_MODE=inline` globally or `"displayMode": "inline"` in `ask-user.json`.
 
+## RPC / headless fallback
+
+When the rich TUI is unavailable (`ctx.ui.custom()` returns `undefined`, e.g. `pi --rpc`), the tool collects the same answers through the dialog protocol (`select` / `input`):
+
+- **Single select** — one `select` dialog listing the option titles, plus a freeform row when `allowFreeform` is set.
+- **Multi select** — repeated `select` rounds. Every round lists the options as numbered checkbox rows (`1. [✓] Red`, `2. [ ] Blue`); picking a row toggles it, picking it again unchecks it. A `✓ Done selecting` row appears once at least one option is checked, and a freeform row appears when `allowFreeform` is set. The dialog title carries the full option list with descriptions and the current selection.
+- **Comment** — with `allowComment`, an `input` dialog follows the selection; submitting nothing skips it.
+- **Cancellation** — only a cancelled dialog (or a timeout) produces `cancelled: true`.
+
+The user never types option titles, so a mismatch cannot be mistaken for a cancellation. If the dialog host returns a value that is not one of the offered choices, the tool returns `isError: true` with `cancelled: false`, echoes the raw answer in `details.rawInput`, and lists the offered choices in the error text.
+
+Results collected this way carry `details.fallback: "dialogs"`.
+
 ## Result details
 
 All tool results include a structured `details` object for rendering and session state reconstruction:
@@ -169,6 +182,12 @@ interface AskToolDetails {
   options: QuestionOption[];
   response: AskResponse | null;
   cancelled: boolean;
+  /** Present when the RPC/headless dialog protocol collected the answer. */
+  fallback?: "dialogs";
+  /** Failure description; a failed ask keeps `cancelled: false`. */
+  error?: string;
+  /** Verbatim dialog answer that matched none of the offered choices. */
+  rawInput?: string;
 }
 ```
 

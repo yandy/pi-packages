@@ -267,6 +267,29 @@ function makeUI(overrides: Record<string, unknown> = {}) {
 	};
 }
 
+/**
+ * 脚本化的 RPC 宿主：按顺序把每一轮 select 的选项里“包含指定片段”的那一项原样返回，
+ * 与真实宿主一样只回传列表里出现过的字符串。片段找不到就抛错，避免测试脚本写错时
+ * 静默退化成“用户取消”。picks 用完后返回 undefined（= 用户取消）。
+ */
+function scriptedSelect(picks: string[]) {
+	const calls: Array<{ title: string; options: string[]; opts: any }> = [];
+	let round = 0;
+	return {
+		calls,
+		select: async (title: string, options: string[], opts?: any) => {
+			calls.push({ title, options, opts });
+			const pick = picks[round++];
+			if (pick === undefined) return undefined;
+			const match = options.find((option) => option.includes(pick));
+			if (match === undefined) {
+				throw new Error(`scripted pick ${JSON.stringify(pick)} not offered: ${JSON.stringify(options)}`);
+			}
+			return match;
+		},
+	};
+}
+
 function createOverlayHandle() {
 	let hidden = false;
 	const calls: boolean[] = [];
@@ -1909,41 +1932,6 @@ describe("ask_user", () => {
 			expect(result.details.response).toEqual({ kind: "freeform", text: "Purple" });
 		});
 
-		it("multi-select degrades to input() with options in prompt", async () => {
-			const tool = await setupTool();
-			let inputTitle = "";
-
-			const result = await tool.execute(
-				"tool-call-id",
-				{
-					question: "Pick colors",
-					options: ["Red", "Blue", "Green"],
-					allowMultiple: true,
-					allowComment: false,
-				},
-				undefined,
-				undefined,
-				{
-					hasUI: true,
-					ui: makeUI({
-						custom: async () => undefined,
-						select: async () => undefined,
-						input: async (title: string) => {
-							inputTitle = title;
-							return "Red, Green";
-						},
-					}),
-				},
-			);
-
-			expect(result.isError).not.toBe(true);
-			expect(result.details.response).toEqual({ kind: "selection", selections: ["Red", "Green"] });
-			// Prompt should list the options for the user
-			expect(inputTitle).toContain("1. Red");
-			expect(inputTitle).toContain("2. Blue");
-			expect(inputTitle).toContain("3. Green");
-		});
-
 		it("collects an optional comment by default when the custom UI is unavailable", async () => {
 			const tool = await setupTool();
 			const inputTitles: string[] = [];
@@ -2062,6 +2050,264 @@ describe("ask_user", () => {
 			);
 
 			expect(capturedOpts).toEqual({ timeout: 5000 });
+		});
+	});
+
+	describe("RPC fallback multi-select", () => {
+		it("collects several options through repeated select() rounds", async () => {
+			const tool = await setupTool();
+			const host = scriptedSelect(["Red", "Green", "Done"]);
+
+			const result = await tool.execute(
+				"tool-call-id",
+				{
+					question: "Pick colors",
+					options: [
+						{ title: "Red", description: "warm shade" },
+						{ title: "Blue", description: "cool shade" },
+						{ title: "Green", description: "grass shade" },
+					],
+					allowMultiple: true,
+					allowFreeform: false,
+					allowComment: false,
+				},
+				undefined,
+				undefined,
+				{ hasUI: true, ui: makeUI({ custom: async () => undefined, select: host.select }) },
+			);
+
+			expect(result.isError).not.toBe(true);
+			expect(result.details.cancelled).toBe(false);
+			expect(result.details.response).toEqual({ kind: "selection", selections: ["Red", "Green"] });
+			expect(host.calls).toHaveLength(3);
+			// Descriptions stay visible: the dialog prompt carries the full option list.
+			expect(host.calls[0]?.title).toContain("warm shade");
+			expect(host.calls[0]?.title).toContain("grass shade");
+		});
+
+		it("shows the checked state on the option rows of the next round", async () => {
+			const tool = await setupTool();
+			const host = scriptedSelect(["Red", "Done"]);
+
+			await tool.execute(
+				"tool-call-id",
+				{ question: "Pick colors", options: ["Red", "Blue"], allowMultiple: true, allowFreeform: false, allowComment: false },
+				undefined,
+				undefined,
+				{ hasUI: true, ui: makeUI({ custom: async () => undefined, select: host.select }) },
+			);
+
+			const firstRound = host.calls[0]?.options ?? [];
+			const secondRound = host.calls[1]?.options ?? [];
+			expect(secondRound[0]).not.toBe(firstRound[0]);
+			expect(secondRound[0]).toContain("Red");
+			expect(secondRound[1]).toBe(firstRound[1]);
+		});
+
+		it("picking a checked option again unchecks it", async () => {
+			const tool = await setupTool();
+			const host = scriptedSelect(["Red", "Red", "Blue", "Done"]);
+
+			const result = await tool.execute(
+				"tool-call-id",
+				{ question: "Pick colors", options: ["Red", "Blue"], allowMultiple: true, allowFreeform: false, allowComment: false },
+				undefined,
+				undefined,
+				{ hasUI: true, ui: makeUI({ custom: async () => undefined, select: host.select }) },
+			);
+
+			expect(result.details.response).toEqual({ kind: "selection", selections: ["Blue"] });
+		});
+
+		it("offers a finish row only once at least one option is checked", async () => {
+			const tool = await setupTool();
+			const host = scriptedSelect(["Red", "Done"]);
+
+			await tool.execute(
+				"tool-call-id",
+				{ question: "Pick colors", options: ["Red", "Blue"], allowMultiple: true, allowFreeform: false, allowComment: false },
+				undefined,
+				undefined,
+				{ hasUI: true, ui: makeUI({ custom: async () => undefined, select: host.select }) },
+			);
+
+			expect(host.calls[0]?.options).toHaveLength(2);
+			expect(host.calls[1]?.options).toHaveLength(3);
+		});
+
+		it("offers a freeform row and follows up with input()", async () => {
+			const tool = await setupTool();
+			const host = scriptedSelect(["Type custom response"]);
+
+			const result = await tool.execute(
+				"tool-call-id",
+				{ question: "Pick colors", options: ["Red", "Blue"], allowMultiple: true, allowComment: false },
+				undefined,
+				undefined,
+				{
+					hasUI: true,
+					ui: makeUI({ custom: async () => undefined, select: host.select, input: async () => "Purple" }),
+				},
+			);
+
+			expect(result.isError).not.toBe(true);
+			expect(result.details.response).toEqual({ kind: "freeform", text: "Purple" });
+		});
+
+		it("collects an optional comment after finishing", async () => {
+			const tool = await setupTool();
+			const host = scriptedSelect(["Red", "Done"]);
+
+			const result = await tool.execute(
+				"tool-call-id",
+				{ question: "Pick colors", options: ["Red", "Blue"], allowMultiple: true, allowFreeform: false },
+				undefined,
+				undefined,
+				{
+					hasUI: true,
+					ui: makeUI({ custom: async () => undefined, select: host.select, input: async () => "Both are fine." }),
+				},
+			);
+
+			expect(result.details.response).toEqual({
+				kind: "selection",
+				selections: ["Red"],
+				comment: "Both are fine.",
+			});
+		});
+
+		it("treats a cancelled select round as a user cancellation", async () => {
+			const tool = await setupTool();
+			const host = scriptedSelect(["Red"]);
+
+			const result = await tool.execute(
+				"tool-call-id",
+				{ question: "Pick colors", options: ["Red", "Blue"], allowMultiple: true, allowFreeform: false, allowComment: false },
+				undefined,
+				undefined,
+				{ hasUI: true, ui: makeUI({ custom: async () => undefined, select: host.select }) },
+			);
+
+			expect(result.isError).not.toBe(true);
+			expect(result.details.cancelled).toBe(true);
+			expect(result.details.response).toBeNull();
+		});
+
+		it("passes the timeout to every select round", async () => {
+			const tool = await setupTool();
+			const host = scriptedSelect(["Red", "Done"]);
+
+			await tool.execute(
+				"tool-call-id",
+				{
+					question: "Pick colors",
+					options: ["Red", "Blue"],
+					allowMultiple: true,
+					allowFreeform: false,
+					allowComment: false,
+					timeout: 5000,
+				},
+				undefined,
+				undefined,
+				{ hasUI: true, ui: makeUI({ custom: async () => undefined, select: host.select }) },
+			);
+
+			expect(host.calls.map((call) => call.opts)).toEqual([{ timeout: 5000 }, { timeout: 5000 }]);
+		});
+	});
+
+	describe("RPC fallback answer validation (issue #247)", () => {
+		it("multi-select: an answer matching no offered row is a diagnosable error, not a cancellation", async () => {
+			const tool = await setupTool();
+
+			const result = await tool.execute(
+				"tool-call-id",
+				{ question: "Pick targets", options: ["E2E tests", "Docker build"], allowMultiple: true, allowComment: false },
+				undefined,
+				undefined,
+				{
+					hasUI: true,
+					ui: makeUI({ custom: async () => undefined, select: async () => "E2E, 无 docker" }),
+				},
+			);
+
+			expect(result.isError).toBe(true);
+			expect(result.details.cancelled).toBe(false);
+			expect(result.details.response).toBeNull();
+			expect(result.details.rawInput).toBe("E2E, 无 docker");
+			const text = result.content.map((part: any) => part.text).join("\n");
+			expect(text).toContain("E2E, 无 docker");
+			expect(text).toContain("E2E tests");
+			expect(text).toContain("Docker build");
+		});
+
+		it("single-select: an answer matching no offered option is a diagnosable error, not a cancellation", async () => {
+			const tool = await setupTool();
+
+			const result = await tool.execute(
+				"tool-call-id",
+				{ question: "Pick a color", options: ["Red", "Blue"], allowFreeform: false },
+				undefined,
+				undefined,
+				{
+					hasUI: true,
+					ui: makeUI({ custom: async () => undefined, select: async () => "Purple" }),
+				},
+			);
+
+			expect(result.isError).toBe(true);
+			expect(result.details.cancelled).toBe(false);
+			expect(result.details.rawInput).toBe("Purple");
+		});
+
+		it("marks answered dialog-fallback results with fallback: 'dialogs'", async () => {
+			const tool = await setupTool();
+
+			const result = await tool.execute(
+				"tool-call-id",
+				{ question: "Pick a color", options: ["Red", "Blue"], allowFreeform: false },
+				undefined,
+				undefined,
+				{
+					hasUI: true,
+					ui: makeUI({ custom: async () => undefined, select: async () => "Blue", input: async () => undefined }),
+				},
+			);
+
+			expect(result.details.fallback).toBe("dialogs");
+		});
+
+		it("marks cancelled dialog-fallback results with fallback: 'dialogs'", async () => {
+			const tool = await setupTool();
+
+			const result = await tool.execute(
+				"tool-call-id",
+				{ question: "Pick a color", options: ["Red", "Blue"], allowFreeform: false },
+				undefined,
+				undefined,
+				{ hasUI: true, ui: makeUI({ custom: async () => undefined }) },
+			);
+
+			expect(result.details.cancelled).toBe(true);
+			expect(result.details.fallback).toBe("dialogs");
+		});
+
+		it("does not mark results answered by the custom TUI", async () => {
+			const tool = await setupTool();
+
+			const result = await tool.execute(
+				"tool-call-id",
+				{ question: "Pick a color", options: ["Red", "Blue"] },
+				undefined,
+				undefined,
+				{
+					hasUI: true,
+					ui: makeUI({ custom: async () => ({ kind: "selection", selections: ["Red"] }) }),
+				},
+			);
+
+			expect(result.details.cancelled).toBe(false);
+			expect(result.details.fallback).toBeUndefined();
 		});
 	});
 
