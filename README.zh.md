@@ -8,7 +8,6 @@
 |---|---|---|
 | [pi-ask-user](./pi-ask-user/README.zh.md) | 交互式 ask_user 工具，支持可搜索分栏 UI、多选和自由文本 | `@yandy0725/pi-ask-user` |
 | [pi-coding-tools](./pi-coding-tools/README.zh.md) | AST/LSP 代码智能工具（ast_grep_search/ast_grep_replace/lsp_symbols/lsp_hover/lsp_navigate） | `@yandy0725/pi-coding-tools` |
-| [pi-container-sandbox](./pi-container-sandbox/README.zh.md) | Docker 沙箱扩展 | `@yandy0725/pi-container-sandbox` |
 | [pi-sandbox](./pi-sandbox/README.zh.md) | 进程级沙箱扩展（bwrap/landlock/seatbelt/windows-acl）：工作目录可写、其余宿主文件可读，fail-closed | `@yandy0725/pi-sandbox` |
 | [pi-subagents](./pi-subagents/README.zh.md) | 进程内子代理核心，支持后台执行和类型化 API | `@yandy0725/pi-subagents` |
 | [pi-superpowers](./pi-superpowers/README.zh.md) | Superpowers 结构化开发工作流（brainstorming、TDD、调试等） | `@yandy0725/pi-superpowers` |
@@ -17,6 +16,7 @@
 | [pi-web-tools](./pi-web-tools/README.zh.md) | websearch + webfetch 工具 | `@yandy0725/pi-web-tools` |
 
 > `pi-memory` 已迁往 [simple-memory](https://github.com/yandy/simple-memory)。
+> `pi-container-sandbox` 已退役：npm 包标记为 deprecated，源码保留在 git 历史中（`pi-container-sandbox-v1.3.0`）。
 
 ## 开发
 

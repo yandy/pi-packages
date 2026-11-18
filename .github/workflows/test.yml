@@ -30,8 +30,6 @@ jobs:
               - "pi-ask-user/**"
             pi-sandbox:
               - "pi-sandbox/**"
-            pi-container-sandbox:
-              - "pi-container-sandbox/**"
             pi-web-tools:
               - "pi-web-tools/**"
             pi-coding-tools:
@@ -73,13 +71,7 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-      # pi-container-sandbox 声明 "os": ["linux"]（Linux 特异包，spec D1）；npm 11 对 workspace 包
-      # 同样检查 os 字段，Windows 上须 --force 才能 monorepo 安装
-      # （docs/superpowers/specs/2026-10-04-windows-ci-design.md §3.4，实验已验证）。
       - run: npm ci
-        if: runner.os == 'Linux'
-      - run: npm ci --force
-        if: runner.os == 'Windows'
       - run: npm run check:dev-deps
         if: runner.os == 'Linux'
       - run: npm run check:host-deps
@@ -101,10 +93,6 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         package: ${{ fromJson(needs.changes.outputs.packages) }}
-        exclude:
-          # D1：pi-container-sandbox 是 Linux 特异包，Windows 不跑
-          - package: pi-container-sandbox
-            os: windows-latest
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     steps:
@@ -114,9 +102,6 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
-        if: runner.os == 'Linux'
-      - run: npm ci --force
-        if: runner.os == 'Windows'
       - run: npm run check:dev-deps
         if: runner.os == 'Linux'
       - run: npm run check:host-deps

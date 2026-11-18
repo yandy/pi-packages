@@ -284,7 +284,7 @@ export default function (pi: ExtensionAPI) {
 - **description 只写事实**：不写“何时该用”，不写跨工具策略，不写面向用户的说明；不复述参数（参数级细节放参数描述）。
 - **guidelines 不写参数细节与工具语法**；同一句话不得同时出现在 description 与 guideline（两处各付一份，且把两处绑死）。
 - **跨工具共享的规则必须来自同一字符串常量**：pi 只按精确字符串去重，换个措辞就等于付两份。参考 `pi-sandbox/src/tools.ts` 的 `ENV_REDIRECT_GUIDELINE`、`pi-coding-tools/src/tools/lsp-tools.ts` 的 `LSP_LANGUAGE_SERVER_GUIDELINE`。
-- **覆盖内置工具必须用 `create*ToolDefinition`**：`create*Tool()` 返回的是 `AgentTool`，经 `wrapToolDefinition()` 只透传 `name/label/description/parameters/prepareArguments/executionMode`，**不透传 `promptSnippet` / `promptGuidelines`**；而宿主按名字覆盖后只从覆盖后的定义读提示词，不会回落到内置定义。用错会让内置工具从 `Available tools` 消失、内置纪律全部静默丢失（`pi-container-sandbox` 曾因此丢 779 字符）。
+- **覆盖内置工具必须用 `create*ToolDefinition`**：`create*Tool()` 返回的是 `AgentTool`，经 `wrapToolDefinition()` 只透传 `name/label/description/parameters/prepareArguments/executionMode`，**不透传 `promptSnippet` / `promptGuidelines`**；而宿主按名字覆盖后只从覆盖后的定义读提示词，不会回落到内置定义。用错会让内置工具从 `Available tools` 消失、内置纪律全部静默丢失（已退役的 `pi-container-sandbox` 曾因此丢 779 字符）。
 - **`label` / `renderCall` / `renderResult` / 返回值 `details` 不进 LLM**：不要往那里搬提示词内容，也不要为了“省 token”去优化它们。
 - **注意宿主限制**：用自定义 system prompt（`SYSTEM.md` / `--system-prompt`）时 `promptSnippet` 与 `promptGuidelines` 会被整体丢弃，只有 `description` 存活。所以硬约束不能只押在 guidelines 上。
 

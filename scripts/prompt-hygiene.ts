@@ -10,7 +10,7 @@ import { expect } from "vitest";
  * - `promptGuidelines`：system prompt 的 `Guidelines`，按**精确字符串**去重 → 跨工具共享的规则
  *   必须来自同一常量，且不得与本工具 description 逐字重复。
  *
- * 只对 `authored` 列出的工具做措辞检查：本仓的 pi-sandbox / pi-container-sandbox 会重新注册
+ * 只对 `authored` 列出的工具做措辞检查：本仓的 pi-sandbox 会重新注册
  * pi 内置的 read/write/edit/bash，那些 snippet 是 pi 自己写的（例如 edit 的 98 字符 snippet
  * 以 "Make" 开头），不该由本仓的规则去约束；预算仍然对整包生效。
  */

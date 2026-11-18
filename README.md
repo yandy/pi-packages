@@ -12,7 +12,6 @@ Monorepo for @yandy pi packages. Uses npm workspaces.
 |---|---|---|
 | [pi-ask-user](./pi-ask-user) | Interactive ask_user tool with searchable split-pane UI, multi-select, and freeform | `@yandy0725/pi-ask-user` |
 | [pi-coding-tools](./pi-coding-tools) | AST/LSP code-intel tools (ast_grep_search/ast_grep_replace/lsp_symbols/lsp_hover/lsp_navigate) | `@yandy0725/pi-coding-tools` |
-| [pi-container-sandbox](./pi-container-sandbox) | Docker sandbox extension | `@yandy0725/pi-container-sandbox` |
 | [pi-sandbox](./pi-sandbox) | Process-level sandbox (bwrap/landlock/seatbelt/windows-acl): workspace writable, everything else readable, fail-closed | `@yandy0725/pi-sandbox` |
 | [pi-subagents](./pi-subagents) | In-process sub-agent core with background execution and typed API | `@yandy0725/pi-subagents` |
 | [pi-superpowers](./pi-superpowers) | Superpowers structured development workflows (brainstorming, TDD, debugging, etc.) | `@yandy0725/pi-superpowers` |
@@ -21,6 +20,7 @@ Monorepo for @yandy pi packages. Uses npm workspaces.
 | [pi-web-tools](./pi-web-tools) | websearch + webfetch tools | `@yandy0725/pi-web-tools` |
 
 > `pi-memory` now lives in [simple-memory](https://github.com/yandy/simple-memory).
+> `pi-container-sandbox` is retired: the npm package is deprecated and its source lives in git history (`pi-container-sandbox-v1.3.0`).
 
 ## Development
 
