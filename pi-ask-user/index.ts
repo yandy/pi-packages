@@ -1646,19 +1646,25 @@ function createDialogGuard(signal: AbortSignal | undefined, timeout: number | un
 		},
 		async run<T>(call: (opts: DialogCallOptions) => Promise<T>): Promise<T | undefined> {
 			if (signal?.aborted) {
-				reason = "abort";
+				// 首个原因即最终原因：后到的 abort 不得把 timeout 改写成 abort。
+				reason ??= "abort";
 				return undefined;
 			}
+			// 本次提问已在更早的轮次本地结算：不再开新的对话框。
+			if (reason !== undefined) return undefined;
 			const controller = new AbortController();
 			let settleLocal: ((value: DialogLocalCancel) => void) | undefined;
 			// 直接参与 race，不套 `.then`：本地取消不需要额外的 microtask 才能被 race 看见。
 			const localCancel = new Promise<DialogLocalCancel>((resolve) => {
 				settleLocal = resolve;
 			});
+			// 本轮自己的结算开关：整次提问的 reason 不该兼任本轮是否已取消。
+			let settledLocally = false;
 			const cancelLocally = (next: "timeout" | "abort") => {
-				if (reason !== undefined) return;
+				if (settledLocally) return;
+				settledLocally = true;
 				// 先记录原因：abort listener 里同步 reject 的宿主走的也是同一条判定。
-				reason = next;
+				reason ??= next;
 				controller.abort();
 				settleLocal?.(DIALOG_LOCAL_CANCEL);
 			};
@@ -1671,13 +1677,20 @@ function createDialogGuard(signal: AbortSignal | undefined, timeout: number | un
 					? { signal: controller.signal, timeout }
 					: { signal: controller.signal };
 				// 立即订阅宿主 promise：本地取消后迟到的 resolve / reject 都落在这条链上。
-				const host = call(opts).then(
-					(value): T | DialogLocalCancel => (reason === undefined ? value : DIALOG_LOCAL_CANCEL),
-					(error): T | DialogLocalCancel => {
-						if (reason !== undefined) return DIALOG_LOCAL_CANCEL;
-						throw error;
-					},
-				);
+				let host: Promise<T | DialogLocalCancel>;
+				try {
+					host = call(opts).then(
+						(value): T | DialogLocalCancel => (reason === undefined ? value : DIALOG_LOCAL_CANCEL),
+						(error): T | DialogLocalCancel => {
+							if (reason !== undefined) return DIALOG_LOCAL_CANCEL;
+							throw error;
+						},
+					);
+				} catch (error) {
+					// 同步抛错同样让位于已记录的本地取消；没有本地原因时它是真实宿主故障。
+					if (reason !== undefined) return undefined;
+					throw error;
+				}
 				const outcome = await Promise.race([host, localCancel]);
 				return outcome === DIALOG_LOCAL_CANCEL ? undefined : outcome;
 			} finally {
@@ -1694,6 +1707,19 @@ function describeCancel(reason: "timeout" | "abort" | undefined, timeoutMs: numb
 		return `Timed out after ${timeoutMs}ms waiting for the user's answer — the host UI did not respond. The question was not answered.`;
 	}
 	return "User cancelled the question";
+}
+
+/**
+ * 宿主抛出的真实错误：结构化上报。没有本地取消时它不得被吞成用户取消，
+ * 也不得让 execute 直接 reject——每条 dialog 路径都返回同一形状。
+ */
+function toolFailureResult(error: unknown) {
+	const message = error instanceof Error ? `${error.message}\n${error.stack ?? ""}` : String(error);
+	return {
+		content: [{ type: "text" as const, text: `Ask tool failed: ${message}` }],
+		isError: true as const,
+		details: { error: message },
+	};
 }
 
 /** Sentinel row that finishes a dialog multi-select; only offered once something is checked. */
@@ -1953,7 +1979,13 @@ export default function (pi: ExtensionAPI) {
 					signal,
 					explicitTimeout ?? (ctx.mode === "tui" ? undefined : DEFAULT_DIALOG_TIMEOUT_MS),
 				);
-				const answer = await guard.run((opts) => ctx.ui.input(prompt, "Type your answer...", opts));
+				let answer: string | undefined;
+				try {
+					answer = await guard.run((opts) => ctx.ui.input(prompt, "Type your answer...", opts));
+				} catch (error) {
+					// 无本地取消时宿主异常与其它 dialog 路径一致：结构化上报，不让 execute 直接 reject。
+					return toolFailureResult(error);
+				}
 				const response = createFreeformResponse(answer);
 
 				if (!response) {
@@ -1987,6 +2019,8 @@ export default function (pi: ExtensionAPI) {
 			let dialogGuard: DialogGuard | undefined;
 			// 富 TUI 自己结算的原因：custom() 的成功/取消都走 done，本地 timeout/abort 需要留痕。
 			let customCancelReason: "timeout" | "abort" | undefined;
+			// 富 TUI 异常退出时的清理入口（已结算后调用也是幂等的）。
+			let disposeCustomSettlement: (() => void) | undefined;
 			let overlayHandle: OverlayHandle | undefined;
 			let removeOverlayInputListener: (() => void) | undefined;
 			let hasAnnouncedHide = false;
@@ -1999,19 +2033,27 @@ export default function (pi: ExtensionAPI) {
 				) => {
 					let finished = false;
 					let timer: ReturnType<typeof setTimeout> | undefined;
-					// 一次性结算：宿主迟到的 timeout / abort 回调不得重复 done，也不得覆盖已有结果。
-					const finish = (value: AskUIResult | null, reason?: "timeout" | "abort") => {
-						if (finished) return;
-						finished = true;
+					const cleanup = () => {
 						if (timer !== undefined) {
 							clearTimeout(timer);
 							timer = undefined;
 						}
 						signal?.removeEventListener("abort", onAbort);
+					};
+					// 一次性结算：宿主迟到的 timeout / abort 回调不得重复 done，也不得覆盖已有结果。
+					const finish = (value: AskUIResult | null, reason?: "timeout" | "abort") => {
+						if (finished) return;
+						finished = true;
+						cleanup();
 						if (reason) customCancelReason = reason;
 						done(value);
 					};
 					const onAbort = () => finish(null, "abort");
+					// 组件构造或 custom() 抛错时 execute 走异常分支，不会有 done：由 finally 收尾。
+					disposeCustomSettlement = () => {
+						finished = true;
+						cleanup();
+					};
 
 					if (signal?.aborted) {
 						// 登记之前就被中断：不留弹窗等一个永远不会来的回答。
@@ -2103,14 +2145,10 @@ export default function (pi: ExtensionAPI) {
 						} as AskToolDetails,
 					};
 				}
-				const message = error instanceof Error ? `${error.message}\n${error.stack ?? ""}` : String(error);
-				return {
-					content: [{ type: "text", text: `Ask tool failed: ${message}` }],
-					isError: true,
-					details: { error: message },
-				};
+				return toolFailureResult(error);
 			} finally {
 				removeOverlayInputListener?.();
+				disposeCustomSettlement?.();
 			}
 
 			const fallbackFields = usedDialogFallback ? { fallback: "dialogs" as const } : {};
