@@ -44,9 +44,6 @@ jobs:
             pi-subagents-v*)
               echo "dir=pi-subagents" >> "$GITHUB_OUTPUT"
               ;;
-            pi-superpowers-v*)
-              echo "dir=pi-superpowers" >> "$GITHUB_OUTPUT"
-              ;;
           esac
 
       - run: npm ci
