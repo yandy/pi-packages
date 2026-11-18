@@ -12,6 +12,7 @@ import { createPermissionState, processPermissionState } from "../src/permission
 import { DEFAULT_SANDBOX_CONFIG } from "../src/config";
 import { PLACEHOLDER_KEYS } from "../src/escalation";
 import { getEscalationBroker, resetEscalationBrokerForTests } from "../src/escalation-broker";
+import { NON_TUI_APPROVAL_DEADLINE_MS } from "../src/approval-dialog";
 import { getDenialLedger, resetDenialLedgerForTests } from "../src/denial-ledger";
 
 // T14 修订（Fix 2）：把受限 pwsh ops 工厂替换成一个可识别的哨兵，使“builder 收到的 operations 是否
@@ -82,6 +83,8 @@ function toolCtx(hasUI = true, choice: string | undefined = "Allow once") {
 /** 需要定制共享 toolCtx 的 mock 时使用的完整结构视图；不另造审批 ctx 桩。 */
 type ToolCtxTestDouble = {
 	hasUI: boolean;
+	/** 弹窗宿主模式：缺省 undefined → 审批按非 TUI 处理（有 deadline）。 */
+	mode?: string;
 	sessionManager: { getSessionId(): string; getSessionFile(): string };
 	ui: {
 		select: ReturnType<typeof vi.fn>;
@@ -104,7 +107,12 @@ beforeEach(() => {
 	fakeTmpDir = realpathSync.native(join(dir, "fake-tmp"));
 	outsideDir = realpathSync.native(join(dir, "outside"));
 });
-afterEach(() => { resetEscalationBrokerForTests(); resetDenialLedgerForTests(); rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => {
+	vi.useRealTimers();
+	resetEscalationBrokerForTests();
+	resetDenialLedgerForTests();
+	rmSync(dir, { recursive: true, force: true });
+});
 
 describe("createSandboxTools schemas", () => {
 	it("提权参数显式声明 null：strict 模式下模型拿到的是 schema 认可的“不提权”取值（而非猜字符串）", () => {
@@ -447,7 +455,8 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 
 	function registerParent(sessionId: string, choice: string | undefined = "Allow once") {
 		const select = vi.fn(async () => choice);
-		getEscalationBroker().registerParent({ sessionId, hasUI: () => true, select });
+		// mode 为父会话的实际宿主模式（issue #253：deadline 判定按弹窗所在会话，不看子会话）
+		getEscalationBroker().registerParent({ sessionId, hasUI: () => true, mode: () => "rpc", select });
 		return select;
 	}
 
@@ -523,9 +532,9 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 		expect(parentSelect).not.toHaveBeenCalled();
 	});
 
-	it("direct 路径透传 signal（D6）", async () => {
+	it("direct 路径透传 signal：宿主拿到派生 signal（不是调用方对象）与 timeout（D6 + #253）", async () => {
 		const { deps } = makeDeps();
-		const ctx = toolCtx(true, "Allow once") as { ui: { select: ReturnType<typeof vi.fn> } };
+		const ctx = toolCtx(true, "Allow once") as ToolCtxTestDouble;
 		const ac = new AbortController();
 		seedDenial("command");
 		await resolveCallMode(
@@ -533,19 +542,25 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 			ctx as never,
 			deps, "command", () => "x", ac.signal,
 		);
-		expect(ctx.ui.select.mock.calls[0][2]).toEqual({ signal: ac.signal });
+		const opts = ctx.ui.select.mock.calls[0][2] as { signal: AbortSignal; timeout?: number };
+		expect(opts.signal).toBeInstanceOf(AbortSignal);
+		expect(opts.signal).not.toBe(ac.signal);
+		expect(opts.timeout).toBe(NON_TUI_APPROVAL_DEADLINE_MS);
 	});
 
-	it("direct 路径无 signal → 第三参为 undefined（headless 行为逐字不变，D6）", async () => {
+	it("direct 路径无 signal：仍向宿主传派生 signal 与 timeout（本地 deadline 不依赖调用方给 signal）", async () => {
 		const { deps } = makeDeps();
-		const ctx = toolCtx(true, "Allow once") as { ui: { select: ReturnType<typeof vi.fn> } };
+		const ctx = toolCtx(true, "Allow once") as ToolCtxTestDouble;
 		seedDenial("command");
 		await resolveCallMode(
 			{ sandbox_permissions: "danger-full-access", justification: "j" },
 			ctx as never,
 			deps, "command", () => "x",
 		);
-		expect(ctx.ui.select.mock.calls[0][2]).toBeUndefined();
+		const opts = ctx.ui.select.mock.calls[0][2] as { signal: AbortSignal; timeout?: number };
+		expect(opts).toBeDefined();
+		expect(opts.signal).toBeInstanceOf(AbortSignal);
+		expect(opts.timeout).toBe(NON_TUI_APPROVAL_DEADLINE_MS);
 	});
 
 	it("direct 路径 ctx.ui.select 抛错 → 按取消处理，命令不执行，不冒泡宿主内部报错（与 broker.request 口径一致）", async () => {
@@ -573,7 +588,7 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 		const { deps } = makeDeps();
 		const broker = getEscalationBroker();
 		const ownSelect = vi.fn(async () => "Allow once");
-		broker.registerParent({ sessionId: TEST_SESSION, hasUI: () => true, select: ownSelect });
+		broker.registerParent({ sessionId: TEST_SESSION, hasUI: () => true, mode: () => "rpc", select: ownSelect });
 		const request = vi.spyOn(broker, "request");
 		const ctx = toolCtx(true, "Allow once") as ToolCtxTestDouble;
 		seedDenial("command");
@@ -603,7 +618,7 @@ describe("resolveCallMode 审批通道路由（spec 2026-09-30）", () => {
 			releaseForwarded = resolve;
 		}));
 		const broker = getEscalationBroker();
-		broker.registerParent({ sessionId: TEST_SESSION, hasUI: () => true, select: forwardedSelect });
+		broker.registerParent({ sessionId: TEST_SESSION, hasUI: () => true, mode: () => "rpc", select: forwardedSelect });
 		broker.linkChild("child-concurrent", TEST_SESSION);
 		seedDenial("command");
 		seedDenial("command", "child-concurrent");
@@ -1018,5 +1033,356 @@ describe("extraWritableDirs 接线", () => {
 			const { readFile } = await import("node:fs/promises");
 			expect(await readFile(target, "utf-8")).toBe("goodbye world");
 		} finally { rmSync(extra, { recursive: true, force: true }); }
+	});
+});
+
+describe("审批 deadline 与应答白名单（#253 验收）", () => {
+	/** 子会话 ctx：hasUI=false，审批必须转发到父通道；mode 可选（用于证明实现不看子会话 mode）。 */
+	function childCtx(sessionId: string, mode?: string) {
+		return {
+			hasUI: false,
+			mode,
+			sessionManager: { getSessionId: () => sessionId },
+			ui: {
+				select: vi.fn(async () => {
+					throw new Error("child session must not prompt locally");
+				}),
+			},
+		} as never;
+	}
+
+	/** 直连 ctx（本会话有 UI）：mode 决定 TUI/RPC 判定。 */
+	function directCtx(mode: string | undefined): ToolCtxTestDouble {
+		const ctx = toolCtx(true) as ToolCtxTestDouble;
+		ctx.mode = mode;
+		return ctx;
+	}
+
+	/** 记录 promise 的结算状态与值，便于在假时钟下断言「到期前仍 pending」。 */
+	function track<T>(promise: Promise<T>) {
+		const state: { done: boolean; value: T | undefined; error: Error | undefined } = {
+			done: false,
+			value: undefined,
+			error: undefined,
+		};
+		const tracked = promise.then(
+			(value) => {
+				state.done = true;
+				state.value = value;
+				return value;
+			},
+			(error: Error) => {
+				state.done = true;
+				state.error = error;
+				throw error;
+			},
+		);
+		tracked.catch(() => {}); // 迟到的 rejection 不得变成 unhandled rejection
+		return { state, tracked };
+	}
+
+	it("直连 RPC 永不应答：deadline 前 pending，到点抛既有 cancelled 文案，且不 spawn", async () => {
+		vi.useFakeTimers();
+		const { deps, spawnFn } = makeDeps();
+		const { bash } = createSandboxTools(deps);
+		const ctx = directCtx("rpc");
+		ctx.ui.select.mockImplementation(() => new Promise<string | undefined>(() => {}));
+		seedDenial("command");
+		const { state } = track(bash.execute("deadline-bash", {
+			command: "touch ./must-not-run",
+			sandbox_permissions: "danger-full-access", justification: "probe",
+		}, undefined, undefined, ctx as never));
+
+		await vi.advanceTimersByTimeAsync(NON_TUI_APPROVAL_DEADLINE_MS - 1);
+		expect(state.done).toBe(false);
+
+		await vi.advanceTimersByTimeAsync(1);
+		expect(state.done).toBe(true);
+		expect(state.error?.message).toMatch(/cancelled — nothing was executed/);
+		expect(spawnFn).not.toHaveBeenCalled();
+		expect(existsSync(join(ws, "must-not-run"))).toBe(false);
+	});
+
+	it("直连 RPC 永不应答（write）：文件未落盘，也不新增 denial 记录", async () => {
+		vi.useFakeTimers();
+		const { deps } = makeDeps();
+		const { write } = createSandboxTools(deps);
+		const ctx = directCtx("rpc");
+		ctx.ui.select.mockImplementation(() => new Promise<string | undefined>(() => {}));
+		seedDenial("operation");
+		const target = join(outsideDir, `deadline-write-${process.pid}-${Date.now()}.txt`);
+		const { state } = track(write.execute("deadline-write", {
+			path: target, content: "x",
+			sandbox_permissions: "danger-full-access", justification: "probe",
+		}, undefined, undefined, ctx as never));
+
+		await vi.advanceTimersByTimeAsync(NON_TUI_APPROVAL_DEADLINE_MS);
+		expect(state.done).toBe(true);
+		expect(state.error?.message).toMatch(/cancelled/);
+		expect(existsSync(target)).toBe(false);
+		// 一次性语义：前置记录已被门禁消费，超时既不恢复也不新增
+		expect(getDenialLedger().consume(TEST_SESSION, "operation")).toBe(false);
+	});
+
+	it("超时后不恢复前置拒绝：同一会话的下一次提权被门禁忽略", async () => {
+		vi.useFakeTimers();
+		const { deps } = makeDeps();
+		const ctx = directCtx("rpc");
+		ctx.ui.select.mockImplementation(() => new Promise<string | undefined>(() => {}));
+		seedDenial("command");
+		const first = track(resolveCall(
+			{ sandbox_permissions: "danger-full-access", justification: "j" },
+			ctx as never, deps, "command", () => "x",
+		));
+		await vi.advanceTimersByTimeAsync(NON_TUI_APPROVAL_DEADLINE_MS);
+		expect(first.state.error?.message).toMatch(/cancelled/);
+		// 记录没有重建：第二笔提权直接被 denial-first 门禁忽略（不弹窗、不执行）
+		vi.useRealTimers();
+		const second = await resolveCall(
+			{ sandbox_permissions: "danger-full-access", justification: "j" },
+			ctx as never, deps, "command", () => "x",
+		);
+		expect(second).toEqual({ mode: "workspace-write", escalated: false, ignoredEscalation: true });
+		expect(ctx.ui.select).toHaveBeenCalledTimes(1);
+	});
+
+	// RPC 宿主原样透传客户端 value：这些都是真能到达授权判定的运行时值（表驱动覆盖 execute 层）。
+	const invalidChoices: { label: string; value: unknown }[] = [
+		{ label: '"Allow"', value: "Allow" },
+		{ label: '"not-a-choice"', value: "not-a-choice" },
+		{ label: "null", value: null },
+		{ label: "对象", value: {} },
+	];
+	for (const { label, value } of invalidChoices) {
+		it(`非法应答 ${label}：不批准、不执行、不新增 denial 记录`, async () => {
+			const { deps, spawnFn } = makeDeps();
+			const { bash } = createSandboxTools(deps);
+			const ctx = directCtx("rpc");
+			ctx.ui.select.mockResolvedValue(value);
+			seedDenial("command");
+			const settled = await bash.execute(`invalid-choice-${label}`, {
+				command: "touch ./must-not-run",
+				sandbox_permissions: "danger-full-access", justification: "probe",
+			}, undefined, undefined, ctx as never).then(() => null, (error: Error) => error);
+			expect(settled).toBeInstanceOf(Error);
+			expect(settled?.message).toMatch(/not one of the offered options.*nothing was executed/s);
+			expect(spawnFn).not.toHaveBeenCalled();
+			expect(existsSync(join(ws, "must-not-run"))).toBe(false);
+			expect(getDenialLedger().consume(TEST_SESSION, "command")).toBe(false);
+		});
+	}
+
+	it("到期后迟到的 Allow once 不执行（execute 层，非仅 dialog 层）", async () => {
+		vi.useFakeTimers();
+		const { deps, spawnFn } = makeDeps();
+		const { bash } = createSandboxTools(deps);
+		const ctx = directCtx("rpc");
+		let answer: ((value: string | undefined) => void) | undefined;
+		ctx.ui.select.mockImplementation(() => new Promise<string | undefined>((resolve) => {
+			answer = resolve;
+		}));
+		seedDenial("command");
+		const { state } = track(bash.execute("late-allow", {
+			command: "touch ./must-not-run",
+			sandbox_permissions: "danger-full-access", justification: "probe",
+		}, undefined, undefined, ctx as never));
+		await vi.advanceTimersByTimeAsync(NON_TUI_APPROVAL_DEADLINE_MS);
+		expect(state.error?.message).toMatch(/cancelled — nothing was executed/);
+
+		vi.useRealTimers();
+		if (answer === undefined) throw new Error("approval must still be pending for the late answer");
+		answer("Allow once");
+		await new Promise((resolve) => setTimeout(resolve, 10)); // 真实宏任务窗口：让迟到应答沿 promise 链走完
+		expect(spawnFn).not.toHaveBeenCalled();
+		expect(existsSync(join(ws, "must-not-run"))).toBe(false);
+	});
+
+	it("Deny 与在飞 abort 都不新增 denial 记录（cancelled ≠ Deny，也不恢复前置记录）", async () => {
+		const { deps } = makeDeps();
+		const denyCtx = directCtx("rpc");
+		denyCtx.ui.select.mockResolvedValue("Deny");
+		denyCtx.ui.input.mockResolvedValue("nope");
+		seedDenial("command");
+		await expect(resolveCall(
+			{ sandbox_permissions: "danger-full-access", justification: "j" },
+			denyCtx as never, deps, "command", () => "x",
+		)).rejects.toThrow(/the user rejected/);
+		expect(getDenialLedger().consume(TEST_SESSION, "command")).toBe(false);
+
+		const abortCtx = directCtx("rpc");
+		abortCtx.ui.select.mockImplementation(() => new Promise<string | undefined>(() => {}));
+		seedDenial("command");
+		const ac = new AbortController();
+		const { state } = track(resolveCall(
+			{ sandbox_permissions: "danger-full-access", justification: "j" },
+			abortCtx as never, deps, "command", () => "x", ac.signal,
+		));
+		await vi.waitFor(() => expect(abortCtx.ui.select).toHaveBeenCalledTimes(1));
+		ac.abort();
+		await vi.waitFor(() => expect(state.done).toBe(true));
+		expect(state.error?.message).toMatch(/cancelled/);
+		expect(getDenialLedger().consume(TEST_SESSION, "command")).toBe(false);
+	});
+
+	it("ctx.ui 的抛错取值器不冒泡宿主报错：input 抛错 → Deny 无理由，select 抛错 → cancelled", async () => {
+		const { deps, spawnFn } = makeDeps();
+		const { bash } = createSandboxTools(deps);
+		const denialCtx = {
+			hasUI: true,
+			mode: "rpc",
+			sessionManager: { getSessionId: () => TEST_SESSION },
+			ui: {
+				select: async () => "Deny",
+				get input(): (title: string, placeholder?: string) => Promise<string | undefined> {
+					throw new Error("hostile input getter");
+				},
+			},
+		} as never;
+		seedDenial("command");
+		const denied = await bash.execute("getter-input", {
+			command: "touch ./must-not-run",
+			sandbox_permissions: "danger-full-access", justification: "probe",
+		}, undefined, undefined, denialCtx).then(() => null, (error: Error) => error);
+		expect(denied?.message).toMatch(/the user rejected escalating this command/);
+		expect(denied?.message).not.toContain("hostile input getter");
+
+		const selectCtx = {
+			hasUI: true,
+			mode: "rpc",
+			sessionManager: { getSessionId: () => TEST_SESSION },
+			ui: {
+				get select(): (title: string, options: string[]) => Promise<string | undefined> {
+					throw new Error("hostile select getter");
+				},
+			},
+		} as never;
+		seedDenial("command");
+		const cancelled = await bash.execute("getter-select", {
+			command: "touch ./must-not-run",
+			sandbox_permissions: "danger-full-access", justification: "probe",
+		}, undefined, undefined, selectCtx).then(() => null, (error: Error) => error);
+		expect(cancelled?.message).toMatch(/cancelled — nothing was executed/);
+		expect(cancelled?.message).not.toContain("hostile select getter");
+		expect(spawnFn).not.toHaveBeenCalled();
+	});
+
+	it("broker 父通道永不应答：按父会话 mode（rpc）武装 deadline，子会话 mode 不参与判定", async () => {
+		vi.useFakeTimers();
+		const { deps } = makeDeps();
+		const select = vi.fn(() => new Promise<string | undefined>(() => {}));
+		getEscalationBroker().registerParent({ sessionId: "parent-rpc", hasUI: () => true, mode: () => "rpc", select });
+		getEscalationBroker().linkChild("child-tui", "parent-rpc");
+		seedDenial("command", "child-tui");
+		const { state } = track(resolveCallMode(
+			{ sandbox_permissions: "danger-full-access", justification: "j" },
+			// 子会话 mode 是 tui：实现若误用子会话 mode 就不会武装 deadline
+			childCtx("child-tui", "tui"), deps, "command", () => "x",
+		));
+		expect(select).toHaveBeenCalledTimes(1);
+		expect(select.mock.calls[0][2]).toMatchObject({ timeout: NON_TUI_APPROVAL_DEADLINE_MS });
+
+		await vi.advanceTimersByTimeAsync(NON_TUI_APPROVAL_DEADLINE_MS - 1);
+		expect(state.done).toBe(false);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(state.done).toBe(true);
+		expect(state.error?.message).toMatch(/cancelled — nothing was executed/);
+	});
+
+	it("TUI 父通道不设默认上限：假时钟推进超过默认值仍 pending，人工回答后正常批准", async () => {
+		vi.useFakeTimers();
+		const { deps } = makeDeps();
+		let release: ((value: string | undefined) => void) | undefined;
+		const select = vi.fn((_title: string) => new Promise<string | undefined>((resolve) => {
+			release = resolve;
+		}));
+		getEscalationBroker().registerParent({ sessionId: "parent-tui", hasUI: () => true, mode: () => "tui", select });
+		getEscalationBroker().linkChild("child-rpc", "parent-tui");
+		seedDenial("command", "child-rpc");
+		const { state, tracked } = track(resolveCallMode(
+			{ sandbox_permissions: "danger-full-access", justification: "j" },
+			// 子会话 mode 是 rpc：父会话是 TUI 时不得武装 deadline
+			childCtx("child-rpc", "rpc"), deps, "command", () => "x",
+		));
+		expect(select.mock.calls[0][2]).toMatchObject({ timeout: undefined });
+		expect(vi.getTimerCount()).toBe(0);
+		await vi.advanceTimersByTimeAsync(NON_TUI_APPROVAL_DEADLINE_MS * 4);
+		expect(state.done).toBe(false);
+
+		vi.useRealTimers();
+		if (release === undefined) throw new Error("TUI dialog must be pending");
+		release("Allow once");
+		await expect(tracked).resolves.toBe("danger-full-access");
+	});
+
+	it("Deny 理由步本地 deadline 到期 → 整次审批 cancelled（不退化成 Deny 无理由）", async () => {
+		vi.useFakeTimers();
+		const { deps, spawnFn } = makeDeps();
+		const { bash } = createSandboxTools(deps);
+		const ctx = directCtx("rpc");
+		ctx.ui.select.mockResolvedValue("Deny");
+		ctx.ui.input.mockImplementation(() => new Promise<string | undefined>(() => {}));
+		seedDenial("command");
+		const { state } = track(bash.execute("reason-deadline", {
+			command: "touch ./must-not-run",
+			sandbox_permissions: "danger-full-access", justification: "probe",
+		}, undefined, undefined, ctx as never));
+
+		await vi.advanceTimersByTimeAsync(NON_TUI_APPROVAL_DEADLINE_MS);
+		expect(state.done).toBe(true);
+		expect(state.error?.message).toMatch(/cancelled — nothing was executed/);
+		expect(state.error?.message).not.toMatch(/the user rejected/);
+		expect(spawnFn).not.toHaveBeenCalled();
+	});
+
+	it("宿主正常取消理由输入 → 仍是「用户拒绝、无理由」（本地 deadline 不误伤）", async () => {
+		vi.useFakeTimers();
+		const { deps } = makeDeps();
+		const ctx = directCtx("rpc");
+		ctx.ui.select.mockResolvedValue("Deny");
+		ctx.ui.input.mockResolvedValue(undefined);
+		seedDenial("command");
+		const { state } = track(resolveCallMode(
+			{ sandbox_permissions: "danger-full-access", justification: "j" },
+			ctx as never, deps, "command", () => "x",
+		));
+		await vi.advanceTimersByTimeAsync(NON_TUI_APPROVAL_DEADLINE_MS * 2);
+		expect(state.error?.message).toMatch(/the user rejected escalating this command to "danger-full-access"/);
+		expect(state.error?.message).not.toMatch(/cancelled/);
+	});
+
+	it("在飞 abort（宿主忽略 signal、永不应答）：本地结算为 cancelled，宿主 signal 被中断", async () => {
+		const { deps } = makeDeps();
+		const ctx = directCtx("rpc");
+		let hostSignal: AbortSignal | undefined;
+		ctx.ui.select.mockImplementation((_title: string, _options: string[], opts?: { signal?: AbortSignal }) => {
+			hostSignal = opts?.signal;
+			return new Promise<string | undefined>(() => {});
+		});
+		seedDenial("command");
+		const ac = new AbortController();
+		const { state } = track(resolveCallMode(
+			{ sandbox_permissions: "danger-full-access", justification: "j" },
+			ctx as never, deps, "command", () => "x", ac.signal,
+		));
+		await vi.waitFor(() => expect(hostSignal).toBeDefined());
+		ac.abort();
+		await vi.waitFor(() => expect(state.done).toBe(true));
+		expect(state.error?.message).toMatch(/cancelled — nothing was executed/);
+		expect(hostSignal?.aborted).toBe(true);
+	});
+
+	it("TUI 直连不设默认上限：无本地 timer", async () => {
+		vi.useFakeTimers();
+		const { deps } = makeDeps();
+		const ctx = directCtx("tui");
+		ctx.ui.select.mockImplementation(() => new Promise<string | undefined>(() => {}));
+		seedDenial("command");
+		const { state } = track(resolveCallMode(
+			{ sandbox_permissions: "danger-full-access", justification: "j" },
+			ctx as never, deps, "command", () => "x",
+		));
+		await vi.advanceTimersByTimeAsync(NON_TUI_APPROVAL_DEADLINE_MS * 4);
+		expect(state.done).toBe(false);
+		expect(ctx.ui.select.mock.calls[0][2]).toMatchObject({ timeout: undefined });
 	});
 });

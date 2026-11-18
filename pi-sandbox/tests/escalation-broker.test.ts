@@ -1,15 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { NON_TUI_APPROVAL_DEADLINE_MS } from "../src/approval-dialog";
 import { getEscalationBroker, type ParentApprovalChannel, resetEscalationBrokerForTests } from "../src/escalation-broker";
 
-/** 造一个父通道假件：hasUI 可切换，select/input 记录调用并返回固定值。 */
-function fakeChannel(sessionId: string, hasUI = true, choice: string | undefined = "Allow once") {
+/** 造一个父通道假件：hasUI 可切换，select/input 记录调用并返回固定值。
+ *  mode 是父会话的实际宿主模式（broker 用它决定要不要武装本地 deadline）。 */
+function fakeChannel(sessionId: string, hasUI = true, choice: string | undefined = "Allow once", mode = "rpc") {
 	const select = vi.fn(async () => choice);
 	const input = vi.fn(async (_title: string, _placeholder?: string) => "because");
-	const channel: ParentApprovalChannel = { sessionId, hasUI: () => hasUI, select, input };
+	const channel: ParentApprovalChannel = { sessionId, hasUI: () => hasUI, mode: () => mode, select, input };
 	return { channel, select, input };
 }
 
 afterEach(() => {
+	vi.useRealTimers();
 	// 模块级全局槽位跨测试复位（testing.md：模块单例必须显式复位）
 	resetEscalationBrokerForTests();
 });
@@ -129,6 +132,7 @@ describe("resolveChannel（严格路由，spec §2 D3）", () => {
 			hasUI: () => {
 				throw new Error("This extension ctx is stale");
 			},
+			mode: () => "rpc",
 			select: async () => undefined,
 		});
 		broker.linkChild("c", "boom");
@@ -137,14 +141,17 @@ describe("resolveChannel（严格路由，spec §2 D3）", () => {
 });
 
 describe("request（并发结算 + abort）", () => {
-	it("透传 title/options，返回用户选择；无 signal 时第三参为 undefined", async () => {
+	it("透传 title/options，返回用户选择；无外部 signal 时仍传派生 signal 与 timeout", async () => {
 		const broker = getEscalationBroker();
 		const { channel, select } = fakeChannel("parent-1");
 		await expect(broker.request(channel, "T", ["Allow once", "Deny"])).resolves.toEqual({ choice: "Allow once" });
-		expect(select).toHaveBeenCalledWith("T", ["Allow once", "Deny"], undefined);
+		expect(select).toHaveBeenCalledTimes(1);
+		const opts = select.mock.calls[0][2];
+		expect(opts?.signal).toBeInstanceOf(AbortSignal);
+		expect(opts?.timeout).toBe(NON_TUI_APPROVAL_DEADLINE_MS);
 	});
 
-	it("有 signal 时以 opts.signal 透传（父弹窗可被中断关闭）", async () => {
+	it("有 signal 时派生 signal 承接中断（父弹窗可被关闭），且不是调用方那个对象", async () => {
 		const broker = getEscalationBroker();
 		const ac = new AbortController();
 		let received: AbortSignal | undefined;
@@ -152,9 +159,10 @@ describe("request（并发结算 + abort）", () => {
 			received = opts?.signal;
 			return "Deny";
 		});
-		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select };
+		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, mode: () => "rpc", select };
 		await expect(broker.request(channel, "T", ["Allow once", "Deny"], ac.signal)).resolves.toEqual({ choice: "Deny" });
-		expect(received).toBe(ac.signal);
+		expect(received).toBeInstanceOf(AbortSignal);
+		expect(received).not.toBe(ac.signal);
 	});
 
 	it("两个并发 request 各自结算且结果对应，不承诺顺序", async () => {
@@ -163,7 +171,7 @@ describe("request（并发结算 + abort）", () => {
 		const select = vi.fn((title: string) => new Promise<string | undefined>((resolve) => {
 			releases.set(title, resolve);
 		}));
-		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select };
+		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, mode: () => "rpc", select };
 		const first = broker.request(channel, "t1", ["Allow once", "Deny"]);
 		const second = broker.request(channel, "t2", ["Allow once", "Deny"]);
 		// 两个 select 都必须先进入在飞状态；任一请求等待另一个 settle 都会在这里超时。
@@ -186,7 +194,7 @@ describe("request（并发结算 + abort）", () => {
 		expect(select).not.toHaveBeenCalled();
 	});
 
-	it("在飞时 abort → select 收到同一 signal，resolve undefined", async () => {
+	it("在飞时 abort → 派生 signal 被中断，resolve undefined", async () => {
 		const broker = getEscalationBroker();
 		const ac = new AbortController();
 		let received: AbortSignal | undefined;
@@ -196,11 +204,13 @@ describe("request（并发结算 + abort）", () => {
 				received = opts?.signal;
 				opts?.signal?.addEventListener("abort", () => resolve(undefined), { once: true });
 			}));
-		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select };
+		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, mode: () => "rpc", select };
 		const pending = broker.request(channel, "T", ["Allow once", "Deny"], ac.signal);
-		await vi.waitFor(() => expect(received).toBe(ac.signal));
+		await vi.waitFor(() => expect(received).toBeInstanceOf(AbortSignal));
+		expect(received).not.toBe(ac.signal);
 		ac.abort();
 		await expect(pending).resolves.toEqual({ choice: undefined });
+		expect(received?.aborted).toBe(true);
 	});
 
 	it("父侧 select 抛错 → resolve undefined（按取消处理，不冒泡打断子代理工具调用）", async () => {
@@ -208,7 +218,7 @@ describe("request（并发结算 + abort）", () => {
 		const select = vi.fn(async () => {
 			throw new Error("ui exploded");
 		});
-		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select };
+		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, mode: () => "rpc", select };
 		await expect(broker.request(channel, "T", ["Allow once"])).resolves.toEqual({ choice: undefined });
 	});
 
@@ -220,9 +230,55 @@ describe("request（并发结算 + abort）", () => {
 			if (calls === 1) throw new Error("ui exploded");
 			return "Allow once";
 		});
-		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select };
+		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, mode: () => "rpc", select };
 		await expect(broker.request(channel, "t1", ["Allow once"])).resolves.toEqual({ choice: undefined });
 		await expect(broker.request(channel, "t2", ["Allow once"])).resolves.toEqual({ choice: "Allow once" });
+	});
+});
+
+describe("request 的\"从不 reject\"契约：抛错取值器（review I1）", () => {
+	it("通道 input 是抛错取值器 → 仍是「Deny、无理由」，不 reject、不降级成取消", async () => {
+		const broker = getEscalationBroker();
+		const select = vi.fn(async () => "Deny");
+		const channel = {
+			sessionId: "p",
+			hasUI: () => true,
+			mode: () => "rpc",
+			select,
+			get input(): (title: string, placeholder?: string) => Promise<string | undefined> {
+				throw new Error("hostile input getter");
+			},
+		} as unknown as ParentApprovalChannel;
+		await expect(broker.request(channel, "T", ["Deny", "Allow once"], undefined, { title: "Why deny?", placeholder: "optional" }))
+			.resolves.toEqual({ choice: "Deny" });
+	});
+
+	it("通道 select 是抛错取值器 → 按取消结算，不 reject", async () => {
+		const broker = getEscalationBroker();
+		const channel = {
+			sessionId: "p",
+			hasUI: () => true,
+			mode: () => "rpc",
+			get select(): (title: string, options: string[]) => Promise<string | undefined> {
+				throw new Error("hostile select getter");
+			},
+		} as unknown as ParentApprovalChannel;
+		await expect(broker.request(channel, "T", ["Deny", "Allow once"])).resolves.toEqual({ choice: undefined });
+	});
+
+	it("通道 mode 是抛错取值器 → 按非 TUI 处理（有 deadline），请求照常结算", async () => {
+		const broker = getEscalationBroker();
+		const select = vi.fn(async () => "Allow once");
+		const channel = {
+			sessionId: "p",
+			hasUI: () => true,
+			get mode(): () => string | undefined {
+				throw new Error("hostile mode getter");
+			},
+			select,
+		} as unknown as ParentApprovalChannel;
+		await expect(broker.request(channel, "T", ["Deny", "Allow once"])).resolves.toEqual({ choice: "Allow once" });
+		expect(select.mock.calls[0][2]?.timeout).toBe(NON_TUI_APPROVAL_DEADLINE_MS);
 	});
 });
 
@@ -247,7 +303,10 @@ describe("request：Deny 理由的两步式（select → input 串行）", () =>
 		const { channel, input } = fakeChannel("p", true, "Deny");
 		await expect(broker.request(channel, "T", ["Allow once", "Deny"], undefined, reasonPrompt))
 			.resolves.toEqual({ choice: "Deny", reason: "because" });
-		expect(input).toHaveBeenCalledWith("Why deny?", "optional", undefined);
+		expect(input).toHaveBeenCalledTimes(1);
+		expect(input.mock.calls[0][0]).toBe("Why deny?");
+		expect(input.mock.calls[0][1]).toBe("optional");
+		expect(input.mock.calls[0][2]?.signal).toBeInstanceOf(AbortSignal);
 	});
 
 	it("Allow once → 不追问理由（input 零调用）", async () => {
@@ -260,7 +319,7 @@ describe("request：Deny 理由的两步式（select → input 串行）", () =>
 	it("channel 无 input → 返回 { choice: 'Deny' }（理由缺失不阻塞拒绝）", async () => {
 		const broker = getEscalationBroker();
 		const select = vi.fn(async () => "Deny");
-		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select };
+		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, mode: () => "rpc", select };
 		await expect(broker.request(channel, "T", ["Allow once", "Deny"], undefined, reasonPrompt)).resolves.toEqual({ choice: "Deny" });
 	});
 
@@ -270,7 +329,7 @@ describe("request：Deny 理由的两步式（select → input 串行）", () =>
 		const input = vi.fn(async () => {
 			throw new Error("ui exploded");
 		});
-		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select, input };
+		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, mode: () => "rpc", select, input };
 		await expect(broker.request(channel, "T", ["Allow once", "Deny"], undefined, reasonPrompt)).resolves.toEqual({ choice: "Deny" });
 	});
 
@@ -283,9 +342,11 @@ describe("request：Deny 理由的两步式（select → input 串行）", () =>
 			inputSignal = opts?.signal;
 			return "ok";
 		});
-		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select, input };
+		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, mode: () => "rpc", select, input };
 		await broker.request(channel, "T", ["Allow once", "Deny"], ac.signal, reasonPrompt);
-		expect(inputSignal).toBe(ac.signal);
+		expect(inputSignal).toBeInstanceOf(AbortSignal);
+		expect(inputSignal).not.toBe(ac.signal);
+		expect(inputSignal?.aborted).toBe(false);
 	});
 
 	it("同一 request 内 select → input 串行，理由输入不被并发请求打断", async () => {
@@ -302,7 +363,7 @@ describe("request：Deny 理由的两步式（select → input 串行）", () =>
 			events.push(`select:${title}`);
 			return "Deny";
 		});
-		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, select, input };
+		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, mode: () => "rpc", select, input };
 		const first = broker.request(channel, "t1", ["Allow once", "Deny"], undefined, { title: "Why deny t1?" });
 		const second = broker.request(channel, "t2", ["Allow once", "Deny"], undefined, { title: "Why deny t2?" });
 		// 两个理由输入可同时处于在飞状态；这里不比较不同 request 的事件先后。
@@ -318,5 +379,83 @@ describe("request：Deny 理由的两步式（select → input 串行）", () =>
 		releaseSecond("r2");
 		await expect(first).resolves.toEqual({ choice: "Deny", reason: "r1" });
 		await expect(second).resolves.toEqual({ choice: "Deny", reason: "r2" });
+	});
+});
+
+describe("request：按父会话 mode 决定 deadline（issue #253）", () => {
+	it("父会话是 rpc 且宿主永不应答：deadline 前 pending，到点结算为 cancelled", async () => {
+		vi.useFakeTimers();
+		const broker = getEscalationBroker();
+		const { channel, select } = fakeChannel("p", true, undefined);
+		select.mockImplementation(() => new Promise<string | undefined>(() => {}));
+		const state: { done: boolean; value: { choice: unknown } | undefined } = { done: false, value: undefined };
+		const pending = broker.request(channel, "T", ["Deny", "Allow once"]).then((value) => {
+			state.done = true;
+			state.value = value;
+			return value;
+		});
+
+		await vi.advanceTimersByTimeAsync(NON_TUI_APPROVAL_DEADLINE_MS - 1);
+		expect(state.done).toBe(false);
+		await vi.advanceTimersByTimeAsync(1);
+		await pending;
+		expect(state.value).toEqual({ choice: undefined });
+	});
+
+	it("父会话是 tui：假时钟推进超过默认值仍 pending，人工回答后正常结算", async () => {
+		vi.useFakeTimers();
+		const broker = getEscalationBroker();
+		let release: ((value: string | undefined) => void) | undefined;
+		const select = vi.fn((_title: string) => new Promise<string | undefined>((resolve) => {
+			release = resolve;
+		}));
+		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, mode: () => "tui", select };
+		const pending = broker.request(channel, "T", ["Deny", "Allow once"]);
+		expect(select.mock.calls[0][2]?.timeout).toBeUndefined();
+		expect(vi.getTimerCount()).toBe(0);
+
+		await vi.advanceTimersByTimeAsync(NON_TUI_APPROVAL_DEADLINE_MS * 4);
+		vi.useRealTimers();
+		if (release === undefined) throw new Error("TUI dialog must be pending");
+		release("Allow once");
+		await expect(pending).resolves.toEqual({ choice: "Allow once" });
+	});
+
+	it("宿主在 abort listener 里同步 reject → 仍是 cancelled（本地裁决优先）", async () => {
+		vi.useFakeTimers();
+		const broker = getEscalationBroker();
+		const select = vi.fn(
+			(_title: string, _options: string[], opts?: { signal?: AbortSignal }) =>
+				new Promise<string | undefined>((_resolve, reject) => {
+					opts?.signal?.addEventListener("abort", () => reject(new Error("host rejected synchronously")), { once: true });
+				}),
+		);
+		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, mode: () => "rpc", select };
+		const pending = broker.request(channel, "T", ["Deny", "Allow once"]);
+		await vi.advanceTimersByTimeAsync(NON_TUI_APPROVAL_DEADLINE_MS);
+		await expect(pending).resolves.toEqual({ choice: undefined });
+	});
+
+	it("理由输入步也拿到同一套 timeout（每次弹窗各自 300 秒，共用同一个中断通道）", async () => {
+		const broker = getEscalationBroker();
+		const { channel, input } = fakeChannel("p", true, "Deny");
+		await broker.request(channel, "T", ["Deny", "Allow once"], undefined, { title: "Why deny?", placeholder: "optional" });
+		expect(input.mock.calls[0][2]?.timeout).toBe(NON_TUI_APPROVAL_DEADLINE_MS);
+	});
+
+	it("两个并发 request 各自的 deadline 互不影响（按期结算的只有到点那个）", async () => {
+		vi.useFakeTimers();
+		const broker = getEscalationBroker();
+		const answers = new Map<string, (value: string | undefined) => void>();
+		const select = vi.fn((title: string) => new Promise<string | undefined>((resolve) => {
+			answers.set(title, resolve);
+		}));
+		const channel: ParentApprovalChannel = { sessionId: "p", hasUI: () => true, mode: () => "rpc", select };
+		const first = broker.request(channel, "t1", ["Deny", "Allow once"]);
+		const second = broker.request(channel, "t2", ["Deny", "Allow once"]);
+		await vi.waitFor(() => expect(answers.size).toBe(2));
+		await vi.advanceTimersByTimeAsync(NON_TUI_APPROVAL_DEADLINE_MS);
+		await expect(first).resolves.toEqual({ choice: undefined });
+		await expect(second).resolves.toEqual({ choice: undefined });
 	});
 });

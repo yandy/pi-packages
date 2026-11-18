@@ -2,7 +2,11 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetSandboxConfigCache } from "../src/config";
+import { NON_TUI_APPROVAL_DEADLINE_MS } from "../src/approval-dialog";
+import { DEFAULT_SANDBOX_CONFIG, resetSandboxConfigCache } from "../src/config";
+import { getDenialLedger, resetDenialLedgerForTests } from "../src/denial-ledger";
+import { createPermissionState } from "../src/permission";
+import { resolveCall } from "../src/tools";
 import { processHasUI, resetConfigWarningStateForTests, takeConfigWarnings } from "../src/config-warnings";
 import { getEscalationBroker, resetEscalationBrokerForTests } from "../src/escalation-broker";
 import { processPermissionState, type PermissionState } from "../src/permission";
@@ -33,6 +37,7 @@ afterEach(() => {
 	processPermissionState.override = null; // C1：模块单例跨测试复位
 	for (const state of freshPermissionStates.splice(0)) state.override = null; // T15 修订：resetModules 后重取的新实例同样复位
 	resetEscalationBrokerForTests(); // 审批通道注册表同为进程级单例，必须复位
+	resetDenialLedgerForTests();
 	resetSandboxConfigCache();
 	resetConfigWarningStateForTests();
 	vi.unstubAllEnvs();
@@ -597,5 +602,116 @@ describe("配置告警的出口（spec 2026-11-18）", () => {
 		expect(() => hooks.session_start?.({ type: "session_start" }, ctx)).not.toThrow();
 		expect(notify).toHaveBeenCalledTimes(1);
 		expect(warningsApi.takeConfigWarnings()).toHaveLength(1);
+	});
+});
+
+describe("父通道 approval deadline 按父会话 ctx.mode 判定（issue #253）", () => {
+	/** 子会话 ctx：hasUI=false，审批必须经 broker 转发到父通道。 */
+	function childCtx(sessionId: string, mode: string) {
+		return {
+			hasUI: false,
+			mode,
+			sessionManager: { getSessionId: () => sessionId },
+			ui: {
+				select: async () => {
+					throw new Error("child session must not prompt locally");
+				},
+			},
+		} as never;
+	}
+
+	/** resolveCall 只需配置/权限/平台：本用例只关心审批通道，不执行任何工具。 */
+	function deps() {
+		return {
+			cwd: dir,
+			platform: "linux" as const,
+			getConfig: () => DEFAULT_SANDBOX_CONFIG,
+			permission: createPermissionState(),
+		};
+	}
+
+	function track<T>(promise: Promise<T>) {
+		const state: { done: boolean; value: T | undefined; error: Error | undefined } = { done: false, value: undefined, error: undefined };
+		const tracked = promise.then(
+			(value) => {
+				state.done = true;
+				state.value = value;
+				return value;
+			},
+			(error: Error) => {
+				state.done = true;
+				state.error = error;
+				throw error;
+			},
+		);
+		tracked.catch(() => {});
+		return { state, tracked };
+	}
+
+	it("父会话是 rpc（子会话 tui）→ 按父 mode 武装 deadline，到点 cancelled", async () => {
+		vi.useFakeTimers();
+		try {
+			const { fakePi, hooks, channels } = makeFakePi();
+			const activate = (await import("../index")).default;
+			activate(fakePi as never);
+			// 父 ctx 的 mode 是唯一判据：删掉 index.ts 的 mode 接线，父 mode 变 undefined → 本用例仍会到点，
+			// 但反向用例（父 tui）会开始自动到期，那一侧负责咬住接线是否真的存在。
+			const select = vi.fn(() => new Promise<string | undefined>(() => {}));
+			hooks.session_start?.({ type: "session_start" }, {
+				hasUI: true,
+				mode: "rpc",
+				sessionManager: { getSessionId: () => "p-rpc" },
+				ui: { select },
+			});
+			channels["subagents:child:session-created"]?.({ sessionId: "c-tui", parentSessionId: "p-rpc" });
+			getDenialLedger().record("c-tui", "command");
+			const { state } = track(resolveCall(
+				{ sandbox_permissions: "danger-full-access", justification: "j" },
+				childCtx("c-tui", "tui"), deps(), "command", () => "x",
+			));
+			expect(select).toHaveBeenCalledTimes(1);
+			expect(select.mock.calls[0][2]?.timeout).toBe(NON_TUI_APPROVAL_DEADLINE_MS);
+
+			await vi.advanceTimersByTimeAsync(NON_TUI_APPROVAL_DEADLINE_MS - 1);
+			expect(state.done).toBe(false);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(state.done).toBe(true);
+			expect(state.error?.message).toMatch(/cancelled — nothing was executed/);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("父会话是 tui（子会话 rpc）→ 不设默认上限，人工回答后正常批准", async () => {
+		vi.useFakeTimers();
+		const { fakePi, hooks, channels } = makeFakePi();
+		const activate = (await import("../index")).default;
+		activate(fakePi as never);
+		let release: ((value: string | undefined) => void) | undefined;
+		const select = vi.fn((_title: string) => new Promise<string | undefined>((resolve) => {
+			release = resolve;
+		}));
+		hooks.session_start?.({ type: "session_start" }, {
+			hasUI: true,
+			mode: "tui",
+			sessionManager: { getSessionId: () => "p-tui" },
+			ui: { select },
+		});
+		channels["subagents:child:session-created"]?.({ sessionId: "c-rpc", parentSessionId: "p-tui" });
+		getDenialLedger().record("c-rpc", "command");
+		const { state, tracked } = track(resolveCall(
+			{ sandbox_permissions: "danger-full-access", justification: "j" },
+			childCtx("c-rpc", "rpc"), deps(), "command", () => "x",
+		));
+		expect(select.mock.calls[0][2]?.timeout).toBeUndefined();
+		expect(vi.getTimerCount()).toBe(0);
+
+		await vi.advanceTimersByTimeAsync(NON_TUI_APPROVAL_DEADLINE_MS * 4);
+		expect(state.done).toBe(false);
+
+		vi.useRealTimers();
+		if (release === undefined) throw new Error("TUI approval must be pending");
+		release("Allow once");
+		await expect(tracked).resolves.toEqual({ mode: "danger-full-access", escalated: true, ignoredEscalation: false });
 	});
 });

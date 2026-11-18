@@ -13,6 +13,7 @@
  * 栈顶关闭后重新显示并各自结算；RPC 的并发请求各自独立结算。
  */
 
+import { type ApprovalDialogOptions, type ApprovalDialogPort, runApprovalDialog } from "./approval-dialog";
 import type { DenialReasonPrompt, EscalationDecision } from "./escalation";
 
 /** 进程全局槽位键：带包名前缀，避免与其他扩展的 globalThis 使用相撞。 */
@@ -35,23 +36,25 @@ function hasUIOf(channel: ParentApprovalChannel): boolean {
 
 /**
  * 父会话注册的审批通道。
- * `hasUI` 是函数而非布尔快照：注册后父会话可能失去 UI（reload / 会话替换），每次解析都现查。
- * `opts.signal` 直通 pi 的 `ExtensionUIDialogOptions.signal`——子代理被中断时父弹窗被真正关闭，
- * 且已 abort 的请求根本不会弹窗。宿主实现见 TUI 的 `showExtensionSelector` 与 RPC 模式的
- * `createDialogPromise`：二者都在 signal abort 时关闭弹窗并 resolve `undefined`。
- * TUI `interactive-mode.js` 的 `extensionDialogs` / `showTopExtensionDialog()` 让新弹窗获焦，
- * 早先的弹窗留在栈里，栈顶关闭后重新显示并各自结算；RPC `rpc-mode.js` 的
- * `pendingExtensionRequests` 按请求独立结算。并发审批顺序由宿主决定，本包不做承诺。
+ * `hasUI` 与 `mode` 是函数而非快照：注册后父会话可能失去 UI 或换宿主（reload / 会话替换），
+ * 每次都用现查的值。
+ * - `hasUI()`：路由判据（`resolveChannel` 只命中仍有 UI 的祖先）。
+ * - `mode()`：审批 deadline 的判据，必须是**弹窗实际显示的那个会话**的 `ctx.mode`。子会话自己的
+ *   mode 与弹窗是否有人值守无关（子会话可以是 rpc 而父会话是 tui，反之亦然）。
+ * `opts` 直通 pi 的 `ExtensionUIDialogOptions`（`signal` + `timeout`）：`signal` 让父弹窗能被中断关闭，
+ * `timeout` 让宿主自己也武装一个与本地同值的倒计时。宿主实现见 TUI 的 `showExtensionSelector` 与
+ * RPC 模式的 `createDialogPromise`。并发审批顺序由宿主决定，本包不做承诺。
  * 此处不引 dist 行号——行号引用跨宿主版本即腐（Ruling 3）。
  */
 export interface ParentApprovalChannel {
 	readonly sessionId: string;
 	hasUI(): boolean;
-	select(title: string, options: string[], opts?: { signal?: AbortSignal }): Promise<string | undefined>;
+	mode(): string | undefined;
+	select(title: string, options: string[], opts?: ApprovalDialogOptions): Promise<string | undefined>;
 	/** 可选：Deny 后的理由输入（两步式的第二步）。缺失/抛错时请求照常返回 Deny（无理由）。
 	 *  宿主的 `ctx.ui.input` 本就是必填成员，此处仍声明为可选：通道是**跨会话注册**的抽象，
 	 *  注册方可能拿不到 `input`（异常 ctx）；缺失时跳过理由追问是 fail-closed 方向。 */
-	input?(title: string, placeholder?: string, opts?: { signal?: AbortSignal }): Promise<string | undefined>;
+	input?(title: string, placeholder?: string, opts?: ApprovalDialogOptions): Promise<string | undefined>;
 }
 
 export interface EscalationBroker {
@@ -65,7 +68,8 @@ export interface EscalationBroker {
 	unlinkChild(childSessionId: string): void;
 	/** 严格解析：沿 link 向上找第一个「已注册且 hasUI()」的祖先通道；找不到返回 null。 */
 	resolveChannel(childSessionId: string): ParentApprovalChannel | null;
-	/** 提交一次审批；signal abort → choice 为 undefined，落进既有"取消"分支。 */
+	/** 提交一次审批；本地 deadline / signal abort → choice 为 undefined，落进既有"取消"分支。
+	 *  从不 reject：父侧 UI 异常、病态 signal 一律按取消结算。 */
 	request(
 		channel: ParentApprovalChannel,
 		title: string,
@@ -120,26 +124,22 @@ class InProcessEscalationBroker implements EscalationBroker {
 		signal?: AbortSignal,
 		denialReason?: DenialReasonPrompt,
 	): Promise<EscalationDecision> {
+		const port: ApprovalDialogPort = {
+			// deadline 判据来自父会话（弹窗所在宿主），不是发起的子会话。
+			mode: () => channel.mode(),
+			select: (title, options, opts) => channel.select(title, options, opts),
+			// 取值延迟到调用点：通道是跨会话注册的宿主对象，`input` 可能是抛错取值器；抛错由 dialog 层
+			// 收成「Deny、无理由」，不该把整次审批降级成取消。
+			input: (title, placeholder, opts) => {
+				const input = channel.input;
+				return typeof input === "function" ? input(title, placeholder, opts) : Promise.resolve(undefined);
+			},
+		};
 		const run = async (): Promise<EscalationDecision> => {
 			try {
-				// 调用前已被中断：根本不弹窗，否则用户会看到没人接收结果的幽灵审批（Review Focus #2）。
-				// 读取 aborted 也放在 try 内——病态 signal getter 抛错时仍须保证 request 从不 reject，
-				// 这条契约是 escalation.ts 能零改动的前提。
-				if (signal?.aborted === true) return { choice: undefined };
-				// 在飞时 abort 由 pi 的对话框自行关闭并 resolve undefined（opts.signal 已透传）。
-				const choice = await channel.select(title, options, signal === undefined ? undefined : { signal });
-				// 同一请求内串行 await：先 select，Deny 时再 input 收理由。
-				if (choice !== "Deny" || denialReason === undefined || typeof channel.input !== "function") {
-					return { choice };
-				}
-				try {
-					const reason = await channel.input(denialReason.title, denialReason.placeholder, signal === undefined ? undefined : { signal });
-					return { choice, reason };
-				} catch {
-					return { choice }; // 理由输入异常不影响拒绝语义（fail-closed）
-				}
+				return await runApprovalDialog(port, { title, options, denialReason }, signal);
 			} catch {
-				// 父侧 UI 异常按"取消"处理（fail-closed），不让异常冒泡打断子代理的工具调用。
+				// 父侧 UI / 病态 signal 一律按"取消"处理（fail-closed），不让异常冒泡打断子代理的工具调用。
 				return { choice: undefined };
 			}
 		};
