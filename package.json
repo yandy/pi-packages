@@ -5,7 +5,6 @@
 	"workspaces": [
 		"pi-ask-user",
 		"pi-coding-tools",
-		"pi-container-sandbox",
 		"pi-web-tools",
 		"pi-todo",
 		"pi-vision-tools",

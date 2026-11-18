@@ -29,9 +29,6 @@ jobs:
             pi-sandbox-v*)
               echo "dir=pi-sandbox" >> "$GITHUB_OUTPUT"
               ;;
-            pi-container-sandbox-v*)
-              echo "dir=pi-container-sandbox" >> "$GITHUB_OUTPUT"
-              ;;
             pi-web-tools-v*)
               echo "dir=pi-web-tools" >> "$GITHUB_OUTPUT"
               ;;

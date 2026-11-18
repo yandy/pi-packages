@@ -178,8 +178,8 @@ Optional grants and their trade-offs:
 
 - Config lives in the agent dir's global files only (`~/.pi/agent/sandbox.json` for the sandbox fields, `~/.pi/agent/sandbox-writable.json` for the extra writable roots): project-level `<project>/.pi/sandbox.json` and `<project>/.pi/sandbox-writable.json` are ignored silently (move any settings you rely on to the global files). Legacy `image`/`runtime`/`host` sections are ignored with a warning — rewrite them as the new fields above as needed
 - The container runtime (docker/podman), image builds, `runtime.mounts`, the `/sandbox` command, `--container*` flags, and the external-path approval flow are not part of this package
-- Need container-grade isolation (separate filesystem/network namespaces)? Install `@yandy0725/pi-container-sandbox` — it keeps the container implementation
-- `pi-sandbox` and `@yandy0725/pi-container-sandbox` are **mutually exclusive**: both take over `bash`/`write`/`edit` and both read the same global `~/.pi/agent/sandbox.json` (with incompatible schemas) — enable only one at a time, and uninstall or disable the other before switching. pi-sandbox ignores project-level files; pi-container-sandbox still reads its own project scope
+- Container-grade isolation (separate filesystem/network namespaces) is out of scope for this package. The old `@yandy0725/pi-container-sandbox` is retired from this repo (npm package deprecated; source in git history at `pi-container-sandbox-v1.3.0`)
+- If you still run the old `@yandy0725/pi-container-sandbox`: it and `pi-sandbox` are **mutually exclusive** — both take over `bash`/`write`/`edit` and both read the same global `~/.pi/agent/sandbox.json` (with incompatible schemas); enable only one at a time, and uninstall or disable the other before switching. pi-sandbox ignores project-level files; the old package still reads its own project scope
 
 ## Development
 
