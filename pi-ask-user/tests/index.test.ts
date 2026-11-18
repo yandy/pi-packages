@@ -2712,6 +2712,27 @@ describe("ask_user", () => {
 			expect(result.details.cancelReason).toBeUndefined();
 			expect(result.content[0].text).toContain("socket closed");
 		});
+
+		it("reports an ordinary host failure on the option-less input as a structured error", async () => {
+			const tool = await setupTool();
+
+			const result = await tool.execute(
+				"tool-call-id",
+				{ question: "What is your name?" },
+				undefined,
+				undefined,
+				dialogCtx({
+					input: async () => {
+						throw new Error("socket closed");
+					},
+				}),
+			);
+
+			expect(result.isError).toBe(true);
+			expect(result.details.cancelled).not.toBe(true);
+			expect(result.details.cancelReason).toBeUndefined();
+			expect(result.content[0].text).toContain("socket closed");
+		});
 	});
 
 	describe("rich TUI cancellation contract (issue #255)", () => {
@@ -2810,6 +2831,33 @@ describe("ask_user", () => {
 				expect(result.details.response).toEqual({ kind: "selection", selections: ["A"] });
 				expect(result.details.cancelReason).toBeUndefined();
 				expect(doneCalls).toEqual([{ kind: "selection", selections: ["A"] }]);
+				expect(vi.getTimerCount()).toBe(0);
+				expect(removeListener).toHaveBeenCalledWith("abort", expect.any(Function));
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("clears its timer and abort listener when the rich UI fails after arming them", async () => {
+			vi.useFakeTimers();
+			try {
+				const tool = await setupTool();
+				const controller = new AbortController();
+				const removeListener = vi.spyOn(controller.signal, "removeEventListener");
+
+				const result = await tool.execute(
+					"tool-call-id",
+					{ question: "Which option?", options: ["A", "B"], timeout: 1000 },
+					controller.signal,
+					undefined,
+					customCtx((factory, done) => {
+						factory(TUI, createTheme(), createKeybindings(), done);
+						throw new Error("component blew up");
+					}),
+				);
+
+				expect(result.isError).toBe(true);
+				expect(result.content[0].text).toContain("component blew up");
 				expect(vi.getTimerCount()).toBe(0);
 				expect(removeListener).toHaveBeenCalledWith("abort", expect.any(Function));
 			} finally {

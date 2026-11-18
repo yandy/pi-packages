@@ -194,10 +194,12 @@ RPC 模式（`pi --mode rpc`）下 `ctx.ui.custom()` 返回 `undefined`，`ask_u
   超时会 abort 传给宿主的 signal，让守规矩的宿主撤掉弹窗。
 - 已记录的本地超时/中断拥有最终裁决权：宿主在 abort listener 里同步 resolve/reject，或在本地取消之后才
   结算，都不能把结果改成答案或宿主错误；迟到的 rejection 会被消费，不会变成 unhandled rejection。
-  没有本地取消原因时，宿主异常仍返回结构化的 `isError` 结果。
+  没有本地取消原因时，每条 dialog 路径（包括无选项的自由提问 `input()`）上宿主异常都返回结构化的
+  `isError` 结果。
 - 结算结果为 `cancelled: true` 加 `details.cancelReason`：到期为 `"timeout"`，被中断为 `"abort"`，
   用户（或宿主）主动取消时缺省。富内联/叠加层 UI 同样上报这两个原因：显式 `timeout` 与工具中断会结算
-  提示并清理 timer 与 abort listener，迟到回调不会再结算一次。
+  提示并清理 timer 与 abort listener，任何结局（作答、取消、超时、中断、组件构造抛错）都会清理，
+  迟到回调不会再结算一次。
 
 ## 致谢
 

@@ -217,11 +217,13 @@ See the host's `docs/rpc-extension-ui.md` for the wire format.
 - A recorded local timeout/abort has the final say: a host that resolves — or rejects — from inside the
   abort listener, or after the local cancel, cannot turn the result into an answer or a host error. Late
   rejections are absorbed instead of surfacing as unhandled rejections. A host failure with no local
-  cancel still returns a structured `isError` result.
+  cancel still returns a structured `isError` result on every dialog path, including the option-less
+  freeform `input`.
 - Settlement is reported as `cancelled: true` plus `details.cancelReason`: `"timeout"` when the
   deadline expired, `"abort"` when the call was interrupted, and absent when the user (or host) cancelled.
   The rich inline/overlay UI reports the same reasons; its explicit `timeout` and tool abort settle the
-  prompt and are cleaned up (timer + abort listener) on every exit, and late callbacks cannot re-settle it.
+  prompt and are cleaned up (timer + abort listener) on every exit — answer, cancel, timeout, abort, or
+  an exception while building the component — and late callbacks cannot re-settle it.
 
 ## Credits
 
