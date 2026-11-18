@@ -31,6 +31,19 @@ function readHasUI(ctx: { hasUI: boolean }): boolean {
 }
 
 /**
+ * UI 模式的防御性读取（同上：每个成员都是先 assertActive() 的取值器）。
+ * undefined 表示无法判断，由 escalation-broker 按非 TUI 处理——挂死比误取消更糟。
+ */
+function readCtxMode(ctx: { mode: unknown }): string | undefined {
+	try {
+		const mode = ctx.mode;
+		return typeof mode === "string" ? mode : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
  * 活动工具探测：取值失败（陈旧 ctx / reload / 取值器抛错）时返回 undefined，表示“无法判断”。
  * 外层 try/catch 保证扩展 factory 永不 throw（I2）；非数组返回值同样归为无法判断。
  */
@@ -191,6 +204,10 @@ export default function (pi: ExtensionAPI) {
 			sessionId,
 			// hasUI 现查而非快照：注册后父会话可能因 reload / 会话替换失去 UI，或使 ctx 失效
 			hasUI: () => readHasUI(ctx),
+			// mode 决定审批 dialog 的默认 deadline：必须报告**实际弹窗的父会话**模式
+			// （TUI 无上限；RPC/json/print 有默认 deadline），不能拿子会话的。
+			mode: () => readCtxMode(ctx),
+			// opts（派生 signal + timeout）由共享审批 guard 生成，原样转发给宿主。
 			select: (title, options, opts) => ctx.ui.select(title, options, opts),
 			// 两步式的第二步：Deny 后的可选理由。异常 ctx 可能缺 input——缺失/抛错时 broker 跳过理由追问
 			// （拒绝照常结算）。

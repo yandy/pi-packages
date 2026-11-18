@@ -259,6 +259,33 @@ describe("escalation approval forwarding wiring (spec 2026-09-30 §4.5)", () => 
 		expect(broker.resolveChannel("42")).toBeNull();
 	});
 
+	it("注册的父通道报告实际 UI 模式；取值抛错 / 缺失时返回 undefined（由 broker 按非 TUI 兜底）", async () => {
+		const { fakePi, hooks } = makeFakePi();
+		const activate = (await import("../index")).default;
+		activate(fakePi as never);
+		hooks.session_start?.({ type: "session_start" }, {
+			hasUI: true,
+			sessionManager: { getSessionId: () => "p-mode" },
+			mode: "rpc",
+			ui: { select: async () => "Allow once" },
+		});
+		getEscalationBroker().linkChild("c-mode", "p-mode");
+		expect(getEscalationBroker().resolveChannel("c-mode")?.mode?.()).toBe("rpc");
+
+		// 陈旧 ctx：mode 取值器抛错 → 通道仍可用，mode 归为未知（非 TUI 兜底），绝不冒泡。
+		hooks.session_start?.({ type: "session_start" }, {
+			hasUI: true,
+			sessionManager: { getSessionId: () => "p-stale" },
+			get mode(): string {
+				throw new Error("This extension ctx is stale");
+			},
+			ui: { select: async () => "Allow once" },
+		});
+		getEscalationBroker().linkChild("c-stale", "p-stale");
+		expect(() => getEscalationBroker().resolveChannel("c-stale")?.mode?.()).not.toThrow();
+		expect(getEscalationBroker().resolveChannel("c-stale")?.mode?.()).toBeUndefined();
+	});
+
 	it("注册的父通道把 opts 透传给 ctx.ui.select", async () => {
 		const { fakePi, hooks } = makeFakePi();
 		const activate = (await import("../index")).default;

@@ -231,3 +231,24 @@ describe("approveEscalation", () => {
 		expect(u.ask).not.toHaveBeenCalled();
 	});
 });
+
+describe("approveEscalation：授权只接受精确白名单（值来自扩展 UI / RPC 边界，运行时不可信）", () => {
+	// 宿主 RPC 原样透传客户端的 value，协议层没有选项校验；`"Allow"`、`null`、对象都会到这里。
+	const notChoices: [string, unknown][] = [
+		["近似但不等价的字符串", "Allow"],
+		["任意非白名单字符串", "not-a-choice"],
+		["大小写不同", "allow once"],
+		["首尾带空白", " Allow once "],
+		["空串", ""],
+		["null", null],
+		["对象", { choice: "Allow once" }],
+		["布尔", true],
+	];
+	for (const [label, value] of notChoices) {
+		it(`${label} → 无效审批应答 fail-closed，绝不批准`, async () => {
+			const ask = vi.fn(async () => ({ choice: value as string | undefined }));
+			await expect(approveEscalation({ ...base, requestedMode: "danger-full-access" }, { hasUI: true, ask }))
+				.rejects.toThrow(/unrecognized answer.*nothing was executed.*treat it as a denial/s);
+		});
+	}
+});

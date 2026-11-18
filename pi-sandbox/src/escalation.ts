@@ -231,5 +231,12 @@ export async function approveEscalation(request: EscalationRequest, ui: Escalati
 			`the user rejected escalating this ${subject} to "${requestedMode}"; it stays denied, so stop and explain instead of working around it — do not retry with a different mode or a rewritten command${denialReasonSuffix(decision.reason)}`,
 		);
 	}
+	// 运行时白名单：choice 来自扩展 UI / RPC 边界（宿主原样透传客户端 value），类型断言不是保证。
+	// 只有逐字 "Allow once" 批准；null、对象、"Allow"、首尾带空白等都按无效应答 fail-closed。
+	if (decision.choice !== "Allow once") {
+		throw new Error(
+			`the approval for escalating this ${subject} to "${requestedMode}" returned an unrecognized answer — nothing was executed; treat it as a denial and stop instead of working around it.`,
+		);
+	}
 	return requestedMode as SandboxMode;
 }

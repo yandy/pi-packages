@@ -13,6 +13,7 @@
  * 栈顶关闭后重新显示并各自结算；RPC 的并发请求各自独立结算。
  */
 
+import { type ApprovalDialogOptions, dialogTimeoutMs, runApprovalDialog } from "./approval-dialog";
 import type { DenialReasonPrompt, EscalationDecision } from "./escalation";
 
 /** 进程全局槽位键：带包名前缀，避免与其他扩展的 globalThis 使用相撞。 */
@@ -36,9 +37,11 @@ function hasUIOf(channel: ParentApprovalChannel): boolean {
 /**
  * 父会话注册的审批通道。
  * `hasUI` 是函数而非布尔快照：注册后父会话可能失去 UI（reload / 会话替换），每次解析都现查。
- * `opts.signal` 直通 pi 的 `ExtensionUIDialogOptions.signal`——子代理被中断时父弹窗被真正关闭，
- * 且已 abort 的请求根本不会弹窗。宿主实现见 TUI 的 `showExtensionSelector` 与 RPC 模式的
- * `createDialogPromise`：二者都在 signal abort 时关闭弹窗并 resolve `undefined`。
+ * `mode` 同样现查：它决定 deadline——TUI 无上限（用户有 Esc/Ctrl-C），非 TUI 默认
+ * `APPROVAL_DIALOG_DEFAULT_TIMEOUT_MS`。必须报告**实际显示弹窗的父会话**模式，不是子会话的。
+ * `opts` 携带派生 signal 与 timeout：宿主据此关闭弹窗并自行定时，本地 guard 再兜一层。
+ * 宿主实现见 TUI 的 `showExtensionSelector` 与 RPC 模式的 `createDialogPromise`：二者都在
+ * signal abort 时关闭弹窗并 resolve `undefined`；但宿主不可信，结算不能只靠它。
  * TUI `interactive-mode.js` 的 `extensionDialogs` / `showTopExtensionDialog()` 让新弹窗获焦，
  * 早先的弹窗留在栈里，栈顶关闭后重新显示并各自结算；RPC `rpc-mode.js` 的
  * `pendingExtensionRequests` 按请求独立结算。并发审批顺序由宿主决定，本包不做承诺。
@@ -47,11 +50,22 @@ function hasUIOf(channel: ParentApprovalChannel): boolean {
 export interface ParentApprovalChannel {
 	readonly sessionId: string;
 	hasUI(): boolean;
-	select(title: string, options: string[], opts?: { signal?: AbortSignal }): Promise<string | undefined>;
+	/** 实际显示弹窗的会话 UI 模式（tui/rpc/json/print）；缺失或读取失败按非 TUI 兜底。 */
+	mode?(): string | undefined;
+	select(title: string, options: string[], opts?: ApprovalDialogOptions): Promise<string | undefined>;
 	/** 可选：Deny 后的理由输入（两步式的第二步）。缺失/抛错时请求照常返回 Deny（无理由）。
 	 *  宿主的 `ctx.ui.input` 本就是必填成员，此处仍声明为可选：通道是**跨会话注册**的抽象，
 	 *  注册方可能拿不到 `input`（异常 ctx）；缺失时跳过理由追问是 fail-closed 方向。 */
-	input?(title: string, placeholder?: string, opts?: { signal?: AbortSignal }): Promise<string | undefined>;
+	input?(title: string, placeholder?: string, opts?: ApprovalDialogOptions): Promise<string | undefined>;
+}
+
+/** 通道的 UI 模式读数：任何失败（陈旧 ctx / 敌对实现）都按未知处理 → 非 TUI 兜底。 */
+function modeOf(channel: ParentApprovalChannel): string | undefined {
+	try {
+		return channel.mode?.();
+	} catch {
+		return undefined;
+	}
 }
 
 export interface EscalationBroker {
@@ -65,7 +79,8 @@ export interface EscalationBroker {
 	unlinkChild(childSessionId: string): void;
 	/** 严格解析：沿 link 向上找第一个「已注册且 hasUI()」的祖先通道；找不到返回 null。 */
 	resolveChannel(childSessionId: string): ParentApprovalChannel | null;
-	/** 提交一次审批；signal abort → choice 为 undefined，落进既有"取消"分支。 */
+	/** 提交一次审批。取消（本地 deadline / abort / 审批 UI 抛错）→ choice 为 undefined，
+	 *  落进既有"取消"分支，不冒泡成子代理工具调用的错误文本。 */
 	request(
 		channel: ParentApprovalChannel,
 		title: string,
@@ -120,30 +135,12 @@ class InProcessEscalationBroker implements EscalationBroker {
 		signal?: AbortSignal,
 		denialReason?: DenialReasonPrompt,
 	): Promise<EscalationDecision> {
-		const run = async (): Promise<EscalationDecision> => {
-			try {
-				// 调用前已被中断：根本不弹窗，否则用户会看到没人接收结果的幽灵审批（Review Focus #2）。
-				// 读取 aborted 也放在 try 内——病态 signal getter 抛错时仍须保证 request 从不 reject，
-				// 这条契约是 escalation.ts 能零改动的前提。
-				if (signal?.aborted === true) return { choice: undefined };
-				// 在飞时 abort 由 pi 的对话框自行关闭并 resolve undefined（opts.signal 已透传）。
-				const choice = await channel.select(title, options, signal === undefined ? undefined : { signal });
-				// 同一请求内串行 await：先 select，Deny 时再 input 收理由。
-				if (choice !== "Deny" || denialReason === undefined || typeof channel.input !== "function") {
-					return { choice };
-				}
-				try {
-					const reason = await channel.input(denialReason.title, denialReason.placeholder, signal === undefined ? undefined : { signal });
-					return { choice, reason };
-				} catch {
-					return { choice }; // 理由输入异常不影响拒绝语义（fail-closed）
-				}
-			} catch {
-				// 父侧 UI 异常按"取消"处理（fail-closed），不让异常冒泡打断子代理的工具调用。
-				return { choice: undefined };
-			}
-		};
-		return run();
+		// deadline 按**实际显示弹窗的父会话**模式定：子会话的 mode 与弹窗无关。
+		// 两步式与全部结算逻辑都在共享 guard 内，这里只负责通道适配。
+		return runApprovalDialog(channel, title, options, denialReason, {
+			signal,
+			timeoutMs: dialogTimeoutMs(modeOf(channel)),
+		});
 	}
 }
 
