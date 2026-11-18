@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetSandboxConfigCache } from "../src/config";
+import { processHasUI, resetConfigWarningStateForTests, takeConfigWarnings } from "../src/config-warnings";
 import { getEscalationBroker, resetEscalationBrokerForTests } from "../src/escalation-broker";
 import { processPermissionState, type PermissionState } from "../src/permission";
 import { aclSkillPaths } from "../src/win32/skill-paths";
@@ -26,12 +27,14 @@ beforeEach(() => {
 	dir = mkdtempSync(join(tmpdir(), "idx-"));
 	mkdirSync(join(dir, "agent"), { recursive: true });
 	vi.stubEnv("PI_CODING_AGENT_DIR", join(dir, "agent"));
+	resetConfigWarningStateForTests(); // 配置告警的缓冲/出口/进程级 UI 标志都是进程状态
 });
 afterEach(() => {
 	processPermissionState.override = null; // C1：模块单例跨测试复位
 	for (const state of freshPermissionStates.splice(0)) state.override = null; // T15 修订：resetModules 后重取的新实例同样复位
 	resetEscalationBrokerForTests(); // 审批通道注册表同为进程级单例，必须复位
 	resetSandboxConfigCache();
+	resetConfigWarningStateForTests();
 	vi.unstubAllEnvs();
 	rmSync(dir, { recursive: true, force: true });
 });
@@ -138,16 +141,12 @@ describe("extension activate", () => {
 		// （beforeEach 的 PI_CODING_AGENT_DIR 已把 getAgentDir() 指向临时目录）。
 		writeFileSync(join(dir, "agent", "sandbox.json"), JSON.stringify({ runnerCommand: ["myrunner"] }));
 		const { fakePi, tools, commands } = makeFakePi();
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		try {
-			const activate = (await import("../index")).default;
-			expect(() => activate(fakePi as never)).not.toThrow();
-			expect(tools.sort()).toEqual(registeredToolNames());
-			expect(commands).toEqual(["permission"]);
-			expect(warn.mock.calls.flat().join(" ")).toMatch(/falling back to defaults/u);
-		} finally {
-			warn.mockRestore();
-		}
+		const activate = (await import("../index")).default;
+		expect(() => activate(fakePi as never)).not.toThrow();
+		expect(tools.sort()).toEqual(registeredToolNames());
+		expect(commands).toEqual(["permission"]);
+		// 告警不直接写终端：先进缓冲，等 session_start 拿到 ctx 再发（spec 2026-11-18）
+		expect(takeConfigWarnings().join(" ")).toMatch(/falling back to defaults/u);
 	});
 
 	it("status shows bypassed before custom runner when mode is danger-full-access (Ruling 19)", async () => {
@@ -476,5 +475,127 @@ describe("T15: 平台门控与 PowerShell 状态行（Ruling 8/9）", () => {
 		expect(notify).toHaveBeenCalledTimes(1);
 		const text = String(notify.mock.calls[0]?.[0]);
 		expect(text).toContain("shell: powershell only (activation unknown)");
+	});
+});
+
+/**
+ * 配置告警的落点（spec 2026-11-18）：配置在 factory 顶部读取，那时没有 ctx——直接 console.warn
+ * 会被 TUI 覆盖。这里钉住三条出口规则：有 UI → ctx.ui.notify(warning)；父会话是 TUI 的子会话
+ * → 不打印、留缓冲；本进程从未出现 UI（print/json）→ stderr。
+ */
+describe("配置告警的出口（spec 2026-11-18）", () => {
+	/**
+	 * 这里必须用「当前模块 registry 里」的实例：上文 T15 用例的 vi.resetModules() 让文件顶部的
+	 * 静态导入与 `await import` 出来的新图脱钩，而告警缓冲本身就是模块级状态。取法固定为
+	 * 「先 import 扩展，再 import 依赖」——两者落在同一个新图里。
+	 */
+	async function freshExtension() {
+		const index = await import("../index");
+		const config = await import("../src/config");
+		const warningsApi = await import("../src/config-warnings");
+		config.resetSandboxConfigCache();
+		warningsApi.resetConfigWarningStateForTests();
+		return { activate: index.default, config, warningsApi };
+	}
+
+	/** 写一条会触发告警的 extraWritableDirs（目录不存在 → 逐条告警）。 */
+	function writeMissingWritable() {
+		writeFileSync(join(dir, "agent", "sandbox-writable.json"), JSON.stringify([join(dir, "not-there")]));
+	}
+
+	it("session_start（有 UI）补发缓冲的告警到对话区，且不写终端", async () => {
+		const { activate, warningsApi } = await freshExtension();
+		const { fakePi, hooks } = makeFakePi();
+		writeMissingWritable();
+		const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+		try {
+			activate(fakePi as never); // factory 顶部加载配置：告警只能入缓冲
+			expect(warningsApi.takeConfigWarnings()).toHaveLength(1); // 确实缓冲了一条
+			expect(stderr).not.toHaveBeenCalled(); // 加载期一个字都没写到终端
+
+			writeMissingWritable(); // 补回一条缓冲（takeConfigWarnings 是取走语义）
+			(await import("../src/config")).resetSandboxConfigCache();
+			activate(fakePi as never);
+
+			const notify = vi.fn();
+			hooks.session_start?.({ type: "session_start" }, { hasUI: true, mode: "tui", sessionManager: { getSessionId: () => "p" }, ui: { notify } });
+			expect(notify).toHaveBeenCalledTimes(1);
+			expect(notify).toHaveBeenCalledWith(expect.stringContaining("not an existing directory"), "warning");
+			expect(warningsApi.processHasUI()).toBe(true);
+		} finally {
+			stderr.mockRestore();
+		}
+	});
+
+	it("出口装好后新告警直发（不再等下一个 session_start）", async () => {
+		const { activate, config, warningsApi } = await freshExtension();
+		const { fakePi, hooks } = makeFakePi();
+		activate(fakePi as never);
+		const notify = vi.fn();
+		hooks.session_start?.({ type: "session_start" }, { hasUI: true, mode: "tui", sessionManager: { getSessionId: () => "p" }, ui: { notify } });
+
+		// /reload 会 re-import 整个扩展并重读配置：本用例用「清缓存 + 重载」模拟同一实例内的重读
+		writeMissingWritable();
+		config.resetSandboxConfigCache();
+		config.getSandboxConfig();
+		expect(notify).toHaveBeenCalledWith(expect.stringContaining("not an existing directory"), "warning");
+		expect(warningsApi.takeConfigWarnings()).toEqual([]);
+	});
+
+	it("父会话是 TUI 的子会话（hasUI=false，mode=print）不往 stderr 打印：会覆盖父会话界面", async () => {
+		const { activate, config, warningsApi } = await freshExtension();
+		const { fakePi, hooks } = makeFakePi();
+		activate(fakePi as never);
+		// 父会话先建好 UI 出口：进程级 UI 标志置真
+		hooks.session_start?.({ type: "session_start" }, { hasUI: true, mode: "tui", sessionManager: { getSessionId: () => "p" }, ui: { notify: vi.fn() } });
+		// 子会话 cwd 与父不同 → 宿主清扩展缓存、重新 import 整个扩展 → 新模块实例没有出口，
+		// 配置重读的告警只能入缓冲。这里用「摘除出口 + 清配置缓存」模拟这个新实例。
+		warningsApi.setConfigWarningSink(null);
+		writeMissingWritable();
+		config.resetSandboxConfigCache();
+		config.getSandboxConfig();
+
+		const rawWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			hooks.session_start?.({ type: "session_start" }, { hasUI: false, mode: "print", sessionManager: { getSessionId: () => "c" }, ui: {} });
+			expect(rawWarn).not.toHaveBeenCalled();
+			expect(warningsApi.takeConfigWarnings()).toHaveLength(1); // 告警留在缓冲里，等下一个有 UI 的会话
+		} finally {
+			rawWarn.mockRestore();
+		}
+	});
+
+	it("本进程从未出现过 UI（pi -p / JSON 模式）才退回 stderr", async () => {
+		const { activate, config, warningsApi } = await freshExtension();
+		const { fakePi, hooks } = makeFakePi();
+		activate(fakePi as never);
+		writeMissingWritable();
+		config.resetSandboxConfigCache();
+		config.getSandboxConfig();
+
+		const rawWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			hooks.session_start?.({ type: "session_start" }, { hasUI: false, mode: "print", sessionManager: { getSessionId: () => "c" }, ui: {} });
+			expect(rawWarn).toHaveBeenCalledTimes(1);
+			expect(String(rawWarn.mock.calls[0]?.[0])).toMatch(/not an existing directory/u);
+			expect(warningsApi.takeConfigWarnings()).toEqual([]); // 已消费，不会重复打印
+			expect(warningsApi.processHasUI()).toBe(false);
+		} finally {
+			rawWarn.mockRestore();
+		}
+	});
+
+	it("ctx.ui.notify 抛错（陈旧 ctx）不影响 session_start，告警退回缓冲", async () => {
+		const { activate, warningsApi } = await freshExtension();
+		writeMissingWritable();
+		const { fakePi, hooks } = makeFakePi();
+		activate(fakePi as never);
+		const notify = vi.fn(() => {
+			throw new Error("This extension ctx is stale after session replacement or reload.");
+		});
+		const ctx = { hasUI: true, mode: "tui", sessionManager: { getSessionId: () => "p" }, ui: { notify } };
+		expect(() => hooks.session_start?.({ type: "session_start" }, ctx)).not.toThrow();
+		expect(notify).toHaveBeenCalledTimes(1);
+		expect(warningsApi.takeConfigWarnings()).toHaveLength(1);
 	});
 });

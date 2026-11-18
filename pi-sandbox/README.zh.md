@@ -117,6 +117,8 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 
 额外可写根仅在 `workspace-write` 下、工作区与 tmp 之外生效。条目必须是绝对路径；`~` / `~/`（Win32 `~\`）展开到家目录，不支持 `~user`。非绝对路径、不存在、非目录的条目在加载时逐条告警并忽略；文件不是字符串数组（包括 JSON 非法）时整份告警并忽略，不产生任何额外可写根。文件缺失等于没有额外可写根，静默——与 `[]` 等价。`sandbox.json` 里的 `extraWritableDirs` 是 1.7.x 留下的旧写法：加载时告警并忽略——请把清单移到 `sandbox-writable.json`。
 
+配置告警不会直接写终端：配置在任何 UI 上下文出现之前就被读取，所以告警先入缓冲，由第一个带 UI 的会话送出——TUI 里它作为 `Warning: …` 行出现在对话区（而不是被界面盖掉），`-p` / JSON 模式则写到 stderr。
+
 ### 示例：为常见工具开放缓存目录
 
 把全局缓存/包存储放在工作区外的工具，在 `workspace-write` 下会失败或反复重新下载。把这些目录列进 `~/.pi/agent/sandbox-writable.json` 正是为此准备的：用户一次性授权存储目录，模型随后原样运行工具——不需要 `UV_CACHE_DIR` / `PNPM_HOME` / `npm_config_cache` 之类的搬迁（见上文「缓存/数据目录搬迁属于越界行为」）。

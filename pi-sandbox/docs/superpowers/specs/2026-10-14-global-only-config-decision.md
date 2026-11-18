@@ -44,6 +44,6 @@
 
 ## 6. 验证
 
-- `tests/config.test.ts` 新增静默忽略回归：项目文件写 `mode: danger-full-access` + `runnerCommand` + 非法 `probeTimeoutMs`，断言配置等于默认/全局值、`console.warn` 一次都未被调用；另有“只有项目文件时保持默认”与“项目文件不进入 fail-safe 路径”两条。
+- `tests/config.test.ts` 新增静默忽略回归：项目文件写 `mode: danger-full-access` + `runnerCommand` + 非法 `probeTimeoutMs`，断言配置等于默认/全局值、告警出口一次都未被调用；另有“只有项目文件时保持默认”与“项目文件不进入 fail-safe 路径”两条。
 - `tests/index-smoke.test.ts` 的 I2（坏配置不 throw）与 Ruling 19（`/permission` 状态）用例改走隔离的全局配置。
 - `npm test -w pi-sandbox`、`npm run typecheck -w pi-sandbox`、`npm run lint -w pi-sandbox` 全绿；根 `npm test` 确认无包外调用点。

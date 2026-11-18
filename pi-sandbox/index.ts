@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getSandboxConfig } from "./src/config";
+import { markProcessHasUI, processHasUI, setConfigWarningSink, takeConfigWarnings } from "./src/config-warnings";
 import { getDenialLedger } from "./src/denial-ledger";
 import { getEscalationBroker } from "./src/escalation-broker";
 import { createPermissionCommand, processPermissionState } from "./src/permission";
@@ -40,6 +41,43 @@ function readActiveTools(pi: ExtensionAPI): string[] | undefined {
 	} catch {
 		return undefined;
 	}
+}
+
+/**
+ * 配置告警的出站接线（见 src/config-warnings.ts）：配置在 factory 顶部读取，那时没有 ctx，
+ * 告警只能先入缓冲。这里按宿主能力选择落点——有 UI 交给 `ctx.ui.notify(…, "warning")`
+ * （进对话区，而不是被 TUI 覆盖的裸终端）；本进程从未出现过 UI（`pi -p` / JSON）才退回
+ * stderr；其余无 UI 会话（父会话为 TUI 的子会话）不打印，留在缓冲等下一个有 UI 的会话。
+ */
+function relayConfigWarnings(ctx: {
+	hasUI: boolean;
+	mode?: string;
+	ui?: { notify?: (message: string, type?: "info" | "warning" | "error") => void };
+}): void {
+	if (readHasUI(ctx)) {
+		let notify: ((message: string, type: "warning") => void) | undefined;
+		try {
+			const uiNotify = ctx.ui?.notify;
+			if (typeof uiNotify === "function") notify = (message, type) => uiNotify(message, type);
+		} catch {
+			notify = undefined; // 陈旧 ctx：本轮没有可信的 UI 出口，告警留在缓冲里
+		}
+		if (notify !== undefined) {
+			markProcessHasUI();
+			setConfigWarningSink((message) => notify?.(message, "warning"));
+			return;
+		}
+	}
+	setConfigWarningSink(null);
+	if (processHasUI()) return; // 子会话（父会话是 TUI）：打印会覆盖父会话界面
+	let mode: unknown;
+	try {
+		mode = ctx.mode;
+	} catch {
+		mode = undefined;
+	}
+	if (mode !== "print" && mode !== "json") return; // 判断不出宿主形态时不写终端
+	for (const message of takeConfigWarnings()) console.warn(message);
 }
 
 /**
@@ -132,6 +170,11 @@ export default function (pi: ExtensionAPI) {
 		getDenialLedger().forget(event.sessionId); // 子会话销毁：清掉未消费的拒绝记录（防 Map 泄漏）
 	});
 	pi.on("session_start", (_event, ctx) => {
+		try {
+			relayConfigWarnings(ctx);
+		} catch {
+			// 告警接线绝不能影响会话启动（I2）：拿不到 ctx 就留在缓冲里等下一轮
+		}
 		if (!readHasUI(ctx)) return; // headless / 子会话 / ctx 已失效：都不是审批终点
 		let sessionId: string;
 		try {
@@ -155,6 +198,7 @@ export default function (pi: ExtensionAPI) {
 		});
 	});
 	pi.on("session_shutdown", () => {
+		setConfigWarningSink(null); // 会话结束/ctx 即将失效：后续告警重新入缓冲
 		unsubscribeCreated();
 		unsubscribeDisposed();
 		if (registeredSessionId === null) return;

@@ -34,7 +34,7 @@
 
 1. 顶层必须是字符串数组；缺失文件 → 空列表（不告警、不报错）。
 2. 逐条：`~` / `~/…`（win32 `~\…`）展开 → 必须绝对路径 → 必须是已存在目录 → `realpathSync.native` 规范化 → 按 canonical 拼写去重（保持声明顺序）。
-3. 单条不合格 → `console.warn` 并丢弃该条，其余照常生效（沿用 `resolveExtraWritableDirs`，不改其判定）。
+3. 单条不合格 → `reportConfigWarning` 并丢弃该条，其余照常生效（沿用 `resolveExtraWritableDirs`，不改其判定）。
 4. 覆盖 pi agent 目录的条目仍**只告警、保留**。
 
 失败分层（与 `sandbox.json` **互相独立**）：
@@ -42,9 +42,9 @@
 | 情况 | 处理 |
 |---|---|
 | 文件缺失 | 空列表，静默 |
-| 文件不可读（非 `ENOENT`/`ENOTDIR`，如 `EACCES`、同名目录） | `console.warn` + 空列表（用户放了文件却拿不到授权，不得无提示） |
-| JSON 损坏 / 顶层不是数组 / 含非字符串元素 | `console.warn` + 空列表 |
-| 单条非绝对 / 不存在 / 不是目录 | `console.warn` + 丢弃该条 |
+| 文件不可读（非 `ENOENT`/`ENOTDIR`，如 `EACCES`、同名目录） | `reportConfigWarning` + 空列表（用户放了文件却拿不到授权，不得无提示） |
+| JSON 损坏 / 顶层不是数组 / 含非字符串元素 | `reportConfigWarning` + 空列表 |
+| 单条非绝对 / 不存在 / 不是目录 | `reportConfigWarning` + 丢弃该条 |
 
 关键变化：这个字段的任何错误**都不再**让 `sandbox.json` 整份回落默认（旧行为是"取值不是字符串数组 → 整份配置回退"）。`mode` / `runnerCommand` / `probeTimeoutMs` 的校验与 fail-safe 路径不受新文件影响。
 

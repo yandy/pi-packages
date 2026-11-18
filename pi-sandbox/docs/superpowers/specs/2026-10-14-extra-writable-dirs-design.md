@@ -38,8 +38,8 @@
 规范化顺序（加载时，进程内一次）：
 
 1. `~` / `~/…`（win32 也接受 `~\…`）展开为 `os.homedir()`；
-2. 展开后不是绝对路径 → `console.warn` 并丢弃该条；
-3. 不是已存在目录（`statSync().isDirectory()`）→ `console.warn` 并丢弃该条；
+2. 展开后不是绝对路径 → `reportConfigWarning` 并丢弃该条；
+3. 不是已存在目录（`statSync().isDirectory()`）→ `reportConfigWarning` 并丢弃该条；
 4. `realpathSync.native` 规范化（symlink 解析到真实目标，与 `canonicalPath` 同语义）；
 5. 去重（canonical 拼写），保持声明顺序。
 
