@@ -15,7 +15,7 @@ A Pi package that adds an interactive `ask_user` tool for collecting user decisi
 - Pi-TUI-aligned keybinding and editor behavior
 - Custom TUI rendering for tool calls and results
 - System prompt integration via `promptSnippet` and `promptGuidelines`
-- Optional timeout for auto-dismiss in both overlay and fallback input modes
+- Optional timeout for auto-dismiss in both overlay and fallback input modes, plus a default 5-minute deadline for dialog prompts in non-TUI (RPC) modes so an unresponsive host cannot hang the turn
 - Structured `details` on all results for session state reconstruction
 - Graceful fallback when interactive UI is unavailable: RPC/headless sessions keep structured single- and multi-select via the dialog protocol
 - Bundled `ask-user` skill for mandatory decision-gating in high-stakes or ambiguous tasks
@@ -61,7 +61,7 @@ The registered tool name is:
 | `allowMultiple` | `boolean?` | `false` | Enable multi-select mode |
 | `allowFreeform` | `boolean?` | `true` | Add a "Type something" freeform option |
 | `allowComment` | `boolean?` | `true` | Expose a user-toggleable extra-context option in the custom UI (`ctrl+g` or the toggle row) and collect an optional comment in fallback dialogs |
-| `timeout` | `number?` | — | Auto-dismiss after N ms and return `null` if the prompt times out |
+| `timeout` | `number?` | — (300000 ms for dialogs in non-TUI modes) | Auto-dismiss after N ms and return `null` if the prompt times out. An explicit value always wins over the non-TUI default |
 
 Appearance options (`displayMode`, `overlayToggleKey`, `commentToggleKey`) are **not** model-visible parameters. They are user preferences resolved from env vars and `ask-user.json` — see [Display mode](#display-mode) and [Shortcuts](#shortcuts). They remain accepted by the internal `AskParams` type for SDK/direct callers, but an LLM tool call cannot set them.
 
@@ -188,8 +188,34 @@ interface AskToolDetails {
   error?: string;
   /** Verbatim dialog answer that matched none of the offered choices. */
   rawInput?: string;
+  /** Set when the tool settled the prompt itself; absent for a user/host cancel. */
+  cancelReason?: "timeout" | "abort";
 }
 ```
+
+## RPC / headless hosts
+
+In RPC mode (`pi --mode rpc`) `ctx.ui.custom()` returns `undefined`, so `ask_user` falls back to the
+extension UI dialog protocol (`select()` / `input()`).
+
+**Hard requirement: an RPC client must implement the dialog methods `select`, `confirm`, `input`, and
+`editor`.** Each emits an `extension_ui_request` and waits for an `extension_ui_response` with the
+matching `id`. Pi only arms a timer or an abort listener when the request carries `timeout` / `signal`,
+so a client that silently drops these requests stalls any tool call that asks the user something.
+See the host's `docs/rpc-extension-ui.md` for the wire format.
+
+`ask_user` defends itself against a silent client:
+
+- Every dialog call carries both a `timeout` and an `AbortSignal`, so a conforming host can show a
+  countdown and dismiss the prompt when the turn is aborted.
+- In non-TUI modes a default deadline of **300000 ms (5 minutes)** applies when the caller did not pass
+  `timeout`; an explicit `timeout` always wins. TUI mode keeps waiting indefinitely — a real user is
+  present and can press `esc`.
+- The tool also races its own deadline and the tool's abort signal against the host promise, so it
+  settles even if the host ignores both options. On expiry the host-facing signal is aborted so a
+  conforming host tears down its prompt.
+- Settlement is reported as `cancelled: true` plus `details.cancelReason`: `"timeout"` when the
+  deadline expired, `"abort"` when the call was interrupted, and absent when the user (or host) cancelled.
 
 ## Credits
 
@@ -203,7 +229,7 @@ This project is based on [pi-ask-user](https://github.com/edlsh/pi-ask-user) by 
 |---|---|---|
 | `custom` (rich inline / overlay question component) | `hasUI` | RPC returns `undefined` immediately, so the tool falls back to the `select` / `input` dialog protocol below |
 | `onTerminalInput` (overlay toggle key) | `mode === "tui"` (registered only inside the component path) | Not registered |
-| `select` / `input` (dialog fallback, freeform questions) | `hasUI` | Forwarded as `extension_ui_request`; the client must answer. Only a caller-supplied `timeout` bounds the wait — without it an unresponsive client keeps the tool call pending |
+| `select` / `input` (dialog fallback, freeform questions) | `hasUI` | Forwarded as `extension_ui_request`; the client should answer. Every call carries `timeout` + `signal`, and the tool races its own deadline (default 300000 ms outside TUI) and the tool's abort signal, so an unresponsive client settles as `cancelled: true` with `details.cancelReason: "timeout"` instead of hanging the turn |
 | `notify` (`ask_user hidden — press …`) | `mode === "tui"` | Not reached |
 | `hasUI === false` (print / json) | `hasUI` | Returns an `Ask requires interactive mode …` error result so the model can ask in plain text instead |
 

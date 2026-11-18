@@ -15,7 +15,7 @@
 - Pi-TUI 对齐的按键绑定和编辑器行为
 - 工具调用和结果的自定义 TUI 渲染
 - 通过 `promptSnippet` 和 `promptGuidelines` 集成系统提示词
-- 叠加层和回退输入模式下均支持可选的超时自动关闭
+- 叠加层和回退输入模式下均支持可选的超时自动关闭；非 TUI（RPC）模式的对话框另有 5 分钟默认上限，宿主不响应也不会挂死整轮
 - 所有结果均包含结构化 `details` 用于会话状态重建
 - 交互式 UI 不可用时的优雅回退：RPC/headless 会话仍通过对话协议保持结构化单选与多选
 - 内置 `ask-user` 技能，用于高风险或模糊任务中的强制决策门控
@@ -61,7 +61,7 @@ pi install npm:@yandy0725/pi-ask-user
 | `allowMultiple` | `boolean?` | `false` | 启用多选模式 |
 | `allowFreeform` | `boolean?` | `true` | 添加"自定义输入"自由文本选项 |
 | `allowComment` | `boolean?` | `true` | 在自定义 UI 中提供可切换的额外上下文选项（`ctrl+g` 或切换行），并在回退对话框中收集可选注释 |
-| `timeout` | `number?` | — | N 毫秒后自动关闭，超时返回 `null` |
+| `timeout` | `number?` | —（非 TUI 模式的对话框为 300000 ms） | N 毫秒后自动关闭，超时返回 `null`。显式传入的值始终优先于非 TUI 默认值 |
 
 外观类选项（`displayMode`、`overlayToggleKey`、`commentToggleKey`）**不是**模型可见参数：它们是用户偏好，由环境变量与 `ask-user.json` 解析（见[显示模式](#显示模式)与[快捷键](#快捷键)）。内部 `AskParams` 类型仍接受它们（供 SDK/直接调用），但 LLM 的工具调用无法设置。
 
@@ -170,8 +170,30 @@ interface AskToolDetails {
   error?: string;
   /** 对话返回的、与任何可选项都不匹配的原始答案。 */
   rawInput?: string;
+  /** 工具自行结算时给出；用户（或宿主）主动取消时缺省。 */
+  cancelReason?: "timeout" | "abort";
 }
 ```
+
+## RPC / headless 宿主
+
+RPC 模式（`pi --mode rpc`）下 `ctx.ui.custom()` 返回 `undefined`，`ask_user` 回退到扩展 UI 对话框协议
+（`select()` / `input()`）。
+
+**硬要求：RPC 客户端必须实现 `select`、`confirm`、`input`、`editor` 四个对话框方法。** 每个方法发出一个
+`extension_ui_request`，并等待带相同 `id` 的 `extension_ui_response`。宿主只有在请求带 `timeout` / `signal`
+时才注册定时器与 abort 监听，因此静默丢弃这些请求的客户端会挂死任何向用户提问的工具调用。
+线格式见宿主的 `docs/rpc-extension-ui.md`。
+
+`ask_user` 对静默客户端有自保：
+
+- 每次对话框调用都同时带 `timeout` 与 `AbortSignal`，守规矩的宿主可显示倒计时，并在 turn 被中断时关闭弹窗。
+- 非 TUI 模式下，调用方未传 `timeout` 时适用 **300000 ms（5 分钟）** 默认上限；显式 `timeout` 始终优先。
+  TUI 模式不设默认上限——真实用户在场，可随时按 `esc`。
+- 工具还会用本地 deadline 与工具 abort signal 与宿主 promise 赛跑，宿主完全忽略这两个选项时也能结算。
+  超时会 abort 传给宿主的 signal，让守规矩的宿主撤掉弹窗。
+- 结算结果为 `cancelled: true` 加 `details.cancelReason`：到期为 `"timeout"`，被中断为 `"abort"`，
+  用户（或宿主）主动取消时缺省。
 
 ## 致谢
 
@@ -185,7 +207,7 @@ interface AskToolDetails {
 |---|---|---|
 | `custom`（富交互的内联 / 浮层提问组件） | `hasUI` | RPC 直接返回 `undefined`，工具退回下面的 `select` / `input` 对话协议 |
 | `onTerminalInput`（浮层切换键） | `mode === "tui"`（只在组件路径里注册） | 不注册 |
-| `select` / `input`（对话降级、无选项的自由提问） | `hasUI` | 以 `extension_ui_request` 转发，客户端必须应答；只有调用方给了 `timeout` 才能限定等待时间，否则客户端不响应时工具调用一直挂着 |
+| `select` / `input`（对话降级、无选项的自由提问） | `hasUI` | 以 `extension_ui_request` 转发，客户端应当应答。每次调用都带 `timeout` + `signal`，工具另用本地 deadline（非 TUI 默认 300000 ms）与工具 abort signal 赛跑，客户端不响应时结算为 `cancelled: true` 加 `details.cancelReason: "timeout"`，不会挂死整轮 |
 | `notify`（`ask_user hidden — press …` 提示） | `mode === "tui"` | 不会触发 |
 | `hasUI === false`（print / json） | `hasUI` | 返回 `Ask requires interactive mode …` 错误结果，让模型改用纯文本提问 |
 

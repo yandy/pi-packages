@@ -118,6 +118,8 @@ interface AskToolDetails {
 	error?: string;
 	/** Verbatim dialog answer that matched none of the offered choices. */
 	rawInput?: string;
+	/** 未作答的原因：工具自行结算时给出（超时 / 中断）；用户主动取消时缺省。 */
+	cancelReason?: "timeout" | "abort";
 }
 
 type AskUIResult = AskResponse;
@@ -396,6 +398,12 @@ const FREEFORM_SENTINEL = "\u270f\ufe0f Type custom response...";
 const COMMENT_TOGGLE_LABEL = "Add extra context after selection";
 const DEFAULT_OVERLAY_TOGGLE_KEY = "alt+o";
 const DEFAULT_COMMENT_TOGGLE_KEY = "ctrl+g";
+/**
+ * 非 TUI 模式下 dialog 的默认自动结算上限（issue #246）。
+ * RPC 宿主漏实现 select/input 时应答永不到达，而本工具 executionMode 为 sequential，
+ * 一次无响应即挂死整轮 turn。TUI 有真实用户与 Esc/Ctrl-C，不设默认上限。
+ */
+const DEFAULT_DIALOG_TIMEOUT_MS = 300_000;
 
 // Vim-style aliases for navigating option lists. ctrl+j/k are safe in the
 // searchable single-select because they don't collide with fuzzy-search input.
@@ -1596,6 +1604,83 @@ class AskComponent extends Container {
 	}
 }
 
+/** 传给宿主 dialog 的结算选项（pi `ExtensionUIDialogOptions` 的子集）。 */
+interface DialogCallOptions {
+	signal: AbortSignal;
+	timeout?: number;
+}
+
+interface DialogGuard {
+	/** 本次提问的自动结算上限；undefined 表示不设上限。 */
+	readonly timeout: number | undefined;
+	/** 工具自行结算的原因；undefined = 宿主正常应答（含用户主动取消）。 */
+	readonly reason: "timeout" | "abort" | undefined;
+	run<T>(call: (opts: DialogCallOptions) => Promise<T>): Promise<T | undefined>;
+}
+
+/**
+ * 给一次 dialog 提问接上本地结算通道（issue #246）。
+ *
+ * 宿主 RPC 的 `createDialogPromise` 只在 `opts.timeout` / `opts.signal` 存在时才注册定时器与
+ * abort 监听；两者都缺时，promise 只有收到 `extension_ui_response` 才结算。因此三条通道同时接上：
+ * 1. timeout 透传给宿主（宿主可显示倒计时并自行收尾）；
+ * 2. 工具 signal 透传给宿主（abort 时关闭弹窗），并在本地 race 同一 signal；
+ * 3. 本地 deadline 定时器与宿主 promise race——宿主完全忽略 opts 时工具仍能结算。
+ * 超时会 abort 传给宿主的 signal，让守规矩的宿主撤掉自己的弹窗；工具 signal 不受影响。
+ */
+function createDialogGuard(signal: AbortSignal | undefined, timeout: number | undefined): DialogGuard {
+	let reason: "timeout" | "abort" | undefined;
+	return {
+		timeout,
+		get reason() {
+			return reason;
+		},
+		async run<T>(call: (opts: DialogCallOptions) => Promise<T>): Promise<T | undefined> {
+			if (signal?.aborted) {
+				reason = "abort";
+				return undefined;
+			}
+			const controller = new AbortController();
+			let settle: (() => void) | undefined;
+			const settled = new Promise<void>((resolve) => {
+				settle = resolve;
+			});
+			const onAbort = () => {
+				reason = "abort";
+				controller.abort();
+				settle?.();
+			};
+			signal?.addEventListener("abort", onAbort, { once: true });
+			const hasDeadline = timeout !== undefined && timeout > 0;
+			const timer = hasDeadline
+				? setTimeout(() => {
+						reason = "timeout";
+						controller.abort();
+						settle?.();
+					}, timeout)
+				: undefined;
+			try {
+				const opts: DialogCallOptions = hasDeadline
+					? { signal: controller.signal, timeout }
+					: { signal: controller.signal };
+				// race 已订阅宿主 promise：超时后宿主迟到的 reject 不会变成 unhandled rejection。
+				return await Promise.race([call(opts), settled.then(() => undefined)]);
+			} finally {
+				if (timer !== undefined) clearTimeout(timer);
+				signal?.removeEventListener("abort", onAbort);
+			}
+		},
+	};
+}
+
+/** 未作答时给模型的说明：超时与用户取消必须可区分。 */
+function describeCancel(reason: "timeout" | "abort" | undefined, timeoutMs: number | undefined): string {
+	if (reason === "timeout") {
+		return `Timed out after ${timeoutMs}ms waiting for the user's answer — the host UI did not respond. The question was not answered.`;
+	}
+	return "User cancelled the question";
+}
+
 /** Sentinel row that finishes a dialog multi-select; only offered once something is checked. */
 const DIALOG_DONE_SENTINEL = "\u2713 Done selecting";
 
@@ -1618,12 +1703,11 @@ class DialogAnswerError extends Error {
 // biome-ignore lint/complexity/noBannedTypes: pi-coding-agent dialog API
 type DialogUI = { select: Function; input: Function };
 
-type DialogOptions = { timeout: number } | undefined;
-
 /**
  * Structured multi-select over the single-choice dialog protocol: every round offers the option
  * rows with their checkbox state, picking a row toggles it, and a sentinel row finishes the pick.
  * Mirrors the TUI multi-select (checkbox rows + freeform row) so both modes collect the same shape.
+ * 每一轮 select / input 都经 guard 结算：宿主不响应时由本地 deadline / abort 收尾，不会无限转轮。
  */
 async function askMultipleViaDialogs(
 	ui: DialogUI,
@@ -1631,7 +1715,7 @@ async function askMultipleViaDialogs(
 	options: QuestionOption[],
 	allowFreeform: boolean,
 	allowComment: boolean,
-	dialogOpts: DialogOptions,
+	guard: DialogGuard,
 ): Promise<AskUIResult | null> {
 	const checked = new Set<number>();
 	const optionList = formatOptionsForMessage(options);
@@ -1649,21 +1733,21 @@ async function askMultipleViaDialogs(
 			`${prompt}\n\nOptions (pick one or more; pick a checked option again to uncheck it):\n${optionList}\n\n` +
 			`Selected: ${selections.length > 0 ? selections.join(", ") : "(none)"}`;
 
-		const value = (await ui.select(title, choices, dialogOpts)) as string | undefined;
+		const value = (await guard.run((opts) => ui.select(title, choices, opts))) as string | undefined;
 		if (isCancelledInput(value)) return null;
 
 		if (value === DIALOG_DONE_SENTINEL) {
 			if (!allowComment) return createSelectionResponse(selections);
-			const comment = (await ui.input(
-				buildCommentPrompt(prompt, selections),
-				"Optional comment (press Enter to skip)...",
-				dialogOpts,
+			const comment = (await guard.run((opts) =>
+				ui.input(buildCommentPrompt(prompt, selections), "Optional comment (press Enter to skip)...", opts),
 			)) as string | undefined;
+			// 追问评论时超时/中断：整次提问按未作答结算，不能把已选项当成有效回答返回。
+			if (guard.reason) return null;
 			return createSelectionResponse(selections, comment);
 		}
 
 		if (value === FREEFORM_SENTINEL) {
-			const answer = (await ui.input(prompt, "Type your answer...", dialogOpts)) as string | undefined;
+			const answer = (await guard.run((opts) => ui.input(prompt, "Type your answer...", opts))) as string | undefined;
 			if (isCancelledInput(answer)) return null;
 			return createFreeformResponse(answer);
 		}
@@ -1681,6 +1765,7 @@ async function askMultipleViaDialogs(
  *
  * Both selection modes stay structured: the user only ever picks from the strings we offered,
  * so an unusable answer is reported as a diagnosable error instead of a user cancellation.
+ * 每次 dialog 调用都经 guard 结算，宿主不响应时由本地 deadline / abort 收尾。
  */
 async function askViaDialogs(
 	ui: DialogUI,
@@ -1690,23 +1775,22 @@ async function askViaDialogs(
 	allowMultiple: boolean,
 	allowFreeform: boolean,
 	allowComment: boolean,
-	timeout?: number,
+	guard: DialogGuard,
 ): Promise<AskUIResult | null> {
-	const dialogOpts = timeout ? { timeout } : undefined;
 	const prompt = context ? `${question}\n\nContext:\n${context}` : question;
 
 	if (allowMultiple) {
-		return askMultipleViaDialogs(ui, prompt, options, allowFreeform, allowComment, dialogOpts);
+		return askMultipleViaDialogs(ui, prompt, options, allowFreeform, allowComment, guard);
 	}
 
 	const selectOptions = options.map((o) => o.title);
 	if (allowFreeform) selectOptions.push(FREEFORM_SENTINEL);
 
-	const selected = (await ui.select(prompt, selectOptions, dialogOpts)) as string | undefined;
+	const selected = (await guard.run((opts) => ui.select(prompt, selectOptions, opts))) as string | undefined;
 	if (isCancelledInput(selected)) return null;
 
 	if (selected === FREEFORM_SENTINEL) {
-		const answer = (await ui.input(prompt, "Type your answer...", dialogOpts)) as string | undefined;
+		const answer = (await guard.run((opts) => ui.input(prompt, "Type your answer...", opts))) as string | undefined;
 		if (isCancelledInput(answer)) return null;
 		return createFreeformResponse(answer);
 	}
@@ -1717,11 +1801,10 @@ async function askViaDialogs(
 		return createSelectionResponse([selected]);
 	}
 
-	const comment = (await ui.input(
-		buildCommentPrompt(prompt, [selected]),
-		"Optional comment (press Enter to skip)...",
-		dialogOpts,
+	const comment = (await guard.run((opts) =>
+		ui.input(buildCommentPrompt(prompt, [selected]), "Optional comment (press Enter to skip)...", opts),
 	)) as string | undefined;
+	if (guard.reason) return null;
 	return createSelectionResponse([selected], comment);
 }
 
@@ -1768,7 +1851,11 @@ export default function (pi: ExtensionAPI) {
 			// 它们是**用户偏好**，优先级为 模型参数 > env > ask-user.json > 默认值，模型能直接
 			// 盖掉用户的设置，且占了 782 字符的 schema。取值改由 env（PI_ASK_USER_DISPLAY_MODE 等）
 			// 与 ask-user.json 提供，内部解析链与 `AskParams` 类型保留（SDK/内部调用仍可传）。
-			timeout: Type.Optional(Type.Number({ description: "Auto-dismiss after N ms; returns null when expired." })),
+			timeout: Type.Optional(
+				Type.Number({
+					description: "Auto-dismiss after N ms; returns null when expired. Defaults to 300000 ms in non-TUI (RPC) modes.",
+				}),
+			),
 		}),
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
@@ -1814,6 +1901,8 @@ export default function (pi: ExtensionAPI) {
 			};
 			const options = normalizeOptions(rawOptions);
 			const normalizedContext = context?.trim() || undefined;
+			// 显式 timeout 只在为正有限数时生效；0/负数/非法值退回默认，不重新打开「永不结算」的口子。
+			const explicitTimeout = typeof timeout === "number" && Number.isFinite(timeout) && timeout > 0 ? timeout : undefined;
 
 			if (!ctx.hasUI || !ctx.ui) {
 				const optionText = options.length > 0 ? `\n\nOptions:\n${formatOptionsForMessage(options)}` : "";
@@ -1834,13 +1923,25 @@ export default function (pi: ExtensionAPI) {
 
 			if (options.length === 0) {
 				const prompt = normalizedContext ? `${question}\n\nContext:\n${normalizedContext}` : question;
-				const answer = await ctx.ui.input(prompt, "Type your answer...", timeout ? { timeout } : undefined);
+				// TUI 里用户在场且可随时 Esc，不设默认上限；其余模式必须自带 deadline。
+				const guard = createDialogGuard(
+					signal,
+					explicitTimeout ?? (ctx.mode === "tui" ? undefined : DEFAULT_DIALOG_TIMEOUT_MS),
+				);
+				const answer = await guard.run((opts) => ctx.ui.input(prompt, "Type your answer...", opts));
 				const response = createFreeformResponse(answer);
 
 				if (!response) {
 					return {
-						content: [{ type: "text", text: "User cancelled the question" }],
-						details: { question, context: normalizedContext, options, response: null, cancelled: true } as AskToolDetails,
+						content: [{ type: "text", text: describeCancel(guard.reason, guard.timeout) }],
+						details: {
+							question,
+							context: normalizedContext,
+							options,
+							response: null,
+							cancelled: true,
+							cancelReason: guard.reason,
+						} as AskToolDetails,
 					};
 				}
 
@@ -1858,6 +1959,7 @@ export default function (pi: ExtensionAPI) {
 
 			let result: AskUIResult | null;
 			let usedDialogFallback = false;
+			let dialogGuard: DialogGuard | undefined;
 			let overlayHandle: OverlayHandle | undefined;
 			let removeOverlayInputListener: (() => void) | undefined;
 			let hasAnnouncedHide = false;
@@ -1927,8 +2029,10 @@ export default function (pi: ExtensionAPI) {
 				if (customResult !== undefined) {
 					result = customResult;
 				} else {
-					// RPC/headless mode: degrade to select()/input() dialog protocol
+					// RPC/headless mode: degrade to select()/input() dialog protocol.
+					// 走到这里说明宿主没有富 UI（custom() 返回 undefined），一律给默认上限。
 					usedDialogFallback = true;
+					dialogGuard = createDialogGuard(signal, explicitTimeout ?? DEFAULT_DIALOG_TIMEOUT_MS);
 					result = await askViaDialogs(
 						ctx.ui,
 						question,
@@ -1937,7 +2041,7 @@ export default function (pi: ExtensionAPI) {
 						allowMultiple,
 						allowFreeform,
 						allowComment,
-						timeout,
+						dialogGuard,
 					);
 				}
 			} catch (error) {
@@ -1970,9 +2074,10 @@ export default function (pi: ExtensionAPI) {
 			const fallbackFields = usedDialogFallback ? { fallback: "dialogs" as const } : {};
 
 			if (result === null) {
-				pi.events.emit("ask:cancelled", { question, context: normalizedContext, options });
+				const cancelReason = dialogGuard?.reason;
+				pi.events.emit("ask:cancelled", { question, context: normalizedContext, options, reason: cancelReason });
 				return {
-					content: [{ type: "text", text: "User cancelled the question" }],
+					content: [{ type: "text", text: describeCancel(cancelReason, dialogGuard?.timeout) }],
 					details: {
 						question,
 						context: normalizedContext,
@@ -1980,6 +2085,7 @@ export default function (pi: ExtensionAPI) {
 						response: null,
 						cancelled: true,
 						...fallbackFields,
+						cancelReason,
 					} as AskToolDetails,
 				};
 			}
@@ -2039,7 +2145,8 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			if (!details || details.cancelled || !details.response) {
-				return new Text(theme.fg("warning", "Cancelled"), 0, 0);
+				const label = details?.cancelReason === "timeout" ? "Timed out" : "Cancelled";
+				return new Text(theme.fg("warning", label), 0, 0);
 			}
 
 			const response = details.response;
