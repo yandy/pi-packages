@@ -15,7 +15,7 @@
 - Pi-TUI 对齐的按键绑定和编辑器行为
 - 工具调用和结果的自定义 TUI 渲染
 - 通过 `promptSnippet` 和 `promptGuidelines` 集成系统提示词
-- 叠加层和回退输入模式下均支持可选的超时自动关闭；非 TUI（RPC）模式的对话框另有 5 分钟默认上限，宿主不响应也不会挂死整轮
+- 叠加层和回退输入模式下均支持可选的超时自动关闭；非 TUI（RPC）模式的对话框另有 5 分钟默认上限，宿主不响应也不会挂死整轮。本地超时或工具中断始终拥有最终裁决权：结果为 `cancelled: true` 并带 `details.cancelReason`，即使宿主随后才 resolve / reject
 - 所有结果均包含结构化 `details` 用于会话状态重建
 - 交互式 UI 不可用时的优雅回退：RPC/headless 会话仍通过对话协议保持结构化单选与多选
 - 内置 `ask-user` 技能，用于高风险或模糊任务中的强制决策门控
@@ -145,7 +145,7 @@ export PI_ASK_USER_COMMENT_TOGGLE_KEY=alt+c
 - **注释**——`allowComment` 开启时，选择之后再走一次 `input`；直接提交空内容即跳过。
 - **取消**——只有对话被取消（或超时）才产生 `cancelled: true`。
 
-用户不需要手打选项标题，因此不存在“解析失败被当成取消”。若对话宿主返回的值不在 offered 列表里，工具返回 `isError: true` 且 `cancelled: false`，在 `details.rawInput` 回显原始答案，并在错误文本里列出可选项。
+用户不需要手打选项标题，因此不存在“解析失败被当成取消”。只有本轮实际 offered 的行会被接受：自由文本行仅在 `allowFreeform` 开启时成立，`✓ Done selecting` 仅在已勾选时成立。返回的值不在 offered 列表里（未提供的哨兵、上一轮的旧行或任意未知字符串）时，工具返回 `isError: true` 且 `cancelled: false`，在 `details.rawInput` 回显原始答案，并在错误文本里列出可选项。
 
 走这条路径得到的结果带 `details.fallback: "dialogs"`。
 
@@ -192,8 +192,12 @@ RPC 模式（`pi --mode rpc`）下 `ctx.ui.custom()` 返回 `undefined`，`ask_u
   TUI 模式不设默认上限——真实用户在场，可随时按 `esc`。
 - 工具还会用本地 deadline 与工具 abort signal 与宿主 promise 赛跑，宿主完全忽略这两个选项时也能结算。
   超时会 abort 传给宿主的 signal，让守规矩的宿主撤掉弹窗。
+- 已记录的本地超时/中断拥有最终裁决权：宿主在 abort listener 里同步 resolve/reject，或在本地取消之后才
+  结算，都不能把结果改成答案或宿主错误；迟到的 rejection 会被消费，不会变成 unhandled rejection。
+  没有本地取消原因时，宿主异常仍返回结构化的 `isError` 结果。
 - 结算结果为 `cancelled: true` 加 `details.cancelReason`：到期为 `"timeout"`，被中断为 `"abort"`，
-  用户（或宿主）主动取消时缺省。
+  用户（或宿主）主动取消时缺省。富内联/叠加层 UI 同样上报这两个原因：显式 `timeout` 与工具中断会结算
+  提示并清理 timer 与 abort listener，迟到回调不会再结算一次。
 
 ## 致谢
 
@@ -205,9 +209,9 @@ RPC 模式（`pi --mode rpc`）下 `ctx.ui.custom()` 返回 `undefined`，`ask_u
 
 | 方法 | 守卫 | 非 TUI（RPC / headless） |
 |---|---|---|
-| `custom`（富交互的内联 / 浮层提问组件） | `hasUI` | RPC 直接返回 `undefined`，工具退回下面的 `select` / `input` 对话协议 |
+| `custom`（富交互的内联 / 浮层提问组件） | `hasUI` | RPC 直接返回 `undefined`，工具退回下面的 `select` / `input` 对话协议。显式 `timeout` 或工具中断会把提示结算为 `cancelled: true` 加 `details.cancelReason: "timeout"` / `"abort"`（超时渲染为 `Timed out`），并在每条退出路径上清理 timer 与 abort listener |
 | `onTerminalInput`（浮层切换键） | `mode === "tui"`（只在组件路径里注册） | 不注册 |
-| `select` / `input`（对话降级、无选项的自由提问） | `hasUI` | 以 `extension_ui_request` 转发，客户端应当应答。每次调用都带 `timeout` + `signal`，工具另用本地 deadline（非 TUI 默认 300000 ms）与工具 abort signal 赛跑，客户端不响应时结算为 `cancelled: true` 加 `details.cancelReason: "timeout"`，不会挂死整轮 |
+| `select` / `input`（对话降级、无选项的自由提问） | `hasUI` | 以 `extension_ui_request` 转发，客户端应当应答。每次调用都带 `timeout` + `signal`，工具另用本地 deadline（非 TUI 默认 300000 ms）与工具 abort signal 赛跑，客户端不响应时结算为 `cancelled: true` 加 `details.cancelReason: "timeout"`，不会挂死整轮；本地取消同样优先于之后才到达的宿主 resolve / reject |
 | `notify`（`ask_user hidden — press …` 提示） | `mode === "tui"` | 不会触发 |
 | `hasUI === false`（print / json） | `hasUI` | 返回 `Ask requires interactive mode …` 错误结果，让模型改用纯文本提问 |
 

@@ -1627,7 +1627,16 @@ interface DialogGuard {
  * 2. 工具 signal 透传给宿主（abort 时关闭弹窗），并在本地 race 同一 signal；
  * 3. 本地 deadline 定时器与宿主 promise race——宿主完全忽略 opts 时工具仍能结算。
  * 超时会 abort 传给宿主的 signal，让守规矩的宿主撤掉自己的弹窗；工具 signal 不受影响。
+ *
+ * 本地结算拥有最终裁决权（issue #255）：宿主可能在 abort listener 里同步 reject，
+ * 也可能在本地取消之后才 resolve/reject。因此宿主 promise 的每次结算都先看已记录的原因，
+ * 一旦本地取消成立，结果就固定为本地取消，迟到的值/异常一律被忽略（异常也被这条链消费，
+ * 不会变成 unhandled rejection）。没有本地原因时，宿主异常照旧抛出，不会被吞成用户取消。
  */
+const DIALOG_LOCAL_CANCEL = Symbol("ask_user.localCancel");
+
+type DialogLocalCancel = typeof DIALOG_LOCAL_CANCEL;
+
 function createDialogGuard(signal: AbortSignal | undefined, timeout: number | undefined): DialogGuard {
 	let reason: "timeout" | "abort" | undefined;
 	return {
@@ -1641,30 +1650,36 @@ function createDialogGuard(signal: AbortSignal | undefined, timeout: number | un
 				return undefined;
 			}
 			const controller = new AbortController();
-			let settle: (() => void) | undefined;
-			const settled = new Promise<void>((resolve) => {
-				settle = resolve;
+			let settleLocal: ((value: DialogLocalCancel) => void) | undefined;
+			// 直接参与 race，不套 `.then`：本地取消不需要额外的 microtask 才能被 race 看见。
+			const localCancel = new Promise<DialogLocalCancel>((resolve) => {
+				settleLocal = resolve;
 			});
-			const onAbort = () => {
-				reason = "abort";
+			const cancelLocally = (next: "timeout" | "abort") => {
+				if (reason !== undefined) return;
+				// 先记录原因：abort listener 里同步 reject 的宿主走的也是同一条判定。
+				reason = next;
 				controller.abort();
-				settle?.();
+				settleLocal?.(DIALOG_LOCAL_CANCEL);
 			};
+			const onAbort = () => cancelLocally("abort");
 			signal?.addEventListener("abort", onAbort, { once: true });
 			const hasDeadline = timeout !== undefined && timeout > 0;
-			const timer = hasDeadline
-				? setTimeout(() => {
-						reason = "timeout";
-						controller.abort();
-						settle?.();
-					}, timeout)
-				: undefined;
+			const timer = hasDeadline ? setTimeout(() => cancelLocally("timeout"), timeout) : undefined;
 			try {
 				const opts: DialogCallOptions = hasDeadline
 					? { signal: controller.signal, timeout }
 					: { signal: controller.signal };
-				// race 已订阅宿主 promise：超时后宿主迟到的 reject 不会变成 unhandled rejection。
-				return await Promise.race([call(opts), settled.then(() => undefined)]);
+				// 立即订阅宿主 promise：本地取消后迟到的 resolve / reject 都落在这条链上。
+				const host = call(opts).then(
+					(value): T | DialogLocalCancel => (reason === undefined ? value : DIALOG_LOCAL_CANCEL),
+					(error): T | DialogLocalCancel => {
+						if (reason !== undefined) return DIALOG_LOCAL_CANCEL;
+						throw error;
+					},
+				);
+				const outcome = await Promise.race([host, localCancel]);
+				return outcome === DIALOG_LOCAL_CANCEL ? undefined : outcome;
 			} finally {
 				if (timer !== undefined) clearTimeout(timer);
 				signal?.removeEventListener("abort", onAbort);
@@ -1735,6 +1750,9 @@ async function askMultipleViaDialogs(
 
 		const value = (await guard.run((opts) => ui.select(title, choices, opts))) as string | undefined;
 		if (isCancelledInput(value)) return null;
+		// 先校验 offered 集合，再分派哨兵：未提供的 Done / Freeform 行必须报非法应答，
+		// 不能绕过 allowComment / allowFreeform，也不能被当成用户取消。
+		if (!choices.includes(value)) throw new DialogAnswerError(value, choices);
 
 		if (value === DIALOG_DONE_SENTINEL) {
 			if (!allowComment) return createSelectionResponse(selections);
@@ -1753,6 +1771,7 @@ async function askMultipleViaDialogs(
 		}
 
 		const index = rowToIndex.get(value);
+		// choices 已校验过：走到这里只可能是行匹配表本身出错（重复行等内部不变量）。
 		if (index === undefined) throw new DialogAnswerError(value, choices);
 		if (checked.has(index)) checked.delete(index);
 		else checked.add(index);
@@ -1788,14 +1807,14 @@ async function askViaDialogs(
 
 	const selected = (await guard.run((opts) => ui.select(prompt, selectOptions, opts))) as string | undefined;
 	if (isCancelledInput(selected)) return null;
+	// 与多选一致：先校验 offered 集合，再分派 Freeform 哨兵，未提供时不得打开 input。
+	if (!selectOptions.includes(selected)) throw new DialogAnswerError(selected, selectOptions);
 
 	if (selected === FREEFORM_SENTINEL) {
 		const answer = (await guard.run((opts) => ui.input(prompt, "Type your answer...", opts))) as string | undefined;
 		if (isCancelledInput(answer)) return null;
 		return createFreeformResponse(answer);
 	}
-
-	if (!selectOptions.includes(selected)) throw new DialogAnswerError(selected, selectOptions);
 
 	if (!allowComment) {
 		return createSelectionResponse([selected]);
@@ -1861,8 +1880,14 @@ export default function (pi: ExtensionAPI) {
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			if (signal?.aborted) {
 				return {
-					content: [{ type: "text", text: "Cancelled" }],
-					details: { question: params.question, options: [], response: null, cancelled: true } as AskToolDetails,
+					content: [{ type: "text", text: describeCancel("abort", undefined) }],
+					details: {
+						question: params.question,
+						options: [],
+						response: null,
+						cancelled: true,
+						cancelReason: "abort",
+					} as AskToolDetails,
 				};
 			}
 
@@ -1960,6 +1985,8 @@ export default function (pi: ExtensionAPI) {
 			let result: AskUIResult | null;
 			let usedDialogFallback = false;
 			let dialogGuard: DialogGuard | undefined;
+			// 富 TUI 自己结算的原因：custom() 的成功/取消都走 done，本地 timeout/abort 需要留痕。
+			let customCancelReason: "timeout" | "abort" | undefined;
 			let overlayHandle: OverlayHandle | undefined;
 			let removeOverlayInputListener: (() => void) | undefined;
 			let hasAnnouncedHide = false;
@@ -1970,13 +1997,28 @@ export default function (pi: ExtensionAPI) {
 					keybindings: KeybindingsManager,
 					done: (result: AskUIResult | null) => void,
 				) => {
-					if (signal) {
-						const onAbort = () => done(null);
-						signal.addEventListener("abort", onAbort, { once: true });
-					}
+					let finished = false;
+					let timer: ReturnType<typeof setTimeout> | undefined;
+					// 一次性结算：宿主迟到的 timeout / abort 回调不得重复 done，也不得覆盖已有结果。
+					const finish = (value: AskUIResult | null, reason?: "timeout" | "abort") => {
+						if (finished) return;
+						finished = true;
+						if (timer !== undefined) {
+							clearTimeout(timer);
+							timer = undefined;
+						}
+						signal?.removeEventListener("abort", onAbort);
+						if (reason) customCancelReason = reason;
+						done(value);
+					};
+					const onAbort = () => finish(null, "abort");
 
-					if (timeout && timeout > 0) {
-						setTimeout(() => done(null), timeout);
+					if (signal?.aborted) {
+						// 登记之前就被中断：不留弹窗等一个永远不会来的回答。
+						onAbort();
+					} else {
+						signal?.addEventListener("abort", onAbort, { once: true });
+						if (explicitTimeout !== undefined) timer = setTimeout(() => finish(null, "timeout"), explicitTimeout);
 					}
 
 					return new AskComponent(
@@ -1991,7 +2033,7 @@ export default function (pi: ExtensionAPI) {
 						theme,
 						keybindings,
 						shortcuts,
-						done,
+						finish,
 					);
 				};
 
@@ -2074,10 +2116,10 @@ export default function (pi: ExtensionAPI) {
 			const fallbackFields = usedDialogFallback ? { fallback: "dialogs" as const } : {};
 
 			if (result === null) {
-				const cancelReason = dialogGuard?.reason;
+				const cancelReason = usedDialogFallback ? dialogGuard?.reason : customCancelReason;
 				pi.events.emit("ask:cancelled", { question, context: normalizedContext, options, reason: cancelReason });
 				return {
-					content: [{ type: "text", text: describeCancel(cancelReason, dialogGuard?.timeout) }],
+					content: [{ type: "text", text: describeCancel(cancelReason, dialogGuard?.timeout ?? explicitTimeout) }],
 					details: {
 						question,
 						context: normalizedContext,
