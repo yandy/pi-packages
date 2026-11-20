@@ -909,20 +909,15 @@ class WrappedSingleSelectList implements Component {
 			}
 		}
 
-		let lines: string[];
-		if (mdTheme) {
-			const mdComponent = new Markdown(md.trim(), 0, 0, mdTheme);
-			lines = mdComponent.render(width);
-		} else {
-			lines = [];
-			for (const line of wrapTextWithAnsi(md.trim(), Math.max(10, width))) {
-				lines.push(truncateToWidth(line, width, ""));
-			}
-		}
+		const renderedLines: readonly string[] = mdTheme
+			? new Markdown(md.trim(), 0, 0, mdTheme).render(width)
+			: wrapTextWithAnsi(md.trim(), Math.max(10, width)).map((line) => truncateToWidth(line, width, ""));
 
-		while (lines.length > 0 && lines[lines.length - 1]?.trim() === "") {
-			lines.pop();
+		let contentEnd = renderedLines.length;
+		while (contentEnd > 0 && renderedLines[contentEnd - 1]?.trim() === "") {
+			contentEnd--;
 		}
+		const lines = renderedLines.slice(0, contentEnd);
 
 		if (lines.length <= maxLines) return lines;
 		if (maxLines === 1) return [truncateToWidth(this.theme.fg("dim", "…"), width, "")];

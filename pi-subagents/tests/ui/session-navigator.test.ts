@@ -6,6 +6,7 @@ import type { LifetimeUsage } from "../../src/lifecycle/usage";
 import type { SessionMessage } from "../../src/types";
 import { liveSource, type TranscriptSource } from "../../src/ui/session-navigation";
 import { SessionNavigatorHandler, TranscriptOverlay } from "../../src/ui/session-navigator";
+import type { TranscriptBody } from "../../src/ui/transcript-body";
 import { makeNavigable } from "../helpers/make-navigable";
 
 const registry = new AgentTypeRegistry(() => new Map());
@@ -183,6 +184,20 @@ describe("TranscriptOverlay", () => {
 		});
 		const out = makeOverlay({ source }).render(80).join("\n");
 		expect(out).toContain("◍");
+	});
+
+	it("leaves reused body lines unchanged when adding the streaming indicator", () => {
+		const source = fakeSource({
+			streaming: () => ({ activeTools: new Map([["k", "read"]]), streamingMessage: undefined }),
+		});
+		const overlay = makeOverlay({ source });
+		const cachedLines = ["cached transcript line"];
+		const body = (overlay as unknown as { body: TranscriptBody }).body;
+		// pi-tui 1.6 may reuse this array; the overlay must derive its own content lines.
+		vi.spyOn(body, "render").mockReturnValue(cachedLines);
+
+		expect(overlay.render(80).join("\n")).toContain("◍");
+		expect(cachedLines).toEqual(["cached transcript line"]);
 	});
 
 	it("derives the running indicator text from the in-flight message", () => {

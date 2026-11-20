@@ -447,12 +447,12 @@ export class TranscriptOverlay implements Component {
 	 */
 	private buildContentLines(innerW: number): string[] {
 		if (innerW <= 0) return [];
-		const lines = this.body.render(innerW);
+		const bodyLines = this.body.render(innerW);
 		this.renderedIndicator = this.indicatorLine();
 		if (this.renderedIndicator) {
-			lines.push("", this.renderedIndicator);
+			return [...bodyLines, "", this.renderedIndicator];
 		}
-		return lines;
+		return [...bodyLines];
 	}
 
 	/** Running-agent indicator line, or "" when the source is not streaming. */
