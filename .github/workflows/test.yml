@@ -34,6 +34,8 @@ jobs:
               - "pi-web-tools/**"
             pi-coding-tools:
               - "pi-coding-tools/**"
+            pi-notify:
+              - "pi-notify/**"
             pi-subagents:
               - "pi-subagents/**"
             pi-todo:
