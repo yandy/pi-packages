@@ -31,6 +31,20 @@ function assistantText(message: MessageLike): string {
 		.join(" ");
 }
 
+/** Best-effort markup removal for a one-line desktop notification; not a full markdown parser. */
+function stripMarkdown(text: string): string {
+	return text
+		.split("\n")
+		.map((line) => line.replace(/^\s{0,3}(?:#{1,6}\s+|[-*+]\s+|\d+\.\s+)/, ""))
+		.join("\n")
+		.replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+		.replace(/`([^`]*)`/g, "$1")
+		.replace(/\*\*([^*]+)\*\*/g, "$1")
+		.replace(/\*([^*\n]+)\*/g, "$1")
+		.replace(/__([^_]+)__/g, "$1")
+		.replace(/_([^_\n]+)_/g, "$1");
+}
+
 export function extractSummary(entries: unknown[], maxLen = 160): string {
 	for (let i = entries.length - 1; i >= 0; i--) {
 		const entry = entries[i];
@@ -38,7 +52,7 @@ export function extractSummary(entries: unknown[], maxLen = 160): string {
 		const { type, message } = entry as { type?: unknown; message?: MessageLike };
 		if (type !== "message" || typeof message !== "object" || message === null) continue;
 		if (message.role !== "assistant") continue;
-		const text = assistantText(message).replace(/\s+/g, " ").trim();
+		const text = stripMarkdown(assistantText(message)).replace(/\s+/g, " ").trim();
 		if (!text) return "";
 		return text.length > maxLen ? `${text.slice(0, maxLen)}…` : text;
 	}

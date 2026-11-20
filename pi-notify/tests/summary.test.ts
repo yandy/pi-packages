@@ -69,6 +69,37 @@ describe("extractSummary", () => {
 		expect(extractSummary(entries)).toBe("a".repeat(160));
 	});
 
+	it("strips markdown markup while keeping the readable text", () => {
+		const entries = [
+			{
+				type: "message",
+				message: {
+					role: "assistant",
+					content: [
+						{
+							type: "text",
+							text: "## Result\n- Updated `foo.ts` and **fixed** the *bug*\n- See [the docs](https://example.com) for details",
+						},
+					],
+				},
+			},
+		];
+		expect(extractSummary(entries)).toBe("Result Updated foo.ts and fixed the bug See the docs for details");
+	});
+
+	it("strips ordered list markers and keeps math with single asterisks readable", () => {
+		const entries = [
+			{
+				type: "message",
+				message: {
+					role: "assistant",
+					content: "1. first step\n2. second step\nresult: 2*3 = 6",
+				},
+			},
+		];
+		expect(extractSummary(entries)).toBe("first step second step result: 2*3 = 6");
+	});
+
 	it("returns empty for no entries, no assistant, or no text blocks", () => {
 		expect(extractSummary([])).toBe("");
 		expect(extractSummary([{ type: "message", message: { role: "user", content: "hi" } }])).toBe("");
