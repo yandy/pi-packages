@@ -8,6 +8,7 @@ const ASSISTANT_ENTRIES = [
 function createHarness(opts?: {
 	env?: NodeJS.ProcessEnv;
 	sessionName?: string;
+	systemPrompt?: string;
 	entries?: unknown[];
 	platform?: NodeJS.Platform;
 }) {
@@ -16,6 +17,7 @@ function createHarness(opts?: {
 	const fakeNotifier = { notify: vi.fn(), degraded: false };
 	const notifierOpts: Array<{ command: string; onError?: (message: string) => void }> = [];
 	let current = 0;
+	let systemPrompt = opts?.systemPrompt ?? "";
 	const pi = {
 		on: (event: string, handler: any) => {
 			(handlers[event] ??= []).push(handler);
@@ -29,6 +31,7 @@ function createHarness(opts?: {
 	const ctx = {
 		cwd: "/work/proj",
 		sessionManager: { getEntries: () => opts?.entries ?? ASSISTANT_ENTRIES },
+		getSystemPrompt: () => systemPrompt,
 		ui: { notify: vi.fn() },
 	};
 	extension(pi as any, {
@@ -44,7 +47,16 @@ function createHarness(opts?: {
 	const fire = async (event: string, payload: any = {}) => {
 		for (const handler of handlers[event] ?? []) await handler({ type: event, ...payload }, ctx);
 	};
-	return { handlers, commands, fakeNotifier, notifierOpts, ctx, fire, setNow: (t: number) => (current = t) };
+	return {
+		handlers,
+		commands,
+		fakeNotifier,
+		notifierOpts,
+		ctx,
+		fire,
+		setNow: (t: number) => (current = t),
+		setSystemPrompt: (value: string) => (systemPrompt = value),
+	};
 }
 
 describe("ui_prompt_start", () => {
@@ -152,6 +164,69 @@ describe("agent_settled", () => {
 		const h = createHarness({ env: { PI_NOTIFY_MIN_DURATION_MS: "0" }, entries: [] });
 		await h.fire("agent_settled", { aborted: false });
 		expect(h.fakeNotifier.notify.mock.calls[0][0].body).toBe("pid 4242");
+	});
+});
+
+describe("active-agent session suppression", () => {
+	const markedPrompts = [
+		[
+			"append-style",
+			'<sub_agent_context>\nYou are operating as a sub-agent.\n</sub_agent_context>\n\n<active_agent name="general-purpose"/>\n\n# Environment',
+		],
+		["replace-style", '<active_agent name="Explore"/>\n\n# Environment\n\nRead only.'],
+	] as const;
+
+	it.each(markedPrompts)("suppresses prompt and completion notifications for %s prompts", async (_kind, systemPrompt) => {
+		const h = createHarness({ env: { PI_NOTIFY_MIN_DURATION_MS: "0" }, systemPrompt });
+		await h.fire("session_start", { reason: "startup" });
+		await h.fire("ui_prompt_start", { kind: "confirm", title: "Q" });
+		await h.fire("agent_settled", { aborted: false });
+		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
+		expect(h.notifierOpts).toHaveLength(0);
+	});
+
+	it("suppresses marked prompts before session_start without constructing a notifier", async () => {
+		const h = createHarness({ systemPrompt: '<active_agent name="Explore"/>\n\n# Environment' });
+		await h.fire("ui_prompt_start", { kind: "confirm", title: "Q" });
+		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
+		expect(h.notifierOpts).toHaveLength(0);
+	});
+
+	it("does not suppress natural-language subagent text without the marker", async () => {
+		const h = createHarness({
+			env: { PI_NOTIFY_MIN_DURATION_MS: "0" },
+			systemPrompt: "You are operating as a sub-agent invoked to handle a specific task.",
+		});
+		await h.fire("session_start", { reason: "startup" });
+		await h.fire("ui_prompt_start", { kind: "confirm", title: "Q" });
+		await h.fire("agent_settled", { aborted: false });
+		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(2);
+	});
+
+	it("recomputes suppression on session_start", async () => {
+		const h = createHarness({ systemPrompt: '<active_agent name="Explore"/>' });
+		await h.fire("session_start", { reason: "startup" });
+		await h.fire("ui_prompt_start", { kind: "confirm", title: "Q" });
+		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
+
+		h.setSystemPrompt("");
+		await h.fire("session_start", { reason: "reload" });
+		await h.fire("ui_prompt_start", { kind: "confirm", title: "Q" });
+		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not let /notify override suppression", async () => {
+		const h = createHarness({
+			env: { PI_NOTIFY: "0", PI_NOTIFY_MIN_DURATION_MS: "0" },
+			systemPrompt: '<active_agent name="Explore"/>',
+		});
+		await h.fire("session_start", { reason: "startup" });
+		await h.commands.notify.handler("", h.ctx);
+		expect(h.ctx.ui.notify).toHaveBeenCalledWith("Notifications enabled", "info");
+
+		await h.fire("ui_prompt_start", { kind: "confirm", title: "Q" });
+		await h.fire("agent_settled", { aborted: false });
+		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
 	});
 });
 

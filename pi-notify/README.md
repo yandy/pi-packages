@@ -9,6 +9,7 @@ Desktop notifications for pi: when you run several pi instances in parallel, eac
 - **Instance identification**: the title leads with the session name (or project directory name when unnamed). A second body line retains the project name when useful and always includes the process pid.
 - **Readable summaries**: markdown markers and extra whitespace are removed. Summaries are limited to 160 grapheme clusters plus an ellipsis, preferring a nearby sentence or word boundary over splitting text or emoji.
 - **Anti-spam**: completion notifications are skipped for runs shorter than a configurable minimum duration (default 10 s), so quick back-and-forth in a window you're already watching stays quiet. Aborted runs never notify.
+- **Active-agent suppression**: sessions whose system prompt contains an `<active_agent name="..."/>` marker never emit prompt or completion desktop notifications, including prompts before `session_start`. Detection is recomputed on `session_start`.
 - **`/notify` command**: toggle notifications per instance at runtime.
 - **Failure-safe**: notification delivery is fire-and-forget; if spawning the notifier fails (e.g. `notify-send` or `powershell.exe` is missing), the extension warns once in the pi UI and stays silent afterwards — the agent loop is never blocked.
 
@@ -79,7 +80,7 @@ Run duration is measured from the first `agent_start` of an idle period to `agen
 ## Behavior notes
 
 - Works identically in all pi modes (tui / rpc / print / json); desktop delivery does not depend on the terminal UI.
-- Prompts shown before `session_start` (e.g. project trust prompts from extensions) still notify, thanks to lazy initialization. Pi's own built-in trust prompt does not pass through the extension UI channel and is not covered.
+- In unmarked sessions, prompts shown before `session_start` (e.g. project trust prompts from extensions) still notify, thanks to lazy initialization. Active-agent sessions remain suppressed. Pi's own built-in trust prompt does not pass through the extension UI channel and is not covered.
 - Notification bodies appear on your desktop (and possibly the lock screen, depending on desktop settings) and may contain session content.
 - Out of scope: clicking a notification to focus its terminal, suppressing notifications while the window is focused, independent Windows branding, and WSL delivery. Window focus detection is not reliably available on Wayland. The minimum-duration threshold approximates focus-based suppression.
 
