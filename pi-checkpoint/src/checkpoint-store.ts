@@ -42,32 +42,7 @@ export class CheckpointStore {
 	}
 
 	private async resolveRepository(cwd: string): Promise<RepositoryContext | null> {
-		const rootResult = await this.runGit(["rev-parse", "--path-format=absolute", "--show-toplevel"], {
-			cwd,
-			env: { LC_ALL: "C" },
-			allowNonZeroExit: true,
-		});
-		if (rootResult.code !== 0) {
-			if (isNonWorktree(rootResult)) return null;
-			throw new GitCommandError(["rev-parse", "--path-format=absolute", "--show-toplevel"], rootResult);
-		}
-		const worktreeRoot = resolve(rootResult.stdout.trim());
-		const commonResult = await this.runGit(["rev-parse", "--path-format=absolute", "--git-common-dir"], {
-			cwd: worktreeRoot,
-		});
-		const commonDir = resolve(commonResult.stdout.trim());
-		const headResult = await this.runGit(["rev-parse", "--verify", "--quiet", "HEAD"], {
-			cwd: worktreeRoot,
-			allowNonZeroExit: true,
-		});
-		if (headResult.code !== 0 && headResult.code !== 1) {
-			throw new GitCommandError(["rev-parse", "--verify", "--quiet", "HEAD"], headResult);
-		}
-		return {
-			worktreeRoot,
-			commonDir,
-			head: headResult.code === 0 ? headResult.stdout.trim() : null,
-		};
+		return resolveRepositoryContext(cwd, this.runGit);
 	}
 
 	private async capture(
@@ -131,6 +106,35 @@ export class CheckpointStore {
 			await rm(temporaryDirectory, { recursive: true, force: true });
 		}
 	}
+}
+
+export async function resolveRepositoryContext(cwd: string, runGit: RunGit): Promise<RepositoryContext | null> {
+	const rootResult = await runGit(["rev-parse", "--path-format=absolute", "--show-toplevel"], {
+		cwd,
+		env: { LC_ALL: "C" },
+		allowNonZeroExit: true,
+	});
+	if (rootResult.code !== 0) {
+		if (isNonWorktree(rootResult)) return null;
+		throw new GitCommandError(["rev-parse", "--path-format=absolute", "--show-toplevel"], rootResult);
+	}
+	const worktreeRoot = resolve(rootResult.stdout.trim());
+	const commonResult = await runGit(["rev-parse", "--path-format=absolute", "--git-common-dir"], {
+		cwd: worktreeRoot,
+	});
+	const commonDir = resolve(commonResult.stdout.trim());
+	const headResult = await runGit(["rev-parse", "--verify", "--quiet", "HEAD"], {
+		cwd: worktreeRoot,
+		allowNonZeroExit: true,
+	});
+	if (headResult.code !== 0 && headResult.code !== 1) {
+		throw new GitCommandError(["rev-parse", "--verify", "--quiet", "HEAD"], headResult);
+	}
+	return {
+		worktreeRoot,
+		commonDir,
+		head: headResult.code === 0 ? headResult.stdout.trim() : null,
+	};
 }
 
 function isNonWorktree(result: GitResult): boolean {
