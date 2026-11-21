@@ -98,7 +98,7 @@ describe("/checkpoint", () => {
 			refExists: async () => false,
 		});
 		await handler("7", ctx);
-		expect(notify).toHaveBeenCalledWith(expect.stringContaining("only the stored preview remains"), "warning");
+		expect(notify).toHaveBeenCalledWith(expect.stringContaining("may fail once Git reclaims its objects"), "warning");
 	});
 
 	it("still prints the diff command when the ref is gone", async () => {
@@ -116,7 +116,7 @@ describe("/checkpoint", () => {
 			refExists: async () => true,
 		});
 		await handler("7", ctx);
-		expect(notify).not.toHaveBeenCalledWith(expect.stringContaining("only the stored preview remains"), expect.anything());
+		expect(notify).not.toHaveBeenCalledWith(expect.stringContaining("may fail once Git reclaims its objects"), expect.anything());
 	});
 
 	it("keeps the query output when the ref check throws", async () => {
@@ -128,6 +128,6 @@ describe("/checkpoint", () => {
 		});
 		await handler("7", ctx);
 		expect(notify).toHaveBeenCalledWith(expect.stringContaining("git diff baseline-oid result-oid"), "info");
-		expect(notify).not.toHaveBeenCalledWith(expect.stringContaining("only the stored preview remains"), expect.anything());
+		expect(notify).not.toHaveBeenCalledWith(expect.stringContaining("may fail once Git reclaims its objects"), expect.anything());
 	});
 });

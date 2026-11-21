@@ -48,7 +48,7 @@ export function createCheckpointCommandHandler(deps: CheckpointCommandDeps): Reg
 		);
 		if (await refIsGone(deps, ctx.cwd, data.ref)) {
 			ctx.ui.notify(
-				`Checkpoint #${runNumber}: checkpoint objects were pruned; only the stored preview remains`,
+				`Checkpoint #${runNumber}: the checkpoint ref was pruned, so the git diff command may fail once Git reclaims its objects; the stored preview remains`,
 				"warning",
 			);
 		}
