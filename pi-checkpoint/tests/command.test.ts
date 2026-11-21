@@ -112,6 +112,13 @@ function lastNotification(notify: ReturnType<typeof vi.fn>): { message: string; 
 	return { message: String(call[0]), level: String(call[1]) };
 }
 
+function parseRepositoryDiffCommand(command: string): string[] {
+	const match = /^git --git-dir='((?:[^']|'\\'')*)' diff ([0-9a-f]{40}) ([0-9a-f]{40})$/.exec(command);
+	if (!match) throw new Error(`not a repository-qualified diff command: ${command}`);
+	const commonDir = match[1].replaceAll("'\\''", "'");
+	return ["git", `--git-dir=${commonDir}`, "diff", match[2], match[3]];
+}
+
 describe("/checkpoint <runNumber>", () => {
 	it("prints the diff command only when the ref resolves to the recorded result commit", async () => {
 		const { handler, notify, calls, ctx } = makeHarness({ entry: okData({ commonDir: "/repo/.git" }) });
@@ -126,8 +133,20 @@ describe("/checkpoint <runNumber>", () => {
 		]);
 		const { message, level } = lastNotification(notify);
 		expect(level).toBe("info");
-		expect(message).toContain(`git diff ${BASELINE} ${RESULT}`);
+		expect(message).toContain(`git --git-dir='/repo/.git' diff ${BASELINE} ${RESULT}`);
 		expect(message).toContain(`ref: ${REF}`);
+	});
+
+	it("shell-quotes repository paths in the emitted diff command", async () => {
+		const { handler, notify, ctx } = makeHarness({
+			entry: okData({ commonDir: "/tmp/repository with 'quote'/.git" }),
+		});
+
+		await handler("7", ctx);
+
+		expect(lastNotification(notify).message).toContain(
+			`git --git-dir='/tmp/repository with '\\''quote'\\''/.git' diff ${BASELINE} ${RESULT}`,
+		);
 	});
 
 	it("keeps the aborted marker on live snapshots", async () => {
@@ -144,7 +163,7 @@ describe("/checkpoint <runNumber>", () => {
 		await handler("7", ctx);
 
 		expect(calls[0]?.options.cwd).toBe("/work");
-		expect(lastNotification(notify).message).toContain(`git diff ${BASELINE} ${RESULT}`);
+		expect(lastNotification(notify).message.split("\n").at(-1)).toBe(`git diff ${BASELINE} ${RESULT}`);
 	});
 
 	it("shows the stored summary without a diff command when the ref is missing", async () => {
@@ -370,7 +389,9 @@ describe("/checkpoint <runNumber> with a real repository", () => {
 			other.dir,
 		);
 		await live.handler("1", live.ctx);
-		expect(lastNotification(live.notify).message).toContain(`git diff ${baseline} ${result}`);
+		expect(lastNotification(live.notify).message).toContain(
+			`git --git-dir='${commonDir}' diff ${baseline} ${result}`,
+		);
 
 		await git(repo.dir, "update-ref", "-d", ref);
 		const deleted = realHarness(
@@ -391,6 +412,30 @@ describe("/checkpoint <runNumber> with a real repository", () => {
 		expect(foreignMessage.message).not.toContain("git diff");
 	});
 
+	it("executes the emitted diff from a foreign cwd when the repository path contains spaces", async () => {
+		repo = await createTestRepo("pi-checkpoint repository with spaces-");
+		other = await createTestRepo();
+		const { baseline, result, commonDir } = await seed();
+		const ref = "refs/pi/checkpoint/c3BhY2Vz/run-3";
+		await git(repo.dir, "update-ref", ref, result);
+		const live = realHarness(
+			okData({ runNumber: 3, ref, baselineCommit: baseline, resultCommit: result, commonDir }),
+			other.dir,
+		);
+
+		await live.handler("3", live.ctx);
+
+		const { message, level } = lastNotification(live.notify);
+		expect(level).toBe("info");
+		const argv = parseRepositoryDiffCommand(message.split("\n").at(-1) ?? "");
+		expect(argv[1]).toBe(`--git-dir=${commonDir}`);
+		const emittedOutput = await git(other.dir, ...argv.slice(1));
+		const expectedOutput = await git(repo.dir, "diff", baseline, result);
+		expect(emittedOutput).toBe(expectedOutput);
+		expect(emittedOutput).toContain("-before");
+		expect(emittedOutput).toContain("+after");
+	});
+
 	it("falls back to the session cwd for entries without a recorded common dir", async () => {
 		repo = await createTestRepo();
 		const { baseline, result } = await seed();
@@ -403,6 +448,6 @@ describe("/checkpoint <runNumber> with a real repository", () => {
 		);
 		await legacy.handler("2", legacy.ctx);
 
-		expect(lastNotification(legacy.notify).message).toContain(`git diff ${baseline} ${result}`);
+		expect(lastNotification(legacy.notify).message.split("\n").at(-1)).toBe(`git diff ${baseline} ${result}`);
 	});
 });

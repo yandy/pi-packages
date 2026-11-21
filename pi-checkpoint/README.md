@@ -74,13 +74,19 @@ Use the command:
 /checkpoint 3
 ```
 
-It verifies that the recorded ref still resolves to the recorded result commit, and only then reports the full hidden ref, baseline/result commit IDs, and a ready-to-run command:
+It verifies that the recorded ref still resolves to the recorded result commit, and only then reports the full hidden ref, baseline/result commit IDs, and a ready-to-run command. For entries with a recorded Git common dir, the command is repository-qualified and shell-quotes that path:
+
+```bash
+git --git-dir='<recordedCommonDir>' diff <baselineCommit> <resultCommit>
+```
+
+It therefore runs from any working directory, including an unrelated repository. Older entries without a recorded common dir are verified in the current working directory and retain the bare current-repository command:
 
 ```bash
 git diff <baselineCommit> <resultCommit>
 ```
 
-If the ref is missing or points at another commit, it prints `snapshot unavailable` with the reason plus the retained shortstat and preview (a legacy preview larger than 16 KiB is truncated again for display); a missing snapshot is never presented as a usable diff command. If Git cannot run the verification, it reports `snapshot unconfirmed` instead of claiming the snapshot was pruned. Entries record the Git common dir; older entries without it are verified in the current working directory and use wording that does not assert where the snapshot went.
+If the ref is missing or points at another commit, it prints `snapshot unavailable` with the reason plus the retained shortstat and preview (a legacy preview larger than 16 KiB is truncated again for display); a missing snapshot is never presented as a usable diff command. If Git cannot run the verification, it reports `snapshot unconfirmed` instead of claiming the snapshot was pruned. Legacy entries use wording that does not assert where the snapshot went.
 
 No argument or an invalid number prints usage. Lookup is scoped to the current conversation branch. No LLM tool is registered.
 
@@ -100,9 +106,10 @@ Defaults are `retentionDays: 30` and `maxRefs: 1000`. The patch preview is fixed
 ```
 
 - Only the global file `~/.pi/agent/checkpoint.json` is read. Project-level configuration is ignored: a file inside the repository must not be able to impose a destructive retention policy on a shared Git common dir.
-- A missing file uses both defaults. Each field accepts a positive integer or `null`; `null` disables that dimension, and `null` for both disables pruning entirely (the manual command then reports that pruning is disabled).
+- A missing file uses both defaults. In an existing config object, omitted known fields default independently: `retentionDays` to `30` and `maxRefs` to `1000`. Each configured field accepts a positive integer or `null`; `null` disables that dimension, and `null` for both disables pruning entirely (the manual command then reports that pruning is disabled).
+- The only accepted top-level keys are exactly `retentionDays` and `maxRefs`. Every other key, including a near-miss spelling, is rejected without echoing the unknown key name or value.
 - Config is read at `session_start` and on every manual `/checkpoint prune`; the file is not watched. Automatic sweeps within a session reuse the policy loaded at session start.
-- Invalid JSON, a wrong field type, or a non-integer/non-positive/unsafe value fails closed: a warning without file content, no ref deletion, and capture keeps working. Invalid config never falls back to the defaults.
+- Invalid JSON, an unknown top-level key, a wrong field type, or a non-integer/non-positive/unsafe value fails closed: a warning without config contents or unknown key names, no ref deletion, and capture keeps working. Invalid config never falls back to the defaults.
 
 ### Scope and selection
 

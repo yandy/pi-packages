@@ -3,11 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createGitRunner } from "../src/git.js";
 import { createCheckpointMaintenance } from "../src/maintenance.js";
-import type { PruneReport } from "../src/prune.js";
+import { CheckpointPruner, type PruneReport } from "../src/prune.js";
 import { DEFAULT_RETENTION_POLICY, type RetentionPolicy, retentionConfigPath } from "../src/retention-config.js";
 import type { RepositoryContext } from "../src/repository.js";
-import { createTestRepo, type TestRepo, writeRepoFile } from "./helpers/git-repo.js";
+import { commitAll, createTestRepo, git, gitWithEnv, type TestRepo, writeRepoFile } from "./helpers/git-repo.js";
 
 const REPO: RepositoryContext = { worktreeRoot: "/repo", commonDir: "/repo/.git", head: "head" };
 const OTHER_REPO: RepositoryContext = { worktreeRoot: "/other", commonDir: "/other/.git", head: "head" };
@@ -340,6 +341,44 @@ describe("CheckpointMaintenance global-only configuration", () => {
 		await maintenance.sessionStart(ctx);
 
 		expect(prune).toHaveBeenCalledWith(expect.anything(), DEFAULT_RETENTION_POLICY, { dryRun: false });
+	});
+
+	it("rejects misspelled keys with zero prune calls and zero deletes", async () => {
+		await writeFile(
+			retentionConfigPath(agentDir),
+			JSON.stringify({ retentionDay: "SENTINEL-CONTENT", maxrefs: 10_000 }),
+			"utf8",
+		);
+		await writeRepoFile(repo.dir, "file.txt", "base\n");
+		await commitAll(repo.dir, "base");
+		const ref = "refs/pi/checkpoint/dHlwby10ZXN0/run-1";
+		const date = "946684800 +0000";
+		const result = await gitWithEnv(
+			repo.dir,
+			{ GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+			"commit-tree",
+			"HEAD^{tree}",
+			"-m",
+			`pi-checkpoint result ref=${ref}`,
+		);
+		await git(repo.dir, "update-ref", ref, result);
+		const pruner = new CheckpointPruner(createGitRunner());
+		const prune = vi.spyOn(pruner, "prune");
+		const maintenance = createCheckpointMaintenance({ agentDir, pruner });
+		const notify = vi.fn();
+		const ctx = { cwd: repo.dir, ui: { notify } } as unknown as ExtensionContext;
+
+		await maintenance.sessionStart(ctx);
+		await maintenance.prune(ctx, false);
+
+		expect(prune).not.toHaveBeenCalled();
+		expect(await git(repo.dir, "rev-parse", ref)).toBe(result);
+		expect(notify).toHaveBeenCalledWith(expect.stringContaining("unknown top-level keys"), "warning");
+		for (const call of notify.mock.calls) {
+			expect(String(call[0])).not.toContain("retentionDay");
+			expect(String(call[0])).not.toContain("maxrefs");
+			expect(String(call[0])).not.toContain("SENTINEL-CONTENT");
+		}
 	});
 
 	it("does not fall back to project config when the global config is invalid", async () => {

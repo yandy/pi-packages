@@ -53,6 +53,21 @@ describe("parseRetentionPolicy", () => {
 		expect(parseRetentionPolicy({ maxRefs: 5 })).toEqual({ retentionDays: 30, maxRefs: 5 });
 	});
 
+	it("rejects every unknown top-level key without echoing its name or value", () => {
+		const unknownConfigs = [
+			{ retentionDay: "SENTINEL-VALUE" },
+			{ maxrefs: "SENTINEL-VALUE" },
+			{ RetentionDays: "SENTINEL-VALUE" },
+			{ patchPreviewBytes: "SENTINEL-VALUE" },
+		];
+		for (const config of unknownConfigs) {
+			const error = errorFrom(() => parseRetentionPolicy(config));
+			expect(error.message).toBe("checkpoint config contains unknown top-level keys");
+			expect(error.message).not.toContain(Object.keys(config)[0]);
+			expect(error.message).not.toContain("SENTINEL-VALUE");
+		}
+	});
+
 	it("accepts null to disable a dimension", () => {
 		expect(parseRetentionPolicy({ retentionDays: null })).toEqual({ retentionDays: null, maxRefs: 1000 });
 		expect(parseRetentionPolicy({ maxRefs: null })).toEqual({ retentionDays: 30, maxRefs: null });
@@ -100,6 +115,9 @@ describe("loadRetentionPolicy", () => {
 		await writeConfig(JSON.stringify({ retentionDays: 3 }));
 		await expect(loadRetentionPolicy(agentDir)).resolves.toEqual({ retentionDays: 3, maxRefs: 1000 });
 
+		await writeConfig(JSON.stringify({ maxRefs: 12 }));
+		await expect(loadRetentionPolicy(agentDir)).resolves.toEqual({ retentionDays: 30, maxRefs: 12 });
+
 		await writeConfig(JSON.stringify({ retentionDays: null, maxRefs: 12 }));
 		await expect(loadRetentionPolicy(agentDir)).resolves.toEqual({ retentionDays: null, maxRefs: 12 });
 
@@ -141,6 +159,19 @@ describe("loadRetentionPolicy", () => {
 			(thrown: Error) => thrown,
 		);
 		expect(error.message).toContain("retentionDays must be a positive integer or null");
+		expect(error.message).not.toContain("SENTINEL-CONTENT");
+	});
+
+	it("rejects unknown top-level keys without leaking their names or config contents", async () => {
+		await writeConfig(JSON.stringify({ retentionDay: "SENTINEL-CONTENT", maxRefs: 12 }));
+		const error = await loadRetentionPolicy(agentDir).then(
+			() => {
+				throw new Error("expected loadRetentionPolicy to reject");
+			},
+			(thrown: Error) => thrown,
+		);
+		expect(error.message).toContain("unknown top-level keys");
+		expect(error.message).not.toContain("retentionDay");
 		expect(error.message).not.toContain("SENTINEL-CONTENT");
 	});
 

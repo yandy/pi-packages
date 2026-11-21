@@ -20,8 +20,8 @@ export interface TestRepo {
 	cleanup: () => Promise<void>;
 }
 
-export async function createTestRepo(): Promise<TestRepo> {
-	const dir = await mkdtemp(join(tmpdir(), "pi-checkpoint-test-"));
+export async function createTestRepo(prefix = "pi-checkpoint-test-"): Promise<TestRepo> {
+	const dir = await mkdtemp(join(tmpdir(), prefix));
 	try {
 		await git(dir, "init");
 		await git(dir, "config", "user.name", "Checkpoint Test");

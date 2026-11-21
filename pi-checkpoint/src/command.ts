@@ -119,9 +119,19 @@ async function reportSnapshot(data: CheckpointOkData, ctx: ExtensionCommandConte
 		return;
 	}
 	ctx.ui.notify(
-		`Checkpoint #${data.runNumber}${data.aborted ? " (aborted)" : ""}\nref: ${data.ref}\nbaseline: ${data.baselineCommit}\nresult: ${data.resultCommit}\ngit diff ${data.baselineCommit} ${data.resultCommit}`,
+		`Checkpoint #${data.runNumber}${data.aborted ? " (aborted)" : ""}\nref: ${data.ref}\nbaseline: ${data.baselineCommit}\nresult: ${data.resultCommit}\n${diffCommand(data)}`,
 		"info",
 	);
+}
+
+function diffCommand(data: CheckpointOkData): string {
+	const diff = `diff ${data.baselineCommit} ${data.resultCommit}`;
+	if (data.commonDir === undefined) return `git ${diff}`;
+	return `git --git-dir=${quoteShellArgument(data.commonDir)} ${diff}`;
+}
+
+function quoteShellArgument(value: string): string {
+	return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 function missingReason(scope: "recorded" | "legacy"): string {

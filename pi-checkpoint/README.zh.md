@@ -74,13 +74,19 @@ TUI 时间线会显示：
 /checkpoint 3
 ```
 
-命令会先验证记录的 ref 仍指向记录的 result commit，只有验证通过才返回完整隐藏 ref、baseline/result commit ID，以及可直接执行的命令：
+命令会先验证记录的 ref 仍指向记录的 result commit，只有验证通过才返回完整隐藏 ref、baseline/result commit ID，以及可直接执行的命令。对于记录了 Git common dir 的 entry，命令会用该目录限定仓库，并对路径做 shell 引号转义：
+
+```bash
+git --git-dir='<recordedCommonDir>' diff <baselineCommit> <resultCommit>
+```
+
+因此可以在任意工作目录执行，包括不相关的仓库。缺少该字段的旧 entry 在当前工作目录中验证，并保留依赖当前仓库的裸命令：
 
 ```bash
 git diff <baselineCommit> <resultCommit>
 ```
 
-ref 缺失或指向其他 commit 时，命令打印 `snapshot unavailable` 及原因，并继续展示保留的 shortstat 和预览（旧 entry 中超过 16 KiB 的预览会按显示上限再次截断）；不会把缺失的快照伪装成可用的 diff 命令。Git 无法执行验证时报告 `snapshot unconfirmed`，不会把“验证失败”说成“已清理”。新 entry 记录 Git common dir；缺少该字段的旧 entry 在当前工作目录中验证，并使用不断言快照去向的文案。
+ref 缺失或指向其他 commit 时，命令打印 `snapshot unavailable` 及原因，并继续展示保留的 shortstat 和预览（旧 entry 中超过 16 KiB 的预览会按显示上限再次截断）；不会把缺失的快照伪装成可用的 diff 命令。Git 无法执行验证时报告 `snapshot unconfirmed`，不会把“验证失败”说成“已清理”。旧 entry 使用不断言快照去向的文案。
 
 无参数或编号非法时显示用法；查询范围是当前对话分支。本包不注册 LLM 工具。
 
@@ -100,9 +106,10 @@ ref 缺失或指向其他 commit 时，命令打印 `snapshot unavailable` 及�
 ```
 
 - 只读取全局文件 `~/.pi/agent/checkpoint.json`，忽略项目级配置：仓库内的文件不能向共享的 Git common dir 下发破坏性保留策略。
-- 文件不存在时使用两个默认值。每个字段接受正整数或 `null`；`null` 关闭对应维度，两者都为 `null` 时完全禁用清理（手动命令只会提示清理已禁用）。
+- 文件不存在时使用两个默认值。配置对象已存在时，省略的已知字段各自独立使用默认值：`retentionDays` 为 `30`，`maxRefs` 为 `1000`。每个已配置字段接受正整数或 `null`；`null` 关闭对应维度，两者都为 `null` 时完全禁用清理（手动命令只会提示清理已禁用）。
+- 顶层只接受名称完全匹配的 `retentionDays` 和 `maxRefs`。其他任何 key（包括近似拼写）都会被拒绝，错误不会回显未知 key 的名称或值。
 - 配置在 `session_start` 和每次手动 `/checkpoint prune` 时重新读取，不监听文件变化；同一 session 内的自动 sweep 沿用 session start 时加载的策略。
-- JSON 无法解析、字段类型错误、非正整数或超出安全整数范围时 fail closed：给出不含文件内容的警告，不删除任何 ref，捕获继续工作。无效配置绝不会回退到默认值。
+- JSON 无法解析、存在未知顶层 key、字段类型错误、非正整数或超出安全整数范围时 fail closed：给出不含配置内容或未知 key 名称的警告，不删除任何 ref，捕获继续工作。无效配置绝不会回退到默认值。
 
 ### 作用域与选择
 

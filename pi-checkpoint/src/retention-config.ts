@@ -11,7 +11,7 @@ export interface RetentionPolicy {
 
 export const RETENTION_CONFIG_FILENAME = "checkpoint.json";
 
-/** Used only when the config file is absent; invalid config never falls back to these values. */
+/** Defaults for a missing file and independently omitted known fields; invalid config never falls back. */
 export const DEFAULT_RETENTION_POLICY: RetentionPolicy = Object.freeze({
 	retentionDays: 30,
 	maxRefs: 1000,
@@ -26,6 +26,10 @@ export function parseRetentionPolicy(raw: unknown): RetentionPolicy {
 		throw new Error("checkpoint config must be a JSON object");
 	}
 	const record = raw as Record<string, unknown>;
+	if (Object.keys(record).some((key) => key !== "retentionDays" && key !== "maxRefs")) {
+		// Unknown names and values may be sensitive; never include either in the error.
+		throw new Error("checkpoint config contains unknown top-level keys");
+	}
 	return {
 		retentionDays: parseRetentionField("retentionDays", record.retentionDays),
 		maxRefs: parseRetentionField("maxRefs", record.maxRefs),
