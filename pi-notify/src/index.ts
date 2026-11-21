@@ -3,6 +3,8 @@ import { loadConfig, type NotifyConfig } from "./config.js";
 import { createNotifier, type Notifier } from "./notifier.js";
 import { extractSummary, formatDuration, instanceContext, instanceName, withContext } from "./summary.js";
 
+const ACTIVE_AGENT_RE = /<active_agent\s+name="[^"]+"\s*\/>/;
+
 export default function (
 	pi: ExtensionAPI,
 	deps?: {
@@ -21,6 +23,13 @@ export default function (
 	let notifier: Notifier | undefined;
 	let enabled = config.enabled;
 	let runStartedAt: number | undefined;
+	let activeAgentSession: boolean | undefined;
+	let runOrigin: "user" | "custom" | undefined;
+
+	const isActiveAgentSession = (ctx: ExtensionContext): boolean => {
+		activeAgentSession ??= ACTIVE_AGENT_RE.test(ctx.getSystemPrompt());
+		return activeAgentSession;
+	};
 
 	// Lazily initialised so prompts fired before session_start (e.g. project trust) still notify.
 	const ensure = (ctx: ExtensionContext) => {
@@ -32,14 +41,21 @@ export default function (
 		});
 	};
 
-	pi.on("session_start", async (_event, _ctx) => {
+	pi.on("session_start", async (_event, ctx) => {
+		activeAgentSession = ACTIVE_AGENT_RE.test(ctx.getSystemPrompt());
+		runOrigin = undefined;
 		config = loadConfig(deps?.env, platform);
 		notifier = undefined;
 		enabled = config.enabled;
 		runStartedAt = undefined;
 	});
 
+	pi.on("before_agent_start", async (event, _ctx) => {
+		runOrigin = event.messageType;
+	});
+
 	pi.on("ui_prompt_start", async (event, ctx) => {
+		if (isActiveAgentSession(ctx)) return;
 		ensure(ctx);
 		if (!enabled) return;
 		const sessionName = pi.getSessionName?.();
@@ -61,9 +77,12 @@ export default function (
 	});
 
 	pi.on("agent_settled", async (event, ctx) => {
-		ensure(ctx);
 		const duration = runStartedAt === undefined ? 0 : now() - runStartedAt;
+		const automaticRun = runOrigin === "custom";
 		runStartedAt = undefined;
+		runOrigin = undefined;
+		if (automaticRun || isActiveAgentSession(ctx)) return;
+		ensure(ctx);
 		if (event.aborted || !enabled || duration < config.minDurationMs) return;
 		const sessionName = pi.getSessionName?.();
 		notifier?.notify({

@@ -9,6 +9,8 @@ pi 的桌面通知包：当你并行运行多个 pi 实例时，每个实例在�
 - **实例标识**：标题以 session 名开头（未命名时回退为项目目录名）；正文第二行在有用时保留项目名，并始终带进程 pid。
 - **可读摘要**：去除 markdown 标记和多余空白；最多保留 160 个字素簇加 `…`，优先选择附近的句子或单词边界，避免截断单词或 emoji。
 - **防打扰**：短于最短时长阈值（默认 10 秒）的回合不发完成通知——你正在窗口里连续交互的短问答保持安静；被中断（aborted）的回合不通知。
+- **Active-agent 会话抑制**：系统提示词含 `<active_agent name="..."/>` 标记的会话不发送等待输入或完成桌面通知，包括早于 `session_start` 的弹窗；每次 `session_start` 重新检测。
+- **Custom 回合抑制**：`before_agent_start` 报告 `messageType: "custom"` 的回合不发送完成通知；并入既有用户回合的 steering / follow-up 不改变来源，该用户回合完成时仍正常通知。
 - **`/notify` 命令**：运行时切换当前实例的通知开关。
 - **失败安全**：通知发送为 fire-and-forget；若启动通知程序失败（例如 `notify-send` 或 `powershell.exe` 不存在），在 pi UI 中警告一次后保持静默，绝不阻塞 agent 循环。
 
@@ -79,7 +81,7 @@ proj · pid 4242
 ## 行为说明
 
 - 在所有 pi 模式（tui / rpc / print / json）下行为一致；桌面投递不依赖终端 UI。
-- 早于 `session_start` 的弹窗（例如扩展发起的 project trust 确认）也会通知（惰性初始化）。pi 内置的 trust prompt 不经过扩展 UI 通道，不覆盖。
+- 无标记会话中，早于 `session_start` 的弹窗（例如扩展发起的 project trust 确认）也会通知（惰性初始化）；active-agent 会话保持抑制。pi 内置的 trust prompt 不经过扩展 UI 通道，不覆盖。
 - 通知正文会显示在桌面上（是否含锁屏取决于桌面设置），可能包含会话内容。
 - 非目标：点击通知聚焦对应终端窗口、窗口聚焦时自动免打扰、独立 Windows 品牌和 WSL 投递。Wayland 下没有可靠的窗口聚焦检测，最短时长阈值用于近似后者。
 
