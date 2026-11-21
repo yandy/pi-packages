@@ -4,11 +4,11 @@ pi 的桌面通知包：当你并行运行多个 pi 实例时，每个实例在�
 
 ## 功能
 
-- **等待输入**：任何阻塞式 `ctx.ui` 弹窗（select / confirm / input / editor / custom，含其它扩展发起的弹窗）立即发送通知，包含弹窗标题、交互类型和实例上下文，urgency 默认 `critical`。
+- **等待输入**：任何阻塞式 `ctx.ui` 弹窗（select / confirm / input / editor / custom，含其它扩展发起的弹窗）都会发送通知——延迟 4 秒投递，弹窗在此之前关闭则不发送——包含弹窗标题、交互类型和实例上下文，urgency 默认 `critical`。
 - **任务完成**：agent 完全空闲（`agent_settled`）时发送通知，展示回合耗时和最后一条 assistant 消息的纯文本摘要，urgency 默认 `normal`。
 - **实例标识**：标题以 session 名开头（未命名时回退为项目目录名）；正文第二行在有用时保留项目名，并始终带进程 pid。
 - **可读摘要**：去除 markdown 标记和多余空白；最多保留 160 个字素簇加 `…`，优先选择附近的句子或单词边界，避免截断单词或 emoji。
-- **防打扰**：短于最短时长阈值（默认 10 秒）的回合不发完成通知——你正在窗口里连续交互的短问答保持安静；被中断（aborted）的回合不通知。
+- **防打扰**：短于最短时长阈值（默认 10 秒）的回合不发完成通知——你正在窗口里连续交互的短问答保持安静；随手点掉的弹窗同样不通知；被中断（aborted）的回合不通知。
 - **Active-agent 会话抑制**：系统提示词含 `<active_agent name="..."/>` 标记的会话不发送等待输入或完成桌面通知，包括早于 `session_start` 的弹窗；每次 `session_start` 重新检测。
 - **Custom 回合抑制**：`before_agent_start` 报告 `messageType: "custom"` 的回合不发送完成通知；并入既有用户回合的 steering / follow-up 不改变来源，该用户回合完成时仍正常通知。
 - **`/notify` 命令**：运行时切换当前实例的通知开关。
@@ -44,6 +44,7 @@ pi install npm:@yandy0725/pi-notify
 - 等待输入时，`<subject>` 为弹窗标题，无标题时为其 kind；`custom` 弹窗按契约不带标题，因此固定用 `Interactive prompt` 而非 kind 名称。`<context>` 包含有独立 session 名时的项目 basename、未在首行重复出现的弹窗 kind，以及 `pid <pid>`。
 - 任务完成时，`<summary>` 为最后一条 assistant 消息的清洗后文本；无文本时正文只有 `<context>`。耗时四舍五入到秒，按秒、分钟或小时紧凑展示。
 - `\n` 表示实际换行：标题或摘要位于第一行，实例元数据位于第二行。自定义通知命令仍在同一个 body 参数中收到这两行。
+- 等待输入通知**延迟 4 秒**投递：弹窗打开时排定，若在此之前关闭（`ui_prompt_end`）则丢弃。因此自己用斜杠命令打开、随手点掉的列表不会弹窗，而无人应答的弹窗照常通知。会话替换与关闭也会丢弃待投递的通知。
 
 示例：
 
@@ -52,6 +53,10 @@ review · Finished · 1m 23s
 Updated foo.ts and fixed the notification bug…
 proj · pid 4242
 ```
+
+### 已知限制
+
+取消依赖 `ui_prompt_end`，而 Pi 只为最外层弹窗、且经由微任务派发该事件。若弹窗在同一个 tick 内打开又关闭（例如其它扩展的 `ui_prompt_start` 处理器先让出执行权，使本扩展的处理器晚到），仍会发送通知。弹窗事件不携带发起者信息，扩展内部无法消除这一窗口。
 
 ## 配置
 
@@ -65,7 +70,7 @@ proj · pid 4242
 | `PI_NOTIFY_URGENCY_DONE` | `normal` | 完成通知的 urgency |
 | `PI_NOTIFY_COMMAND` | 非 Windows 为 `notify-send`；Windows 为 `powershell.exe` | 自定义通知程序；以 `<command> <title> <body>` 调用（不传 urgency） |
 
-回合时长从当前空闲周期间隔内首个 `agent_start` 计到 `agent_settled`，时长 **>=** 阈值才发送。每次 settle 与 session 替换都会重置计时；等待输入通知不受阈值影响。
+回合时长从当前空闲周期间隔内首个 `agent_start` 计到 `agent_settled`，时长 **>=** 阈值才发送。每次 settle 与 session 替换都会重置计时；等待输入通知不受阈值影响，但会延迟 4 秒投递，且弹窗提前关闭即取消。待投递的等待输入通知在 `session_shutdown` 时丢弃（任何会话替换都会先在旧 runner 上发出它），而**不在** `session_start` 丢弃：Pi 在 `session_start` 之前发出的启动期弹窗不能因此丢掉告警。
 
 `/notify` 切换当前实例的开关并在 pi UI 中反馈新状态。开关仅存于内存：`PI_NOTIFY` 决定初始状态，`session_start`（startup / reload / new / resume / fork）时重置。
 

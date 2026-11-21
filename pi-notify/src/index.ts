@@ -5,6 +5,17 @@ import { extractSummary, formatDuration, instanceContext, instanceName, withCont
 
 const ACTIVE_AGENT_RE = /<active_agent\s+name="[^"]+"\s*\/>/;
 
+/**
+ * How long a blocking prompt must stay open before it raises a desktop notification.
+ *
+ * A prompt the operator answers immediately — typically a picker their own slash
+ * command opened — is not a request for attention, so it must not notify. A prompt
+ * nobody answers is exactly the case the notification exists for.
+ *
+ * Exported for the test harness only; the delay is behavior, not a knob.
+ */
+export const PROMPT_NOTIFY_DELAY_MS = 4000;
+
 export default function (
 	pi: ExtensionAPI,
 	deps?: {
@@ -25,6 +36,13 @@ export default function (
 	let runStartedAt: number | undefined;
 	let activeAgentSession: boolean | undefined;
 	let runOrigin: "user" | "custom" | undefined;
+	let pendingPromptTimer: ReturnType<typeof setTimeout> | undefined;
+
+	const cancelPendingPrompt = (): void => {
+		if (pendingPromptTimer === undefined) return;
+		clearTimeout(pendingPromptTimer);
+		pendingPromptTimer = undefined;
+	};
 
 	const isActiveAgentSession = (ctx: ExtensionContext): boolean => {
 		activeAgentSession ??= ACTIVE_AGENT_RE.test(ctx.getSystemPrompt());
@@ -43,6 +61,10 @@ export default function (
 
 	pi.on("session_start", async (_event, ctx) => {
 		activeAgentSession = ACTIVE_AGENT_RE.test(ctx.getSystemPrompt());
+		// A pending prompt alert is deliberately left alone: every session replacement emits
+		// session_shutdown on the outgoing runner first (and reload builds new extension instances),
+		// so nothing stale can survive — while cancelling here would drop an alert for a prompt that
+		// is still open (the startup prompt Pi emits before session_start).
 		runOrigin = undefined;
 		config = loadConfig(deps?.env, platform);
 		notifier = undefined;
@@ -54,6 +76,10 @@ export default function (
 		runOrigin = event.messageType;
 	});
 
+	pi.on("session_shutdown", async () => {
+		cancelPendingPrompt();
+	});
+
 	pi.on("ui_prompt_start", async (event, ctx) => {
 		if (isActiveAgentSession(ctx)) return;
 		ensure(ctx);
@@ -62,14 +88,32 @@ export default function (
 		// "custom" is the only kind Pi emits without a title by contract, so the protocol word
 		// must not reach the notification body.
 		const subject = event.title || (event.kind === "custom" ? "Interactive prompt" : event.kind);
-		notifier?.notify({
+		const notification = {
 			title: `${instanceName(sessionName, ctx.cwd)} · Waiting for input`,
 			body: withContext(
 				subject,
 				instanceContext(sessionName, ctx.cwd, pid, event.title && event.title !== event.kind ? event.kind : undefined),
 			),
 			urgency: config.urgencyPrompt,
-		});
+		};
+		// Deferred, not immediate: see PROMPT_NOTIFY_DELAY_MS. Building the payload here keeps
+		// the notification describing the prompt that opened, not whatever state arrives later,
+		// and the notifier instance is captured for the same reason: a later session_start resets
+		// the module-level notifier, which must not swallow an alert already scheduled.
+		const deliver = notifier;
+		cancelPendingPrompt();
+		const timer = setTimeout(() => {
+			pendingPromptTimer = undefined;
+			if (!enabled) return;
+			deliver?.notify(notification);
+		}, PROMPT_NOTIFY_DELAY_MS);
+		timer.unref?.();
+		pendingPromptTimer = timer;
+	});
+
+	pi.on("ui_prompt_end", async () => {
+		// The operator answered before the delay elapsed: nothing to deliver.
+		cancelPendingPrompt();
 	});
 
 	pi.on("agent_start", async (_event, _ctx) => {

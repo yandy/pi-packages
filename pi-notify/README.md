@@ -4,11 +4,11 @@ Desktop notifications for pi: when you run several pi instances in parallel, eac
 
 ## Features
 
-- **Waiting for input**: any blocking `ctx.ui` prompt (select / confirm / input / editor / custom, including prompts from other extensions) immediately sends a notification with the prompt title, prompt kind, and instance context. Urgency defaults to `critical`.
+- **Waiting for input**: any blocking `ctx.ui` prompt (select / confirm / input / editor / custom, including prompts from other extensions) sends a notification — held for 4 s and dropped if the prompt closes first — with the prompt title, prompt kind, and instance context. Urgency defaults to `critical`.
 - **Task finished**: when the agent becomes fully idle (`agent_settled`), the notification shows the run duration and a plain-text summary of the last assistant message. Urgency defaults to `normal`.
 - **Instance identification**: the title leads with the session name (or project directory name when unnamed). A second body line retains the project name when useful and always includes the process pid.
 - **Readable summaries**: markdown markers and extra whitespace are removed. Summaries are limited to 160 grapheme clusters plus an ellipsis, preferring a nearby sentence or word boundary over splitting text or emoji.
-- **Anti-spam**: completion notifications are skipped for runs shorter than a configurable minimum duration (default 10 s), so quick back-and-forth in a window you're already watching stays quiet. Aborted runs never notify.
+- **Anti-spam**: completion notifications are skipped for runs shorter than a configurable minimum duration (default 10 s), so quick back-and-forth in a window you're already watching stays quiet. Prompts you answer right away never notify, and aborted runs never notify.
 - **Active-agent suppression**: sessions whose system prompt contains an `<active_agent name="..."/>` marker never emit prompt or completion desktop notifications, including prompts before `session_start`. Detection is recomputed on `session_start`.
 - **Custom-run suppression**: completion notifications are skipped for runs whose `before_agent_start` reports `messageType: "custom"`. Steering or follow-ups merged into an existing user run preserve that run's normal completion notification.
 - **`/notify` command**: toggle notifications per instance at runtime.
@@ -44,6 +44,7 @@ Requires pi >= 1.5.0 and one of the following backends:
 - For a prompt, `<subject>` is its title, or its kind when untitled; `custom` prompts carry no title by contract, so they use the fixed subject `Interactive prompt` instead of the kind name. `<context>` contains the project basename when a distinct named session is active, the prompt kind when it is not already the subject, and `pid <pid>`.
 - For completion, `<summary>` is the last assistant message's cleaned text. If no assistant text exists, the body contains only `<context>`. Duration is rounded to the nearest second and shown as seconds, minutes, or hours.
 - The `\n` denotes an actual newline: the subject or summary stays on the first line, while instance metadata moves to the second line. Custom notifier commands receive both lines in the single body argument.
+- Prompt notifications are **deferred by 4 s**: the alert is scheduled when the prompt opens and dropped if the prompt closes first (`ui_prompt_end`). A picker your own slash command opened and you answered right away therefore never notifies, while a prompt nobody answers still does. Pending alerts are also discarded on session replacement and shutdown.
 
 Example:
 
@@ -52,6 +53,10 @@ review · Finished · 1m 23s
 Updated foo.ts and fixed the notification bug…
 proj · pid 4242
 ```
+
+### Known limit
+
+Cancellation rides on `ui_prompt_end`, which Pi emits for the outermost prompt only and through a microtask. A prompt that opens and closes within the same tick — before this extension's handler runs, which can happen when another extension's `ui_prompt_start` handler yields first — still alerts. Prompt events carry no initiator, so this window cannot be closed from inside the extension.
 
 ## Configuration
 
@@ -65,7 +70,7 @@ All configuration is via environment variables:
 | `PI_NOTIFY_URGENCY_DONE` | `normal` | Urgency for completion notifications |
 | `PI_NOTIFY_COMMAND` | `notify-send` on non-Windows; `powershell.exe` on Windows | Custom notifier executable; invoked as `<command> <title> <body>` without urgency |
 
-Run duration is measured from the first `agent_start` of an idle period to `agent_settled`, and the notification fires when it is **>=** the threshold. The timer resets on every settle and on session replacement; waiting-for-input notifications are not subject to the threshold.
+Run duration is measured from the first `agent_start` of an idle period to `agent_settled`, and the notification fires when it is **>=** the threshold. The timer resets on every settle and on session replacement; waiting-for-input notifications are not subject to the threshold, but they are deferred by 4 s and cancelled when the prompt closes first. A pending prompt alert is discarded on `session_shutdown` (every session replacement emits it on the outgoing runner first), not on `session_start`: the startup prompt Pi emits before `session_start` must not lose its alert.
 
 `/notify` toggles the current instance on/off and reports the new state in the pi UI. The toggle is in-memory only: `PI_NOTIFY` sets the initial state, and `session_start` (startup / reload / new / resume / fork) resets it.
 
