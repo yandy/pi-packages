@@ -363,14 +363,19 @@ describe("checkpoint ref retention", () => {
 		const repo = await makeRepo();
 		const head = await commitAll(repo.dir);
 		await seedRef(repo.dir, head, "busy/run-old", "2026-09-01T00:00:00Z");
+		let slowDelete: Promise<void> | undefined;
 		const sweeper = createRetentionSweeper({
 			timeoutMs: 20,
 			runGit: async (args, options) => {
 				if (!args.includes("update-ref")) return createGitRunner()(args, options);
-				await new Promise((resolve) => setTimeout(resolve, 60));
+				slowDelete = new Promise((resolve) => setTimeout(resolve, 60));
+				await slowDelete;
 				return { stdout: "", stderr: "", code: null, killed: true, truncated: false };
 			},
 		});
 		expect((await sweeper.sweep(repo.dir)).status).toBe("failed");
+		// The runner call the timeout abandoned still settles; wait for it so teardown on Windows
+		// does not race an open handle.
+		await slowDelete;
 	});
 });

@@ -7,6 +7,26 @@ import { createTestRepo, type TestRepo } from "./helpers/git-repo.js";
 
 type Handler = (...args: never[]) => unknown;
 
+/**
+ * The session_start handler is fire-and-forget, so a test that returns before the sweep finishes
+ * leaves git children holding the temporary repository open. Windows then refuses to remove it
+ * (EBUSY). Waiting for `pending()` to reach zero is what makes the fixture teardown safe.
+ */
+function trackCalls(runGit: RunGit) {
+	let pending = 0;
+	const calls: string[][] = [];
+	const wrapped: RunGit = async (args, options) => {
+		pending += 1;
+		calls.push(args);
+		try {
+			return await runGit(args, options);
+		} finally {
+			pending -= 1;
+		}
+	};
+	return { runGit: wrapped, calls, pending: () => pending };
+}
+
 const repos: TestRepo[] = [];
 
 async function makeRepo(): Promise<TestRepo> {
@@ -103,33 +123,36 @@ describe("pi-checkpoint extension entry", () => {
 
 	it("sweeps checkpoint refs once per session", async () => {
 		const repo = await makeRepo();
-		const calls: string[][] = [];
-		const runGit: RunGit = async (args, options) => {
-			calls.push(args);
+		const tracker = trackCalls(async (args, options) => {
 			if (args[0] === "for-each-ref") return { stdout: "", stderr: "", code: 0, killed: false, truncated: false };
 			return createGitRunner()(args, options);
-		};
+		});
 		const { pi, events } = createHost();
-		registerCheckpoint(pi, { runGit });
+		registerCheckpoint(pi, { runGit: tracker.runGit });
 
 		await events.get("session_start")?.({}, { cwd: repo.dir } as never);
 		await events.get("session_start")?.({}, { cwd: repo.dir } as never);
 
-		await vi.waitFor(() => expect(calls.filter((args) => args[0] === "for-each-ref")).toHaveLength(1));
+		await vi.waitFor(() => expect(tracker.pending()).toBe(0));
+		expect(tracker.calls.filter((args) => args[0] === "for-each-ref")).toHaveLength(1);
 	});
 
 	it("keeps a failed sweep invisible to the session", async () => {
 		const repo = await makeRepo();
-		const runGit: RunGit = async (args, options) => {
+		const tracker = trackCalls(async (args, options) => {
 			if (args[0] === "for-each-ref") throw new Error("git for-each-ref failed");
 			return createGitRunner()(args, options);
-		};
+		});
 		const { pi, events, appendEntry } = createHost();
 		const notify = vi.fn();
 		const ctx = { cwd: repo.dir, ui: { notify } } as unknown as ExtensionCommandContext;
-		registerCheckpoint(pi, { runGit });
+		registerCheckpoint(pi, { runGit: tracker.runGit });
 
 		await expect(Promise.resolve(events.get("session_start")?.({}, ctx as never))).resolves.toBeUndefined();
+		await vi.waitFor(() => {
+			expect(tracker.calls.some((args) => args[0] === "for-each-ref")).toBe(true);
+			expect(tracker.pending()).toBe(0);
+		});
 
 		// The run-level capture path keeps working after a failed sweep.
 		await expect(Promise.resolve(events.get("agent_settled")?.({ aborted: false }, ctx as never))).resolves.toBeUndefined();
