@@ -50,7 +50,7 @@ function deferred<T>() {
 	return { promise, resolve, reject };
 }
 
-function makeHarness(cwd = "/repo") {
+function makeHarness(cwd = "/repo", resultCommonDir = `${cwd}/.git`) {
 	const ref = checkpointRef("session", "run-id");
 	const baseline: Snapshot = {
 		worktreeRoot: cwd,
@@ -62,6 +62,7 @@ function makeHarness(cwd = "/repo") {
 	};
 	const result: Snapshot = {
 		...baseline,
+		commonDir: resultCommonDir,
 		head: "head-after",
 		commit: "result-oid",
 		tree: "result-tree",
@@ -126,6 +127,22 @@ describe("CheckpointCoordinator", () => {
 		expect(h.store.captureResult).toHaveBeenCalledTimes(1);
 	});
 
+	it("persists the result common dir on successful entries", async () => {
+		const h = makeHarness();
+		await h.coordinator.beforeAgentStart(startEvent(), h.ctx);
+		await h.coordinator.agentSettled({ type: "agent_settled", aborted: false }, h.ctx);
+
+		expect(appendedData(h.appendEntry)).toMatchObject({ status: "ok", commonDir: h.result.commonDir });
+	});
+
+	it("takes the common dir from the captured result rather than the baseline", async () => {
+		const h = makeHarness("/repo", "/shared/common.git");
+		await h.coordinator.beforeAgentStart(startEvent(), h.ctx);
+		await h.coordinator.agentSettled({ type: "agent_settled", aborted: false }, h.ctx);
+
+		expect(appendedData(h.appendEntry)).toMatchObject({ status: "ok", commonDir: "/shared/common.git" });
+	});
+
 	it("keeps a confirmed no-change preview", async () => {
 		const h = makeHarness();
 		h.preview.mockResolvedValue({ ...normalPreview, shortstat: "", patchPreview: "" });
@@ -148,6 +165,7 @@ describe("CheckpointCoordinator", () => {
 		await h.coordinator.agentSettled({ type: "agent_settled", aborted: false }, h.ctx);
 
 		expect(appendedData(h.appendEntry)).toMatchObject({ status: "error", stage: "baseline", baselineCommit: null });
+		expect(appendedData(h.appendEntry)).not.toHaveProperty("commonDir");
 		expect(h.store.captureResult).not.toHaveBeenCalled();
 	});
 

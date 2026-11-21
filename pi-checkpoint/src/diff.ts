@@ -1,6 +1,6 @@
 import { createGitRunner, type RunGit } from "./git.js";
 
-const DEFAULT_PATCH_BYTES = 128 * 1024;
+const DEFAULT_PATCH_BYTES = 16 * 1024;
 const SHORTSTAT_BYTES = 16 * 1024;
 
 export interface DiffInput {

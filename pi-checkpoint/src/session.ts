@@ -24,6 +24,7 @@ export interface CheckpointOkData extends CheckpointBaseData, DiffPreview {
 	resultCommit: string;
 	headBefore: string | null;
 	headAfter: string | null;
+	commonDir?: string;
 }
 
 export interface CheckpointErrorData extends CheckpointBaseData {
@@ -49,7 +50,8 @@ export function parseCheckpointEntryData(value: unknown): CheckpointEntryData | 
 			!isNullableString(value.shortstat) ||
 			!isNullableString(value.patchPreview) ||
 			typeof value.previewTruncated !== "boolean" ||
-			!isNullableString(value.previewError)
+			!isNullableString(value.previewError) ||
+			!isOptionalString(value.commonDir)
 		) {
 			return null;
 		}
@@ -69,6 +71,7 @@ export function parseCheckpointEntryData(value: unknown): CheckpointEntryData | 
 			resultCommit: value.resultCommit,
 			headBefore: value.headBefore,
 			headAfter: value.headAfter,
+			...(value.commonDir === undefined ? {} : { commonDir: value.commonDir }),
 			shortstat: value.shortstat,
 			patchPreview: value.patchPreview,
 			previewTruncated: value.previewTruncated,
@@ -161,4 +164,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNullableString(value: unknown): value is string | null {
 	return value === null || typeof value === "string";
+}
+
+function isOptionalString(value: unknown): value is string | undefined {
+	return value === undefined || typeof value === "string";
 }

@@ -75,6 +75,22 @@ describe("checkpoint session data", () => {
 		expect(parseCheckpointEntryData(errorData())).toEqual(errorData());
 	});
 
+	it("round-trips legacy ok records without repository identity and current ones with it", () => {
+		const legacy = okData();
+		const parsedLegacy = parseCheckpointEntryData(legacy);
+		expect(parsedLegacy).toEqual(legacy);
+		expect(parsedLegacy).not.toHaveProperty("commonDir");
+
+		const current = okData({ commonDir: "/repo/.git" });
+		expect(parseCheckpointEntryData(current)).toEqual(current);
+	});
+
+	it("rejects a present but non-string repository identity", () => {
+		expect(parseCheckpointEntryData({ ...okData(), commonDir: 42 })).toBeNull();
+		expect(parseCheckpointEntryData({ ...okData(), commonDir: null })).toBeNull();
+		expect(parseCheckpointEntryData({ ...okData(), commonDir: ["/repo/.git"] })).toBeNull();
+	});
+
 	it("rejects malformed, old-version, and incomplete records", () => {
 		expect(parseCheckpointEntryData({ version: 1, status: "ok" })).toBeNull();
 		expect(parseCheckpointEntryData({ ...okData(), version: 2 })).toBeNull();

@@ -171,6 +171,7 @@ export function createCheckpointCoordinator(deps: CoordinatorDependencies): Chec
 				resultCommit: result.commit,
 				headBefore: baseline.head,
 				headAfter: result.head,
+				commonDir: result.commonDir,
 			});
 		},
 

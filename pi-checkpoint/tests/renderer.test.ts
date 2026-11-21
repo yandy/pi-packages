@@ -50,6 +50,26 @@ describe("formatCheckpointEntry", () => {
 		expect(lines).toContain("diff --git a/file b/file");
 	});
 
+	it("renders stored summaries and previews with or without repository identity", () => {
+		const legacy = formatCheckpointEntry(okData(), true).join("\n");
+		const current = formatCheckpointEntry(okData({ commonDir: "/repo/.git" }), true).join("\n");
+		expect(current).toBe(legacy);
+		expect(current).toContain("1 file changed");
+		expect(current).toContain("diff --git a/file b/file");
+	});
+
+	it("renders a legacy oversized preview unchanged without re-truncating it", () => {
+		const largeBody = "界".repeat(60_000);
+		const legacyPreview = `diff --git a/large b/large\n+${largeBody}\nLEGACY-PREVIEW-END`;
+		expect(Buffer.byteLength(legacyPreview, "utf8")).toBeGreaterThan(128 * 1024);
+
+		const lines = formatCheckpointEntry(okData({ patchPreview: legacyPreview, previewTruncated: true }), true);
+		const rendered = lines.join("\n");
+		expect(rendered).toContain(largeBody);
+		expect(rendered).toContain("LEGACY-PREVIEW-END");
+		expect(rendered).toContain("Preview truncated");
+	});
+
 	it("marks truncation and preview failures distinctly", () => {
 		expect(formatCheckpointEntry(okData({ previewTruncated: true }), true).join("\n")).toContain(
 			"/checkpoint 7",

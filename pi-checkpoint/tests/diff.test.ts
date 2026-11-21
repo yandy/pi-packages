@@ -49,13 +49,15 @@ describe("createDiffPreview", () => {
 		expect(preview.previewError).toBeNull();
 	});
 
-	it("bounds a large UTF-8 patch to 128 KiB without exceeding the byte limit", async () => {
+	it("bounds a large UTF-8 patch to 16 KiB without exceeding the byte limit", async () => {
 		const input = await snapshotPair("large.txt", "before\n", `${"界".repeat(50_000)}\n`);
 		const preview = await createDiffPreview(input);
 
 		expect(preview.previewTruncated).toBe(true);
 		expect(preview.patchPreview).not.toBeNull();
-		expect(Buffer.byteLength(preview.patchPreview ?? "", "utf8")).toBeLessThanOrEqual(131_072);
+		const previewBytes = Buffer.byteLength(preview.patchPreview ?? "", "utf8");
+		expect(previewBytes).toBeLessThanOrEqual(16_384);
+		expect(previewBytes).toBeGreaterThan(16_380);
 		expect(preview.patchPreview).not.toContain("�");
 		expect(preview.previewError).toBeNull();
 	});
