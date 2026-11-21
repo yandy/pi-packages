@@ -116,6 +116,20 @@ describe("createDiffPreview", () => {
 		expect(preview.previewError).toContain("patch");
 	});
 
+	it("enforces the final UTF-8 byte cap even when the runner reports success", async () => {
+		const input = await snapshotPair("file.txt", "before\n", "after\n");
+		const successful: RunGit = async (args) => {
+			if (args.includes("--shortstat")) {
+				return { stdout: "1 file changed\n", stderr: "", code: 0, killed: false, truncated: false };
+			}
+			return { stdout: "��", stderr: "", code: 0, killed: false, truncated: false };
+		};
+		const preview = await createDiffPreview({ ...input, maxPatchBytes: 4 }, successful);
+
+		expect(Buffer.byteLength(preview.patchPreview ?? "", "utf8")).toBeLessThanOrEqual(4);
+		expect(preview.previewTruncated).toBe(true);
+	});
+
 	it("passes cancellation and hardened diff flags to both Git commands", async () => {
 		const input = await snapshotPair("file.txt", "before\n", "after\n");
 		const run = createGitRunner();

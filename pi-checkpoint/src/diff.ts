@@ -85,7 +85,8 @@ async function runPreviewPart(
 				error: `${label}: ${cleanError(result.stderr || `git diff exited with ${result.code ?? "unknown"}`)}`,
 			};
 		}
-		return { value: result.stdout, truncated: false, error: null };
+		const value = utf8Prefix(result.stdout, maxOutputBytes);
+		return { value, truncated: value.length !== result.stdout.length, error: null };
 	} catch (error) {
 		return { value: null, truncated: false, error: `${label}: ${cleanError(error)}` };
 	}
@@ -98,12 +99,15 @@ function cleanError(error: unknown): string {
 
 function utf8Prefix(value: string, maxBytes: number): string {
 	let bytes = Buffer.from(value, "utf8");
-	if (bytes.length <= maxBytes && !value.endsWith("�")) return value;
+	if (bytes.length <= maxBytes) return value;
 	bytes = bytes.subarray(0, maxBytes);
+	const decoder = new TextDecoder("utf-8", { fatal: true });
 	while (bytes.length > 0) {
-		const text = bytes.toString("utf8");
-		if (!text.endsWith("�")) return text;
-		bytes = bytes.subarray(0, bytes.length - 1);
+		try {
+			return decoder.decode(bytes);
+		} catch {
+			bytes = bytes.subarray(0, bytes.length - 1);
+		}
 	}
 	return "";
 }
