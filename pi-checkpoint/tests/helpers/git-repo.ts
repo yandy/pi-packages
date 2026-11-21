@@ -53,6 +53,12 @@ export async function git(cwd: string, ...args: string[]): Promise<string> {
 	return stdout.trim();
 }
 
+export async function commitAll(cwd: string, message = "test commit"): Promise<string> {
+	await git(cwd, "add", "-A");
+	await git(cwd, "commit", "-m", message);
+	return git(cwd, "rev-parse", "HEAD");
+}
+
 export async function writeRepoFile(cwd: string, relativePath: string, content: string | Buffer): Promise<void> {
 	const path = join(cwd, relativePath);
 	await mkdir(dirname(path), { recursive: true });
