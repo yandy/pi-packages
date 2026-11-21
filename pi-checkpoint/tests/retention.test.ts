@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createGitRunner, type RunGit } from "../src/git.js";
-import { isCheckpointRefName, pruneCheckpointRefs, selectRefsToDelete } from "../src/retention.js";
+import {
+	createRetentionSweeper,
+	isCheckpointRefName,
+	pruneCheckpointRefs,
+	selectRefsToDelete,
+} from "../src/retention.js";
 import { commitAll, createTestRepo, git, gitWithEnv } from "./helpers/git-repo.js";
 
 const day = 86_400;
@@ -134,6 +139,69 @@ describe("checkpoint ref retention", () => {
 		const plain = await mkdtemp(join(tmpdir(), "pi-checkpoint-plain-"));
 		expect(await pruneCheckpointRefs(plain)).toBeNull();
 		await rm(plain, { recursive: true, force: true });
+	});
+
+	it("deletes in exactly one unconditional batched call", async () => {
+		const repo = await createTestRepo();
+		const head = await commitAll(repo.dir);
+		await seedRef(repo.dir, head, "busy/run-old", "2026-09-01T00:00:00Z");
+		await seedRef(repo.dir, head, "busy/run-older", "2026-09-02T00:00:00Z");
+		const calls: { args: string[]; stdin?: string }[] = [];
+		const runGit: RunGit = async (args, options) => {
+			calls.push({ args, stdin: options.stdin });
+			return createGitRunner()(args, options);
+		};
+		await pruneCheckpointRefs(repo.dir, { now: () => new Date("2026-11-21T00:00:00Z"), runGit });
+		const deletions = calls.filter((call) => call.args[0] === "update-ref");
+		expect(deletions).toHaveLength(1);
+		expect(deletions[0]?.args).toContain("--stdin");
+		expect(deletions[0]?.stdin).toContain("delete refs/pi/checkpoint/busy/run-old");
+		expect(deletions[0]?.stdin).not.toMatch(/(?:^|\n)delete refs\/pi\/checkpoint\/busy\/run-old [0-9a-f]{7,}/);
+		await repo.cleanup();
+	});
+
+	it("sweeps a repository once per process unless forced", async () => {
+		const repo = await createTestRepo();
+		const head = await commitAll(repo.dir);
+		await seedRef(repo.dir, head, "busy/run-old", "2026-09-01T00:00:00Z");
+		const sweeper = createRetentionSweeper({ now: () => new Date("2026-11-21T00:00:00Z") });
+		expect(await sweeper.sweep(repo.dir)).toEqual({ status: "pruned", deleted: 1, kept: 0 });
+		expect(await sweeper.sweep(repo.dir)).toEqual({ status: "skipped", reason: "already-swept" });
+		expect((await sweeper.sweep(repo.dir, { force: true })).status).toBe("pruned");
+		await repo.cleanup();
+	});
+
+	it("reports not-a-worktree outside a repository", async () => {
+		const plain = await mkdtemp(join(tmpdir(), "pi-checkpoint-plain-"));
+		expect(await createRetentionSweeper().sweep(plain)).toEqual({ status: "skipped", reason: "not-a-worktree" });
+		await rm(plain, { recursive: true, force: true });
+	});
+
+	it("reports git failures instead of throwing", async () => {
+		const repo = await createTestRepo();
+		const failing = createRetentionSweeper({
+			runGit: async (args, options) => {
+				if (args[0] === "for-each-ref") throw new Error("boom\nsecond line");
+				return createGitRunner()(args, options);
+			},
+		});
+		expect(await failing.sweep(repo.dir)).toEqual({ status: "failed", error: "boom second line" });
+		await repo.cleanup();
+	});
+
+	it("reports an aborted run as failed without throwing", async () => {
+		const repo = await createTestRepo();
+		const aborted = createRetentionSweeper({
+			timeoutMs: 1,
+			runGit: async (args, options) => {
+				if (args[0] !== "for-each-ref") return createGitRunner()(args, options);
+				await new Promise((resolve) => setTimeout(resolve, 20));
+				return { stdout: "", stderr: "", code: null, killed: true, truncated: false };
+			},
+		});
+		const outcome = await aborted.sweep(repo.dir);
+		expect(outcome.status).toBe("failed");
+		await repo.cleanup();
 	});
 
 	it("does not run update-ref when nothing is stale", async () => {

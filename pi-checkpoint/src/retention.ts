@@ -4,6 +4,7 @@ import { CHECKPOINT_REFS_PREFIX } from "./refs.js";
 
 export const RETENTION_DAYS = 30;
 export const MAX_REFS_PER_REPO = 200;
+export const DEFAULT_SWEEP_TIMEOUT_MS = 10_000;
 
 const SECONDS_PER_DAY = 86_400;
 
@@ -20,6 +21,7 @@ export interface RetentionPolicy {
 
 export interface PruneResult {
 	deleted: number;
+	/** Refs the listing accepted and kept. Refs under the prefix with a malformed shape or an unreadable date count as neither deleted nor kept. */
 	kept: number;
 }
 
@@ -29,6 +31,19 @@ export interface PruneOptions {
 	retentionDays?: number;
 	maxRefs?: number;
 	signal?: AbortSignal;
+}
+
+export type SweepOutcome =
+	| { status: "pruned"; deleted: number; kept: number }
+	| { status: "skipped"; reason: "already-swept" | "not-a-worktree" }
+	| { status: "failed"; error: string };
+
+export interface SweeperOptions extends PruneOptions {
+	timeoutMs?: number;
+}
+
+export interface RetentionSweeper {
+	sweep(cwd: string, sweepOptions?: { force?: boolean }): Promise<SweepOutcome>;
 }
 
 export function isCheckpointRefName(name: string): boolean {
@@ -90,6 +105,81 @@ export async function pruneCheckpointRefs(cwd: string, options: PruneOptions = {
 		stdin: deleteSet.map((name) => `delete ${name}\n`).join(""),
 	});
 	return { deleted: deleteSet.length, kept: records.length - deleteSet.length };
+}
+
+/**
+ * Builds a best-effort retention sweeper. Each instance remembers the common Git directories it has
+ * already swept, so one session sweeps a repository once. `sweep` never throws: a missing worktree,
+ * a repeated call, a Git failure, a timeout or truncated output all resolve to a {@link SweepOutcome}.
+ */
+export function createRetentionSweeper(options: SweeperOptions = {}): RetentionSweeper {
+	const runGit = options.runGit ?? createGitRunner();
+	const timeoutMs = options.timeoutMs ?? DEFAULT_SWEEP_TIMEOUT_MS;
+	const sweptCommonDirs = new Set<string>();
+
+	return {
+		async sweep(cwd, sweepOptions = {}) {
+			try {
+				const repository = await resolveRepositoryContext(cwd, runGit);
+				if (!repository) return { status: "skipped", reason: "not-a-worktree" };
+				if (!sweepOptions.force && sweptCommonDirs.has(repository.commonDir)) {
+					return { status: "skipped", reason: "already-swept" };
+				}
+				// Recorded before pruning so a failed sweep is not retried by this instance.
+				sweptCommonDirs.add(repository.commonDir);
+
+				const controller = new AbortController();
+				const forwardAbort = () => controller.abort();
+				let timedOut = false;
+				let interrupted = false;
+				const timer = setTimeout(() => {
+					timedOut = true;
+					controller.abort();
+				}, timeoutMs);
+				if (options.signal?.aborted) controller.abort();
+				else options.signal?.addEventListener("abort", forwardAbort, { once: true });
+
+				const guardedRunGit: RunGit = async (args, gitOptions) => {
+					const result = await runGit(args, { ...gitOptions, signal: controller.signal });
+					if (result.killed || result.truncated) interrupted = true;
+					return result;
+				};
+
+				try {
+					const result = await pruneCheckpointRefs(repository.worktreeRoot, {
+						retentionDays: options.retentionDays,
+						maxRefs: options.maxRefs,
+						now: options.now,
+						runGit: guardedRunGit,
+						signal: controller.signal,
+					});
+					if (timedOut) return { status: "failed", error: timeoutMessage(timeoutMs) };
+					if (interrupted || controller.signal.aborted) {
+						return { status: "failed", error: "Retention sweep was interrupted" };
+					}
+					if (!result) return { status: "skipped", reason: "not-a-worktree" };
+					return { status: "pruned", deleted: result.deleted, kept: result.kept };
+				} catch (error) {
+					if (timedOut) return { status: "failed", error: timeoutMessage(timeoutMs) };
+					throw error;
+				} finally {
+					clearTimeout(timer);
+					options.signal?.removeEventListener("abort", forwardAbort);
+				}
+			} catch (error) {
+				return { status: "failed", error: cleanErrorMessage(error) };
+			}
+		},
+	};
+}
+
+function timeoutMessage(timeoutMs: number): string {
+	return `Retention sweep timed out after ${timeoutMs}ms`;
+}
+
+function cleanErrorMessage(error: unknown): string {
+	const message = error instanceof Error ? error.message : String(error);
+	return message.replace(/\s+/g, " ").trim().slice(0, 500);
 }
 
 function parseRefListing(stdout: string): CheckpointRefRecord[] {
