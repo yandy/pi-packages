@@ -19,6 +19,7 @@ export interface GitRunOptions {
 	signal?: AbortSignal;
 	allowNonZeroExit?: boolean;
 	maxOutputBytes?: number;
+	stdin?: string;
 }
 
 export interface GitResult {
@@ -59,6 +60,7 @@ export function createGitRunner(spawnFn: typeof spawn = spawn): RunGit {
 	return (args, options) => {
 		const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
 		const env = { ...cleanInheritedGitEnvironment(process.env), ...options.env };
+		const stdinMode: "ignore" | "pipe" = options.stdin === undefined ? "ignore" : "pipe";
 
 		return new Promise<GitResult>((resolve, reject) => {
 			let child: ChildProcess;
@@ -67,13 +69,19 @@ export function createGitRunner(spawnFn: typeof spawn = spawn): RunGit {
 					cwd: options.cwd,
 					env,
 					shell: false,
-					stdio: ["ignore", "pipe", "pipe"],
+					stdio: [stdinMode, "pipe", "pipe"],
 					windowsHide: true,
 				});
 			} catch (error) {
 				if (isErrno(error, "ENOENT")) reject(new GitUnavailableError());
 				else reject(error);
 				return;
+			}
+
+			if (options.stdin !== undefined) {
+				// The child can exit before draining stdin; swallow the resulting EPIPE instead of throwing.
+				child.stdin?.on("error", () => {});
+				child.stdin?.end(options.stdin);
 			}
 
 			const stdout: Buffer[] = [];

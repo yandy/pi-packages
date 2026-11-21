@@ -95,6 +95,18 @@ describe("Git process boundary", () => {
 		expect(largeError.killed).toBe(true);
 	});
 
+	it("feeds stdin when provided", async () => {
+		const run = createGitRunner();
+		const result = await run(["hash-object", "--stdin"], { cwd: repo.dir, stdin: "hello\n" });
+		expect(result.stdout.trim()).toBe("ce013625030ba8dba906f756967f9e9ca394464a");
+	});
+
+	it("closes stdin for commands that read it when no stdin is given", async () => {
+		const run = createGitRunner();
+		const result = await run(["hash-object", "--stdin"], { cwd: repo.dir });
+		expect(result.stdout.trim()).toBe("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391");
+	});
+
 	it("terminates a child when the caller aborts", async () => {
 		const run = createGitRunner();
 		const controller = new AbortController();
