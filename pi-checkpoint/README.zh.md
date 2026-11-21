@@ -111,12 +111,12 @@ git diff <baselineCommit> <resultCommit>
 - `/checkpoint prune` 立即强制清扫并报告 `Pruned N checkpoint ref(s); M kept`、`Checkpoint prune skipped: ...` 或 `Checkpoint prune failed: ...`。`M` 只计清扫枚举接受并保留下来的 ref，前缀下形状不符或日期不可读的条目既不在 N 也不在 M 中。
 - 删除是一次 `git update-ref --stdin` 批量写入，内容为带条件的 `delete <ref> <commit>` 行，且只作用于形状为 `refs/pi/checkpoint/<sessionKey>/<runId>` 的 ref。Git 整体原子执行该批，并拒绝任何 ref 已不再指向枚举时那个 commit 的行，因此在枚举与删除之间被改写的 ref 不会被删；整批被拒时从新枚举重算一次再试。
 - 被截断或被 kill 的枚举结果不用于删除：不完整的 `git for-each-ref` 输出既不会选中也不会删除任何 ref。
-- 清扫不跟踪进行中的 run，安全性来自时间而非白名单：run 的 baseline commit 时间新且属于最新的 ref，因此日期与数量两条规则都不会命中它。残余风险是清扫运行时其 baseline 已不在保留集内的 run：开始一轮后闲置超过 30 天的 session，或该 run 尚未结束期间仓库新增了至少 200 个更新的检查点。此时清扫可能删掉该 ref，该 run 随后的 result 捕获会失败并留下捕获错误记录，而不是 result。
+- 清扫不跟踪进行中的 run，安全性只来自选择规则：run 的 baseline ref 通常刚写入且属于最新 ref，两条规则都不会命中它。只要它的 commit 日期或排序落出保留集，就可能被选中，原因不限：闲置超过 30 天、run 未结束期间仓库新增了至少 200 个更新的检查点、系统时钟回拨、仓库里已存在带未来日期的 ref。同秒时间戳按 ref 名排序，因此「更新」只是排序，不是保证。此时清扫可能删掉该 ref，该 run 随后的 result 捕获会失败并留下捕获错误记录，而不是 result。
 - 仍可手动删除检查点：`git update-ref -d <full-ref>`。
 
 **不提供 restore，也不主动回收对象。** 本包不会运行 `git gc`、`repack` 或 `prune`。ref 删除后其 commit 变为 unreachable，由 Git 自身的 auto-gc 在 `gc.pruneExpire`（默认两周）之后回收；在此之前对象仍然存在。
 
-Session entry 从不修改也不删除，因此被清扫的 run 在时间线上仍保留已存的摘要与 patch 预览。`/checkpoint <n>` 照常打印 commit ID 与 `git diff` 命令，并在 ref 已不存在时追加 `Checkpoint #N: checkpoint objects were pruned; only the stored preview remains`。存在性检查本身失败时保持静默，只有确定「ref 不存在」才输出该提示。
+Session entry 从不修改也不删除，因此被清扫的 run 在时间线上仍保留已存的摘要与 patch 预览。`/checkpoint <n>` 照常打印 commit ID 与 `git diff` 命令，并在 ref 已不存在时追加 `Checkpoint #N: the checkpoint ref was pruned, so git diff may fail once Git reclaims its objects; the stored preview remains`。删除 ref 不等于删除对象，因此在 Git 的 auto-gc 运行之前，`git diff` 命令通常仍然可用。存在性检查本身失败时保持静默，只有确定「ref 不存在」才输出该提示。
 
 ## UI 能力
 

@@ -34,11 +34,13 @@
 - **失败重算一次。** 整批被拒后重新枚举、用同一个 `now` 重算删除集，再用新 OID 重试一次；第二次失败就抛给清扫器（`failed`）。两个进程并发清扫时，后一个的带 old value 删除会失败，重枚举后已无陈旧 ref，返回 `{ deleted: 0, kept: n }`，因此并发仍然非致命。
 - **枚举一次并带 OID。** `git for-each-ref --format='%(committerdate:unix) %(objectname) %(refname)' refs/pi/checkpoint` 同时给出日期、当前 commit 与名称，在仓库子目录执行也覆盖整个 worktree。
 - **不完整的枚举一律拒绝。** 枚举进程被截断输出或被 kill（`truncated || killed`）时不解析、不删除，直接抛错让清扫器报 `failed`：截断与退出码存在竞态，部分列表会被当成完整 ref 集合，从而选中从未枚举到的 ref。
+- **绝不解引用符号 ref。** 删除事务必须是 `git update-ref --no-deref --stdin`，且枚举用 `%(symref)` 把符号 ref 直接跳过。否则一个指向 `refs/heads/<branch>` 的 checkpoint symref 会让 git 删掉那条分支、而 symref 自身留下。捕获写入 ref 同样使用 `--no-deref`。
+- **删除不执行仓库 hooks。** `update-ref` 会触发 `reference-transaction` hook，它可能改动工作区或永久阻塞；删除事务与捕获一样带一个空的临时 `core.hooksPath`。for-each-ref 不触发 hooks，无需隔离。
 - **只碰自己的命名空间。** 只删除同时满足「前缀为 `refs/pi/checkpoint/`」与「形状为 `<sessionKey>/<runId>`」的 ref；其他 ref、其他命名空间、形状不符的条目一律不动。
 - **不主动回收对象。** 删 ref 后对象变为 unreachable，Git 自身的 auto-gc 在 `gc.pruneExpire`（默认 2 周）后回收。本包不启动 `gc`、`repack`、`prune`，避免在用户仓库里发起长时间、带锁的维护操作。
 - **清扫不阻塞会话。** 在 `session_start` 触发，best-effort、静默、带超时；失败不 throw、不 notify、不写 entry。
 - **每会话每仓库至多一次。** 以 `git-common-dir` 去重，避免每个会话都重复枚举。扩展实例是每会话一份（子代理会话也加载同一扩展，因而有独立实例），因此去重粒度是「每个会话每仓库一次」，不是进程级。
-- **进行中的 run 不靠白名单保护，靠时间。** 其 ref 指向的 baseline commit 时间是 run 开始附近且属于最新 N 个，因此两条删除规则通常都不会命中它；清扫器不跟踪活跃 run。残余风险：清扫时该 run 的 baseline 已不在保留集内——开始一轮后闲置超过 30 天，或该 run 尚未结束期间仓库新增了至少 200 个更新的检查点。此时 ref 可能被删，该 run 随后的 `captureResult` 会因 old value 不匹配而失败，留下捕获错误 entry 而不是 result。
+- **进行中的 run 不靠白名单保护，靠选择规则。** 其 ref 指向的 baseline commit 是 run 开始附近写入且通常属于最新 N 个，所以两条删除规则通常不命中它；清扫器不跟踪活跃 run，也不承诺绝不命中。只要该 ref 的 commit 日期或排序落出保留集，它就会被选中：闲置超过 30 天、run 未结束期间仓库新增至少 200 个更新的检查点、系统时钟回拨、仓库中已存在带未来日期的 ref，都会造成这一结果；同秒时间戳按 ref 名排序，因此「更新」是排序而非保证。此时 ref 可能被删，该 run 随后的 `captureResult` 会因 old value 不匹配而失败，留下捕获错误 entry 而不是 result。
 
 ## 4. 方案取舍
 
@@ -69,7 +71,7 @@
 - 流程：枚举（带 OID）→ 过滤出符合形状的 ref → 按日期降序计算保留集（先日期后数量）→ 把删除集按 `delete <ref> <oid>` 行写入一次 `git update-ref --stdin` → 整批被拒则重枚举重算一次再用新 OID 重试 → 返回计数。`deleted` 是成功那一批删掉的 ref 数，`kept` 是该批枚举数减 `deleted`。
 - `index.ts`：`session_start` 触发一次 fire-and-forget 清扫（`git-common-dir` 去重）；`/checkpoint prune` 绕过该去重立即执行一次。
 - 命令：`/checkpoint prune` 输出删除与保留计数（`ctx.ui.notify`），失败时显示清洗后的短错误；单独 `/checkpoint` 仍显示用法，`/checkpoint <runNumber>` 行为不变。
-- `/checkpoint <runNumber>` 增加一次 best-effort 存在性检查（`rev-parse --verify --quiet <ref>`）：ref 已不存在时追加一行说明对象可能已被回收、仅预览可用；git 不可用或检查失败时省略该行，不影响原有输出。
+- `/checkpoint <runNumber>` 增加一次 best-effort 存在性检查（`rev-parse --verify --quiet <ref>`）：ref 已不存在时追加一行说明 ref 已被清扫、`git diff` 可能失效、已存预览仍可用；git 不可用或检查失败时省略该行，不影响原有输出。
 
 ## 7. 错误与降级
 
