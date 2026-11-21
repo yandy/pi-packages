@@ -1,5 +1,5 @@
 import { resolveRepositoryContext } from "./checkpoint-store.js";
-import { createGitRunner, type RunGit } from "./git.js";
+import { createGitRunner, type GitResult, type RunGit } from "./git.js";
 import { CHECKPOINT_REFS_PREFIX } from "./refs.js";
 
 export const RETENTION_DAYS = 30;
@@ -120,32 +120,34 @@ export function createRetentionSweeper(options: SweeperOptions = {}): RetentionS
 	return {
 		async sweep(cwd, sweepOptions = {}) {
 			try {
-				const repository = await resolveRepositoryContext(cwd, runGit);
-				if (!repository) return { status: "skipped", reason: "not-a-worktree" };
-				if (!sweepOptions.force && sweptCommonDirs.has(repository.commonDir)) {
-					return { status: "skipped", reason: "already-swept" };
-				}
-				// Recorded before pruning so a failed sweep is not retried by this instance.
-				sweptCommonDirs.add(repository.commonDir);
-
 				const controller = new AbortController();
 				const forwardAbort = () => controller.abort();
 				let timedOut = false;
 				let interrupted = false;
+				if (options.signal?.aborted) controller.abort();
+				else options.signal?.addEventListener("abort", forwardAbort, { once: true });
 				const timer = setTimeout(() => {
 					timedOut = true;
 					controller.abort();
 				}, timeoutMs);
-				if (options.signal?.aborted) controller.abort();
-				else options.signal?.addEventListener("abort", forwardAbort, { once: true });
 
+				// Every git call, including the three inside the repository-context resolve, is bounded:
+				// an abort settles a still-pending runner call instead of waiting for it to finish.
 				const guardedRunGit: RunGit = async (args, gitOptions) => {
-					const result = await runGit(args, { ...gitOptions, signal: controller.signal });
+					const result = await abortable(controller.signal, runGit(args, { ...gitOptions, signal: controller.signal }));
 					if (result.killed || result.truncated) interrupted = true;
 					return result;
 				};
 
 				try {
+					const repository = await resolveRepositoryContext(cwd, guardedRunGit);
+					if (!repository) return { status: "skipped", reason: "not-a-worktree" };
+					if (!sweepOptions.force && sweptCommonDirs.has(repository.commonDir)) {
+						return { status: "skipped", reason: "already-swept" };
+					}
+					// Recorded before pruning so a failed sweep is not retried by this instance.
+					sweptCommonDirs.add(repository.commonDir);
+
 					const result = await pruneCheckpointRefs(repository.worktreeRoot, {
 						retentionDays: options.retentionDays,
 						maxRefs: options.maxRefs,
@@ -171,6 +173,32 @@ export function createRetentionSweeper(options: SweeperOptions = {}): RetentionS
 			}
 		},
 	};
+}
+
+/**
+ * Settles with whatever the runner eventually returned, or with an interrupted result as soon as
+ * `signal` aborts. Without this, a runner call that ignores the signal would keep `sweep` pending
+ * past its timeout.
+ */
+function abortable(signal: AbortSignal, pending: Promise<GitResult>): Promise<GitResult> {
+	return new Promise<GitResult>((resolveResult, reject) => {
+		let settled = false;
+		const settle = (apply: () => void) => {
+			if (settled) return;
+			settled = true;
+			signal.removeEventListener("abort", onAbort);
+			apply();
+		};
+		const onAbort = () =>
+			settle(() => resolveResult({ stdout: "", stderr: "", code: null, killed: true, truncated: false }));
+		signal.addEventListener("abort", onAbort, { once: true });
+		pending.then(
+			(result) => settle(() => resolveResult(result)),
+			(error: unknown) => settle(() => reject(error)),
+		);
+		// The signal may have aborted between the runner call and the listener registration.
+		if (signal.aborted) onAbort();
+	});
 }
 
 function timeoutMessage(timeoutMs: number): string {

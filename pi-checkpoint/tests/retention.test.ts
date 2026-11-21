@@ -204,6 +204,20 @@ describe("checkpoint ref retention", () => {
 		await repo.cleanup();
 	});
 
+	it("bounds the repository-context resolve by the sweep timeout", async () => {
+		const repo = await createTestRepo();
+		const sweeper = createRetentionSweeper({
+			timeoutMs: 10,
+			runGit: async (args, options) => {
+				// Hangs on the very first resolve call (checkpoint-store.ts:112) and ignores the signal.
+				if (args[0] === "rev-parse") return new Promise(() => {});
+				return createGitRunner()(args, options);
+			},
+		});
+		expect(await sweeper.sweep(repo.dir)).toEqual({ status: "failed", error: "Retention sweep timed out after 10ms" });
+		await repo.cleanup();
+	});
+
 	it("does not run update-ref when nothing is stale", async () => {
 		const repo = await createTestRepo();
 		const head = await commitAll(repo.dir);
