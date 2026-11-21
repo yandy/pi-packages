@@ -363,19 +363,31 @@ describe("checkpoint ref retention", () => {
 		const repo = await makeRepo();
 		const head = await commitAll(repo.dir);
 		await seedRef(repo.dir, head, "busy/run-old", "2026-09-01T00:00:00Z");
-		let slowDelete: Promise<void> | undefined;
+		const staleOid = await git(repo.dir, "rev-parse", "refs/pi/checkpoint/busy/run-old");
+		const staleSeconds = Math.floor(Date.parse("2026-09-01T00:00:00Z") / 1000);
+		let listings = 0;
 		const sweeper = createRetentionSweeper({
 			timeoutMs: 20,
+			// Only the repository resolve runs for real: a listing or a delete that outlives the
+			// timeout would leave a git child holding the fixture during teardown on Windows.
 			runGit: async (args, options) => {
-				if (!args.includes("update-ref")) return createGitRunner()(args, options);
-				slowDelete = new Promise((resolve) => setTimeout(resolve, 60));
-				await slowDelete;
-				return { stdout: "", stderr: "", code: null, killed: true, truncated: false };
+				if (args[0] === "for-each-ref") {
+					const first = listings++ === 0;
+					return {
+						stdout: first ? `${staleSeconds} ${staleOid} refs/pi/checkpoint/busy/run-old\n` : "",
+						stderr: "",
+						code: first ? 0 : null,
+						killed: !first,
+						truncated: false,
+					};
+				}
+				if (args.includes("update-ref")) {
+					await new Promise((resolve) => setTimeout(resolve, 60));
+					return { stdout: "", stderr: "", code: null, killed: true, truncated: false };
+				}
+				return createGitRunner()(args, options);
 			},
 		});
 		expect((await sweeper.sweep(repo.dir)).status).toBe("failed");
-		// The runner call the timeout abandoned still settles; wait for it so teardown on Windows
-		// does not race an open handle.
-		await slowDelete;
 	});
 });
