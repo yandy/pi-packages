@@ -39,11 +39,11 @@
 		"typebox": "*"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.6.6",
-		"@earendil-works/pi-coding-agent": "1.5.0",
-		"@earendil-works/pi-tui": "1.5.0",
+		"@biomejs/biome": "^2.6.8",
+		"@earendil-works/pi-coding-agent": "1.5.2",
+		"@earendil-works/pi-tui": "1.5.2",
 		"@types/node": "^26.6.6",
-		"typebox": "^1.4.6",
+		"typebox": "^1.4.7",
 		"typescript": "~7.0.2",
 		"vitest": "^5.1.0"
 	}
