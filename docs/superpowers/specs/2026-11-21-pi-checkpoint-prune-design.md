@@ -35,7 +35,7 @@
 - **只碰自己的命名空间。** 只删除同时满足「前缀为 `refs/pi/checkpoint/`」与「形状为 `<sessionKey>/<runId>`」的 ref；其他 ref、其他命名空间、形状不符的条目一律不动。
 - **不主动回收对象。** 删 ref 后对象变为 unreachable，Git 自身的 auto-gc 在 `gc.pruneExpire`（默认 2 周）后回收。本包不启动 `gc`、`repack`、`prune`，避免在用户仓库里发起长时间、带锁的维护操作。
 - **清扫不阻塞会话。** 在 `session_start` 触发，best-effort、静默、带超时；失败不 throw、不 notify、不写 entry。
-- **每仓库每进程至多一次。** 以 `git-common-dir` 去重，避免每个 session 都重复枚举。
+- **每会话每仓库至多一次。** 以 `git-common-dir` 去重，避免每个会话都重复枚举。扩展实例是每会话一份（子代理会话也加载同一扩展，因而有独立实例），因此去重粒度是「每个会话每仓库一次」，不是进程级。
 - **进行中的 run 天然安全。** 其 ref 的 committer date 是当前时间且必然属于最新 N 个，不会被两条删除规则命中，因此不需要额外的 session 白名单。
 
 ## 4. 方案取舍
@@ -83,7 +83,7 @@
 - 日期边界：超过 `RETENTION_DAYS` 的 ref 被删；未超过的保留；两个条件同时命中与只命中其一时都按交集处理。
 - 幂等：重复清扫不改变结果；删除集中包含不存在的 ref 时不失败。
 - 隔离：`refs/heads`、`refs/tags`、`refs/pi/checkpoint` 之外的自定义命名空间、形状不符的同前缀条目全部保持原样。
-- 共享仓库：linked worktree 与主 worktree 看到同一批 ref，清扫任一侧都作用于整仓；`git-common-dir` 去重使同进程只枚举一次。
+- 共享仓库：linked worktree 与主 worktree 看到同一批 ref，清扫任一侧都作用于整仓；同一会话内的 `git-common-dir` 去重使重复 `session_start` 只枚举一次。
 - 失败隔离：注入 `for-each-ref` / `update-ref` 失败与超时，会话启动不受影响、无 entry、无异常外泄。
 - 命令：`/checkpoint prune` 的计数与错误路径；`/checkpoint <n>` 在 ref 存在/缺失两种状态下的输出差异。
 - 回归：捕获路径的既有测试全部保持通过（本设计不改变 layout 与 schema）。
