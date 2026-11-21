@@ -4,6 +4,7 @@
 	"license": "MIT",
 	"workspaces": [
 		"pi-ask-user",
+		"pi-checkpoint",
 		"pi-coding-tools",
 		"pi-notify",
 		"pi-web-tools",
