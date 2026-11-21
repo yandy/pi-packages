@@ -53,7 +53,7 @@ describe("checkpoint ref retention", () => {
 
 	afterEach(async () => {
 		await Promise.all(repos.splice(0).map((repo) => repo.cleanup()));
-		await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+		await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })));
 	});
 
 	it("keeps refs inside both limits", () => {

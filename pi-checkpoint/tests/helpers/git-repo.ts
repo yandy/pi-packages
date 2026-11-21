@@ -29,10 +29,12 @@ export async function createTestRepo(): Promise<TestRepo> {
 		await git(dir, "config", "commit.gpgsign", "false");
 		return {
 			dir,
-			cleanup: () => rm(dir, { recursive: true, force: true }),
+			// Windows reports EBUSY while a just-exited child's handles are still closing, so the
+			// removal is retried rather than failing the test that happened to finish last.
+			cleanup: () => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }),
 		};
 	} catch (error) {
-		await rm(dir, { recursive: true, force: true });
+		await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 		throw error;
 	}
 }
