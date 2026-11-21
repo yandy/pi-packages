@@ -38,7 +38,7 @@
 - **不主动回收对象。** 删 ref 后对象变为 unreachable，Git 自身的 auto-gc 在 `gc.pruneExpire`（默认 2 周）后回收。本包不启动 `gc`、`repack`、`prune`，避免在用户仓库里发起长时间、带锁的维护操作。
 - **清扫不阻塞会话。** 在 `session_start` 触发，best-effort、静默、带超时；失败不 throw、不 notify、不写 entry。
 - **每会话每仓库至多一次。** 以 `git-common-dir` 去重，避免每个会话都重复枚举。扩展实例是每会话一份（子代理会话也加载同一扩展，因而有独立实例），因此去重粒度是「每个会话每仓库一次」，不是进程级。
-- **进行中的 run 不靠白名单保护，靠时间。** 其 ref 指向的 baseline commit 时间是 run 开始附近且属于最新 N 个，因此两条删除规则通常都不会命中它；清扫器不跟踪活跃 run。残余风险：baseline 已超出保留窗口的 run（开始一轮后闲置超过 30 天）可能被清扫删掉 ref，该 run 随后的 `captureResult` 会因 old value 不匹配而失败，留下捕获错误 entry 而不是 result。
+- **进行中的 run 不靠白名单保护，靠时间。** 其 ref 指向的 baseline commit 时间是 run 开始附近且属于最新 N 个，因此两条删除规则通常都不会命中它；清扫器不跟踪活跃 run。残余风险：清扫时该 run 的 baseline 已不在保留集内——开始一轮后闲置超过 30 天，或该 run 尚未结束期间仓库新增了至少 200 个更新的检查点。此时 ref 可能被删，该 run 随后的 `captureResult` 会因 old value 不匹配而失败，留下捕获错误 entry 而不是 result。
 
 ## 4. 方案取舍
 
