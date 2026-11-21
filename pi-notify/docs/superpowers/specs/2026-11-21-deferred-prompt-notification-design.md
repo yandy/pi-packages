@@ -30,9 +30,9 @@ The notification therefore cannot filter by initiator. It can, however, observe 
 
 - `ui_prompt_start` opens one pending notification; `ui_prompt_end` cancels it.
 - Pi emits `ui_prompt_start` / `ui_prompt_end` only for the outermost prompt of a nesting (`withUIPrompt` depth guard), so a single pending slot is sufficient. A second start cancels the first outright rather than queueing.
-- The payload is built at prompt-open time, so the notification describes the prompt that opened, not whatever state arrives later.
+- The payload is built at prompt-open time, so the notification describes the prompt that opened, not whatever state arrives later. The notifier instance is captured with it, because a later `session_start` resets the module-level notifier and must not swallow an alert already scheduled.
 - The `enabled` flag is re-checked at delivery: `/notify` between open and delivery wins.
-- `session_start` and `session_shutdown` discard a pending alert, so a replaced or closed session never notifies.
+- `session_shutdown` discards a pending alert. `session_start` deliberately does **not**: every replacement path emits `session_shutdown` on the outgoing runner first (and reload builds fresh extension instances), so nothing stale can survive, while cancelling on `session_start` would drop the alert for the startup prompt Pi emits before it.
 - Active-agent session suppression happens first: a suppressed prompt never schedules a delivery.
 - The delay is `PROMPT_NOTIFY_DELAY_MS = 4000`.
 
@@ -47,12 +47,16 @@ The notification therefore cannot filter by initiator. It can, however, observe 
 Keep a per-extension-instance `pendingPromptTimer`.
 
 - `ui_prompt_start`: after the active-agent, notifier, and `enabled` guards, cancel any pending timer, build the payload, and schedule delivery in `PROMPT_NOTIFY_DELAY_MS`. The timer is `unref`'d so a pending alert never holds the process open.
-- Delivery clears the slot, re-checks `enabled`, and calls `notifier.notify`.
+- Delivery clears the slot, re-checks `enabled`, and calls the captured notifier.
 - `ui_prompt_end`: cancel the pending timer unconditionally; a no-op when nothing was scheduled.
-- `session_start`: cancel alongside the existing per-session resets.
+- `session_start`: cancel nothing; keep the pending alert (see the contract above).
 - `session_shutdown`: cancel so a session that goes away does not alert afterwards.
 
 The existing completion path is untouched.
+
+## Known limits
+
+Cancellation rides on `ui_prompt_end`, which Pi emits only for the outermost prompt of a nesting and through a microtask. If the prompt opens and closes in the same tick before this handler runs — possible when an earlier-registered extension's `ui_prompt_start` handler yields first — the cancel is missed and the alert is delivered anyway. `UIPromptStartEvent` carries no initiator, so the extension cannot close that window itself; a host-provided initiator field would be the real fix.
 
 ## Verification
 
@@ -61,8 +65,9 @@ Add extension-level tests proving:
 - the alert is delivered only after the delay elapses, with the same title, body, and urgency as before;
 - an operator answering before the delay (the `/subagents:sessions` shape) produces no alert;
 - a replacing prompt keeps a single pending alert describing the later prompt;
-- `/notify` between open and delivery suppresses the alert;
-- `session_start` and `session_shutdown` discard a pending alert;
+- `/notify` between open and delivery suppresses the alert, and re-enabling before delivery still delivers;
+- a prompt still open when `session_start` fires keeps its alert;
+- `session_shutdown` (and a replacement that emits it first) discards a pending alert;
 - existing suppression, threshold, and toggle tests keep passing with the delay-driven harness helper.
 
 Run `npm test -w pi-notify`, `npm run typecheck -w pi-notify`, and `npm run lint -w pi-notify`.

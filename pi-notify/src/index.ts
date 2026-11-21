@@ -11,6 +11,8 @@ const ACTIVE_AGENT_RE = /<active_agent\s+name="[^"]+"\s*\/>/;
  * A prompt the operator answers immediately — typically a picker their own slash
  * command opened — is not a request for attention, so it must not notify. A prompt
  * nobody answers is exactly the case the notification exists for.
+ *
+ * Exported for the test harness only; the delay is behavior, not a knob.
  */
 export const PROMPT_NOTIFY_DELAY_MS = 4000;
 
@@ -59,7 +61,10 @@ export default function (
 
 	pi.on("session_start", async (_event, ctx) => {
 		activeAgentSession = ACTIVE_AGENT_RE.test(ctx.getSystemPrompt());
-		cancelPendingPrompt();
+		// A pending prompt alert is deliberately left alone: every session replacement emits
+		// session_shutdown on the outgoing runner first (and reload builds new extension instances),
+		// so nothing stale can survive — while cancelling here would drop an alert for a prompt that
+		// is still open (the startup prompt Pi emits before session_start).
 		runOrigin = undefined;
 		config = loadConfig(deps?.env, platform);
 		notifier = undefined;
@@ -92,12 +97,15 @@ export default function (
 			urgency: config.urgencyPrompt,
 		};
 		// Deferred, not immediate: see PROMPT_NOTIFY_DELAY_MS. Building the payload here keeps
-		// the notification describing the prompt that opened, not whatever state arrives later.
+		// the notification describing the prompt that opened, not whatever state arrives later,
+		// and the notifier instance is captured for the same reason: a later session_start resets
+		// the module-level notifier, which must not swallow an alert already scheduled.
+		const deliver = notifier;
 		cancelPendingPrompt();
 		const timer = setTimeout(() => {
 			pendingPromptTimer = undefined;
 			if (!enabled) return;
-			notifier?.notify(notification);
+			deliver?.notify(notification);
 		}, PROMPT_NOTIFY_DELAY_MS);
 		timer.unref?.();
 		pendingPromptTimer = timer;

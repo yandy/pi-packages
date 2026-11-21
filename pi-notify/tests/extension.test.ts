@@ -89,6 +89,7 @@ describe("ui_prompt_start", () => {
 	it("falls back to the prompt kind when title is missing or empty", async () => {
 		const h = createHarness();
 		await h.firePrompt({ kind: "confirm" });
+		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(1);
 		await h.firePrompt({ kind: "select", title: "" });
 		expect(h.fakeNotifier.notify.mock.calls.map((c) => c[0].body)).toEqual([
 			"confirm\npid 4242",
@@ -184,11 +185,36 @@ describe("prompt notification deferral", () => {
 		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
 	});
 
+	it("delivers when notifications are re-enabled before the timer fires", async () => {
+		const h = createHarness({ env: { PI_NOTIFY: "0" } });
+		await h.fire("session_start", { reason: "startup" });
+		await h.commands.notify.handler("", h.ctx);
+		await h.fire("ui_prompt_start", { kind: "confirm", title: "Q" });
+		await h.commands.notify.handler("", h.ctx);
+		await h.commands.notify.handler("", h.ctx);
+		await vi.advanceTimersByTimeAsync(PROMPT_NOTIFY_DELAY_MS);
+		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps the alert for a prompt still open when the session starts underneath it", async () => {
+		// Pi emits the startup prompt (project trust) before session_start. session_start must not
+		// cancel or unmount the alert: nothing about a session starting means the prompt was answered.
+		const h = createHarness();
+		await h.fire("ui_prompt_start", { kind: "input", title: "Trust?" });
+		await vi.advanceTimersByTimeAsync(1000);
+		await h.fire("session_start", { reason: "startup" });
+		await vi.advanceTimersByTimeAsync(PROMPT_NOTIFY_DELAY_MS);
+		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(1);
+		expect(h.fakeNotifier.notify.mock.calls[0][0].body).toBe("Trust?\ninput · pid 4242");
+	});
+
 	it("discards a pending prompt on session replacement", async () => {
 		const h = createHarness();
 		await h.fire("session_start", { reason: "startup" });
 		await h.fire("ui_prompt_start", { kind: "confirm", title: "Q" });
-		await h.fire("session_start", { reason: "new" });
+		// The host emits session_shutdown on the outgoing runner before a replacement starts.
+		await h.fire("session_shutdown", { reason: "resume" });
+		await h.fire("session_start", { reason: "resume" });
 		await vi.advanceTimersByTimeAsync(PROMPT_NOTIFY_DELAY_MS);
 		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
 	});
