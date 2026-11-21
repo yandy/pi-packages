@@ -330,6 +330,37 @@ describe("CheckpointPruner with mocked Git", () => {
 	});
 
 	it.each([
+		[
+			"an unterminated final record",
+			enumeration(
+				{ ref: refA, commit: OID_A, timestamp: 100 },
+				{ ref: refB, commit: OID_B, timestamp: 200 },
+			).slice(0, -1),
+		],
+		[
+			"an interior blank record",
+			`${enumeration({ ref: refA, commit: OID_A, timestamp: 100 })}\n` +
+				enumeration({ ref: refB, commit: OID_B, timestamp: 200 }),
+		],
+	])("rejects %s", async (_label, stdout) => {
+		const { run, calls } = createMockGit(stdout);
+
+		await expect(
+			new CheckpointPruner(run).prune(mockRepository, { retentionDays: null, maxRefs: 1 }),
+		).rejects.toThrow(/malformed/);
+		expect(callsFor(calls, "update-ref")).toHaveLength(0);
+	});
+
+	it("accepts an empty enumeration without touching refs", async () => {
+		const { run, calls } = createMockGit("");
+
+		const report = await new CheckpointPruner(run).prune(mockRepository, { retentionDays: 1, maxRefs: 1 });
+
+		expect(report).toMatchObject({ completed: 0, selected: 0, deleted: 0 });
+		expect(callsFor(calls, "update-ref")).toHaveLength(0);
+	});
+
+	it.each([
 		["a missing field", `${refA}\0${OID_A}\0commit\0${PLANNER_NOW}\n`],
 		["a non-numeric timestamp", enumeration({ ref: refA, commit: OID_A, timestamp: "not-a-number" })],
 		["an empty timestamp", enumeration({ ref: refA, commit: OID_A, timestamp: "" })],

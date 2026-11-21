@@ -143,11 +143,24 @@ export class CheckpointPruner {
 	}
 }
 
+/**
+ * Parses one newline-terminated record per ref. Framing is strict: empty output is the only
+ * accepted non-terminated input, and an interior blank record is malformed rather than skipped.
+ */
 function parseEnumeration(stdout: string): CheckpointRefRecord[] {
+	if (stdout === "") return [];
+	if (!stdout.endsWith(RECORD_SEPARATOR)) {
+		throw new Error("malformed checkpoint ref enumeration: unterminated record");
+	}
+	const lines = stdout.split(RECORD_SEPARATOR);
+	// The final terminator leaves one empty remainder, which is not a record.
+	lines.pop();
 	const records: CheckpointRefRecord[] = [];
 	const seen = new Set<string>();
-	for (const line of stdout.split(RECORD_SEPARATOR)) {
-		if (line === "") continue;
+	for (const line of lines) {
+		if (line === "") {
+			throw new Error("malformed checkpoint ref enumeration: blank record");
+		}
 		const fields = line.split(FIELD_SEPARATOR);
 		if (fields.length !== ENUMERATION_FIELDS.length) {
 			throw new Error(`malformed checkpoint ref enumeration record: expected ${ENUMERATION_FIELDS.length} fields`);
