@@ -19,6 +19,8 @@ export interface GitRunOptions {
 	signal?: AbortSignal;
 	allowNonZeroExit?: boolean;
 	maxOutputBytes?: number;
+	/** Written verbatim to the child's stdin, which is closed afterwards. */
+	stdin?: string;
 }
 
 export interface GitResult {
@@ -67,7 +69,7 @@ export function createGitRunner(spawnFn: typeof spawn = spawn): RunGit {
 					cwd: options.cwd,
 					env,
 					shell: false,
-					stdio: ["ignore", "pipe", "pipe"],
+					stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
 					windowsHide: true,
 				});
 			} catch (error) {
@@ -139,6 +141,18 @@ export function createGitRunner(spawnFn: typeof spawn = spawn): RunGit {
 				reject(error);
 			});
 			child.once("close", (code) => finish(code));
+
+			if (options.stdin !== undefined) {
+				child.stdin?.on("error", (error) => {
+					// A partially delivered payload must not look like success: fail closed unless the
+					// caller already aborted or the child is being torn down for truncation/abort.
+					if (settled || killed || options.signal?.aborted) return;
+					settled = true;
+					removeAbortListener();
+					reject(error);
+				});
+				child.stdin?.end(options.stdin);
+			}
 
 			if (options.signal?.aborted) onAbort();
 			else options.signal?.addEventListener("abort", onAbort, { once: true });

@@ -2,7 +2,7 @@ import { spawn, type SpawnOptions } from "node:child_process";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createGitRunner, GitCommandError, GitUnavailableError } from "../src/git.js";
-import { createTestRepo, type TestRepo } from "./helpers/git-repo.js";
+import { commitAll, createTestRepo, git, type TestRepo, writeRepoFile } from "./helpers/git-repo.js";
 
 describe("Git process boundary", () => {
 	let repo: TestRepo;
@@ -54,6 +54,23 @@ describe("Git process boundary", () => {
 		const temporaryIndex = join(repo.dir, "temporary-index");
 		await run(["--version"], { cwd: repo.dir, env: { GIT_INDEX_FILE: temporaryIndex } });
 		expect(observedEnv?.GIT_INDEX_FILE).toBe(temporaryIndex);
+	});
+
+	it("passes a multiline update-ref --stdin payload unchanged", async () => {
+		await writeRepoFile(repo.dir, "file.txt", "base\n");
+		const head = await commitAll(repo.dir);
+		await git(repo.dir, "update-ref", "refs/pi/test/first", head);
+		await git(repo.dir, "update-ref", "refs/pi/test/second", head);
+		await git(repo.dir, "update-ref", "refs/pi/test/untouched", head);
+		const payload = `delete refs/pi/test/first ${head}\ndelete refs/pi/test/second ${head}\n`;
+
+		const run = createGitRunner();
+		const result = await run(["update-ref", "--stdin"], { cwd: repo.dir, stdin: payload });
+
+		expect(result.code).toBe(0);
+		await expect(git(repo.dir, "rev-parse", "--verify", "refs/pi/test/first")).rejects.toThrow();
+		await expect(git(repo.dir, "rev-parse", "--verify", "refs/pi/test/second")).rejects.toThrow();
+		expect(await git(repo.dir, "rev-parse", "--verify", "refs/pi/test/untouched")).toBe(head);
 	});
 
 	it("throws a command error for nonzero exits unless they are allowed", async () => {

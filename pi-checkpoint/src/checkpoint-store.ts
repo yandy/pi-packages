@@ -1,12 +1,9 @@
 import { mkdtemp, rm } from "node:fs/promises";
-import { join, resolve } from "node:path";
-import { createGitRunner, GitCommandError, type GitResult, type RunGit } from "./git.js";
+import { join } from "node:path";
+import { createGitRunner, type RunGit } from "./git.js";
+import { resolveRepository, type RepositoryContext } from "./repository.js";
 
-export interface RepositoryContext {
-	worktreeRoot: string;
-	commonDir: string;
-	head: string | null;
-}
+export type { RepositoryContext };
 
 export interface Snapshot extends RepositoryContext {
 	ref: string;
@@ -24,13 +21,13 @@ export class CheckpointStore {
 	}
 
 	async captureBaseline(cwd: string, ref: string, signal?: AbortSignal): Promise<Snapshot | null> {
-		const repository = await this.resolveRepository(cwd);
+		const repository = await resolveRepository(this.runGit, cwd);
 		if (!repository) return null;
 		return this.capture(repository, ref, repository.head, "baseline", "", signal);
 	}
 
 	async captureResult(baseline: Snapshot, signal?: AbortSignal): Promise<Snapshot> {
-		const repository = await this.resolveRepository(baseline.worktreeRoot);
+		const repository = await resolveRepository(this.runGit, baseline.worktreeRoot);
 		if (
 			!repository ||
 			repository.worktreeRoot !== baseline.worktreeRoot ||
@@ -39,35 +36,6 @@ export class CheckpointStore {
 			throw new Error("Git repository identity changed during checkpoint run");
 		}
 		return this.capture(repository, baseline.ref, baseline.commit, "result", baseline.commit, signal);
-	}
-
-	private async resolveRepository(cwd: string): Promise<RepositoryContext | null> {
-		const rootResult = await this.runGit(["rev-parse", "--path-format=absolute", "--show-toplevel"], {
-			cwd,
-			env: { LC_ALL: "C" },
-			allowNonZeroExit: true,
-		});
-		if (rootResult.code !== 0) {
-			if (isNonWorktree(rootResult)) return null;
-			throw new GitCommandError(["rev-parse", "--path-format=absolute", "--show-toplevel"], rootResult);
-		}
-		const worktreeRoot = resolve(rootResult.stdout.trim());
-		const commonResult = await this.runGit(["rev-parse", "--path-format=absolute", "--git-common-dir"], {
-			cwd: worktreeRoot,
-		});
-		const commonDir = resolve(commonResult.stdout.trim());
-		const headResult = await this.runGit(["rev-parse", "--verify", "--quiet", "HEAD"], {
-			cwd: worktreeRoot,
-			allowNonZeroExit: true,
-		});
-		if (headResult.code !== 0 && headResult.code !== 1) {
-			throw new GitCommandError(["rev-parse", "--verify", "--quiet", "HEAD"], headResult);
-		}
-		return {
-			worktreeRoot,
-			commonDir,
-			head: headResult.code === 0 ? headResult.stdout.trim() : null,
-		};
 	}
 
 	private async capture(
@@ -131,13 +99,4 @@ export class CheckpointStore {
 			await rm(temporaryDirectory, { recursive: true, force: true });
 		}
 	}
-}
-
-function isNonWorktree(result: GitResult): boolean {
-	const stderr = result.stderr.toLowerCase();
-	return (
-		stderr.includes("not a git repository") ||
-		stderr.includes("cannot use bare repository") ||
-		stderr.includes("must be run in a work tree")
-	);
 }
