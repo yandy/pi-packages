@@ -39,7 +39,7 @@ Requires pi >= 1.5.0 and one of the following backends:
 | `agent_settled` (not aborted) | `<name> · Finished · <duration>` | `<summary>\n<context>` | `normal` |
 
 - `<name>` is the session name set via `/name` or `pi.setSessionName()`, falling back to the working directory's basename.
-- For a prompt, `<subject>` is its title, or its kind when untitled. `<context>` contains the project basename when a distinct named session is active, the prompt kind when it is not already the subject, and `pid <pid>`.
+- For a prompt, `<subject>` is its title, or its kind when untitled; `custom` prompts carry no title by contract, so they use the fixed subject `Interactive prompt` instead of the kind name. `<context>` contains the project basename when a distinct named session is active, the prompt kind when it is not already the subject, and `pid <pid>`.
 - For completion, `<summary>` is the last assistant message's cleaned text. If no assistant text exists, the body contains only `<context>`. Duration is rounded to the nearest second and shown as seconds, minutes, or hours.
 - The `\n` denotes an actual newline: the subject or summary stays on the first line, while instance metadata moves to the second line. Custom notifier commands receive both lines in the single body argument.
 
