@@ -1,8 +1,8 @@
 import { chmod, mkdtemp, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CheckpointStore, type Snapshot } from "../src/checkpoint-store.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CheckpointStore, resolveRepositoryContext, type Snapshot } from "../src/checkpoint-store.js";
 import { createGitRunner, GitCommandError } from "../src/git.js";
 import { checkpointRef } from "../src/refs.js";
 import { commitAll, createTestRepo, git, readRepoFile, type TestRepo, writeRepoFile } from "./helpers/git-repo.js";
@@ -35,6 +35,7 @@ describe("CheckpointStore", () => {
 	});
 
 	afterEach(async () => {
+		vi.unstubAllEnvs();
 		await Promise.all([...repos].reverse().map((repo) => repo.cleanup()));
 		await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));
 	});
@@ -116,6 +117,21 @@ describe("CheckpointStore", () => {
 		expect(await git(repo.dir, "diff", baseline.commit, result.commit)).toBe("");
 	});
 
+	it("ignores inherited commit dates when capturing", async () => {
+		const repo = await makeRepo();
+		await writeRepoFile(repo.dir, "file.txt", "base\n");
+		await commitAll(repo.dir);
+		vi.stubEnv("GIT_COMMITTER_DATE", "2025-11-21T00:00:00Z");
+		vi.stubEnv("GIT_AUTHOR_DATE", "2025-11-21T00:00:00Z");
+		const startedAt = Date.now();
+		const baseline = required(await store.captureBaseline(repo.dir, checkpointRef("session", "dated")));
+		const result = await store.captureResult(baseline);
+
+		const committerSeconds = Number(await git(repo.dir, "log", "-1", "--format=%ct", result.commit));
+		expect(committerSeconds).toBeGreaterThanOrEqual(Math.floor(startedAt / 1000) - 300);
+		expect(committerSeconds).toBeLessThanOrEqual(Math.floor(Date.now() / 1000) + 300);
+	});
+
 	it("captures an unborn HEAD repository", async () => {
 		const repo = await makeRepo();
 		await writeRepoFile(repo.dir, "first.txt", "first\n");
@@ -184,6 +200,21 @@ describe("CheckpointStore", () => {
 		expect(baseline.worktreeRoot).toBe(await realpath(repo.dir));
 		expect(await git(repo.dir, "show", `${result.commit}:root.txt`)).toBe("root change");
 		expect(await git(repo.dir, "show", `${result.commit}:nested/file.txt`)).toBe("nested");
+	});
+
+	it("resolves the shared repository context from a subdirectory", async () => {
+		const repo = await makeRepo();
+		await writeRepoFile(repo.dir, "dir/file.txt", "x\n");
+		await commitAll(repo.dir);
+		const fromRoot = await resolveRepositoryContext(repo.dir, createGitRunner());
+		const fromSubdir = await resolveRepositoryContext(join(repo.dir, "dir"), createGitRunner());
+		expect(fromRoot?.worktreeRoot).toBe(await realpath(repo.dir));
+		expect(fromRoot?.commonDir).toBe(await realpath(join(repo.dir, ".git")));
+		expect(fromSubdir).toEqual(fromRoot);
+		const outsideDir = await mkdtemp(join(tmpdir(), "pi-checkpoint-plain-"));
+		tempDirs.push(outsideDir);
+		const outside = await resolveRepositoryContext(outsideDir, createGitRunner());
+		expect(outside).toBeNull();
 	});
 
 	it.skipIf(process.platform === "win32")("captures executable mode changes", async () => {

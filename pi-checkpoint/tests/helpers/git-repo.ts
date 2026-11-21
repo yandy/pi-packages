@@ -29,15 +29,17 @@ export async function createTestRepo(): Promise<TestRepo> {
 		await git(dir, "config", "commit.gpgsign", "false");
 		return {
 			dir,
-			cleanup: () => rm(dir, { recursive: true, force: true }),
+			// Windows reports EBUSY while a just-exited child's handles are still closing, so the
+			// removal is retried rather than failing the test that happened to finish last.
+			cleanup: () => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }),
 		};
 	} catch (error) {
-		await rm(dir, { recursive: true, force: true });
+		await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 		throw error;
 	}
 }
 
-export async function git(cwd: string, ...args: string[]): Promise<string> {
+function testEnvironment(cwd: string, overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
 	const env: NodeJS.ProcessEnv = {
 		...process.env,
 		GIT_CONFIG_GLOBAL: join(cwd, ".pi-checkpoint-test-global-config"),
@@ -45,9 +47,17 @@ export async function git(cwd: string, ...args: string[]): Promise<string> {
 		LC_ALL: "C",
 	};
 	for (const name of repositoryEnvironmentVariables) delete env[name];
+	return { ...env, ...overrides };
+}
+
+export async function git(cwd: string, ...args: string[]): Promise<string> {
+	return gitWithEnv(cwd, {}, ...args);
+}
+
+export async function gitWithEnv(cwd: string, env: NodeJS.ProcessEnv, ...args: string[]): Promise<string> {
 	const { stdout } = await execFileAsync("git", args, {
 		cwd,
-		env,
+		env: testEnvironment(cwd, env),
 		maxBuffer: 16 * 1024 * 1024,
 	});
 	return stdout.trim();
@@ -55,7 +65,7 @@ export async function git(cwd: string, ...args: string[]): Promise<string> {
 
 export async function commitAll(cwd: string, message = "test commit"): Promise<string> {
 	await git(cwd, "add", "-A");
-	await git(cwd, "commit", "-m", message);
+	await git(cwd, "commit", "--allow-empty", "-m", message);
 	return git(cwd, "rev-parse", "HEAD");
 }
 

@@ -1,6 +1,6 @@
 import type { CustomEntry, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createCheckpointCommandHandler } from "../src/command.js";
+import { type CheckpointCommandDeps, createCheckpointCommandHandler } from "../src/command.js";
 import { CHECKPOINT_ENTRY_TYPE, type CheckpointOkData } from "../src/session.js";
 
 function checkpointEntry(): CustomEntry {
@@ -35,14 +35,20 @@ function checkpointEntry(): CustomEntry {
 	};
 }
 
+const stubDeps: CheckpointCommandDeps = {
+	sweep: async () => ({ status: "skipped", reason: "not-a-worktree" }),
+	refExists: async () => true,
+};
+
 describe("/checkpoint", () => {
 	let notify: ReturnType<typeof vi.fn>;
 	let ctx: ExtensionCommandContext;
-	const handler = createCheckpointCommandHandler();
+	const handler = createCheckpointCommandHandler(stubDeps);
 
 	beforeEach(() => {
 		notify = vi.fn();
 		ctx = {
+			cwd: "/repo",
 			sessionManager: { getBranch: () => [checkpointEntry()] },
 			ui: { notify },
 		} as unknown as ExtensionCommandContext;
@@ -66,5 +72,62 @@ describe("/checkpoint", () => {
 	it("reports a missing checkpoint", async () => {
 		await handler("404", ctx);
 		expect(notify).toHaveBeenLastCalledWith(expect.stringContaining("not found"), "warning");
+	});
+
+	it("prunes when asked and reports counts", async () => {
+		const handler = createCheckpointCommandHandler({
+			sweep: async () => ({ status: "pruned", deleted: 3, kept: 197 }),
+			refExists: async () => true,
+		});
+		await handler("prune", ctx);
+		expect(notify).toHaveBeenCalledWith(expect.stringContaining("Pruned 3"), "info");
+	});
+
+	it("reports prune failures", async () => {
+		const handler = createCheckpointCommandHandler({
+			sweep: async () => ({ status: "failed", error: "git update-ref failed" }),
+			refExists: async () => true,
+		});
+		await handler("prune", ctx);
+		expect(notify).toHaveBeenCalledWith(expect.stringContaining("Checkpoint prune failed"), "warning");
+	});
+
+	it("notes pruned objects when the ref is gone", async () => {
+		const handler = createCheckpointCommandHandler({
+			sweep: async () => ({ status: "skipped", reason: "not-a-worktree" }),
+			refExists: async () => false,
+		});
+		await handler("7", ctx);
+		expect(notify).toHaveBeenCalledWith(expect.stringContaining("may fail once Git reclaims its objects"), "warning");
+	});
+
+	it("still prints the diff command when the ref is gone", async () => {
+		const handler = createCheckpointCommandHandler({
+			sweep: async () => ({ status: "skipped", reason: "not-a-worktree" }),
+			refExists: async () => false,
+		});
+		await handler("7", ctx);
+		expect(notify).toHaveBeenCalledWith(expect.stringContaining("git diff baseline-oid result-oid"), "info");
+	});
+
+	it("omits the pruned note when the ref still exists", async () => {
+		const handler = createCheckpointCommandHandler({
+			sweep: async () => ({ status: "skipped", reason: "not-a-worktree" }),
+			refExists: async () => true,
+		});
+		await handler("7", ctx);
+		expect(notify).not.toHaveBeenCalledWith(expect.stringContaining("may fail once Git reclaims its objects"), expect.anything());
+	});
+
+	it("keeps the query output when the ref check throws", async () => {
+		const handler = createCheckpointCommandHandler({
+			sweep: async () => ({ status: "skipped", reason: "not-a-worktree" }),
+			refExists: async () => {
+				throw new Error("git rev-parse failed");
+			},
+		});
+		await handler("7", ctx);
+		expect(notify).toHaveBeenCalledWith(expect.stringContaining("git diff baseline-oid result-oid"), "info");
+		expect(notify).not.toHaveBeenCalledWith(expect.stringContaining("may fail once Git reclaims its objects"), expect.anything());
 	});
 });

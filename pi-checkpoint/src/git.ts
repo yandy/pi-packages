@@ -3,7 +3,12 @@
 import { type ChildProcess, spawn } from "node:child_process";
 
 const DEFAULT_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
-const REPOSITORY_ENVIRONMENT_VARIABLES = [
+/**
+ * Git variables that a parent process can use to redirect this process at a different repository or
+ * to force commit dates. Inherited values would let an unrelated outer Git context (a rebase, a hook,
+ * `git commit --date`) redirect a checkpoint's refs or make a brand-new commit look stale.
+ */
+const INHERITED_GIT_ENVIRONMENT_VARIABLES = [
 	"GIT_DIR",
 	"GIT_WORK_TREE",
 	"GIT_COMMON_DIR",
@@ -11,6 +16,8 @@ const REPOSITORY_ENVIRONMENT_VARIABLES = [
 	"GIT_OBJECT_DIRECTORY",
 	"GIT_ALTERNATE_OBJECT_DIRECTORIES",
 	"GIT_QUARANTINE_PATH",
+	"GIT_AUTHOR_DATE",
+	"GIT_COMMITTER_DATE",
 ] as const;
 
 export interface GitRunOptions {
@@ -19,6 +26,7 @@ export interface GitRunOptions {
 	signal?: AbortSignal;
 	allowNonZeroExit?: boolean;
 	maxOutputBytes?: number;
+	stdin?: string;
 }
 
 export interface GitResult {
@@ -51,7 +59,7 @@ export class GitUnavailableError extends Error {
 
 function cleanInheritedGitEnvironment(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 	const env = { ...base };
-	for (const name of REPOSITORY_ENVIRONMENT_VARIABLES) delete env[name];
+	for (const name of INHERITED_GIT_ENVIRONMENT_VARIABLES) delete env[name];
 	return env;
 }
 
@@ -59,6 +67,7 @@ export function createGitRunner(spawnFn: typeof spawn = spawn): RunGit {
 	return (args, options) => {
 		const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
 		const env = { ...cleanInheritedGitEnvironment(process.env), ...options.env };
+		const stdinMode: "ignore" | "pipe" = options.stdin === undefined ? "ignore" : "pipe";
 
 		return new Promise<GitResult>((resolve, reject) => {
 			let child: ChildProcess;
@@ -67,13 +76,19 @@ export function createGitRunner(spawnFn: typeof spawn = spawn): RunGit {
 					cwd: options.cwd,
 					env,
 					shell: false,
-					stdio: ["ignore", "pipe", "pipe"],
+					stdio: [stdinMode, "pipe", "pipe"],
 					windowsHide: true,
 				});
 			} catch (error) {
 				if (isErrno(error, "ENOENT")) reject(new GitUnavailableError());
 				else reject(error);
 				return;
+			}
+
+			if (options.stdin !== undefined) {
+				// The child can exit before draining stdin; swallow the resulting EPIPE instead of throwing.
+				child.stdin?.on("error", () => {});
+				child.stdin?.end(options.stdin);
 			}
 
 			const stdout: Buffer[] = [];
