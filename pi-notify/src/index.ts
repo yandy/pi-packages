@@ -43,7 +43,9 @@ export default function (
 		ensure(ctx);
 		if (!enabled) return;
 		const sessionName = pi.getSessionName?.();
-		const subject = event.title || event.kind;
+		// "custom" is the only kind Pi emits without a title by contract, so the protocol word
+		// must not reach the notification body.
+		const subject = event.title || (event.kind === "custom" ? "Interactive prompt" : event.kind);
 		notifier?.notify({
 			title: `${instanceName(sessionName, ctx.cwd)} · Waiting for input`,
 			body: withContext(

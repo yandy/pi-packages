@@ -69,6 +69,12 @@ describe("ui_prompt_start", () => {
 		]);
 	});
 
+	it("never leaks the protocol word for custom prompts, which carry no title", async () => {
+		const h = createHarness();
+		await h.fire("ui_prompt_start", { kind: "custom" });
+		expect(h.fakeNotifier.notify.mock.calls[0][0].body).toBe("Interactive prompt\npid 4242");
+	});
+
 	it("notifies even before session_start (lazy init)", async () => {
 		const h = createHarness();
 		await h.fire("ui_prompt_start", { kind: "input", title: "Trust?" });
