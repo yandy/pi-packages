@@ -5,7 +5,12 @@ const ASSISTANT_ENTRIES = [
 	{ type: "message", message: { role: "assistant", content: [{ type: "text", text: "All done." }] } },
 ];
 
-function createHarness(opts?: { env?: NodeJS.ProcessEnv; sessionName?: string; entries?: unknown[] }) {
+function createHarness(opts?: {
+	env?: NodeJS.ProcessEnv;
+	sessionName?: string;
+	entries?: unknown[];
+	platform?: NodeJS.Platform;
+}) {
 	const handlers: Record<string, Array<(event: any, ctx: any) => any>> = {};
 	const commands: Record<string, { handler: (args: string, ctx: any) => any }> = {};
 	const fakeNotifier = { notify: vi.fn(), degraded: false };
@@ -34,6 +39,7 @@ function createHarness(opts?: { env?: NodeJS.ProcessEnv; sessionName?: string; e
 		}) as any,
 		now: () => current,
 		pid: 4242,
+		platform: opts?.platform ?? "linux",
 	});
 	const fire = async (event: string, payload: any = {}) => {
 		for (const handler of handlers[event] ?? []) await handler({ type: event, ...payload }, ctx);
@@ -47,8 +53,8 @@ describe("ui_prompt_start", () => {
 		await h.fire("session_start", { reason: "startup" });
 		await h.fire("ui_prompt_start", { kind: "confirm", title: "Dangerous?" });
 		expect(h.fakeNotifier.notify).toHaveBeenCalledWith({
-			title: "Waiting for input — proj (pid 4242)",
-			body: "Dangerous?",
+			title: "proj · Waiting for input",
+			body: "Dangerous?\nconfirm · pid 4242",
 			urgency: "critical",
 		});
 	});
@@ -57,7 +63,10 @@ describe("ui_prompt_start", () => {
 		const h = createHarness();
 		await h.fire("ui_prompt_start", { kind: "confirm" });
 		await h.fire("ui_prompt_start", { kind: "select", title: "" });
-		expect(h.fakeNotifier.notify.mock.calls.map((c) => c[0].body)).toEqual(["confirm", "select"]);
+		expect(h.fakeNotifier.notify.mock.calls.map((c) => c[0].body)).toEqual([
+			"confirm\npid 4242",
+			"select\npid 4242",
+		]);
 	});
 
 	it("notifies even before session_start (lazy init)", async () => {
@@ -69,7 +78,23 @@ describe("ui_prompt_start", () => {
 	it("uses the session name when present", async () => {
 		const h = createHarness({ sessionName: "review" });
 		await h.fire("ui_prompt_start", { kind: "confirm", title: "OK?" });
-		expect(h.fakeNotifier.notify.mock.calls[0][0].title).toBe("Waiting for input — review (pid 4242)");
+		expect(h.fakeNotifier.notify.mock.calls[0][0]).toMatchObject({
+			title: "review · Waiting for input",
+			body: "OK?\nproj · confirm · pid 4242",
+		});
+	});
+
+	it("does not repeat the prompt kind when it is already the title", async () => {
+		const h = createHarness();
+		await h.fire("ui_prompt_start", { kind: "confirm", title: "confirm" });
+		expect(h.fakeNotifier.notify.mock.calls[0][0].body).toBe("confirm\npid 4242");
+	});
+
+	it("uses the Windows default backend and command", async () => {
+		const h = createHarness({ platform: "win32" });
+		await h.fire("session_start", { reason: "startup" });
+		await h.fire("ui_prompt_start", { kind: "confirm", title: "OK?" });
+		expect(h.notifierOpts[0]).toMatchObject({ command: "powershell.exe", backend: "windows-toast" });
 	});
 });
 
@@ -93,8 +118,8 @@ describe("agent_settled", () => {
 		await h.fire("agent_settled", { aborted: false });
 		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(1);
 		expect(h.fakeNotifier.notify).toHaveBeenCalledWith({
-			title: "Task finished — proj (pid 4242)",
-			body: "All done.",
+			title: "proj · Finished · 10s",
+			body: "All done.\npid 4242",
 			urgency: "normal",
 		});
 	});
@@ -117,10 +142,10 @@ describe("agent_settled", () => {
 		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(1);
 	});
 
-	it("sends an empty body when there is no assistant text", async () => {
+	it("uses context as the body when there is no assistant text", async () => {
 		const h = createHarness({ env: { PI_NOTIFY_MIN_DURATION_MS: "0" }, entries: [] });
 		await h.fire("agent_settled", { aborted: false });
-		expect(h.fakeNotifier.notify.mock.calls[0][0].body).toBe("");
+		expect(h.fakeNotifier.notify.mock.calls[0][0].body).toBe("pid 4242");
 	});
 });
 

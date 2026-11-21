@@ -1,18 +1,52 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { extractSummary, instanceName } from "../src/summary.js";
+import {
+	extractSummary,
+	formatDuration,
+	instanceContext,
+	instanceName,
+	withContext,
+} from "../src/summary.js";
 
-describe("instanceName", () => {
+describe("instance identity", () => {
 	it("prefers the session name", () => {
-		expect(instanceName("review", "/tmp/proj", 123)).toBe("review (pid 123)");
+		expect(instanceName("review", "/tmp/proj")).toBe("review");
 	});
 
-	it("falls back to the cwd basename when unnamed", () => {
-		expect(instanceName(undefined, join("/tmp", "proj"), 123)).toBe("proj (pid 123)");
+	it("falls back to the cwd basename when unnamed or empty", () => {
+		expect(instanceName(undefined, join("/tmp", "proj"))).toBe("proj");
+		expect(instanceName("", join("/tmp", "proj"))).toBe("proj");
 	});
 
-	it("falls back to the cwd basename for an empty session name", () => {
-		expect(instanceName("", join("/tmp", "proj"), 1)).toBe("proj (pid 1)");
+	it("keeps project, prompt kind, and pid in the context line", () => {
+		expect(instanceContext("review", join("/tmp", "proj"), 123, "confirm")).toBe(
+			"proj · confirm · pid 123",
+		);
+	});
+
+	it("omits a duplicate or missing project name", () => {
+		expect(instanceContext(undefined, join("/tmp", "proj"), 123)).toBe("pid 123");
+		expect(instanceContext("proj", join("/tmp", "proj"), 123)).toBe("pid 123");
+	});
+
+	it("places the subject before context and handles an empty subject", () => {
+		expect(withContext("All done.", "pid 123")).toBe("All done.\npid 123");
+		expect(withContext("", "pid 123")).toBe("pid 123");
+	});
+});
+
+describe("formatDuration", () => {
+	it.each([
+		[0, "<1s"],
+		[499, "<1s"],
+		[500, "1s"],
+		[10000, "10s"],
+		[60000, "1m"],
+		[83000, "1m 23s"],
+		[3600000, "1h"],
+		[3660000, "1h 1m"],
+	])("formats %d ms as %s", (duration, expected) => {
+		expect(formatDuration(duration)).toBe(expected);
 	});
 });
 
@@ -62,6 +96,24 @@ describe("extractSummary", () => {
 	it("honours a custom maxLen", () => {
 		const entries = [{ type: "message", message: { role: "assistant", content: "abcdefghijklmnop" } }];
 		expect(extractSummary(entries, 10)).toBe("abcdefghij…");
+	});
+
+	it("does not split grapheme clusters", () => {
+		const emoji = "👨‍👩‍👧‍👦";
+		const entries = [{ type: "message", message: { role: "assistant", content: emoji.repeat(4) } }];
+		expect(extractSummary(entries, 2)).toBe(`${emoji.repeat(2)}…`);
+	});
+
+	it("prefers a nearby sentence or word boundary", () => {
+		const sentence = [{ type: "message", message: { role: "assistant", content: "First result. More implementation details follow" } }];
+		const words = [{ type: "message", message: { role: "assistant", content: "alpha beta gamma delta" } }];
+		expect(extractSummary(sentence, 26)).toBe("First result.…");
+		expect(extractSummary(words, 15)).toBe("alpha beta…");
+	});
+
+	it("keeps a sentence boundary exactly at maxLen", () => {
+		const entries = [{ type: "message", message: { role: "assistant", content: "aa bb cc。dd" } }];
+		expect(extractSummary(entries, 9)).toBe("aa bb cc。…");
 	});
 
 	it("does not truncate text exactly at maxLen", () => {
