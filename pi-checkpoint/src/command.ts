@@ -1,11 +1,26 @@
-import type { RegisteredCommand } from "@earendil-works/pi-coding-agent";
+import type { ExtensionCommandContext, RegisteredCommand } from "@earendil-works/pi-coding-agent";
+import type { SweepOutcome } from "./retention.js";
 import { findCheckpoint } from "./session.js";
 
-const USAGE = "Usage: /checkpoint <runNumber>";
+const USAGE = "Usage: /checkpoint <runNumber>\n       /checkpoint prune";
 
-export function createCheckpointCommandHandler(): RegisteredCommand["handler"] {
+const PRUNE_SKIP_MESSAGES: Record<"already-swept" | "not-a-worktree", string> = {
+	"not-a-worktree": "Checkpoint prune skipped: not inside a Git worktree",
+	"already-swept": "Checkpoint prune skipped: this repository was already pruned in this process",
+};
+
+export interface CheckpointCommandDeps {
+	sweep: (cwd: string) => Promise<SweepOutcome>;
+	refExists: (cwd: string, ref: string) => Promise<boolean>;
+}
+
+export function createCheckpointCommandHandler(deps: CheckpointCommandDeps): RegisteredCommand["handler"] {
 	return async (args, ctx) => {
 		const input = args.trim();
+		if (input === "prune") {
+			reportSweepOutcome(ctx, await deps.sweep(ctx.cwd));
+			return;
+		}
 		if (!/^[1-9]\d*$/.test(input)) {
 			ctx.ui.notify(USAGE, "warning");
 			return;
@@ -31,5 +46,32 @@ export function createCheckpointCommandHandler(): RegisteredCommand["handler"] {
 			`Checkpoint #${runNumber}${data.aborted ? " (aborted)" : ""}\nref: ${data.ref}\nbaseline: ${data.baselineCommit}\nresult: ${data.resultCommit}\ngit diff ${data.baselineCommit} ${data.resultCommit}`,
 			"info",
 		);
+		if (await refIsGone(deps, ctx.cwd, data.ref)) {
+			ctx.ui.notify(
+				`Checkpoint #${runNumber}: checkpoint objects were pruned; only the stored preview remains`,
+				"warning",
+			);
+		}
 	};
+}
+
+function reportSweepOutcome(ctx: ExtensionCommandContext, outcome: SweepOutcome): void {
+	if (outcome.status === "pruned") {
+		ctx.ui.notify(`Pruned ${outcome.deleted} checkpoint ref(s); ${outcome.kept} kept`, "info");
+		return;
+	}
+	if (outcome.status === "failed") {
+		ctx.ui.notify(`Checkpoint prune failed: ${outcome.error}`, "warning");
+		return;
+	}
+	ctx.ui.notify(PRUNE_SKIP_MESSAGES[outcome.reason], "info");
+}
+
+/** Only a definite "false" reports the ref as gone; a failing check stays silent so it never hides the query output. */
+async function refIsGone(deps: CheckpointCommandDeps, cwd: string, ref: string): Promise<boolean> {
+	try {
+		return !(await deps.refExists(cwd, ref));
+	} catch {
+		return false;
+	}
 }
