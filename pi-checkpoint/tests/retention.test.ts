@@ -119,7 +119,9 @@ describe("checkpoint ref retention", () => {
 			return realRunner(args, options);
 		};
 		const result = await pruneCheckpointRefs(repo.dir, { now: () => new Date("2026-11-21T00:00:00Z"), runGit });
-		expect(result).toEqual({ deleted: 2, kept: 0 });
+		// The ref that vanished behind our back is not ours to count; the retry deletes the other one.
+		expect(result).toEqual({ deleted: 1, kept: 0 });
+		await expect(git(repo.dir, "rev-parse", "refs/pi/checkpoint/busy/run-b")).rejects.toThrow();
 		await repo.cleanup();
 	});
 
@@ -141,11 +143,13 @@ describe("checkpoint ref retention", () => {
 		await rm(plain, { recursive: true, force: true });
 	});
 
-	it("deletes in exactly one unconditional batched call", async () => {
+	it("deletes in exactly one conditional batched call", async () => {
 		const repo = await createTestRepo();
 		const head = await commitAll(repo.dir);
 		await seedRef(repo.dir, head, "busy/run-old", "2026-09-01T00:00:00Z");
 		await seedRef(repo.dir, head, "busy/run-older", "2026-09-02T00:00:00Z");
+		const oldOid = await git(repo.dir, "rev-parse", "refs/pi/checkpoint/busy/run-old");
+		const olderOid = await git(repo.dir, "rev-parse", "refs/pi/checkpoint/busy/run-older");
 		const calls: { args: string[]; stdin?: string }[] = [];
 		const runGit: RunGit = async (args, options) => {
 			calls.push({ args, stdin: options.stdin });
@@ -155,8 +159,65 @@ describe("checkpoint ref retention", () => {
 		const deletions = calls.filter((call) => call.args[0] === "update-ref");
 		expect(deletions).toHaveLength(1);
 		expect(deletions[0]?.args).toContain("--stdin");
-		expect(deletions[0]?.stdin).toContain("delete refs/pi/checkpoint/busy/run-old");
-		expect(deletions[0]?.stdin).not.toMatch(/(?:^|\n)delete refs\/pi\/checkpoint\/busy\/run-old [0-9a-f]{7,}/);
+		expect(deletions[0]?.stdin?.trim().split("\n")).toEqual([
+			`delete refs/pi/checkpoint/busy/run-old ${oldOid}`,
+			`delete refs/pi/checkpoint/busy/run-older ${olderOid}`,
+		]);
+		await repo.cleanup();
+	});
+
+	it("refuses to delete when the ref listing was truncated", async () => {
+		const repo = await createTestRepo();
+		const head = await commitAll(repo.dir);
+		await seedRef(repo.dir, head, "busy/run-old", "2026-09-01T00:00:00Z");
+		const staleOid = await git(repo.dir, "rev-parse", "refs/pi/checkpoint/busy/run-old");
+		const calls: string[][] = [];
+		const runGit: RunGit = async (args, options) => {
+			calls.push(args);
+			if (args[0] === "for-each-ref") {
+				// Complete enough to select the ref, but not a trustworthy listing of the repository.
+				return {
+					stdout: `${Math.floor(Date.parse("2026-09-01T00:00:00Z") / 1000)} ${staleOid} refs/pi/checkpoint/busy/run-old\n`,
+					stderr: "",
+					code: 0,
+					killed: false,
+					truncated: true,
+				};
+			}
+			return createGitRunner()(args, options);
+		};
+		const nowFn = () => new Date("2026-11-21T00:00:00Z");
+		await expect(pruneCheckpointRefs(repo.dir, { now: nowFn, runGit })).rejects.toThrow(
+			"Checkpoint ref listing did not complete",
+		);
+		expect(calls.some((args) => args[0] === "update-ref")).toBe(false);
+		expect(await git(repo.dir, "rev-parse", "refs/pi/checkpoint/busy/run-old")).toBe(staleOid);
+		expect((await createRetentionSweeper({ now: nowFn, runGit }).sweep(repo.dir)).status).toBe("failed");
+		expect(await git(repo.dir, "rev-parse", "refs/pi/checkpoint/busy/run-old")).toBe(staleOid);
+		await repo.cleanup();
+	});
+
+	it("keeps a ref whose commit changed between the listing and the delete", async () => {
+		const repo = await createTestRepo();
+		const head = await commitAll(repo.dir);
+		await seedRef(repo.dir, head, "busy/run-old", "2026-09-01T00:00:00Z");
+		await seedRef(repo.dir, head, "busy/run-new", "2026-11-20T00:00:00Z");
+		const freshOid = await git(repo.dir, "rev-parse", "refs/pi/checkpoint/busy/run-new");
+		const realRunner = createGitRunner();
+		let intercepted = false;
+		const runGit: RunGit = async (args, options) => {
+			if (args[0] !== "update-ref" || intercepted) return realRunner(args, options);
+			intercepted = true;
+			// A run's baseline ref gets its fresh result right before our transaction lands.
+			await git(repo.dir, "update-ref", "refs/pi/checkpoint/busy/run-old", freshOid);
+			return realRunner(args, options);
+		};
+		const outcome = await createRetentionSweeper({
+			now: () => new Date("2026-11-21T00:00:00Z"),
+			runGit,
+		}).sweep(repo.dir);
+		expect(outcome).toEqual({ status: "pruned", deleted: 0, kept: 2 });
+		expect(await git(repo.dir, "rev-parse", "refs/pi/checkpoint/busy/run-old")).toBe(freshOid);
 		await repo.cleanup();
 	});
 

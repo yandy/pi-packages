@@ -25,7 +25,7 @@ export default function registerCheckpoint(pi: ExtensionAPI, deps: CheckpointExt
 
 	pi.registerEntryRenderer(CHECKPOINT_ENTRY_TYPE, createCheckpointRenderer());
 	pi.registerCommand("checkpoint", {
-		description: "Show the hidden ref and full Git diff command for a checkpoint run",
+		description: "Inspect a checkpoint run's ref and diff command, or prune stale checkpoint refs",
 		handler: createCheckpointCommandHandler({
 			sweep: (cwd) => sweeper.sweep(cwd, { force: true }),
 			refExists: async (cwd, ref) => {

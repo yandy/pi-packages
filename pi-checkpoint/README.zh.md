@@ -108,8 +108,10 @@ git diff <baselineCommit> <resultCommit>
 清扫按仓库（`git-common-dir`）进行，因而跨 session：一次清扫可能删掉其它 session 的旧检查点，包括 linked worktree 中的（它们共享同一个 refs 命名空间）。这些 run 的 session entry 与预览不受影响。
 
 - `session_start` 每 session 每仓库执行一次静默、best-effort 清扫，上限 10 秒。不在 worktree 中、找不到 `git`、Git 失败或超时都不会外露：没有通知、没有 session entry、不会让 run 失败。
-- `/checkpoint prune` 立即强制清扫并报告 `Pruned N checkpoint ref(s); M kept`、`Checkpoint prune skipped: ...` 或 `Checkpoint prune failed: ...`。
-- 删除是一次 `git update-ref --stdin` 批量写入，内容为无条件的 `delete <ref>` 行，且只作用于形状为 `refs/pi/checkpoint/<sessionKey>/<runId>` 的 ref。进行中的 run 时间新且属于最新的 ref，因此绝不会被选中。
+- `/checkpoint prune` 立即强制清扫并报告 `Pruned N checkpoint ref(s); M kept`、`Checkpoint prune skipped: ...` 或 `Checkpoint prune failed: ...`。`M` 只计清扫枚举接受并保留下来的 ref，前缀下形状不符或日期不可读的条目既不在 N 也不在 M 中。
+- 删除是一次 `git update-ref --stdin` 批量写入，内容为带条件的 `delete <ref> <commit>` 行，且只作用于形状为 `refs/pi/checkpoint/<sessionKey>/<runId>` 的 ref。Git 整体原子执行该批，并拒绝任何 ref 已不再指向枚举时那个 commit 的行，因此在枚举与删除之间被改写的 ref 不会被删；整批被拒时从新枚举重算一次再试。
+- 被截断或被 kill 的枚举结果不用于删除：不完整的 `git for-each-ref` 输出既不会选中也不会删除任何 ref。
+- 清扫不跟踪进行中的 run，安全性来自时间而非白名单：run 的 baseline commit 时间新且属于最新的 ref，因此日期与数量两条规则都不会命中它。残余风险是 baseline 已超出保留窗口的 run，即开始一轮后闲置超过 30 天的 session；此时清扫可能删掉该 ref，该 run 随后的 result 捕获会失败并留下捕获错误记录，而不是 result。
 - 仍可手动删除检查点：`git update-ref -d <full-ref>`。
 
 **不提供 restore，也不主动回收对象。** 本包不会运行 `git gc`、`repack` 或 `prune`。ref 删除后其 commit 变为 unreachable，由 Git 自身的 auto-gc 在 `gc.pruneExpire`（默认两周）之后回收；在此之前对象仍然存在。

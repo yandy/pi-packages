@@ -25,7 +25,7 @@ describe("Git process boundary", () => {
 		expect(result.truncated).toBe(false);
 	});
 
-	it("removes inherited repository selectors while allowing an explicit temporary index", async () => {
+	it("removes inherited Git environment overrides while allowing explicit ones", async () => {
 		for (const name of [
 			"GIT_DIR",
 			"GIT_WORK_TREE",
@@ -34,6 +34,8 @@ describe("Git process boundary", () => {
 			"GIT_OBJECT_DIRECTORY",
 			"GIT_ALTERNATE_OBJECT_DIRECTORIES",
 			"GIT_QUARANTINE_PATH",
+			"GIT_AUTHOR_DATE",
+			"GIT_COMMITTER_DATE",
 		]) {
 			vi.stubEnv(name, join(repo.dir, `wrong-${name}`));
 		}
@@ -49,11 +51,17 @@ describe("Git process boundary", () => {
 		expect(observedEnv?.GIT_DIR).toBeUndefined();
 		expect(observedEnv?.GIT_INDEX_FILE).toBeUndefined();
 		expect(observedEnv?.GIT_OBJECT_DIRECTORY).toBeUndefined();
+		expect(observedEnv?.GIT_AUTHOR_DATE).toBeUndefined();
+		expect(observedEnv?.GIT_COMMITTER_DATE).toBeUndefined();
 		expect(observedEnv?.CHECKPOINT_TEST_VALUE).toBe("preserved");
 
 		const temporaryIndex = join(repo.dir, "temporary-index");
-		await run(["--version"], { cwd: repo.dir, env: { GIT_INDEX_FILE: temporaryIndex } });
+		await run(["--version"], {
+			cwd: repo.dir,
+			env: { GIT_INDEX_FILE: temporaryIndex, GIT_COMMITTER_DATE: "2026-11-21T00:00:00Z" },
+		});
 		expect(observedEnv?.GIT_INDEX_FILE).toBe(temporaryIndex);
+		expect(observedEnv?.GIT_COMMITTER_DATE).toBe("2026-11-21T00:00:00Z");
 	});
 
 	it("throws a command error for nonzero exits unless they are allowed", async () => {

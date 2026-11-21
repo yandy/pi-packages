@@ -7,10 +7,16 @@ export const MAX_REFS_PER_REPO = 200;
 export const DEFAULT_SWEEP_TIMEOUT_MS = 10_000;
 
 const SECONDS_PER_DAY = 86_400;
+const REF_LISTING_FORMAT = "--format=%(committerdate:unix) %(objectname) %(refname)";
 
 export interface CheckpointRefRecord {
 	name: string;
 	committedAtSeconds: number;
+}
+
+/** A listed ref plus the commit it pointed at while the listing ran. */
+interface EnumeratedCheckpointRef extends CheckpointRefRecord {
+	objectOid: string;
 }
 
 export interface RetentionPolicy {
@@ -20,8 +26,9 @@ export interface RetentionPolicy {
 }
 
 export interface PruneResult {
+	/** Refs deleted by the successful pass. */
 	deleted: number;
-	/** Refs the listing accepted and kept. Refs under the prefix with a malformed shape or an unreadable date count as neither deleted nor kept. */
+	/** `enumerated - deleted` for the pass that succeeded. Refs under the prefix with a malformed shape or an unreadable date count as neither deleted nor kept. */
 	kept: number;
 }
 
@@ -76,35 +83,89 @@ export function selectRefsToDelete(records: readonly CheckpointRefRecord[], poli
 }
 
 /**
- * Deletes stale checkpoint refs for the repository containing `cwd` in a single batched
- * `update-ref --stdin` call. Returns `null` when `cwd` is outside a Git worktree; any other Git
- * failure is thrown for the caller to handle.
+ * Deletes stale checkpoint refs for the repository containing `cwd`. Returns `null` when `cwd` is outside
+ * a Git worktree; any other Git failure is thrown for the caller to handle.
+ *
+ * Protocol: one listing, then one conditional `update-ref --stdin` transaction of
+ * `delete <ref> <oid>` lines. Git applies the whole batch or nothing, and refuses a line whose ref no
+ * longer points at the listed commit, so a ref rewritten between the listing and the delete (a run's
+ * baseline ref updated to a fresh result, or another sweeper) is never deleted on stale information.
+ * A failed transaction is retried once from a fresh listing with the same `now`. Truncated, killed or
+ * non-zero listings are refused outright: an incomplete listing would otherwise select refs that were
+ * never enumerated. Concurrent sweeps stay non-fatal: the second conditional delete fails, it
+ * re-enumerates, finds nothing stale and reports `{ deleted: 0, kept: n }`.
  */
 export async function pruneCheckpointRefs(cwd: string, options: PruneOptions = {}): Promise<PruneResult | null> {
 	const runGit = options.runGit ?? createGitRunner();
 	const repository = await resolveRepositoryContext(cwd, runGit);
 	if (!repository) return null;
 
-	const listing = await runGit(["for-each-ref", "--format=%(committerdate:unix) %(refname)", CHECKPOINT_REFS_PREFIX], {
-		cwd: repository.worktreeRoot,
-		env: { LC_ALL: "C" },
-		signal: options.signal,
-	});
-	const records = parseRefListing(listing.stdout);
 	const nowSeconds = Math.floor((options.now?.() ?? new Date()).getTime() / 1000);
-	const deleteSet = selectRefsToDelete(records, {
+	const policy: RetentionPolicy = {
 		nowSeconds,
 		retentionDays: options.retentionDays ?? RETENTION_DAYS,
 		maxRefs: options.maxRefs ?? MAX_REFS_PER_REPO,
-	});
+	};
+	const enumerate = () => enumerateCheckpointRefs(repository.worktreeRoot, runGit, options.signal);
+
+	const records = await enumerate();
+	const deleteSet = selectRefsToDelete(records, policy);
 	if (deleteSet.length === 0) return { deleted: 0, kept: records.length };
 
-	await runGit(["update-ref", "--stdin"], {
-		cwd: repository.worktreeRoot,
-		signal: options.signal,
-		stdin: deleteSet.map((name) => `delete ${name}\n`).join(""),
+	const applied = await deleteCheckpointRefs(repository.worktreeRoot, runGit, records, deleteSet, options.signal).then(
+		() => true,
+		() => false,
+	);
+	if (applied) return { deleted: deleteSet.length, kept: records.length - deleteSet.length };
+
+	// Someone else moved a listed ref. Recompute once against fresh OIDs instead of retrying stale ones;
+	// a second failure is the caller's problem to report.
+	const retried = await enumerate();
+	const retrySet = selectRefsToDelete(retried, policy);
+	if (retrySet.length === 0) return { deleted: 0, kept: retried.length };
+
+	await deleteCheckpointRefs(repository.worktreeRoot, runGit, retried, retrySet, options.signal);
+	return { deleted: retrySet.length, kept: retried.length - retrySet.length };
+}
+
+/**
+ * Lists eligible refs with their commit IDs. A listing that did not run to completion is useless for
+ * selection: the runner kills the child on output truncation, which can race a clean exit code, so a
+ * partial list must never be treated as the repository's ref set.
+ */
+async function enumerateCheckpointRefs(
+	worktreeRoot: string,
+	runGit: RunGit,
+	signal?: AbortSignal,
+): Promise<EnumeratedCheckpointRef[]> {
+	const listing = await runGit(["for-each-ref", REF_LISTING_FORMAT, CHECKPOINT_REFS_PREFIX], {
+		cwd: worktreeRoot,
+		env: { LC_ALL: "C" },
+		signal,
 	});
-	return { deleted: deleteSet.length, kept: records.length - deleteSet.length };
+	if (listing.code !== 0 || listing.killed || listing.truncated) {
+		throw new Error("Checkpoint ref listing did not complete");
+	}
+	return parseRefListing(listing.stdout);
+}
+
+/** Applies one conditional `update-ref --stdin` transaction; any mismatch aborts the whole batch. */
+async function deleteCheckpointRefs(
+	worktreeRoot: string,
+	runGit: RunGit,
+	records: readonly EnumeratedCheckpointRef[],
+	deleteSet: readonly string[],
+	signal?: AbortSignal,
+): Promise<void> {
+	const objectOids = new Map(records.map((record) => [record.name, record.objectOid]));
+	const result = await runGit(["update-ref", "--stdin"], {
+		cwd: worktreeRoot,
+		signal,
+		stdin: deleteSet.map((name) => `delete ${name} ${objectOids.get(name)}\n`).join(""),
+	});
+	if (result.code !== 0 || result.killed || result.truncated) {
+		throw new Error("Checkpoint ref deletion did not complete");
+	}
 }
 
 /**
@@ -210,14 +271,14 @@ function cleanErrorMessage(error: unknown): string {
 	return message.replace(/\s+/g, " ").trim().slice(0, 500);
 }
 
-function parseRefListing(stdout: string): CheckpointRefRecord[] {
-	const records: CheckpointRefRecord[] = [];
+function parseRefListing(stdout: string): EnumeratedCheckpointRef[] {
+	const records: EnumeratedCheckpointRef[] = [];
 	for (const line of stdout.split("\n")) {
-		const [rawSeconds, name] = line.trim().split(" ", 2);
-		if (!rawSeconds || !name || !isCheckpointRefName(name)) continue;
+		const [rawSeconds, objectOid, name] = line.trim().split(" ", 3);
+		if (!rawSeconds || !objectOid || !name || !isCheckpointRefName(name)) continue;
 		const committedAtSeconds = Number(rawSeconds);
 		if (!Number.isInteger(committedAtSeconds)) continue;
-		records.push({ name, committedAtSeconds });
+		records.push({ name, committedAtSeconds, objectOid });
 	}
 	return records;
 }

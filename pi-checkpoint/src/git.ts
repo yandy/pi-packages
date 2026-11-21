@@ -3,7 +3,12 @@
 import { type ChildProcess, spawn } from "node:child_process";
 
 const DEFAULT_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
-const REPOSITORY_ENVIRONMENT_VARIABLES = [
+/**
+ * Git variables that a parent process can use to redirect this process at a different repository or
+ * to force commit dates. Inherited values would let an unrelated outer Git context (a rebase, a hook,
+ * `git commit --date`) redirect a checkpoint's refs or make a brand-new commit look stale.
+ */
+const INHERITED_GIT_ENVIRONMENT_VARIABLES = [
 	"GIT_DIR",
 	"GIT_WORK_TREE",
 	"GIT_COMMON_DIR",
@@ -11,6 +16,8 @@ const REPOSITORY_ENVIRONMENT_VARIABLES = [
 	"GIT_OBJECT_DIRECTORY",
 	"GIT_ALTERNATE_OBJECT_DIRECTORIES",
 	"GIT_QUARANTINE_PATH",
+	"GIT_AUTHOR_DATE",
+	"GIT_COMMITTER_DATE",
 ] as const;
 
 export interface GitRunOptions {
@@ -52,7 +59,7 @@ export class GitUnavailableError extends Error {
 
 function cleanInheritedGitEnvironment(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 	const env = { ...base };
-	for (const name of REPOSITORY_ENVIRONMENT_VARIABLES) delete env[name];
+	for (const name of INHERITED_GIT_ENVIRONMENT_VARIABLES) delete env[name];
 	return env;
 }
 

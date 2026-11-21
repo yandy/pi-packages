@@ -30,13 +30,15 @@
 ## 3. 约束
 
 - **每仓库一个 ref。** 现有布局（`refs/pi/checkpoint/<base64url(sessionId)>/<runId>`）不改；`baseline` 与 `result` 写同一个 ref，因此 ref 数等于 run 数。
-- **删除必须无条件。** `git update-ref --stdin` 的 `delete <ref>`（不带 old value）对不存在的 ref 返回成功；带 old value 时对缺失 ref 报 `fatal`。ref 名包含随机 UUID，永不复用，因此无条件删除是幂等且安全的，允许两个进程同时清扫。
-- **枚举一次即可。** `git for-each-ref --format='%(committerdate:unix) %(refname)' refs/pi/checkpoint` 提供日期与名称，在仓库子目录执行也覆盖整个 worktree。
+- **删除必须带 old value。** 写入一*批* `git update-ref --stdin`，每行为 `delete <ref> <enumerated-oid>`：Git 整体原子执行，某行的 ref 已不指向枚举时的 commit（被 `captureResult` 推进成新 result，或被另一个清扫进程改过）时整批拒绝。ref 名包含随机 UUID 永不复用，但「枚举到删除」之间它会被本包自己推进，因此不能再假设 ref 在窗口中静止。
+- **失败重算一次。** 整批被拒后重新枚举、用同一个 `now` 重算删除集，再用新 OID 重试一次；第二次失败就抛给清扫器（`failed`）。两个进程并发清扫时，后一个的带 old value 删除会失败，重枚举后已无陈旧 ref，返回 `{ deleted: 0, kept: n }`，因此并发仍然非致命。
+- **枚举一次并带 OID。** `git for-each-ref --format='%(committerdate:unix) %(objectname) %(refname)' refs/pi/checkpoint` 同时给出日期、当前 commit 与名称，在仓库子目录执行也覆盖整个 worktree。
+- **不完整的枚举一律拒绝。** 枚举进程被截断输出或被 kill（`truncated || killed`）时不解析、不删除，直接抛错让清扫器报 `failed`：截断与退出码存在竞态，部分列表会被当成完整 ref 集合，从而选中从未枚举到的 ref。
 - **只碰自己的命名空间。** 只删除同时满足「前缀为 `refs/pi/checkpoint/`」与「形状为 `<sessionKey>/<runId>`」的 ref；其他 ref、其他命名空间、形状不符的条目一律不动。
 - **不主动回收对象。** 删 ref 后对象变为 unreachable，Git 自身的 auto-gc 在 `gc.pruneExpire`（默认 2 周）后回收。本包不启动 `gc`、`repack`、`prune`，避免在用户仓库里发起长时间、带锁的维护操作。
 - **清扫不阻塞会话。** 在 `session_start` 触发，best-effort、静默、带超时；失败不 throw、不 notify、不写 entry。
 - **每会话每仓库至多一次。** 以 `git-common-dir` 去重，避免每个会话都重复枚举。扩展实例是每会话一份（子代理会话也加载同一扩展，因而有独立实例），因此去重粒度是「每个会话每仓库一次」，不是进程级。
-- **进行中的 run 天然安全。** 其 ref 的 committer date 是当前时间且必然属于最新 N 个，不会被两条删除规则命中，因此不需要额外的 session 白名单。
+- **进行中的 run 不靠白名单保护，靠时间。** 其 ref 指向的 baseline commit 时间是 run 开始附近且属于最新 N 个，因此两条删除规则通常都不会命中它；清扫器不跟踪活跃 run。残余风险：baseline 已超出保留窗口的 run（开始一轮后闲置超过 30 天）可能被清扫删掉 ref，该 run 随后的 `captureResult` 会因 old value 不匹配而失败，留下捕获错误 entry 而不是 result。
 
 ## 4. 方案取舍
 
@@ -64,7 +66,7 @@
 
 - 新增 `src/retention.ts`：`pruneCheckpointRefs(cwd, options?) => Promise<PruneResult | null>`，`options` 为 `{ runGit?, now?, retentionDays?, maxRefs?, signal? }`，`PruneResult` 为 `{ deleted: number; kept: number }`（`kept` 只计枚举接受且保留下来的 ref）。非 Git worktree 返回 `null`（不视为错误）。
 - 仓库解析复用捕获路径的同一套 plumbing（`--path-format=absolute --show-toplevel` / `--git-common-dir`）；`CheckpointStore` 已有的解析逻辑需要暴露或在 retention 内以相同方式实现，两者的仓库身份判断必须一致。
-- 流程：枚举 → 过滤出符合形状的 ref → 按日期降序计算保留集（先日期后数量）→ 把删除集按 `delete <ref>` 行写入一次 `git update-ref --stdin` → 返回计数。
+- 流程：枚举（带 OID）→ 过滤出符合形状的 ref → 按日期降序计算保留集（先日期后数量）→ 把删除集按 `delete <ref> <oid>` 行写入一次 `git update-ref --stdin` → 整批被拒则重枚举重算一次再用新 OID 重试 → 返回计数。`deleted` 是成功那一批删掉的 ref 数，`kept` 是该批枚举数减 `deleted`。
 - `index.ts`：`session_start` 触发一次 fire-and-forget 清扫（`git-common-dir` 去重）；`/checkpoint prune` 绕过该去重立即执行一次。
 - 命令：`/checkpoint prune` 输出删除与保留计数（`ctx.ui.notify`），失败时显示清洗后的短错误；单独 `/checkpoint` 仍显示用法，`/checkpoint <runNumber>` 行为不变。
 - `/checkpoint <runNumber>` 增加一次 best-effort 存在性检查（`rev-parse --verify --quiet <ref>`）：ref 已不存在时追加一行说明对象可能已被回收、仅预览可用；git 不可用或检查失败时省略该行，不影响原有输出。
@@ -81,7 +83,9 @@
 
 - 数量边界：`MAX_REFS + k` 个 ref，删除最旧的 k 个，保留最新 `MAX_REFS` 个；恰好等于上限时不删。
 - 日期边界：超过 `RETENTION_DAYS` 的 ref 被删；未超过的保留；两个条件同时命中与只命中其一时都按交集处理。
-- 幂等：重复清扫不改变结果；删除集中包含不存在的 ref 时不失败。
+- 幂等：重复清扫不改变结果；删除集中包含已被删掉的 ref 时，整批被拒、重枚举后只删剩下的（计数只算成功那批）。
+- 并发与竞态：ref 在枚举与删除之间被推进（`update-ref` 换成新 commit）时，带 old value 的删除不生效，重枚举后该 ref 因日期新而保留；枚举被截断（`truncated`）时不调用 `update-ref`，清扫报 `failed`。
+- 继承环境：`GIT_AUTHOR_DATE` / `GIT_COMMITTER_DATE` 被外部进程设置时不影响捕获 commit 的 committer date。
 - 隔离：`refs/heads`、`refs/tags`、`refs/pi/checkpoint` 之外的自定义命名空间、形状不符的同前缀条目全部保持原样。
 - 共享仓库：linked worktree 与主 worktree 看到同一批 ref，清扫任一侧都作用于整仓；同一会话内的 `git-common-dir` 去重使重复 `session_start` 只枚举一次。
 - 失败隔离：注入 `for-each-ref` / `update-ref` 失败与超时，会话启动不受影响、无 entry、无异常外泄。
