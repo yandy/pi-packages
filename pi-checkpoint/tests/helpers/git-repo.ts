@@ -38,11 +38,17 @@ export async function createTestRepo(): Promise<TestRepo> {
 }
 
 export async function git(cwd: string, ...args: string[]): Promise<string> {
+	return gitWithEnv(cwd, {}, ...args);
+}
+
+/** Runs Git with additional environment variables, e.g. explicit commit timestamps. */
+export async function gitWithEnv(cwd: string, extraEnv: NodeJS.ProcessEnv, ...args: string[]): Promise<string> {
 	const env: NodeJS.ProcessEnv = {
 		...process.env,
 		GIT_CONFIG_GLOBAL: join(cwd, ".pi-checkpoint-test-global-config"),
 		GIT_CONFIG_NOSYSTEM: "1",
 		LC_ALL: "C",
+		...extraEnv,
 	};
 	for (const name of repositoryEnvironmentVariables) delete env[name];
 	const { stdout } = await execFileAsync("git", args, {
