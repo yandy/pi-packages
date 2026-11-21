@@ -74,6 +74,7 @@ proj · pid 4242
 - Windows 复用系统自带的 Windows PowerShell AppUserModelID，因此通知横幅、通知中心和系统通知设置里的来源可能显示为 **Windows PowerShell**。不会安装开始菜单快捷方式或独立的 pi AppUserModelID；需要允许该来源显示通知横幅。
 - Windows 上 `critical` 映射为长 Toast 时长（约 25 秒），其它 urgency 使用短时长。这只是近似映射，不保证 Linux 通知服务可能为 `critical` 提供的常驻行为。
 - 自定义 `PI_NOTIFY_COMMAND` 会替换平台默认后端，并在所有平台保持原来的两个参数协议。
+- 投递是 fire-and-forget：通知不会阻塞 pi，也不会让 pi 驻留。程序完全无法启动时会在本次会话内关闭通知并警告一次；能启动但退出码非 0 时只报告一次（带其 stderr），下一次通知仍会重新尝试。
 
 ## 行为说明
 
@@ -86,7 +87,7 @@ proj · pid 4242
 
 | 方法 | 守卫 | 非 TUI |
 |------|------|--------|
-| `ctx.ui.notify`（开关反馈、发送失败警告） | `none` | fire-and-forget，可能被宿主静默丢弃；核心桌面通知不依赖它 |
+| `ctx.ui.notify`（开关反馈、通知程序失败警告） | `none` | fire-and-forget，可能被宿主静默丢弃；核心桌面通知不依赖它 |
 
 ## License
 

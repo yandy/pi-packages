@@ -74,6 +74,7 @@ Run duration is measured from the first `agent_start` of an idle period to `agen
 - Windows reuses the built-in Windows PowerShell AppUserModelID, so notifications may be attributed to **Windows PowerShell** in the banner, Action Center, and Windows notification settings. No Start-menu shortcut or independent pi AppUserModelID is installed. Banners must be enabled for that source.
 - On Windows, `critical` maps to a long Toast duration (about 25 seconds); other urgency values use the short duration. This is an approximation, not a guarantee of the sticky behavior that a Linux notification daemon may give `critical`.
 - A custom `PI_NOTIFY_COMMAND` replaces the platform default and keeps the original two-argument protocol on every platform.
+- Delivery is fire-and-forget: no notification blocks pi or keeps it alive. A helper that cannot be started at all disables notifications for the rest of the session with one warning; a helper that starts and then exits non-zero is reported once with its stderr, and the next notification gets its own attempt.
 
 ## Behavior notes
 
@@ -86,7 +87,7 @@ Run duration is measured from the first `agent_start` of an idle period to `agen
 
 | Method | Guard | Outside TUI |
 |--------|-------|-------------|
-| `ctx.ui.notify` (toggle feedback, spawn-failure warning) | `none` | Fire-and-forget; may be silently dropped by the host. Core desktop notifications never depend on it |
+| `ctx.ui.notify` (toggle feedback, notifier-failure warning) | `none` | Fire-and-forget; may be silently dropped by the host. Core desktop notifications never depend on it |
 
 ## License
 
