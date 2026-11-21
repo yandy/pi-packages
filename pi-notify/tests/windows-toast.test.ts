@@ -74,10 +74,10 @@ itOnWindows(
 		expect(result.stdout).toContain('duration="long"');
 		expect(result.stdout).toContain("<text>A &amp; B &lt;c&gt;</text>");
 		expect(result.stdout).toContain("<text>line one</text>");
-		expect(result.stdout).toContain("<text>line two</text>");
-		// Only the first two body lines are shown; the BEL is stripped as an invalid
-		// XML 1.0 character.
-		expect(result.stdout).not.toContain("line three");
+		// The body is split at the first newline only, so any further lines stay in the
+		// second field. The BEL in the first line is stripped as an invalid XML 1.0
+		// character.
+		expect(result.stdout).toMatch(/<text>line two\s+line three<\/text>/);
 		expect(result.stdout).not.toContain("\u0007");
 	},
 	WINDOWS_TIMEOUT,
