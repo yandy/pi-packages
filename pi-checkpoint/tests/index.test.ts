@@ -116,6 +116,45 @@ describe("pi-checkpoint extension entry", () => {
 		expect(mocks.maintenance.agentSettled).toHaveBeenCalledWith(ctx);
 	});
 
+	it("skips the settle sweep when a new session starts while capture is pending", async () => {
+		const capture = deferred();
+		mocks.coordinator.agentSettled.mockImplementation(() => capture.promise);
+		mocks.maintenance.sessionStart.mockResolvedValue(undefined);
+		mocks.maintenance.agentSettled.mockResolvedValue(undefined);
+		const { events } = register();
+		const oldCtx = { cwd: "/old-repo" };
+		const newCtx = { cwd: "/new-repo" };
+
+		const settled = handlerFor(events, "agent_settled")({ type: "agent_settled", aborted: false }, oldCtx);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		await handlerFor(events, "session_start")({ type: "session_start" }, newCtx);
+		expect(mocks.maintenance.sessionStart).toHaveBeenCalledWith(newCtx);
+
+		capture.resolve();
+		await settled;
+
+		expect(mocks.coordinator.agentSettled).toHaveBeenCalledWith({ type: "agent_settled", aborted: false }, oldCtx);
+		expect(mocks.maintenance.agentSettled).not.toHaveBeenCalled();
+	});
+
+	it("skips the settle sweep when the session shuts down while capture is pending", async () => {
+		const capture = deferred();
+		mocks.coordinator.agentSettled.mockImplementation(() => capture.promise);
+		mocks.maintenance.agentSettled.mockResolvedValue(undefined);
+		const { events } = register();
+		const ctx = { cwd: "/repo" };
+
+		const settled = handlerFor(events, "agent_settled")({ type: "agent_settled", aborted: false }, ctx);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		handlerFor(events, "session_shutdown")({ type: "session_shutdown" }, ctx);
+		capture.resolve();
+		await settled;
+
+		expect(mocks.maintenance.agentSettled).not.toHaveBeenCalled();
+	});
+
 	it("resets capture state and starts maintenance at session start", async () => {
 		const order: string[] = [];
 		mocks.coordinator.reset.mockImplementation(() => {

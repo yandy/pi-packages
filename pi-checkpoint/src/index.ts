@@ -17,6 +17,9 @@ export default function registerCheckpoint(pi: ExtensionAPI): void {
 		preview: (input) => createDiffPreview(input, runGit),
 	});
 	const maintenance = createCheckpointMaintenance({ runGit });
+	// Incremented on every session boundary so a settle continuation that outlives its session cannot
+	// submit maintenance under the next session's generation and cwd.
+	let lifecycleGeneration = 0;
 
 	pi.registerEntryRenderer(CHECKPOINT_ENTRY_TYPE, createCheckpointRenderer());
 	pi.registerCommand("checkpoint", {
@@ -24,16 +27,22 @@ export default function registerCheckpoint(pi: ExtensionAPI): void {
 		handler: createCheckpointCommandHandler(),
 	});
 	pi.on("session_start", (_event, ctx) => {
+		lifecycleGeneration += 1;
 		coordinator.reset();
 		return maintenance.sessionStart(ctx);
 	});
 	pi.on("session_shutdown", () => {
+		lifecycleGeneration += 1;
 		coordinator.reset();
 		maintenance.reset();
 	});
 	pi.on("before_agent_start", (event, ctx) => coordinator.beforeAgentStart(event, ctx));
 	pi.on("agent_settled", async (event, ctx) => {
+		const generation = lifecycleGeneration;
 		await coordinator.agentSettled(event, ctx);
+		// Capture may still be in flight when the session is replaced; the new session owns maintenance,
+		// so the stale continuation stops here instead of sweeping its cwd under the new policy.
+		if (generation !== lifecycleGeneration) return;
 		await maintenance.agentSettled(ctx);
 	});
 }
