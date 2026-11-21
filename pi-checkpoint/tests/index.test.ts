@@ -1,4 +1,8 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+	ExtensionAPI,
+	ExtensionCommandContext,
+	RegisteredCommand,
+} from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CHECKPOINT_ENTRY_TYPE } from "../src/session.js";
 
@@ -84,6 +88,18 @@ describe("pi-checkpoint extension entry", () => {
 			expect.objectContaining({ handler: expect.any(Function) }),
 		);
 		expect(pi.registerTool).not.toHaveBeenCalled();
+	});
+
+	it("routes the checkpoint prune command through maintenance", async () => {
+		const { pi } = register();
+		const command = vi.mocked(pi.registerCommand).mock.calls[0]?.[1] as RegisteredCommand;
+		const notify = vi.fn();
+		const ctx = { cwd: "/repo", ui: { notify } } as unknown as ExtensionCommandContext;
+
+		await command.handler("prune --dry-run", ctx);
+
+		expect(mocks.maintenance.prune).toHaveBeenCalledWith(ctx, true);
+		expect(notify).not.toHaveBeenCalled();
 	});
 
 	it("routes baseline capture to the coordinator", async () => {

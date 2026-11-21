@@ -23,8 +23,11 @@ export default function registerCheckpoint(pi: ExtensionAPI): void {
 
 	pi.registerEntryRenderer(CHECKPOINT_ENTRY_TYPE, createCheckpointRenderer());
 	pi.registerCommand("checkpoint", {
-		description: "Show the hidden ref and full Git diff command for a checkpoint run",
-		handler: createCheckpointCommandHandler(),
+		description: "Show a checkpoint snapshot or prune expired checkpoint refs",
+		handler: createCheckpointCommandHandler({
+			runGit,
+			prune: (ctx, dryRun) => maintenance.prune(ctx, dryRun),
+		}),
 	});
 	pi.on("session_start", (_event, ctx) => {
 		lifecycleGeneration += 1;
