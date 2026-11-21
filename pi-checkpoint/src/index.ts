@@ -30,7 +30,13 @@ export default function registerCheckpoint(pi: ExtensionAPI, deps: CheckpointExt
 			sweep: (cwd) => sweeper.sweep(cwd, { force: true }),
 			refExists: async (cwd, ref) => {
 				const result = await runGit(["rev-parse", "--verify", "--quiet", ref], { cwd, allowNonZeroExit: true });
-				return result.code === 0;
+				// Exit 0 means present, 1 means "no such ref". Anything else (no worktree, dubious ownership,
+				// corrupt repository, interrupted child) is an unknown state, not proof that the objects are gone:
+				// throwing keeps the command silent about pruning instead of claiming it.
+				if (result.killed || result.truncated) throw new Error("Reference existence check was interrupted");
+				if (result.code === 0) return true;
+				if (result.code === 1) return false;
+				throw new Error(`Reference existence check failed (exit ${result.code ?? "unknown"})`);
 			},
 		}),
 	});
