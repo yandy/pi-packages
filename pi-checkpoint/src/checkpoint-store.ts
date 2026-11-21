@@ -1,5 +1,5 @@
 import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { createGitRunner, GitCommandError, type GitResult, type RunGit } from "./git.js";
 
 export interface RepositoryContext {
@@ -51,11 +51,11 @@ export class CheckpointStore {
 			if (isNonWorktree(rootResult)) return null;
 			throw new GitCommandError(["rev-parse", "--path-format=absolute", "--show-toplevel"], rootResult);
 		}
-		const worktreeRoot = rootResult.stdout.trim();
+		const worktreeRoot = resolve(rootResult.stdout.trim());
 		const commonResult = await this.runGit(["rev-parse", "--path-format=absolute", "--git-common-dir"], {
 			cwd: worktreeRoot,
 		});
-		const commonDir = commonResult.stdout.trim();
+		const commonDir = resolve(commonResult.stdout.trim());
 		const headResult = await this.runGit(["rev-parse", "--verify", "--quiet", "HEAD"], {
 			cwd: worktreeRoot,
 			allowNonZeroExit: true,
