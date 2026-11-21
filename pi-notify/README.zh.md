@@ -10,6 +10,7 @@ pi 的桌面通知包：当你并行运行多个 pi 实例时，每个实例在�
 - **可读摘要**：去除 markdown 标记和多余空白；最多保留 160 个字素簇加 `…`，优先选择附近的句子或单词边界，避免截断单词或 emoji。
 - **防打扰**：短于最短时长阈值（默认 10 秒）的回合不发完成通知——你正在窗口里连续交互的短问答保持安静；被中断（aborted）的回合不通知。
 - **Active-agent 会话抑制**：系统提示词含 `<active_agent name="..."/>` 标记的会话不发送等待输入或完成桌面通知，包括早于 `session_start` 的弹窗；每次 `session_start` 重新检测。
+- **Custom 回合抑制**：`before_agent_start` 报告 `messageType: "custom"` 的回合不发送完成通知；并入既有用户回合的 steering / follow-up 不改变来源，该用户回合完成时仍正常通知。
 - **`/notify` 命令**：运行时切换当前实例的通知开关。
 - **失败安全**：通知发送为 fire-and-forget；若启动通知程序失败（例如 `notify-send` 或 `powershell.exe` 不存在），在 pi UI 中警告一次后保持静默，绝不阻塞 agent 循环。
 

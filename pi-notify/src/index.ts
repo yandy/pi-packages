@@ -24,6 +24,7 @@ export default function (
 	let enabled = config.enabled;
 	let runStartedAt: number | undefined;
 	let activeAgentSession: boolean | undefined;
+	let runOrigin: "user" | "custom" | undefined;
 
 	const isActiveAgentSession = (ctx: ExtensionContext): boolean => {
 		activeAgentSession ??= ACTIVE_AGENT_RE.test(ctx.getSystemPrompt());
@@ -42,10 +43,15 @@ export default function (
 
 	pi.on("session_start", async (_event, ctx) => {
 		activeAgentSession = ACTIVE_AGENT_RE.test(ctx.getSystemPrompt());
+		runOrigin = undefined;
 		config = loadConfig(deps?.env, platform);
 		notifier = undefined;
 		enabled = config.enabled;
 		runStartedAt = undefined;
+	});
+
+	pi.on("before_agent_start", async (event, _ctx) => {
+		runOrigin = event.messageType;
 	});
 
 	pi.on("ui_prompt_start", async (event, ctx) => {
@@ -72,8 +78,10 @@ export default function (
 
 	pi.on("agent_settled", async (event, ctx) => {
 		const duration = runStartedAt === undefined ? 0 : now() - runStartedAt;
+		const automaticRun = runOrigin === "custom";
 		runStartedAt = undefined;
-		if (isActiveAgentSession(ctx)) return;
+		runOrigin = undefined;
+		if (automaticRun || isActiveAgentSession(ctx)) return;
 		ensure(ctx);
 		if (event.aborted || !enabled || duration < config.minDurationMs) return;
 		const sessionName = pi.getSessionName?.();

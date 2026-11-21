@@ -10,6 +10,7 @@ Desktop notifications for pi: when you run several pi instances in parallel, eac
 - **Readable summaries**: markdown markers and extra whitespace are removed. Summaries are limited to 160 grapheme clusters plus an ellipsis, preferring a nearby sentence or word boundary over splitting text or emoji.
 - **Anti-spam**: completion notifications are skipped for runs shorter than a configurable minimum duration (default 10 s), so quick back-and-forth in a window you're already watching stays quiet. Aborted runs never notify.
 - **Active-agent suppression**: sessions whose system prompt contains an `<active_agent name="..."/>` marker never emit prompt or completion desktop notifications, including prompts before `session_start`. Detection is recomputed on `session_start`.
+- **Custom-run suppression**: completion notifications are skipped for runs whose `before_agent_start` reports `messageType: "custom"`. Steering or follow-ups merged into an existing user run preserve that run's normal completion notification.
 - **`/notify` command**: toggle notifications per instance at runtime.
 - **Failure-safe**: notification delivery is fire-and-forget; if spawning the notifier fails (e.g. `notify-send` or `powershell.exe` is missing), the extension warns once in the pi UI and stays silent afterwards — the agent loop is never blocked.
 

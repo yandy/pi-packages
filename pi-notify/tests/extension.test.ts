@@ -230,6 +230,58 @@ describe("active-agent session suppression", () => {
 	});
 });
 
+describe("custom-message run suppression", () => {
+	it("suppresses completion for an idle custom-message run", async () => {
+		const h = createHarness({ env: { PI_NOTIFY_MIN_DURATION_MS: "0" } });
+		await h.fire("session_start", { reason: "startup" });
+		await h.fire("before_agent_start", { messageType: "custom" });
+		await h.fire("agent_settled", { aborted: false });
+		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
+		expect(h.notifierOpts).toHaveLength(0);
+	});
+
+	it("resets custom origin and timing before the next user run", async () => {
+		const h = createHarness();
+		h.setNow(0);
+		await h.fire("session_start", { reason: "startup" });
+		await h.fire("before_agent_start", { messageType: "custom" });
+		await h.fire("agent_start");
+		h.setNow(20000);
+		await h.fire("agent_settled", { aborted: false });
+		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
+
+		h.setNow(30000);
+		await h.fire("before_agent_start", { messageType: "user" });
+		await h.fire("agent_start");
+		h.setNow(40000);
+		await h.fire("agent_settled", { aborted: false });
+		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(1);
+		expect(h.fakeNotifier.notify).toHaveBeenCalledWith({
+			title: "proj · Finished · 10s",
+			body: "All done.\npid 4242",
+			urgency: "normal",
+		});
+	});
+
+	it("preserves user origin across queued follow-ups and low-level continuations", async () => {
+		const h = createHarness();
+		h.setNow(0);
+		await h.fire("session_start", { reason: "startup" });
+		await h.fire("before_agent_start", { messageType: "user" });
+		await h.fire("agent_start");
+		h.setNow(10000);
+		await h.fire("agent_start");
+		h.setNow(20000);
+		await h.fire("agent_settled", { aborted: false });
+		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(1);
+		expect(h.fakeNotifier.notify).toHaveBeenCalledWith({
+			title: "proj · Finished · 20s",
+			body: "All done.\npid 4242",
+			urgency: "normal",
+		});
+	});
+});
+
 describe("/notify command", () => {
 	it("stays silent when disabled by env, and the command overrides it", async () => {
 		const h = createHarness({ env: { PI_NOTIFY: "0", PI_NOTIFY_MIN_DURATION_MS: "0" } });
