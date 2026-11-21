@@ -1,5 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import extension from "../src/index.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import extension, { PROMPT_NOTIFY_DELAY_MS } from "../src/index.js";
+
+beforeEach(() => {
+	vi.useFakeTimers();
+});
+
+afterEach(() => {
+	vi.useRealTimers();
+});
 
 const ASSISTANT_ENTRIES = [
 	{ type: "message", message: { role: "assistant", content: [{ type: "text", text: "All done." }] } },
@@ -47,6 +55,12 @@ function createHarness(opts?: {
 	const fire = async (event: string, payload: any = {}) => {
 		for (const handler of handlers[event] ?? []) await handler({ type: event, ...payload }, ctx);
 	};
+	// Prompt notifications are deferred: open the prompt, then let the delay elapse as
+	// an operator who never touches it would. Tests that cancel the prompt use `fire`.
+	const firePrompt = async (payload: any = {}) => {
+		await fire("ui_prompt_start", payload);
+		await vi.advanceTimersByTimeAsync(PROMPT_NOTIFY_DELAY_MS);
+	};
 	return {
 		handlers,
 		commands,
@@ -54,6 +68,7 @@ function createHarness(opts?: {
 		notifierOpts,
 		ctx,
 		fire,
+		firePrompt,
 		setNow: (t: number) => (current = t),
 		setSystemPrompt: (value: string) => (systemPrompt = value),
 	};
@@ -63,7 +78,7 @@ describe("ui_prompt_start", () => {
 	it("notifies with instance name, prompt title, and prompt urgency", async () => {
 		const h = createHarness();
 		await h.fire("session_start", { reason: "startup" });
-		await h.fire("ui_prompt_start", { kind: "confirm", title: "Dangerous?" });
+		await h.firePrompt({ kind: "confirm", title: "Dangerous?" });
 		expect(h.fakeNotifier.notify).toHaveBeenCalledWith({
 			title: "proj · Waiting for input",
 			body: "Dangerous?\nconfirm · pid 4242",
@@ -73,8 +88,8 @@ describe("ui_prompt_start", () => {
 
 	it("falls back to the prompt kind when title is missing or empty", async () => {
 		const h = createHarness();
-		await h.fire("ui_prompt_start", { kind: "confirm" });
-		await h.fire("ui_prompt_start", { kind: "select", title: "" });
+		await h.firePrompt({ kind: "confirm" });
+		await h.firePrompt({ kind: "select", title: "" });
 		expect(h.fakeNotifier.notify.mock.calls.map((c) => c[0].body)).toEqual([
 			"confirm\npid 4242",
 			"select\npid 4242",
@@ -83,19 +98,19 @@ describe("ui_prompt_start", () => {
 
 	it("never leaks the protocol word for custom prompts, which carry no title", async () => {
 		const h = createHarness();
-		await h.fire("ui_prompt_start", { kind: "custom" });
+		await h.firePrompt({ kind: "custom" });
 		expect(h.fakeNotifier.notify.mock.calls[0][0].body).toBe("Interactive prompt\npid 4242");
 	});
 
 	it("notifies even before session_start (lazy init)", async () => {
 		const h = createHarness();
-		await h.fire("ui_prompt_start", { kind: "input", title: "Trust?" });
+		await h.firePrompt({ kind: "input", title: "Trust?" });
 		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(1);
 	});
 
 	it("uses the session name when present", async () => {
 		const h = createHarness({ sessionName: "review" });
-		await h.fire("ui_prompt_start", { kind: "confirm", title: "OK?" });
+		await h.firePrompt({ kind: "confirm", title: "OK?" });
 		expect(h.fakeNotifier.notify.mock.calls[0][0]).toMatchObject({
 			title: "review · Waiting for input",
 			body: "OK?\nproj · confirm · pid 4242",
@@ -104,15 +119,87 @@ describe("ui_prompt_start", () => {
 
 	it("does not repeat the prompt kind when it is already the title", async () => {
 		const h = createHarness();
-		await h.fire("ui_prompt_start", { kind: "confirm", title: "confirm" });
+		await h.firePrompt({ kind: "confirm", title: "confirm" });
 		expect(h.fakeNotifier.notify.mock.calls[0][0].body).toBe("confirm\npid 4242");
 	});
 
 	it("uses the Windows default backend and command", async () => {
 		const h = createHarness({ platform: "win32" });
 		await h.fire("session_start", { reason: "startup" });
-		await h.fire("ui_prompt_start", { kind: "confirm", title: "OK?" });
+		await h.firePrompt({ kind: "confirm", title: "OK?" });
 		expect(h.notifierOpts[0]).toMatchObject({ command: "powershell.exe", backend: "windows-toast" });
+	});
+});
+
+describe("prompt notification deferral", () => {
+	it("delivers only after the delay, not when the prompt opens", async () => {
+		const h = createHarness();
+		await h.fire("session_start", { reason: "startup" });
+		await h.fire("ui_prompt_start", { kind: "confirm", title: "Dangerous?" });
+		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
+
+		await vi.advanceTimersByTimeAsync(PROMPT_NOTIFY_DELAY_MS - 1);
+		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
+
+		await vi.advanceTimersByTimeAsync(1);
+		expect(h.fakeNotifier.notify).toHaveBeenCalledWith({
+			title: "proj · Waiting for input",
+			body: "Dangerous?\nconfirm · pid 4242",
+			urgency: "critical",
+		});
+	});
+
+	it("drops the notification when the prompt settles first", async () => {
+		// An extension command that opens its own picker (`/subagents:sessions`) and an
+		// operator who answers it right away must never produce a desktop alert.
+		const h = createHarness();
+		await h.fire("session_start", { reason: "startup" });
+		await h.fire("ui_prompt_start", { kind: "select", title: "Subagent sessions" });
+		await vi.advanceTimersByTimeAsync(200);
+		await h.fire("ui_prompt_end", { kind: "select", title: "Subagent sessions" });
+		await vi.advanceTimersByTimeAsync(PROMPT_NOTIFY_DELAY_MS * 2);
+		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
+	});
+
+	it("keeps a single pending notification when prompts replace each other", async () => {
+		const h = createHarness();
+		await h.fire("session_start", { reason: "startup" });
+		await h.fire("ui_prompt_start", { kind: "select", title: "First" });
+		await vi.advanceTimersByTimeAsync(1000);
+		await h.fire("ui_prompt_start", { kind: "select", title: "Second" });
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
+
+		await vi.advanceTimersByTimeAsync(PROMPT_NOTIFY_DELAY_MS);
+		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(1);
+		expect(h.fakeNotifier.notify.mock.calls[0][0].body).toBe("Second\nselect · pid 4242");
+	});
+
+	it("re-checks the toggle before delivery", async () => {
+		const h = createHarness();
+		await h.fire("session_start", { reason: "startup" });
+		await h.fire("ui_prompt_start", { kind: "confirm", title: "Q" });
+		await h.commands.notify.handler("", h.ctx);
+		await vi.advanceTimersByTimeAsync(PROMPT_NOTIFY_DELAY_MS);
+		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
+	});
+
+	it("discards a pending prompt on session replacement", async () => {
+		const h = createHarness();
+		await h.fire("session_start", { reason: "startup" });
+		await h.fire("ui_prompt_start", { kind: "confirm", title: "Q" });
+		await h.fire("session_start", { reason: "new" });
+		await vi.advanceTimersByTimeAsync(PROMPT_NOTIFY_DELAY_MS);
+		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
+	});
+
+	it("discards a pending prompt on session shutdown", async () => {
+		const h = createHarness();
+		await h.fire("session_start", { reason: "startup" });
+		await h.fire("ui_prompt_start", { kind: "confirm", title: "Q" });
+		await h.fire("session_shutdown", { reason: "quit" });
+		await vi.advanceTimersByTimeAsync(PROMPT_NOTIFY_DELAY_MS);
+		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
 	});
 });
 
@@ -179,7 +266,7 @@ describe("active-agent session suppression", () => {
 	it.each(markedPrompts)("suppresses prompt and completion notifications for %s prompts", async (_kind, systemPrompt) => {
 		const h = createHarness({ env: { PI_NOTIFY_MIN_DURATION_MS: "0" }, systemPrompt });
 		await h.fire("session_start", { reason: "startup" });
-		await h.fire("ui_prompt_start", { kind: "confirm", title: "Q" });
+		await h.firePrompt({ kind: "confirm", title: "Q" });
 		await h.fire("agent_settled", { aborted: false });
 		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
 		expect(h.notifierOpts).toHaveLength(0);
@@ -187,7 +274,7 @@ describe("active-agent session suppression", () => {
 
 	it("suppresses marked prompts before session_start without constructing a notifier", async () => {
 		const h = createHarness({ systemPrompt: '<active_agent name="Explore"/>\n\n# Environment' });
-		await h.fire("ui_prompt_start", { kind: "confirm", title: "Q" });
+		await h.firePrompt({ kind: "confirm", title: "Q" });
 		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
 		expect(h.notifierOpts).toHaveLength(0);
 	});
@@ -198,7 +285,7 @@ describe("active-agent session suppression", () => {
 			systemPrompt: "You are operating as a sub-agent invoked to handle a specific task.",
 		});
 		await h.fire("session_start", { reason: "startup" });
-		await h.fire("ui_prompt_start", { kind: "confirm", title: "Q" });
+		await h.firePrompt({ kind: "confirm", title: "Q" });
 		await h.fire("agent_settled", { aborted: false });
 		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(2);
 	});
@@ -206,12 +293,12 @@ describe("active-agent session suppression", () => {
 	it("recomputes suppression on session_start", async () => {
 		const h = createHarness({ systemPrompt: '<active_agent name="Explore"/>' });
 		await h.fire("session_start", { reason: "startup" });
-		await h.fire("ui_prompt_start", { kind: "confirm", title: "Q" });
+		await h.firePrompt({ kind: "confirm", title: "Q" });
 		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
 
 		h.setSystemPrompt("");
 		await h.fire("session_start", { reason: "reload" });
-		await h.fire("ui_prompt_start", { kind: "confirm", title: "Q" });
+		await h.firePrompt({ kind: "confirm", title: "Q" });
 		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(1);
 	});
 
@@ -224,7 +311,7 @@ describe("active-agent session suppression", () => {
 		await h.commands.notify.handler("", h.ctx);
 		expect(h.ctx.ui.notify).toHaveBeenCalledWith("Notifications enabled", "info");
 
-		await h.fire("ui_prompt_start", { kind: "confirm", title: "Q" });
+		await h.firePrompt({ kind: "confirm", title: "Q" });
 		await h.fire("agent_settled", { aborted: false });
 		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
 	});
@@ -286,18 +373,18 @@ describe("/notify command", () => {
 	it("stays silent when disabled by env, and the command overrides it", async () => {
 		const h = createHarness({ env: { PI_NOTIFY: "0", PI_NOTIFY_MIN_DURATION_MS: "0" } });
 		await h.fire("session_start", { reason: "startup" });
-		await h.fire("ui_prompt_start", { kind: "confirm", title: "Q" });
+		await h.firePrompt({ kind: "confirm", title: "Q" });
 		await h.fire("agent_settled", { aborted: false });
 		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
 
 		await h.commands.notify.handler("", h.ctx);
 		expect(h.ctx.ui.notify).toHaveBeenCalledWith("Notifications enabled", "info");
-		await h.fire("ui_prompt_start", { kind: "confirm", title: "Q" });
+		await h.firePrompt({ kind: "confirm", title: "Q" });
 		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(1);
 
 		await h.commands.notify.handler("", h.ctx);
 		expect(h.ctx.ui.notify).toHaveBeenCalledWith("Notifications disabled", "info");
-		await h.fire("ui_prompt_start", { kind: "confirm", title: "Q" });
+		await h.firePrompt({ kind: "confirm", title: "Q" });
 		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(1);
 	});
 
@@ -305,10 +392,10 @@ describe("/notify command", () => {
 		const h = createHarness();
 		await h.fire("session_start", { reason: "startup" });
 		await h.commands.notify.handler("", h.ctx);
-		await h.fire("ui_prompt_start", { kind: "confirm", title: "Q" });
+		await h.firePrompt({ kind: "confirm", title: "Q" });
 		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
 		await h.fire("session_start", { reason: "reload" });
-		await h.fire("ui_prompt_start", { kind: "confirm", title: "Q" });
+		await h.firePrompt({ kind: "confirm", title: "Q" });
 		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(1);
 	});
 });
@@ -316,7 +403,7 @@ describe("/notify command", () => {
 describe("degradation", () => {
 	it("reports notifier failure via ctx.ui.notify as a warning", async () => {
 		const h = createHarness();
-		await h.fire("ui_prompt_start", { kind: "confirm", title: "Q" });
+		await h.firePrompt({ kind: "confirm", title: "Q" });
 		h.notifierOpts[0].onError?.("spawn ENOENT");
 		expect(h.ctx.ui.notify).toHaveBeenCalledWith("spawn ENOENT", "warning");
 	});
