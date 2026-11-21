@@ -81,28 +81,47 @@ git diff <baselineCommit> <resultCommit>
 
 无参数或编号非法时显示用法；查询范围是当前对话分支。本包不注册 LLM 工具。
 
+现在立即清扫旧检查点：
+
+```text
+/checkpoint prune
+```
+
+它强制执行一次保留策略清扫并报告计数，详见[保留策略](#保留策略)。
+
 ## 限制与保留策略
 
 - **ignored 文件不会被捕获。** 其它 untracked 文件都会写入本地 Git object database。运行前请先 ignore 敏感文件；hidden ref 不是加密或保密边界。
 - 隐藏 ref 不出现在普通分支历史中，但 `git log --all`、`git for-each-ref`、备份、对象库副本和 mirror 操作仍可能暴露它们。
 - 不递归捕获 submodule 内部，只记录 superproject 的 gitlink 状态。
 - sparse checkout、`assume-unchanged` / `skip-worktree` 和特殊嵌套仓库遵循 Git plumbing 行为。无法可靠表示时会报告错误，不会声称已经得到可靠快照。
-- 进程在 `agent_settled` 前退出时，可能留下只有 baseline 的 ref。本包不会伪造 result，也不会自动删除它。
-- 不提供 restore 命令，也不自动清理。删除检查点只能显式执行 Git 操作：
-
-  ```bash
-  git update-ref -d <full-ref>
-  ```
-
-  Session entry 会作为历史元数据保留；失去引用的对象以后可能由普通 Git GC 回收。
+- 进程在 `agent_settled` 前退出时，可能留下只有 baseline 的 ref。本包不会伪造 result；该 ref 与其它 ref 适用同一套保留规则。
 - 不在 Git worktree 中或找不到 `git` 时跳过捕获，每个 session 最多提醒一次；后续 run 会重新探测。
+
+### 保留策略
+
+每个 run 恰好一个 ref，因此仓库中 ref 数量等于 run 数量。保留规则给这个数量设上限：
+
+- 只有 commit 日期不超过 **30 天** **且**属于该仓库最新 **200 个** ref 时才保留。两个条件必须同时成立，即日期截断与数量截断取交集，较严格的一侧生效。
+- `RETENTION_DAYS = 30` 与 `MAX_REFS_PER_REPO = 200` 是代码内常量，没有设置项。
+
+清扫按仓库（`git-common-dir`）进行，因而跨 session：一次清扫可能删掉其它 session 的旧检查点，包括 linked worktree 中的（它们共享同一个 refs 命名空间）。这些 run 的 session entry 与预览不受影响。
+
+- `session_start` 每 session 每仓库执行一次静默、best-effort 清扫，上限 10 秒。不在 worktree 中、找不到 `git`、Git 失败或超时都不会外露：没有通知、没有 session entry、不会让 run 失败。
+- `/checkpoint prune` 立即强制清扫并报告 `Pruned N checkpoint ref(s); M kept`、`Checkpoint prune skipped: ...` 或 `Checkpoint prune failed: ...`。
+- 删除是一次 `git update-ref --stdin` 批量写入，内容为无条件的 `delete <ref>` 行，且只作用于形状为 `refs/pi/checkpoint/<sessionKey>/<runId>` 的 ref。进行中的 run 时间新且属于最新的 ref，因此绝不会被选中。
+- 仍可手动删除检查点：`git update-ref -d <full-ref>`。
+
+**不提供 restore，也不主动回收对象。** 本包不会运行 `git gc`、`repack` 或 `prune`。ref 删除后其 commit 变为 unreachable，由 Git 自身的 auto-gc 在 `gc.pruneExpire`（默认两周）之后回收；在此之前对象仍然存在。
+
+Session entry 从不修改也不删除，因此被清扫的 run 在时间线上仍保留已存的摘要与 patch 预览。`/checkpoint <n>` 照常打印 commit ID 与 `git diff` 命令，并在 ref 已不存在时追加 `Checkpoint #N: checkpoint objects were pruned; only the stored preview remains`。存在性检查本身失败时保持静默，只有确定「ref 不存在」才输出该提示。
 
 ## UI 能力
 
 | 方法 | 守卫 | 非 TUI |
 |------|------|--------|
 | `pi.registerEntryRenderer`（时间线检查点条目） | `none`（renderer 仅由 TUI 消费） | 所有模式仍保留 session entry 与 Git ref，但没有可视化时间线 |
-| `ctx.ui.notify`（命令输出、告警） | `none` | RPC 为 fire-and-forget，可能被丢弃；print/json 不保证显示。核心捕获不依赖通知是否送达 |
+| `ctx.ui.notify`（命令输出、告警） | `none` | RPC 为 fire-and-forget，可能被丢弃；print/json 不保证显示。承载 `/checkpoint <n>` 输出、`/checkpoint prune` 结果（含清扫失败）与捕获告警。核心捕获与 `session_start` 的自动清扫不依赖通知是否送达；清扫本身完全不产生 UI |
 
 ## License
 

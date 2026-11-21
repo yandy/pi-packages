@@ -81,28 +81,47 @@ git diff <baselineCommit> <resultCommit>
 
 No argument or an invalid number prints usage. Lookup is scoped to the current conversation branch. No LLM tool is registered.
 
+Use the command to prune stale checkpoints now:
+
+```text
+/checkpoint prune
+```
+
+It forces one retention sweep and reports the counts; see [Retention](#retention).
+
 ## Limits and retention
 
 - **Ignored files are not captured.** All other untracked files are written into the local Git object database. Ignore sensitive files before running the extension; do not treat hidden refs as encryption or a secret boundary.
 - Hidden refs do not appear in normal branch history, but `git log --all`, `git for-each-ref`, backups, object-database copies, and mirror operations can still expose them.
 - Submodule internals are not recursively captured. Only the superproject's gitlink state is represented.
 - Sparse checkout, `assume-unchanged` / `skip-worktree`, and unusual nested repositories follow Git plumbing behavior. Capture reports an error rather than claiming a snapshot it could not represent.
-- If the process exits before `agent_settled`, a baseline-only ref may remain. The extension does not invent a result or automatically delete it.
-- There is no restore command and no automatic pruning. Deleting a checkpoint is an explicit Git operation:
-
-  ```bash
-  git update-ref -d <full-ref>
-  ```
-
-  Session entries remain as historical metadata. Unreferenced objects may eventually be reclaimed by normal Git garbage collection.
+- If the process exits before `agent_settled`, a baseline-only ref may remain. The extension does not invent a result; that ref is subject to the same retention rules as any other.
 - Outside a Git worktree, or when `git` is unavailable, capture is skipped with at most one warning per session. Later runs probe again.
+
+### Retention
+
+Each run owns exactly one ref, so a repository accumulates one ref per run. Retention bounds that count:
+
+- A ref is kept only if its commit date is at most **30 days** old **and** it is among the newest **200** refs of the repository. Both conditions must hold, so date truncation and count truncation intersect and the stricter one wins.
+- `RETENTION_DAYS = 30` and `MAX_REFS_PER_REPO = 200` are code constants; there is no setting for them.
+
+Pruning is per repository (`git-common-dir`) and therefore across sessions: a sweep can delete old checkpoints that belong to a different session, including from a linked worktree, which shares the same refs namespace. Session entries and previews of those runs are not affected.
+
+- `session_start` runs one silent, best-effort sweep per session per repository, bounded by a 10 s timeout. A missing worktree, a missing `git`, a Git failure or a timeout never surfaces: no notification, no session entry, no failed run.
+- `/checkpoint prune` forces a sweep immediately and reports `Pruned N checkpoint ref(s); M kept`, `Checkpoint prune skipped: ...` or `Checkpoint prune failed: ...`.
+- Deletion is a single `git update-ref --stdin` batch of unconditional `delete <ref>` lines, applied only to refs shaped `refs/pi/checkpoint/<sessionKey>/<runId>`. A run still in progress is recent and among the newest refs, so it is never selected.
+- A checkpoint can still be deleted by hand: `git update-ref -d <full-ref>`.
+
+**No restore command, and no garbage collection of its own.** The package never runs `git gc`, `repack` or `prune`. A deleted ref makes its commits unreachable, and Git's own auto-gc reclaims them after `gc.pruneExpire` (default two weeks); until then the objects are still present.
+
+Session entries are never modified or deleted, so a pruned run keeps its stored summary and patch preview in the timeline. `/checkpoint <n>` still prints the commit IDs and the `git diff` command, and appends `Checkpoint #N: checkpoint objects were pruned; only the stored preview remains` once the ref is gone. A failing existence check stays silent; only a definite "ref missing" produces that note.
 
 ## UI surface
 
 | Method | Guard | Outside TUI |
 |--------|-------|-------------|
 | `pi.registerEntryRenderer` (timeline checkpoint entries) | `none` (renderer is only consumed by TUI) | Session entries and Git refs are still persisted in every mode; the visual timeline is unavailable |
-| `ctx.ui.notify` (command output, warnings) | `none` | RPC delivery is fire-and-forget and may be dropped; print/json display is not guaranteed. Core capture never depends on notification delivery |
+| `ctx.ui.notify` (command output, warnings) | `none` | RPC delivery is fire-and-forget and may be dropped; print/json display is not guaranteed. Carries `/checkpoint <n>` output, `/checkpoint prune` results (including prune failures) and capture warnings. Core capture and the automatic `session_start` sweep never depend on notification delivery; the sweep emits no UI at all |
 
 ## License
 

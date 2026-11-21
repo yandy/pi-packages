@@ -62,7 +62,7 @@
 
 ## 6. 执行路径
 
-- 新增 `src/retention.ts`：`pruneCheckpointRefs({ cwd, now?, signal?, runGit? }) => { deleted: number; kept: number }`。非 Git worktree 返回 `{ deleted: 0, kept: 0 }`（不视为错误）。
+- 新增 `src/retention.ts`：`pruneCheckpointRefs(cwd, options?) => Promise<PruneResult | null>`，`options` 为 `{ runGit?, now?, retentionDays?, maxRefs?, signal? }`，`PruneResult` 为 `{ deleted: number; kept: number }`（`kept` 只计枚举接受且保留下来的 ref）。非 Git worktree 返回 `null`（不视为错误）。
 - 仓库解析复用捕获路径的同一套 plumbing（`--path-format=absolute --show-toplevel` / `--git-common-dir`）；`CheckpointStore` 已有的解析逻辑需要暴露或在 retention 内以相同方式实现，两者的仓库身份判断必须一致。
 - 流程：枚举 → 过滤出符合形状的 ref → 按日期降序计算保留集（先日期后数量）→ 把删除集按 `delete <ref>` 行写入一次 `git update-ref --stdin` → 返回计数。
 - `index.ts`：`session_start` 触发一次 fire-and-forget 清扫（`git-common-dir` 去重）；`/checkpoint prune` 绕过该去重立即执行一次。
@@ -90,8 +90,8 @@
 
 ## 9. 文档
 
-- `README.md` / `README.zh.md` 的 `Limits and retention` 改写为：保留期规则、`/checkpoint prune`、自动清扫在 `session_start` 触发、对象回收依赖 Git 自身的 `gc.pruneExpire`，以及对象已被回收时旧 run 只剩预览。
-- 首版 spec 中「不自动删除检查点」「自动清理不在首版范围内」的非目标由本设计取代；README 与代码不保留过程叙事。
+- `README.md` / `README.zh.md` 的 `Limits and retention` / `限制与保留策略` 写明：每 run 一个 ref、保留期规则（30 天与最新 200 个的交集）、`/checkpoint prune` 强制清扫、`session_start` 自动清扫、对象回收依赖 Git 自身的 `gc.pruneExpire`，以及对象已回收时旧 run 只剩预览。
+- README 与代码不得保留「不自动清理检查点」这类与自动清扫矛盾的表述。
 
 ## 10. 已确认决策
 
