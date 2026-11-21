@@ -1,3 +1,5 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
 import { resolveRepositoryContext } from "./checkpoint-store.js";
 import { createGitRunner, type GitResult, type RunGit } from "./git.js";
 import { CHECKPOINT_REFS_PREFIX } from "./refs.js";
@@ -7,7 +9,7 @@ export const MAX_REFS_PER_REPO = 200;
 export const DEFAULT_SWEEP_TIMEOUT_MS = 10_000;
 
 const SECONDS_PER_DAY = 86_400;
-const REF_LISTING_FORMAT = "--format=%(committerdate:unix) %(objectname) %(refname)";
+const REF_LISTING_FORMAT = "--format=%(committerdate:unix) %(objectname) %(refname) %(symref)";
 
 export interface CheckpointRefRecord {
 	name: string;
@@ -112,7 +114,14 @@ export async function pruneCheckpointRefs(cwd: string, options: PruneOptions = {
 	const deleteSet = selectRefsToDelete(records, policy);
 	if (deleteSet.length === 0) return { deleted: 0, kept: records.length };
 
-	const applied = await deleteCheckpointRefs(repository.worktreeRoot, runGit, records, deleteSet, options.signal).then(
+	const applied = await deleteCheckpointRefs(
+		repository.worktreeRoot,
+		repository.commonDir,
+		runGit,
+		records,
+		deleteSet,
+		options.signal,
+	).then(
 		() => true,
 		() => false,
 	);
@@ -124,7 +133,14 @@ export async function pruneCheckpointRefs(cwd: string, options: PruneOptions = {
 	const retrySet = selectRefsToDelete(retried, policy);
 	if (retrySet.length === 0) return { deleted: 0, kept: retried.length };
 
-	await deleteCheckpointRefs(repository.worktreeRoot, runGit, retried, retrySet, options.signal);
+	await deleteCheckpointRefs(
+		repository.worktreeRoot,
+		repository.commonDir,
+		runGit,
+		retried,
+		retrySet,
+		options.signal,
+	);
 	return { deleted: retrySet.length, kept: retried.length - retrySet.length };
 }
 
@@ -149,22 +165,38 @@ async function enumerateCheckpointRefs(
 	return parseRefListing(listing.stdout);
 }
 
-/** Applies one conditional `update-ref --stdin` transaction; any mismatch aborts the whole batch. */
+/**
+ * Applies one conditional `update-ref --stdin` transaction; any mismatch aborts the whole batch.
+ *
+ * `--no-deref` is mandatory: without it a symbolic checkpoint ref makes git delete the ref it points
+ * at (typically a user's branch) and leave the symbolic ref behind. The transaction also runs with an
+ * empty hooks directory, because `update-ref` fires the repository's `reference-transaction` hook, and
+ * a background sweep must not execute or block on arbitrary repository code.
+ */
 async function deleteCheckpointRefs(
 	worktreeRoot: string,
+	commonDir: string,
 	runGit: RunGit,
 	records: readonly EnumeratedCheckpointRef[],
 	deleteSet: readonly string[],
 	signal?: AbortSignal,
 ): Promise<void> {
 	const objectOids = new Map(records.map((record) => [record.name, record.objectOid]));
-	const result = await runGit(["update-ref", "--stdin"], {
-		cwd: worktreeRoot,
-		signal,
-		stdin: deleteSet.map((name) => `delete ${name} ${objectOids.get(name)}\n`).join(""),
-	});
-	if (result.code !== 0 || result.killed || result.truncated) {
-		throw new Error("Checkpoint ref deletion did not complete");
+	const temporaryDirectory = await mkdtemp(join(commonDir, "pi-checkpoint-prune-"));
+	try {
+		const result = await runGit(
+			["-c", `core.hooksPath=${join(temporaryDirectory, "hooks")}`, "update-ref", "--no-deref", "--stdin"],
+			{
+				cwd: worktreeRoot,
+				signal,
+				stdin: deleteSet.map((name) => `delete ${name} ${objectOids.get(name)}\n`).join(""),
+			},
+		);
+		if (result.code !== 0 || result.killed || result.truncated) {
+			throw new Error("Checkpoint ref deletion did not complete");
+		}
+	} finally {
+		await rm(temporaryDirectory, { recursive: true, force: true });
 	}
 }
 
@@ -274,8 +306,12 @@ function cleanErrorMessage(error: unknown): string {
 function parseRefListing(stdout: string): EnumeratedCheckpointRef[] {
 	const records: EnumeratedCheckpointRef[] = [];
 	for (const line of stdout.split("\n")) {
-		const [rawSeconds, objectOid, name] = line.trim().split(" ", 3);
+		const [rawSeconds, objectOid, name, symref] = line.trim().split(" ", 4);
 		if (!rawSeconds || !objectOid || !name || !isCheckpointRefName(name)) continue;
+		// A symbolic checkpoint ref is not ours to delete: `for-each-ref` reports its target's object
+		// and date, so deleting it would speak about a ref we never enumerated, and any non-deref
+		// mistake would remove whatever it points at.
+		if (symref) continue;
 		const committedAtSeconds = Number(rawSeconds);
 		if (!Number.isInteger(committedAtSeconds)) continue;
 		records.push({ name, committedAtSeconds, objectOid });

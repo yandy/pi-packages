@@ -96,7 +96,7 @@ export class CheckpointStore {
 				signal,
 			});
 			const commit = commitResult.stdout.trim();
-			await this.runGit([...config, "update-ref", ref, commit, expectedOld], {
+			await this.runGit([...config, "update-ref", "--no-deref", ref, commit, expectedOld], {
 				cwd: repository.worktreeRoot,
 				env,
 				signal,
