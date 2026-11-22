@@ -1,5 +1,7 @@
 import type { Usage } from "@earendil-works/pi-ai";
-import type { ContextUsage } from "@earendil-works/pi-coding-agent";
+import type { ContextUsage, ExtensionContext, SessionManager } from "@earendil-works/pi-coding-agent";
+
+export type ReadonlySessionManager = ExtensionContext["sessionManager"];
 
 export type CostBasis = "provider" | "estimate" | "mixed";
 
@@ -130,4 +132,26 @@ export interface ContextEvent {
 	label: string;
 	tokensBefore?: number;
 	targetId?: string;
+}
+
+export interface SubagentMetadata {
+	id: string;
+	type: string;
+	description: string;
+	status: string;
+	filePath: string;
+	modelName?: string;
+	thinking?: string;
+	startedAt?: number;
+	completedAt?: number;
+}
+
+export interface LoadedSubagent {
+	manager: SessionManager;
+	metadata: SubagentMetadata;
+}
+
+export interface SubagentLoadResult {
+	sessions: LoadedSubagent[];
+	warnings: string[];
 }
