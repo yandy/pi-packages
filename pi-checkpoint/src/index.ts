@@ -1,12 +1,12 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { CheckpointStore } from "./checkpoint-store.js";
-import { createCheckpointCommandHandler } from "./command.js";
+import { createCheckpointCommandHandler, probeSnapshotRef } from "./command.js";
 import { createCheckpointCoordinator } from "./coordinator.js";
 import { createDiffPreview } from "./diff.js";
 import { createGitRunner, type RunGit } from "./git.js";
 import { createCheckpointRenderer } from "./renderer.js";
-import { createRetentionSweeper } from "./retention.js";
-import { CHECKPOINT_ENTRY_TYPE } from "./session.js";
+import { createRetentionSweeper, pruneCheckpointRefs } from "./retention.js";
+import { CHECKPOINT_ENTRY_TYPE, recordedSnapshots } from "./session.js";
 
 export interface CheckpointExtensionDeps {
 	runGit?: RunGit;
@@ -27,22 +27,15 @@ export default function registerCheckpoint(pi: ExtensionAPI, deps: CheckpointExt
 	pi.registerCommand("checkpoint", {
 		description: "Inspect a checkpoint run's ref and diff command, or prune stale checkpoint refs",
 		handler: createCheckpointCommandHandler({
-			sweep: (cwd) => sweeper.sweep(cwd, { force: true }),
-			refExists: async (cwd, ref) => {
-				const result = await runGit(["rev-parse", "--verify", "--quiet", ref], { cwd, allowNonZeroExit: true });
-				// Exit 0 means present, 1 means "no such ref". Anything else (no worktree, dubious ownership,
-				// corrupt repository, interrupted child) is an unknown state, not proof that the objects are gone:
-				// throwing keeps the command silent about pruning instead of claiming it.
-				if (result.killed || result.truncated) throw new Error("Reference existence check was interrupted");
-				if (result.code === 0) return true;
-				if (result.code === 1) return false;
-				throw new Error(`Reference existence check failed (exit ${result.code ?? "unknown"})`);
-			},
+			prune: (cwd, { dryRun, recorded }) => pruneCheckpointRefs(cwd, { dryRun, recorded, now: deps.now, runGit }),
+			probeSnapshot: (cwd, ref) => probeSnapshotRef(runGit, cwd, ref),
 		}),
 	});
 	pi.on("session_start", (_event, ctx) => {
 		coordinator.reset();
-		void sweeper.sweep(ctx.cwd);
+		// Passing the session's own entries lets the sweep cross-check the refs it wrote, while refs
+		// from other sessions still fall back to commit structure.
+		void sweeper.sweep(ctx.cwd, { recorded: recordedSnapshots(ctx.sessionManager.getEntries()) });
 	});
 	pi.on("session_shutdown", () => coordinator.reset());
 	pi.on("before_agent_start", (event, ctx) => coordinator.beforeAgentStart(event, ctx));

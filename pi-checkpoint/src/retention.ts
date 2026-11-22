@@ -2,22 +2,29 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { resolveRepositoryContext } from "./checkpoint-store.js";
 import { createGitRunner, type GitResult, type RunGit } from "./git.js";
-import { CHECKPOINT_REFS_PREFIX } from "./refs.js";
+import { CHECKPOINT_REFS_PREFIX, checkpointCommitSubject, type RecordedCheckpointCommit } from "./refs.js";
 
 export const RETENTION_DAYS = 30;
 export const MAX_REFS_PER_REPO = 200;
 export const DEFAULT_SWEEP_TIMEOUT_MS = 10_000;
 
 const SECONDS_PER_DAY = 86_400;
-const REF_LISTING_FORMAT = "--format=%(committerdate:unix) %(objectname) %(refname) %(symref)";
+const FIELD_SEPARATOR = "\x1f";
+const FIELD_COUNT = 7;
+/**
+ * One record per ref. `%(parent)` exposes the commit graph, which is what separates a result
+ * snapshot written by this package from a hand-written commit that merely copied the subject.
+ */
+const REF_LISTING_FORMAT =
+	"--format=%(objecttype)%1f%(objectname)%1f%(committerdate:unix)%1f%(parent)%1f%(subject)%1f%(refname)%1f%(symref)";
+/** Full SHA-1 or SHA-256 object id; abbreviated ids are not trustworthy for a conditional delete. */
+const FULL_OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
+const UNIX_SECONDS = /^\d+$/;
 
+/** A ref whose latest commit is a result snapshot of that same ref, so it is a prune candidate. */
 export interface CheckpointRefRecord {
 	name: string;
 	committedAtSeconds: number;
-}
-
-/** A listed ref plus the commit it pointed at while the listing ran. */
-interface EnumeratedCheckpointRef extends CheckpointRefRecord {
 	objectOid: string;
 }
 
@@ -27,11 +34,35 @@ export interface RetentionPolicy {
 	maxRefs: number;
 }
 
+export interface PrunePlan {
+	/** Completed refs older than the retention window, oldest first. */
+	expired: CheckpointRefRecord[];
+	/** Completed refs outside the newest `maxRefs` after the TTL pass, oldest first. */
+	overflow: CheckpointRefRecord[];
+	/** Deduplicated union of both reasons, oldest first, ties broken by ref name. */
+	selected: CheckpointRefRecord[];
+}
+
 export interface PruneResult {
-	/** Refs deleted by the successful pass. */
+	dryRun: boolean;
+	/** Refs whose latest commit is a result snapshot of that ref. */
+	completed: number;
+	/** Refs whose latest commit is a baseline snapshot: never auto-deleted and never counted against `maxRefs`. */
+	baselineOnly: number;
+	/** Refs under the prefix that are not recognized checkpoint snapshots. */
+	unknown: number;
+	/** Completed refs selected because they are older than `retentionDays`. */
+	expired: number;
+	/** Completed refs selected because they fall outside the newest `maxRefs`. */
+	overflow: number;
+	/** Unique refs selected for deletion; `expired + overflow` minus the refs selected for both reasons. */
+	selected: number;
+	/** Refs actually deleted; always 0 for a dry run. */
 	deleted: number;
-	/** `enumerated - deleted` for the pass that succeeded. Refs under the prefix with a malformed shape or an unreadable date count as neither deleted nor kept. */
+	/** Completed refs that remain after the planned or applied deletion. */
 	kept: number;
+	retentionDays: number;
+	maxRefs: number;
 }
 
 export interface PruneOptions {
@@ -39,6 +70,10 @@ export interface PruneOptions {
 	now?: () => Date;
 	retentionDays?: number;
 	maxRefs?: number;
+	/** Plans the same selection without calling `update-ref`. */
+	dryRun?: boolean;
+	/** Snapshot commits this session's entries assert, used to cross-check completed refs. */
+	recorded?: ReadonlyMap<string, RecordedCheckpointCommit>;
 	signal?: AbortSignal;
 }
 
@@ -52,7 +87,10 @@ export interface SweeperOptions extends PruneOptions {
 }
 
 export interface RetentionSweeper {
-	sweep(cwd: string, sweepOptions?: { force?: boolean }): Promise<SweepOutcome>;
+	sweep(
+		cwd: string,
+		sweepOptions?: { force?: boolean; recorded?: ReadonlyMap<string, RecordedCheckpointCommit> },
+	): Promise<SweepOutcome>;
 }
 
 export function isCheckpointRefName(name: string): boolean {
@@ -62,31 +100,38 @@ export function isCheckpointRefName(name: string): boolean {
 	return segments.length === 2 && segments.every((segment) => segment.length > 0);
 }
 
-export function selectRefsToDelete(records: readonly CheckpointRefRecord[], policy: RetentionPolicy): string[] {
-	const candidates = records.filter((record) => isCheckpointRefName(record.name));
-	const newest = [...candidates]
-		.sort(
-			(left, right) =>
-				right.committedAtSeconds - left.committedAtSeconds ||
-				(left.name < right.name ? 1 : left.name > right.name ? -1 : 0),
-		)
-		.slice(0, Math.max(0, policy.maxRefs));
+/**
+ * Selects completed checkpoint refs for deletion. Pure: no clock, no Git, no I/O.
+ *
+ * TTL runs first so expired refs never consume the `maxRefs` budget, then the oldest survivors
+ * beyond `maxRefs` are selected. The union is deduplicated by refname and ordered deterministically,
+ * so a dry run and the following real run produce the same plan.
+ */
+export function buildPrunePlan(records: readonly CheckpointRefRecord[], policy: RetentionPolicy): PrunePlan {
+	const cutoff = policy.nowSeconds - policy.retentionDays * SECONDS_PER_DAY;
+	const expired = records.filter((record) => record.committedAtSeconds < cutoff).sort(compareOldestFirst);
+	const expiredNames = new Set(expired.map((record) => record.name));
+	const survivors = records.filter((record) => !expiredNames.has(record.name)).sort(compareOldestFirst);
+	const maxRefs = Math.max(0, policy.maxRefs);
+	const overflow = survivors.length <= maxRefs ? [] : survivors.slice(0, survivors.length - maxRefs);
+	return { expired, overflow, selected: uniqueByName([...expired, ...overflow]) };
+}
 
-	const retained = new Set<string>();
-	for (const record of newest) {
-		const ageSeconds = policy.nowSeconds - record.committedAtSeconds;
-		if (ageSeconds <= policy.retentionDays * SECONDS_PER_DAY) retained.add(record.name);
-	}
+function compareOldestFirst(left: CheckpointRefRecord, right: CheckpointRefRecord): number {
+	if (left.committedAtSeconds !== right.committedAtSeconds) return left.committedAtSeconds - right.committedAtSeconds;
+	if (left.name === right.name) return 0;
+	return left.name < right.name ? -1 : 1;
+}
 
-	return candidates
-		.map((record) => record.name)
-		.filter((name) => !retained.has(name))
-		.sort();
+function uniqueByName(records: readonly CheckpointRefRecord[]): CheckpointRefRecord[] {
+	const byName = new Map<string, CheckpointRefRecord>();
+	for (const record of records) if (!byName.has(record.name)) byName.set(record.name, record);
+	return [...byName.values()].sort(compareOldestFirst);
 }
 
 /**
- * Deletes stale checkpoint refs for the repository containing `cwd`. Returns `null` when `cwd` is outside
- * a Git worktree; any other Git failure is thrown for the caller to handle.
+ * Deletes stale completed checkpoint refs for the repository containing `cwd`. Returns `null` when
+ * `cwd` is outside a Git worktree; any other Git failure is thrown for the caller to handle.
  *
  * Protocol: one listing, then one conditional `update-ref --stdin` transaction of
  * `delete <ref> <oid>` lines. Git applies the whole batch or nothing, and refuses a line whose ref no
@@ -103,66 +148,201 @@ export async function pruneCheckpointRefs(cwd: string, options: PruneOptions = {
 	if (!repository) return null;
 
 	const nowSeconds = Math.floor((options.now?.() ?? new Date()).getTime() / 1000);
-	const policy: RetentionPolicy = {
-		nowSeconds,
-		retentionDays: options.retentionDays ?? RETENTION_DAYS,
-		maxRefs: options.maxRefs ?? MAX_REFS_PER_REPO,
-	};
-	const enumerate = () => enumerateCheckpointRefs(repository.worktreeRoot, runGit, options.signal);
+	const retentionDays = options.retentionDays ?? RETENTION_DAYS;
+	const maxRefs = options.maxRefs ?? MAX_REFS_PER_REPO;
+	const policy: RetentionPolicy = { nowSeconds, retentionDays, maxRefs };
+	const dryRun = options.dryRun === true;
+	const enumerate = () => classifyCheckpointRefs(repository.worktreeRoot, runGit, options);
 
-	const records = await enumerate();
-	const deleteSet = selectRefsToDelete(records, policy);
-	if (deleteSet.length === 0) return { deleted: 0, kept: records.length };
+	const listed = await enumerate();
+	const plan = buildPrunePlan(listed.completed, policy);
+	if (dryRun) return summarize(listed, plan, policy, true, 0, listed.completed.length - plan.selected.length);
+	if (plan.selected.length === 0) return summarize(listed, plan, policy, false, 0, listed.completed.length);
 
 	const applied = await deleteCheckpointRefs(
 		repository.worktreeRoot,
 		repository.commonDir,
 		runGit,
-		records,
-		deleteSet,
+		plan.selected,
 		options.signal,
 	).then(
 		() => true,
 		() => false,
 	);
-	if (applied) return { deleted: deleteSet.length, kept: records.length - deleteSet.length };
+	if (applied) {
+		return summarize(listed, plan, policy, false, plan.selected.length, listed.completed.length - plan.selected.length);
+	}
 
 	// Someone else moved a listed ref. Recompute once against fresh OIDs instead of retrying stale ones;
 	// a second failure is the caller's problem to report.
 	const retried = await enumerate();
-	const retrySet = selectRefsToDelete(retried, policy);
-	if (retrySet.length === 0) return { deleted: 0, kept: retried.length };
+	const retryPlan = buildPrunePlan(retried.completed, policy);
+	if (retryPlan.selected.length === 0) {
+		return summarize(retried, retryPlan, policy, false, 0, retried.completed.length);
+	}
 
-	await deleteCheckpointRefs(
-		repository.worktreeRoot,
-		repository.commonDir,
-		runGit,
+	await deleteCheckpointRefs(repository.worktreeRoot, repository.commonDir, runGit, retryPlan.selected, options.signal);
+	return summarize(
 		retried,
-		retrySet,
-		options.signal,
+		retryPlan,
+		policy,
+		false,
+		retryPlan.selected.length,
+		retried.completed.length - retryPlan.selected.length,
 	);
-	return { deleted: retrySet.length, kept: retried.length - retrySet.length };
+}
+
+function summarize(
+	listed: ClassifiedRefs,
+	plan: PrunePlan,
+	policy: RetentionPolicy,
+	dryRun: boolean,
+	deleted: number,
+	kept: number,
+): PruneResult {
+	return {
+		dryRun,
+		completed: listed.completed.length,
+		baselineOnly: listed.baselineOnly,
+		unknown: listed.unknown,
+		expired: plan.expired.length,
+		overflow: plan.overflow.length,
+		selected: plan.selected.length,
+		deleted,
+		kept,
+		retentionDays: policy.retentionDays,
+		maxRefs: policy.maxRefs,
+	};
+}
+
+interface ClassifiedRefs {
+	completed: CheckpointRefRecord[];
+	baselineOnly: number;
+	unknown: number;
+}
+
+interface EnumeratedRef {
+	name: string;
+	objectOid: string;
+	committedAtSeconds: number | null;
+	objectType: string;
+	parents: string[];
+	subject: string;
 }
 
 /**
- * Lists eligible refs with their commit IDs. A listing that did not run to completion is useless for
- * selection: the runner kills the child on output truncation, which can race a clean exit code, so a
- * partial list must never be treated as the repository's ref set.
+ * Lists every ref under the checkpoint prefix and classifies it by its latest commit.
+ *
+ * Only `completed` refs may be deleted: the ref must point at a commit whose subject names that exact
+ * ref as a result snapshot and whose single parent is the baseline snapshot for the same ref. The
+ * subject alone is not evidence, because any local writer can copy it; the parent link ties the result
+ * to a baseline this package wrote for the same ref. When the current session recorded the run, its
+ * exact baseline/result commit ids are required as well. Baseline-only refs (an in-flight run or crash
+ * residue) are never candidates and never consume the `maxRefs` budget, so a sweep cannot break a run
+ * that has not produced its result yet.
+ *
+ * A listing that did not run to completion is useless for classification: the runner kills the child
+ * on output truncation, which can race a clean exit code, so a partial list must never be treated as
+ * the repository's ref set.
  */
-async function enumerateCheckpointRefs(
+async function classifyCheckpointRefs(
 	worktreeRoot: string,
 	runGit: RunGit,
-	signal?: AbortSignal,
-): Promise<EnumeratedCheckpointRef[]> {
+	options: PruneOptions,
+): Promise<ClassifiedRefs> {
 	const listing = await runGit(["for-each-ref", REF_LISTING_FORMAT, CHECKPOINT_REFS_PREFIX], {
 		cwd: worktreeRoot,
 		env: { LC_ALL: "C" },
-		signal,
+		signal: options.signal,
 	});
 	if (listing.code !== 0 || listing.killed || listing.truncated) {
 		throw new Error("Checkpoint ref listing did not complete");
 	}
-	return parseRefListing(listing.stdout);
+	const enumerated = parseRefListing(listing.stdout);
+
+	const candidates: { record: CheckpointRefRecord; parent: string }[] = [];
+	let baselineOnly = 0;
+	let unknown = 0;
+	for (const ref of enumerated) {
+		if (!isCheckpointRefName(ref.name)) {
+			unknown += 1;
+			continue;
+		}
+		if (ref.objectType !== "commit" || !FULL_OBJECT_ID.test(ref.objectOid) || ref.committedAtSeconds === null) {
+			unknown += 1;
+			continue;
+		}
+		if (ref.subject === checkpointCommitSubject("baseline", ref.name)) {
+			baselineOnly += 1;
+			continue;
+		}
+		if (ref.subject !== checkpointCommitSubject("result", ref.name) || ref.parents.length !== 1) {
+			unknown += 1;
+			continue;
+		}
+		candidates.push({
+			record: { name: ref.name, objectOid: ref.objectOid, committedAtSeconds: ref.committedAtSeconds },
+			parent: ref.parents[0] as string,
+		});
+	}
+
+	const parentSubjects = await lookupCommitSubjects(
+		worktreeRoot,
+		runGit,
+		[...new Set(candidates.map((candidate) => candidate.parent))],
+		options.signal,
+	);
+	const completed: CheckpointRefRecord[] = [];
+	for (const candidate of candidates) {
+		if (parentSubjects.get(candidate.parent) !== checkpointCommitSubject("baseline", candidate.record.name)) {
+			unknown += 1;
+			continue;
+		}
+		const recorded = options.recorded?.get(candidate.record.name);
+		if (
+			recorded &&
+			(recorded.resultCommit !== candidate.record.objectOid || recorded.baselineCommit !== candidate.parent)
+		) {
+			unknown += 1;
+			continue;
+		}
+		completed.push(candidate.record);
+	}
+	return { completed, baselineOnly, unknown };
+}
+
+/**
+ * Reads the subjects of the baseline commits referenced by candidate result commits. One call for all
+ * of them; a lookup that did not complete makes the whole pass fail closed.
+ */
+async function lookupCommitSubjects(
+	worktreeRoot: string,
+	runGit: RunGit,
+	oids: readonly string[],
+	signal?: AbortSignal,
+): Promise<Map<string, string>> {
+	const subjects = new Map<string, string>();
+	if (oids.length === 0) return subjects;
+	const result = await runGit(["log", "--no-walk=unsorted", "--format=%H%x1f%s", "--stdin"], {
+		cwd: worktreeRoot,
+		env: { LC_ALL: "C" },
+		signal,
+		stdin: oids.map((oid) => `${oid}\n`).join(""),
+	});
+	if (result.code !== 0 || result.killed || result.truncated) {
+		throw new Error("Checkpoint baseline lookup did not complete");
+	}
+	for (const line of result.stdout.split("\n")) {
+		if (line === "") continue;
+		const fields = line.split(FIELD_SEPARATOR);
+		// A subject can legally contain the separator; treat such a record as unreadable instead of
+		// silently accepting a truncated subject as proof.
+		if (fields.length !== 2) throw new Error("Checkpoint baseline lookup did not complete");
+		const [oid, subject] = fields as [string, string];
+		if (oid === "") throw new Error("Checkpoint baseline lookup did not complete");
+		subjects.set(oid, subject);
+	}
+	return subjects;
 }
 
 /**
@@ -177,11 +357,9 @@ async function deleteCheckpointRefs(
 	worktreeRoot: string,
 	commonDir: string,
 	runGit: RunGit,
-	records: readonly EnumeratedCheckpointRef[],
-	deleteSet: readonly string[],
+	deleteSet: readonly CheckpointRefRecord[],
 	signal?: AbortSignal,
 ): Promise<void> {
-	const objectOids = new Map(records.map((record) => [record.name, record.objectOid]));
 	const temporaryDirectory = await mkdtemp(join(commonDir, "pi-checkpoint-prune-"));
 	try {
 		const result = await runGit(
@@ -189,7 +367,7 @@ async function deleteCheckpointRefs(
 			{
 				cwd: worktreeRoot,
 				signal,
-				stdin: deleteSet.map((name) => `delete ${name} ${objectOids.get(name)}\n`).join(""),
+				stdin: deleteSet.map((record) => `delete ${record.name} ${record.objectOid}\n`).join(""),
 			},
 		);
 		if (result.code !== 0 || result.killed || result.truncated) {
@@ -246,6 +424,7 @@ export function createRetentionSweeper(options: SweeperOptions = {}): RetentionS
 						maxRefs: options.maxRefs,
 						now: options.now,
 						runGit: guardedRunGit,
+						recorded: sweepOptions.recorded,
 						signal: controller.signal,
 					});
 					if (timedOut) return { status: "failed", error: timeoutMessage(timeoutMs) };
@@ -303,18 +482,35 @@ function cleanErrorMessage(error: unknown): string {
 	return message.replace(/\s+/g, " ").trim().slice(0, 500);
 }
 
-function parseRefListing(stdout: string): EnumeratedCheckpointRef[] {
-	const records: EnumeratedCheckpointRef[] = [];
+/**
+ * Parses one newline-terminated record per ref. A symbolic ref is skipped entirely: `for-each-ref`
+ * reports its target's object and date, so deleting it would speak about a ref that was never
+ * enumerated, and any non-deref mistake would remove whatever it points at.
+ */
+function parseRefListing(stdout: string): EnumeratedRef[] {
+	const refs: EnumeratedRef[] = [];
 	for (const line of stdout.split("\n")) {
-		const [rawSeconds, objectOid, name, symref] = line.trim().split(" ", 4);
-		if (!rawSeconds || !objectOid || !name || !isCheckpointRefName(name)) continue;
-		// A symbolic checkpoint ref is not ours to delete: `for-each-ref` reports its target's object
-		// and date, so deleting it would speak about a ref we never enumerated, and any non-deref
-		// mistake would remove whatever it points at.
+		if (line === "") continue;
+		const fields = line.split(FIELD_SEPARATOR);
+		if (fields.length !== FIELD_COUNT) continue;
+		const [objectType, objectOid, rawSeconds, parentField, subject, name, symref] = fields as [
+			string,
+			string,
+			string,
+			string,
+			string,
+			string,
+			string,
+		];
 		if (symref) continue;
-		const committedAtSeconds = Number(rawSeconds);
-		if (!Number.isInteger(committedAtSeconds)) continue;
-		records.push({ name, committedAtSeconds, objectOid });
+		refs.push({
+			name,
+			objectOid,
+			committedAtSeconds: UNIX_SECONDS.test(rawSeconds) ? Number(rawSeconds) : null,
+			objectType,
+			parents: parentField === "" ? [] : parentField.split(" "),
+			subject,
+		});
 	}
-	return records;
+	return refs;
 }

@@ -126,6 +126,13 @@ describe("CheckpointCoordinator", () => {
 		expect(h.store.captureResult).toHaveBeenCalledTimes(1);
 	});
 
+	it("records the repository common dir so later queries can verify the snapshot elsewhere", async () => {
+		const h = makeHarness();
+		await h.coordinator.beforeAgentStart(startEvent(), h.ctx);
+		await h.coordinator.agentSettled({ type: "agent_settled", aborted: false }, h.ctx);
+		expect(appendedData(h.appendEntry)).toMatchObject({ status: "ok", commonDir: `${h.ctx.cwd}/.git` });
+	});
+
 	it("keeps a confirmed no-change preview", async () => {
 		const h = makeHarness();
 		h.preview.mockResolvedValue({ ...normalPreview, shortstat: "", patchPreview: "" });

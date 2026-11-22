@@ -1,15 +1,15 @@
 import { randomUUID } from "node:crypto";
-import type { AgentSettledEvent, BeforeAgentStartEvent, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type {
+	AgentSettledEvent,
+	BeforeAgentStartEvent,
+	ExtensionAPI,
+	ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import type { CheckpointStore, Snapshot } from "./checkpoint-store.js";
 import type { DiffInput, DiffPreview } from "./diff.js";
 import { GitUnavailableError } from "./git.js";
 import { checkpointRef } from "./refs.js";
-import {
-	CHECKPOINT_ENTRY_TYPE,
-	type CheckpointEntryData,
-	nextRunNumber,
-	resolveSourceEntryId,
-} from "./session.js";
+import { CHECKPOINT_ENTRY_TYPE, type CheckpointEntryData, nextRunNumber, resolveSourceEntryId } from "./session.js";
 
 export interface CheckpointCoordinator {
 	beforeAgentStart(event: BeforeAgentStartEvent, ctx: ExtensionContext): Promise<void>;
@@ -120,11 +120,7 @@ export function createCheckpointCoordinator(deps: CoordinatorDependencies): Chec
 				append({
 					...baseData(run),
 					status: "error",
-					sourceEntryId: resolveSourceEntryId(
-						ctx.sessionManager.getBranch(),
-						run.previousLeafId,
-						run.messageType,
-					),
+					sourceEntryId: resolveSourceEntryId(ctx.sessionManager.getBranch(), run.previousLeafId, run.messageType),
 					settledAt: timestamp(),
 					aborted: event.aborted,
 					stage: "result",
@@ -159,11 +155,7 @@ export function createCheckpointCoordinator(deps: CoordinatorDependencies): Chec
 				...baseData(run),
 				...preview,
 				status: "ok",
-				sourceEntryId: resolveSourceEntryId(
-					ctx.sessionManager.getBranch(),
-					run.previousLeafId,
-					run.messageType,
-				),
+				sourceEntryId: resolveSourceEntryId(ctx.sessionManager.getBranch(), run.previousLeafId, run.messageType),
 				settledAt: timestamp(),
 				aborted: event.aborted,
 				ref: run.ref,
@@ -171,6 +163,7 @@ export function createCheckpointCoordinator(deps: CoordinatorDependencies): Chec
 				resultCommit: result.commit,
 				headBefore: baseline.head,
 				headAfter: result.head,
+				commonDir: result.commonDir,
 			});
 		},
 

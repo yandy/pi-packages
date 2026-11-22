@@ -73,21 +73,24 @@ TUI 时间线会显示：
 /checkpoint 3
 ```
 
-命令返回完整隐藏 ref、baseline/result commit ID，以及可直接执行的命令：
+新的成功 entry 会记录持有该快照的仓库的 git common dir，因此查询可以在任意 checkout 中验证快照。查询有三种结果：
 
-```bash
-git diff <baselineCommit> <resultCommit>
-```
+1. **可用** —— ref 仍解析到该 run 记录的 result commit。命令打印 ref、baseline/result commit ID，以及带正确仓库上下文的可执行命令：
+   ```bash
+   git --git-dir=<commonDir> diff <baselineCommit> <resultCommit>
+   ```
+2. **确认不可用** —— 记录的 ref 已不存在，或解析到另一个 commit。命令明确说明这一点，只打印已持久化的摘要与预览，绝不输出无法执行的 diff 命令。
+3. **无法确认** —— 检查本身失败（找不到 `git`、不在 Git worktree 中、Git 出错、子进程被中断）。命令说明无法确认可用性，不会声称快照已被清理。
 
-无参数或编号非法时显示用法；查询范围是当前对话分支。本包不注册 LLM 工具。
+该字段出现之前写入的旧 entry 没有 `commonDir`；查询退回当前目录，并使用非断言文案（`可能已清理或属于其他仓库`）。无参数或编号非法时显示用法；查询范围是当前对话分支。本包不注册 LLM 工具。
 
-现在立即清扫旧检查点：
+查看或清扫旧检查点：
 
 ```text
-/checkpoint prune
+/checkpoint prune [--dry-run]
 ```
 
-它强制执行一次保留策略清扫并报告计数，详见[保留策略](#保留策略)。
+`prune --dry-run` 生成与真实执行完全相同的删除计划并报告，但不会改动任何 ref；`prune` 才执行删除。详见[保留策略](#保留策略)。
 
 ## 限制与保留策略
 
@@ -95,28 +98,42 @@ git diff <baselineCommit> <resultCommit>
 - 隐藏 ref 不出现在普通分支历史中，但 `git log --all`、`git for-each-ref`、备份、对象库副本和 mirror 操作仍可能暴露它们。
 - 不递归捕获 submodule 内部，只记录 superproject 的 gitlink 状态。
 - sparse checkout、`assume-unchanged` / `skip-worktree` 和特殊嵌套仓库遵循 Git plumbing 行为。无法可靠表示时会报告错误，不会声称已经得到可靠快照。
-- 进程在 `agent_settled` 前退出时，可能留下只有 baseline 的 ref。本包不会伪造 result；该 ref 与其它 ref 适用同一套保留规则。
+- 进程在 `agent_settled` 前退出时，可能留下只有 baseline 的 ref。本包不会伪造 result；该 ref 不会被自动清理，只能手动删除（见[保留策略](#保留策略)）。
 - 不在 Git worktree 中或找不到 `git` 时跳过捕获，每个 session 最多提醒一次；后续 run 会重新探测。
 
 ### 保留策略
 
-每个 run 恰好一个 ref，因此仓库中 ref 数量等于 run 数量。保留规则给这个数量设上限：
+每个 run 恰好一个 ref，因此仓库中 ref 数量等于 run 数量。保留规则只约束**已完成**的 ref：
 
-- 只有 commit 日期不超过 **30 天** **且**属于该仓库最新 **200 个** ref 时才保留。两个条件必须同时成立，即日期截断与数量截断取交集，较严格的一侧生效。
+- 已完成的 ref 只有 commit 日期不超过 **30 天** **且**属于该仓库最新 **200 个**已完成 ref 时才保留。两个条件必须同时成立，即日期截断与数量截断取交集，较严格的一侧生效。
 - `RETENTION_DAYS = 30` 与 `MAX_REFS_PER_REPO = 200` 是代码内常量，没有设置项。
+- 只有最新 commit 是本包 **result** 快照的 ref 才进入候选。仍指向 **baseline** 快照的 ref（进行中的 run 或崩溃残留）永远不会被自动删除，也不占用数量配额。
+
+一个 ref 只有在以下条件全部满足时才算已完成：
+
+- commit subject 恰好为 `pi-checkpoint result ref=<该 ref>`，且该 commit 恰好有一个 parent；
+- 该 parent 的 subject 恰好为 `pi-checkpoint baseline ref=<同一 ref>`，即 result 与本包为同一 ref 写入的 baseline 相连——仅复制 subject 不算；
+- 若当前 session 记录了该 run，entry 中的 `baselineCommit` 与 `resultCommit` 也必须逐字匹配。
+
+边界：任何本地写入者都能构造出这样的 subject 与 parent 关系，Git 无法证明来源。结构校验能挡住意外碰撞（其它工具的 commit、复用了 subject 的手写 commit、属于其它 ref 的 result commit）；但在 `refs/pi/checkpoint/` 下刻意伪造的一对 commit 与真实检查点无法区分，仍可能被清理。该命名空间视为本包所有。
 
 清扫按仓库（`git-common-dir`）进行，因而跨 session：一次清扫可能删掉其它 session 的旧检查点，包括 linked worktree 中的（它们共享同一个 refs 命名空间）。这些 run 的 session entry 与预览不受影响。
 
 - `session_start` 每 session 每仓库执行一次静默、best-effort 清扫，上限 10 秒。不在 worktree 中、找不到 `git`、Git 失败或超时都不会外露：没有通知、没有 session entry、不会让 run 失败。
-- `/checkpoint prune` 立即强制清扫并报告 `Pruned N checkpoint ref(s); M kept`、`Checkpoint prune skipped: ...` 或 `Checkpoint prune failed: ...`。`M` 只计清扫枚举接受并保留下来的 ref，前缀下形状不符或日期不可读的条目既不在 N 也不在 M 中。
-- 删除是一次 `git update-ref --stdin` 批量写入，内容为带条件的 `delete <ref> <commit>` 行，且只作用于形状为 `refs/pi/checkpoint/<sessionKey>/<runId>` 的 ref。Git 整体原子执行该批，并拒绝任何 ref 已不再指向枚举时那个 commit 的行，因此在枚举与删除之间被改写的 ref 不会被删；整批被拒时从新枚举重算一次再试。
-- 被截断或被 kill 的枚举结果不用于删除：不完整的 `git for-each-ref` 输出既不会选中也不会删除任何 ref。
-- 清扫不跟踪进行中的 run，安全性只来自选择规则：run 的 baseline ref 通常刚写入且属于最新 ref，两条规则都不会命中它。只要它的 commit 日期或排序落出保留集，就可能被选中，原因不限：闲置超过 30 天、run 未结束期间仓库新增了至少 200 个更新的检查点、系统时钟回拨、仓库里已存在带未来日期的 ref。同秒时间戳按 ref 名排序，因此「更新」只是排序，不是保证。此时清扫可能删掉该 ref，该 run 随后的 result 捕获会失败并留下捕获错误记录，而不是 result。
-- 仍可手动删除检查点：`git update-ref -d <full-ref>`。
+- `/checkpoint prune` 立即强制清扫并报告 `Pruned N checkpoint ref(s) (E older than 30 days, O beyond the newest 200); M kept`、`Checkpoint prune skipped: ...` 或 `Checkpoint prune failed: ...`。`/checkpoint prune --dry-run` 不删除任何 ref，报告同一计划：`Checkpoint prune (dry run): would delete N of C completed checkpoint ref(s) (...); M would be kept`。
+- `M` 只计清扫后仍保留的已完成 ref。只有 baseline 的 ref 与无法识别的 ref 既不计入 `N`、`E`、`O`，也不计入 `M`；存在这类 ref 时，报告会附上「未触碰的 baseline-only ref」数量。
+- 删除是一次 `git update-ref --stdin` 批量写入，内容为带条件的 `delete <ref> <commit>` 行，且只作用于形状为 `refs/pi/checkpoint/<sessionKey>/<runId>` 的已完成 ref。Git 整体原子执行该批，并拒绝任何 ref 已不再指向枚举时那个 commit 的行，因此在枚举与删除之间被改写的 ref 不会被删；整批被拒时从新枚举重算一次再试。
+- 被截断或被 kill 的枚举结果不用于删除：不完整的 `git for-each-ref` 输出既不会选中也不会删除任何 ref。baseline 查询同理：被截断、被 kill、非零退出或记录歧义时，不选中任何 ref。
+- baseline-only ref 不会自动过期，因此崩溃残留可能无限增长。这是已接受的限制：本包无法区分被放弃的 baseline 与其它进程中仍然存活的 run，而删掉活跃 run 的 baseline 会让它的 result 捕获失败。确认没有 run 在使用时，由用户手动清理：
+  ```bash
+  git for-each-ref --format='%(subject) %(refname)' refs/pi/checkpoint
+  git update-ref -d <full-ref>
+  ```
+  只删除 subject 以 `pi-checkpoint baseline ` 开头的 ref；`result` ref 属于已完成的 run，由保留策略处理。
 
 **不提供 restore，也不主动回收对象。** 本包不会运行 `git gc`、`repack` 或 `prune`。ref 删除后其 commit 变为 unreachable，由 Git 自身的 auto-gc 在 `gc.pruneExpire`（默认两周）之后回收；在此之前对象仍然存在。
 
-Session entry 从不修改也不删除，因此被清扫的 run 在时间线上仍保留已存的摘要与 patch 预览。`/checkpoint <n>` 照常打印 commit ID 与 `git diff` 命令，并在 ref 已不存在时追加 `Checkpoint #N: the checkpoint ref was pruned, so git diff may fail once Git reclaims its objects; the stored preview remains`。删除 ref 不等于删除对象，因此在 Git 的 auto-gc 运行之前，`git diff` 命令通常仍然可用。存在性检查本身失败时保持静默，只有确定「ref 不存在」才输出该提示。
+Session entry 从不修改也不删除，因此被清扫的 run 在时间线上仍保留已存的摘要与 patch 预览。`/checkpoint <n>` 会用 entry 校验 ref，而不是假设快照仍然完整：可用时保留 diff 命令；ref 缺失或已改写时只打印已持久化的摘要与预览；检查失败时说明无法确认可用性。删除 ref 不等于删除对象，因此在 Git 的 auto-gc 运行之前，可用的 diff 命令通常仍然有效。
 
 ## UI 能力
 

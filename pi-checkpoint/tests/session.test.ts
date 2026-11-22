@@ -7,6 +7,7 @@ import {
 	findCheckpoint,
 	nextRunNumber,
 	parseCheckpointEntryData,
+	recordedSnapshots,
 	resolveSourceEntryId,
 } from "../src/session.js";
 
@@ -73,6 +74,38 @@ describe("checkpoint session data", () => {
 	it("round-trips complete ok and error records", () => {
 		expect(parseCheckpointEntryData(okData())).toEqual(okData());
 		expect(parseCheckpointEntryData(errorData())).toEqual(errorData());
+	});
+
+	it("records the snapshot's common dir and keeps legacy entries readable", () => {
+		const withCommonDir = okData({ commonDir: "/repo/.git" });
+		expect(parseCheckpointEntryData(withCommonDir)).toEqual(withCommonDir);
+
+		// Legacy entries predate the field: they still parse, and no value is invented for them.
+		const legacy = parseCheckpointEntryData(okData());
+		expect(legacy).toEqual(okData());
+		expect(legacy && "commonDir" in legacy).toBe(false);
+
+		expect(parseCheckpointEntryData({ ...withCommonDir, commonDir: 42 })).toBeNull();
+	});
+
+	it("collects the snapshot commits this session recorded for pruning", () => {
+		const entries: SessionEntry[] = [
+			custom("ok-2", okData({ runNumber: 2, ref: "refs/pi/checkpoint/c2Vzc2lvbg/run-2" })),
+			custom("error-3", errorData({ ref: "refs/pi/checkpoint/c2Vzc2lvbg/run-3" })),
+			custom("other", { ...okData(), runNumber: 4 }, "other-extension"),
+		];
+		expect(recordedSnapshots(entries)).toEqual(
+			new Map([
+				[
+					"refs/pi/checkpoint/c2Vzc2lvbg/run-2",
+					{
+						ref: "refs/pi/checkpoint/c2Vzc2lvbg/run-2",
+						baselineCommit: "baseline-oid",
+						resultCommit: "result-oid",
+					},
+				],
+			]),
+		);
 	});
 
 	it("rejects malformed, old-version, and incomplete records", () => {

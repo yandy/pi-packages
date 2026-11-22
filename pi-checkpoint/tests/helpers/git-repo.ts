@@ -69,6 +69,55 @@ export async function commitAll(cwd: string, message = "test commit"): Promise<s
 	return git(cwd, "rev-parse", "HEAD");
 }
 
+export interface CheckpointCommitOptions {
+	/** Full ref name the commit claims to belong to; embedded in the default subject. */
+	ref: string;
+	kind: "baseline" | "result";
+	/** ISO date used for both author and committer time. */
+	date: string;
+	/** Parent commit. A result snapshot's parent is the run's baseline commit. */
+	parent?: string;
+	/** Overrides the package-generated subject to exercise classification. */
+	subject?: string;
+	/** Commit whose tree is reused; defaults to HEAD. */
+	treeFrom?: string;
+}
+
+/** Creates a commit shaped like one written by the capture path, without pointing any ref at it. */
+export async function createCheckpointCommit(cwd: string, options: CheckpointCommitOptions): Promise<string> {
+	const tree = await git(cwd, "rev-parse", `${options.treeFrom ?? "HEAD"}^{tree}`);
+	const args = ["commit-tree", tree];
+	if (options.parent) args.push("-p", options.parent);
+	args.push("-m", options.subject ?? `pi-checkpoint ${options.kind} ref=${options.ref}`);
+	return gitWithEnv(cwd, { GIT_COMMITTER_DATE: options.date, GIT_AUTHOR_DATE: options.date }, ...args);
+}
+
+/** Seeds a completed run: baseline commit, result commit, and the ref pointing at the result. */
+export async function seedCompletedRef(
+	cwd: string,
+	name: string,
+	resultDate: string,
+	baselineDate = resultDate,
+): Promise<{ ref: string; baseline: string; result: string }> {
+	const ref = `refs/pi/checkpoint/${name}`;
+	const baseline = await createCheckpointCommit(cwd, { ref, kind: "baseline", date: baselineDate });
+	const result = await createCheckpointCommit(cwd, { ref, kind: "result", date: resultDate, parent: baseline });
+	await git(cwd, "update-ref", ref, result);
+	return { ref, baseline, result };
+}
+
+/** Seeds an unfinished run or crash residue: a baseline commit with the ref still pointing at it. */
+export async function seedBaselineRef(
+	cwd: string,
+	name: string,
+	date: string,
+): Promise<{ ref: string; baseline: string }> {
+	const ref = `refs/pi/checkpoint/${name}`;
+	const baseline = await createCheckpointCommit(cwd, { ref, kind: "baseline", date });
+	await git(cwd, "update-ref", ref, baseline);
+	return { ref, baseline };
+}
+
 export async function writeRepoFile(cwd: string, relativePath: string, content: string | Buffer): Promise<void> {
 	const path = join(cwd, relativePath);
 	await mkdir(dirname(path), { recursive: true });
