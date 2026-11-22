@@ -11,6 +11,10 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      # 宿主提供包：package 级 devDependencies 精确 pin 到 peer 下限，抬版本要同时决定下限与
+      # CI 实测基线（docs/guides/pi-package-spec.md「devDependencies」），属人工决策。
+      - dependency-name: "@earendil-works/*"
 
   - package-ecosystem: "github-actions"
     directory: "/"
