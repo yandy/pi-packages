@@ -1,3 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerInsightCommand } from "./src/command";
 
-export default function (_pi: ExtensionAPI): void {}
+export default function (pi: ExtensionAPI): void {
+	registerInsightCommand(pi);
+}

@@ -35,6 +35,9 @@ jobs:
             pi-coding-tools-v*)
               echo "dir=pi-coding-tools" >> "$GITHUB_OUTPUT"
               ;;
+            pi-context-insight-v*)
+              echo "dir=pi-context-insight" >> "$GITHUB_OUTPUT"
+              ;;
             pi-notify-v*)
               echo "dir=pi-notify" >> "$GITHUB_OUTPUT"
               ;;
