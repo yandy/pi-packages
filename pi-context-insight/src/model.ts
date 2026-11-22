@@ -60,3 +60,74 @@ export interface ContextComposition {
 	complete: boolean;
 	warnings: string[];
 }
+
+export type ExecutionStatus = "ok" | "error" | "missing" | "unfinished";
+
+export interface ToolExecution {
+	id: string;
+	name: string;
+	nested: boolean;
+	status: ExecutionStatus;
+	timestamp: string;
+	durationMs?: number;
+	durationEstimated: boolean;
+}
+
+export interface ToolSummary {
+	name: string;
+	nested: boolean;
+	calls: number;
+	ok: number;
+	errors: number;
+	missing: number;
+	unfinished: number;
+	durationMs: number;
+}
+
+export interface FileActivity {
+	path: string;
+	read: number;
+	written: number;
+	edited: number;
+	searched: number;
+	addedLines: number;
+	removedLines: number;
+}
+
+export interface CommandActivity {
+	id: string;
+	source: "bash" | "powershell" | "user-bash";
+	nested: boolean;
+	command: string;
+	status: "ok" | "error" | "cancelled" | "missing";
+	timestamp: string;
+	exitCode?: number;
+	durationMs?: number;
+	durationEstimated: boolean;
+}
+
+export interface ActivityReport {
+	executions: ToolExecution[];
+	tools: ToolSummary[];
+	files: FileActivity[];
+	commands: CommandActivity[];
+}
+
+export interface TimingReport {
+	startedAt?: string;
+	endedAt?: string;
+	wallTimeMs: number;
+	modelTimeMs: number;
+	toolTimeMs: number;
+	modelTimeIncomplete: boolean;
+	toolTimeEstimated: boolean;
+}
+
+export interface ContextEvent {
+	id: string;
+	timestamp: string;
+	type: "compaction" | "branch_summary" | "context_edit" | "model_change" | "thinking_level_change" | "subagent";
+	label: string;
+	tokensBefore?: number;
+	targetId?: string;
+}
