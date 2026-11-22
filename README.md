@@ -21,7 +21,6 @@ Monorepo for @yandy pi packages. Uses npm workspaces.
 > `pi-memory` now lives in [simple-memory](https://github.com/yandy/simple-memory).
 > `pi-container-sandbox` is retired: the npm package is deprecated and its source lives in git history (`pi-container-sandbox-v1.3.0`).
 > `pi-superpowers` is retired: the npm package is deprecated and its source lives in git history (`pi-superpowers-v0.7.3`). Install the skills from upstream [obra/superpowers](https://github.com/obra/superpowers) instead.
-> `pi-checkpoint` was retired before its first release: it was never published to npm, and its source lives in git history.
 
 ## Development
 
