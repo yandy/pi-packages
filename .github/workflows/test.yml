@@ -28,8 +28,6 @@ jobs:
               - "scripts/**"
             pi-ask-user:
               - "pi-ask-user/**"
-            pi-checkpoint:
-              - "pi-checkpoint/**"
             pi-sandbox:
               - "pi-sandbox/**"
             pi-web-tools:
