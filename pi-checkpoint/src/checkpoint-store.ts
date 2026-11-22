@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { createGitRunner, GitCommandError, type GitResult, type RunGit } from "./git.js";
+import { checkpointCommitSubject } from "./refs.js";
 
 export interface RepositoryContext {
 	worktreeRoot: string;
@@ -31,11 +32,7 @@ export class CheckpointStore {
 
 	async captureResult(baseline: Snapshot, signal?: AbortSignal): Promise<Snapshot> {
 		const repository = await this.resolveRepository(baseline.worktreeRoot);
-		if (
-			!repository ||
-			repository.worktreeRoot !== baseline.worktreeRoot ||
-			repository.commonDir !== baseline.commonDir
-		) {
+		if (!repository || repository.worktreeRoot !== baseline.worktreeRoot || repository.commonDir !== baseline.commonDir) {
 			throw new Error("Git repository identity changed during checkpoint run");
 		}
 		return this.capture(repository, baseline.ref, baseline.commit, "result", baseline.commit, signal);
@@ -89,7 +86,7 @@ export class CheckpointStore {
 			const tree = treeResult.stdout.trim();
 			const commitArgs = [...config, "commit-tree", tree];
 			if (parent) commitArgs.push("-p", parent);
-			commitArgs.push("-m", `pi-checkpoint ${kind} ref=${ref}`);
+			commitArgs.push("-m", checkpointCommitSubject(kind, ref));
 			const commitResult = await this.runGit(commitArgs, {
 				cwd: repository.worktreeRoot,
 				env,

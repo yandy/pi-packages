@@ -1,5 +1,6 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { DiffPreview } from "./diff.js";
+import type { RecordedCheckpointCommit } from "./refs.js";
 
 export const CHECKPOINT_ENTRY_TYPE = "pi-checkpoint";
 
@@ -24,6 +25,11 @@ export interface CheckpointOkData extends CheckpointBaseData, DiffPreview {
 	resultCommit: string;
 	headBefore: string | null;
 	headAfter: string | null;
+	/**
+	 * Common Git dir of the repository that holds the snapshot. Entries written before this field
+	 * existed have none; a query then falls back to the current directory and uses hedged wording.
+	 */
+	commonDir?: string;
 }
 
 export interface CheckpointErrorData extends CheckpointBaseData {
@@ -49,7 +55,8 @@ export function parseCheckpointEntryData(value: unknown): CheckpointEntryData | 
 			!isNullableString(value.shortstat) ||
 			!isNullableString(value.patchPreview) ||
 			typeof value.previewTruncated !== "boolean" ||
-			!isNullableString(value.previewError)
+			!isNullableString(value.previewError) ||
+			!isOptionalString(value.commonDir)
 		) {
 			return null;
 		}
@@ -69,6 +76,7 @@ export function parseCheckpointEntryData(value: unknown): CheckpointEntryData | 
 			resultCommit: value.resultCommit,
 			headBefore: value.headBefore,
 			headAfter: value.headAfter,
+			...(value.commonDir === undefined ? {} : { commonDir: value.commonDir }),
 			shortstat: value.shortstat,
 			patchPreview: value.patchPreview,
 			previewTruncated: value.previewTruncated,
@@ -99,6 +107,24 @@ export function parseCheckpointEntryData(value: unknown): CheckpointEntryData | 
 		baselineCommit: value.baselineCommit,
 		error: value.error,
 	};
+}
+
+/**
+ * Snapshot commits this session's entries assert for each ref. Pruning only uses them to cross-check
+ * refs it can see; refs from other sessions have no entry here and fall back to commit structure.
+ */
+export function recordedSnapshots(entries: readonly SessionEntry[]): Map<string, RecordedCheckpointCommit> {
+	const recorded = new Map<string, RecordedCheckpointCommit>();
+	for (const entry of entries) {
+		const data = checkpointDataFromEntry(entry);
+		if (data?.status !== "ok") continue;
+		recorded.set(data.ref, {
+			ref: data.ref,
+			baselineCommit: data.baselineCommit,
+			resultCommit: data.resultCommit,
+		});
+	}
+	return recorded;
 }
 
 export function nextRunNumber(entries: readonly SessionEntry[]): number {
@@ -161,4 +187,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNullableString(value: unknown): value is string | null {
 	return value === null || typeof value === "string";
+}
+
+function isOptionalString(value: unknown): value is string | undefined {
+	return value === undefined || typeof value === "string";
 }
