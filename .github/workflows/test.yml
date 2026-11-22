@@ -34,6 +34,8 @@ jobs:
               - "pi-web-tools/**"
             pi-coding-tools:
               - "pi-coding-tools/**"
+            pi-context-insight:
+              - "pi-context-insight/**"
             pi-notify:
               - "pi-notify/**"
             pi-subagents:

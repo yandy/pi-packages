@@ -12,6 +12,7 @@ Monorepo for @yandy pi packages. Uses npm workspaces.
 |---|---|---|
 | [pi-ask-user](./pi-ask-user) | Interactive ask_user tool with searchable split-pane UI, multi-select, and freeform | `@yandy0725/pi-ask-user` |
 | [pi-coding-tools](./pi-coding-tools) | AST/LSP code-intel tools (ast_grep_search/ast_grep_replace/lsp_symbols/lsp_hover/lsp_navigate) | `@yandy0725/pi-coding-tools` |
+| [pi-context-insight](./pi-context-insight) | Standalone offline HTML reports for session context, usage, activity, and child-agent insights | `@yandy0725/pi-context-insight` |
 | [pi-sandbox](./pi-sandbox) | Process-level sandbox (bwrap/landlock/seatbelt/windows-acl): workspace writable, everything else readable, fail-closed | `@yandy0725/pi-sandbox` |
 | [pi-subagents](./pi-subagents) | In-process sub-agent core with background execution and typed API | `@yandy0725/pi-subagents` |
 | [pi-todo](./pi-todo) | Minimal todo tool with editor-overhead widget | `@yandy0725/pi-todo` |
