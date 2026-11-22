@@ -101,11 +101,11 @@ parent subject 通过一次批量提交查询取得；该查询与枚举一样 f
 
 ## 7. 快照可用性查询
 
-- 新的成功 entry 记录可选 `commonDir`（result snapshot 的 git common dir，写入前 `resolve()` 规范化）。旧 entry 没有该字段时仍正常解析与渲染。
-- 查询使用 `data.commonDir ?? ctx.cwd` 解析 ref，并要求解析结果等于 entry 的 `resultCommit`。
+- 成功 entry 记录必填 `commonDir`（result snapshot 的 git common dir，写入前 `resolve()` 规范化）。
+- 查询使用 `data.commonDir` 解析 ref，并要求解析结果等于 entry 的 `resultCommit`。
 - 三态输出：
-  1. **可用**：打印 ref、baseline/result 与可执行命令 `git --git-dir=<commonDir> diff <baseline> <result>`。旧 entry 没有 `commonDir` 时使用当前目录与 `git diff <baseline> <result>`。
-  2. **确认不可用**（有 `commonDir` 且 ref 缺失或 OID 不匹配）：明确说明快照已清理或来源仓库不同，只打印已持久化的 shortstat/preview，不输出无法执行的命令。旧 entry 使用非断言文案（可能已清理或属于其他仓库）。
+  1. **可用**：打印 ref、baseline/result 与可执行命令 `git --git-dir=<commonDir> diff <baseline> <result>`。
+  2. **确认不可用**（ref 缺失或 OID 不匹配）：明确说明快照已清理或来源仓库不同，只打印已持久化的 shortstat/preview，不输出无法执行的命令。
   3. **验证失败**（git 不可用、非 worktree、非零退出、子进程被中断）：说明无法确认可用性，不得等同于「已清理」。
 - 探测退出码语义固定：`0` 解析成功、`1` 确定不存在、其余为验证失败；任何情况下都不把验证失败折叠为「已清理」。
 - 跨仓库查询时 diff 命令必须带 `--git-dir=<commonDir>`，不能只在当前 cwd 可用。
@@ -139,7 +139,7 @@ parent subject 通过一次批量提交查询取得；该查询与枚举一样 f
 
 - `README.md` / `README.zh.md` 的 `Limits and retention` / `限制与保留策略` 写明：每 run 一个 ref、保留期规则（30 天与最新 200 个的交集）、completed / baseline-only 候选模型、`/checkpoint prune [--dry-run]`、`session_start` 自动清扫、对象回收依赖 Git 自身的 `gc.pruneExpire`，以及对象已回收时旧 run 只剩预览。
 - README 明确 baseline-only 可能无限增长是已接受限制，并给出手动清理的完整 Git 命令。
-- README 的查询章节写明三态验证、`commonDir` 兼容与 `--git-dir` diff 命令。
+- README 的查询章节写明三态验证、必填 `commonDir` 与 `--git-dir` diff 命令。
 - README 与代码不得保留「不自动清理检查点」这类与自动清扫矛盾的表述。
 
 ## 11. 已确认决策

@@ -32,6 +32,7 @@ function okData(overrides: Partial<CheckpointOkData> = {}): CheckpointOkData {
 		patchPreview: "diff --git a/file b/file",
 		previewTruncated: false,
 		previewError: null,
+		commonDir: "/repo/.git",
 		...overrides,
 	};
 }
@@ -76,16 +77,10 @@ describe("checkpoint session data", () => {
 		expect(parseCheckpointEntryData(errorData())).toEqual(errorData());
 	});
 
-	it("records the snapshot's common dir and keeps legacy entries readable", () => {
-		const withCommonDir = okData({ commonDir: "/repo/.git" });
-		expect(parseCheckpointEntryData(withCommonDir)).toEqual(withCommonDir);
-
-		// Legacy entries predate the field: they still parse, and no value is invented for them.
-		const legacy = parseCheckpointEntryData(okData());
-		expect(legacy).toEqual(okData());
-		expect(legacy && "commonDir" in legacy).toBe(false);
-
-		expect(parseCheckpointEntryData({ ...withCommonDir, commonDir: 42 })).toBeNull();
+	it("records the snapshot's common dir", () => {
+		expect(parseCheckpointEntryData(okData())).toEqual(okData());
+		expect(parseCheckpointEntryData({ ...okData(), commonDir: undefined })).toBeNull();
+		expect(parseCheckpointEntryData({ ...okData(), commonDir: 42 })).toBeNull();
 	});
 
 	it("collects the snapshot commits this session recorded for pruning", () => {
@@ -108,7 +103,7 @@ describe("checkpoint session data", () => {
 		);
 	});
 
-	it("rejects malformed, old-version, and incomplete records", () => {
+	it("rejects malformed and incomplete records", () => {
 		expect(parseCheckpointEntryData({ version: 1, status: "ok" })).toBeNull();
 		expect(parseCheckpointEntryData({ ...okData(), version: 2 })).toBeNull();
 		expect(parseCheckpointEntryData({ ...okData(), runNumber: 0 })).toBeNull();

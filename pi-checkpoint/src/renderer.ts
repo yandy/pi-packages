@@ -4,7 +4,7 @@ import { parseCheckpointEntryData } from "./session.js";
 
 export function formatCheckpointEntry(value: unknown, expanded: boolean): string[] {
 	const data = parseCheckpointEntryData(value);
-	if (!data) return ["[checkpoint] Invalid or unsupported checkpoint data"];
+	if (!data) return ["[checkpoint] Invalid checkpoint data"];
 	if (data.status === "error") {
 		const lines = [`[checkpoint #${data.runNumber}] ${data.stage} capture failed: ${data.error}`];
 		if (expanded) {

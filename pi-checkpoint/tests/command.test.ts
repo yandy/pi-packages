@@ -112,16 +112,6 @@ describe("/checkpoint", () => {
 		expect(outputOf()).toContain("git --git-dir=/repo/.git diff baseline-oid result-oid");
 	});
 
-	it("uses the current directory and a plain command for legacy entries", async () => {
-		const legacy = makeCtx(okData({ commonDir: undefined }));
-		const probeSnapshot = vi.fn(async () => resolved());
-		await createCheckpointCommandHandler(deps({ probeSnapshot }))("7", legacy);
-
-		expect(probeSnapshot).toHaveBeenCalledWith("/repo", ref);
-		expect(outputOf()).toContain("git diff baseline-oid result-oid");
-		expect(outputOf()).not.toContain("--git-dir");
-	});
-
 	it("reports a pruned snapshot with its retained summary and no runnable command", async () => {
 		const handler = createCheckpointCommandHandler(deps({ probeSnapshot: async () => ({ state: "absent" }) }));
 		await handler("7", ctx);
@@ -142,16 +132,6 @@ describe("/checkpoint", () => {
 		expect(notify).toHaveBeenCalledWith(expect.stringContaining("now points to 0123456"), "warning");
 		expect(outputOf()).toContain("summary: 1 file changed");
 		expect(outputOf()).not.toContain("diff baseline-oid result-oid");
-	});
-
-	it("hedges for legacy entries whose ref cannot be found", async () => {
-		const legacy = makeCtx(okData({ commonDir: undefined }));
-		const handler = createCheckpointCommandHandler(deps({ probeSnapshot: async () => ({ state: "absent" }) }));
-		await handler("7", legacy);
-
-		expect(notify).toHaveBeenCalledWith(expect.stringContaining("may have been pruned"), "warning");
-		expect(outputOf()).toContain("1 file changed");
-		expect(outputOf()).not.toContain("git diff baseline-oid result-oid");
 	});
 
 	it("never reports a failed verification as a pruned snapshot", async () => {

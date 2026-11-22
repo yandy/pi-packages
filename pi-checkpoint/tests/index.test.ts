@@ -82,6 +82,7 @@ function okData(overrides: Partial<CheckpointOkData> = {}): CheckpointOkData {
 		patchPreview: "diff --git a/file b/file",
 		previewTruncated: false,
 		previewError: null,
+		commonDir: "/repo/.git",
 		...overrides,
 	};
 }

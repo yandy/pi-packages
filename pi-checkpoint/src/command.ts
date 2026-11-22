@@ -99,17 +99,16 @@ async function reportSnapshot(
 	deps: CheckpointCommandDeps,
 ): Promise<void> {
 	// The snapshot lives in the repository that wrote it, which is not necessarily the current one.
-	const cwd = data.commonDir ?? ctx.cwd;
 	let resolution: SnapshotResolution;
 	try {
-		resolution = await deps.probeSnapshot(cwd, data.ref);
+		resolution = await deps.probeSnapshot(data.commonDir, data.ref);
 	} catch (error) {
 		resolution = { state: "unverifiable", error: cleanError(error) };
 	}
 
 	if (resolution.state === "unverifiable") {
 		ctx.ui.notify(
-			retainedMessage(data, `snapshot unconfirmed: cannot confirm ${data.ref} in ${cwd}: ${resolution.error}`),
+			retainedMessage(data, `snapshot unconfirmed: cannot confirm ${data.ref} in ${data.commonDir}: ${resolution.error}`),
 			"warning",
 		);
 		return;
@@ -119,7 +118,7 @@ async function reportSnapshot(
 		return;
 	}
 
-	const reason = resolution.state === "absent" ? missingReason(data) : movedReason(data, resolution.oid);
+	const reason = resolution.state === "absent" ? missingReason() : movedReason(resolution.oid);
 	ctx.ui.notify(retainedMessage(data, reason), "warning");
 }
 
@@ -134,25 +133,17 @@ function availableMessage(data: CheckpointOkData): string {
 }
 
 function diffCommand(data: CheckpointOkData): string {
-	const diff = `diff ${data.baselineCommit} ${data.resultCommit}`;
-	// A recorded common dir may belong to another checkout, so the command must carry its own context.
-	if (data.commonDir === undefined) return `git ${diff}`;
-	return `git --git-dir=${quoteShellArgument(data.commonDir)} ${diff}`;
+	// The recorded common dir may belong to another checkout, so the command carries its own context.
+	return `git --git-dir=${quoteShellArgument(data.commonDir)} diff ${data.baselineCommit} ${data.resultCommit}`;
 }
 
-function missingReason(data: CheckpointOkData): string {
-	if (data.commonDir !== undefined) {
-		return "snapshot unavailable: the checkpoint ref no longer exists; it was pruned, or the snapshot belongs to a different repository";
-	}
-	return "snapshot unavailable in the current repository: the ref was not found; it may have been pruned, or the snapshot may belong to a different repository";
+function missingReason(): string {
+	return "snapshot unavailable: the checkpoint ref no longer exists; it was pruned, or the snapshot belongs to a different repository";
 }
 
-function movedReason(data: CheckpointOkData, oid: string): string {
+function movedReason(oid: string): string {
 	const target = /^[0-9a-f]{4,64}$/i.test(oid) ? oid.slice(0, 7) : "another object";
-	if (data.commonDir !== undefined) {
-		return `snapshot unavailable: the checkpoint ref now points to ${target}, not the recorded result commit`;
-	}
-	return `snapshot unavailable in the current repository: the ref points to ${target}; it may have been pruned, or the snapshot may belong to a different repository`;
+	return `snapshot unavailable: the checkpoint ref now points to ${target}, not the recorded result commit`;
 }
 
 /** The retained summary and preview stay readable after the ref is gone; no runnable command is offered. */

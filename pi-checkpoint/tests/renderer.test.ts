@@ -24,6 +24,7 @@ function okData(overrides: Partial<CheckpointOkData> = {}): CheckpointOkData {
 		patchPreview: "diff --git a/file b/file\n+before",
 		previewTruncated: false,
 		previewError: null,
+		commonDir: "/repo/.git",
 		...overrides,
 	};
 }
@@ -72,9 +73,7 @@ describe("formatCheckpointEntry", () => {
 			error: "capture failed",
 		};
 		expect(formatCheckpointEntry(error, false).join("\n")).toContain("capture failed");
-		expect(formatCheckpointEntry({ version: 99 }, true)).toEqual([
-			"[checkpoint] Invalid or unsupported checkpoint data",
-		]);
+		expect(formatCheckpointEntry({ version: 99 }, true)).toEqual(["[checkpoint] Invalid checkpoint data"]);
 	});
 });
 
