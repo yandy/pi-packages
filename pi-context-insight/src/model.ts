@@ -155,3 +155,32 @@ export interface SubagentLoadResult {
 	sessions: LoadedSubagent[];
 	warnings: string[];
 }
+
+export interface SessionMetadata {
+	id: string;
+	name?: string;
+	cwd: string;
+	filePath?: string;
+	model?: string;
+	thinkingLevel?: string;
+}
+
+export interface SessionReport {
+	metadata: SessionMetadata;
+	usage: UsageReport;
+	context: ContextComposition;
+	activity: ActivityReport;
+	events: ContextEvent[];
+	timing: TimingReport;
+	warnings: string[];
+}
+
+export interface SubagentReport {
+	agent: SubagentMetadata;
+	report: SessionReport;
+}
+
+export interface InsightReport extends SessionReport {
+	generatedAt: string;
+	subagents: SubagentReport[];
+}
