@@ -1,7 +1,7 @@
-import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { parseSessionEntries, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { LoadedSubagent, ReadonlySessionManager, SubagentLoadResult, SubagentMetadata } from "./model";
 
 const SUBAGENT_RECORD = "subagents:record";
@@ -48,6 +48,12 @@ function directChild(root: string, filePath: string): boolean {
 	return rel.length > 0 && rel === basename(rel) && !isAbsolute(rel);
 }
 
+function readSessionReadOnly(filePath: string): SessionManager {
+	const entries = parseSessionEntries(readFileSync(filePath, "utf8"));
+	const header = entries.find((entry) => entry.type === "session");
+	return SessionManager.inMemory(header?.cwd ?? dirname(filePath), undefined, entries);
+}
+
 function lineageRoots(parent: ReadonlySessionManager, warnings: string[], ephemeralDir?: string): LineageRoot[] {
 	const parentFile = parent.getSessionFile();
 	if (!parentFile) return [{ sessionId: parent.getSessionId(), tasksDir: ephemeralDir ?? ephemeralTasksDir(parent) }];
@@ -86,7 +92,7 @@ function lineageRoots(parent: ReadonlySessionManager, warnings: string[], epheme
 			const linkedPath = isAbsolute(header.parentSession)
 				? header.parentSession
 				: resolve(dirname(realFile), header.parentSession);
-			manager = SessionManager.open(linkedPath);
+			manager = readSessionReadOnly(linkedPath);
 			sessionFile = linkedPath;
 		} catch (error) {
 			warnings.push(
@@ -115,12 +121,21 @@ function parseRecord(data: unknown): RecordData | undefined {
 	return record;
 }
 
-function activeAgentType(manager: SessionManager): string | undefined {
+function activeAgentType(manager: SessionManager, warnings: string[]): string | undefined {
 	for (const entry of manager.getBranch()) {
 		if (entry.type !== "message" || entry.message.role !== "system") continue;
 		const message = entry.message;
-		const content =
-			typeof message.content === "string" ? message.content : message.content.map((block) => block.text).join("\n");
+		let content = "";
+		if (typeof message.content === "string") content = message.content;
+		else if (Array.isArray(message.content)) {
+			content = message.content
+				.filter((block) => block.type === "text" && typeof block.text === "string")
+				.map((block) => block.text)
+				.join("\n");
+		} else {
+			warnings.push(`Malformed system content in subagent ${manager.getSessionId()}; active agent metadata was skipped`);
+			continue;
+		}
 		const sections = Object.values(message.sections ?? {}).filter((value): value is string => typeof value === "string");
 		const match = ACTIVE_AGENT_RE.exec([content, ...sections].join("\n"));
 		if (match) return match[1];
@@ -137,16 +152,21 @@ function openCandidate(candidate: Candidate): { manager: SessionManager; filePat
 	const realFile = realpathSync(candidate.filePath);
 	if (!directChild(realRoot, realFile)) throw new Error("realpath escapes the allowed tasks root");
 	if (!statSync(realFile).isFile()) throw new Error("not a file");
-	const manager = SessionManager.open(realFile);
+	const manager = readSessionReadOnly(realFile);
 	if (manager.getHeader()?.parentSession !== candidate.root.sessionId) {
 		throw new Error(`parentSession mismatch; expected ${candidate.root.sessionId}`);
 	}
 	return { manager, filePath: realFile };
 }
 
-function metadataFor(manager: SessionManager, filePath: string, record?: RecordData): SubagentMetadata {
+function metadataFor(
+	manager: SessionManager,
+	filePath: string,
+	record: RecordData | undefined,
+	warnings: string[],
+): SubagentMetadata {
 	const fallbackId = manager.getSessionId();
-	const type = record?.type ?? activeAgentType(manager) ?? "unknown";
+	const type = record?.type ?? activeAgentType(manager, warnings) ?? "unknown";
 	return {
 		id: record?.id ?? fallbackId,
 		type,
@@ -185,6 +205,10 @@ export function loadSubagentSessions(
 				continue;
 			}
 			const raw = entry.data as { outputFile?: unknown };
+			if (raw.outputFile !== undefined && (typeof raw.outputFile !== "string" || raw.outputFile.length === 0)) {
+				warnings.push(`Malformed outputFile in subagent record at parent entry ${entry.id}`);
+				continue;
+			}
 			const filePath =
 				typeof raw.outputFile === "string" ? raw.outputFile : join(currentRoot.tasksDir, `${record.id}.jsonl`);
 			const root = roots.find((candidate) => directChild(candidate.tasksDir, filePath));
@@ -221,7 +245,7 @@ export function loadSubagentSessions(
 			seenFiles.add(loaded.filePath);
 			sessions.push({
 				manager: loaded.manager,
-				metadata: metadataFor(loaded.manager, loaded.filePath, candidate.record),
+				metadata: metadataFor(loaded.manager, loaded.filePath, candidate.record, warnings),
 			});
 		} catch (error) {
 			warnings.push(

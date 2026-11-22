@@ -2,7 +2,7 @@ import type { ContextUsage, ExtensionCommandContext, SessionEntry } from "@earen
 import { analyzeActivity, analyzeTiming } from "./activity";
 import { analyzeContextProjection } from "./context";
 import { extractContextEvents } from "./events";
-import type { InsightReport, ReadonlySessionManager, SessionReport } from "./model";
+import type { InsightReport, ReadonlySessionManager, SessionReport, SubagentReport } from "./model";
 import { loadSubagentSessions } from "./subagents";
 import { collectUsageLedger, summarizeUsage } from "./usage";
 
@@ -51,7 +51,7 @@ export function analyzeSessionManager(
 		activity,
 		events: extractContextEvents(entries),
 		timing: analyzeTiming(entries, activity.executions),
-		warnings: [...usage.warnings, ...context.warnings],
+		warnings: [...usage.warnings, ...context.warnings, ...activity.warnings],
 	};
 }
 
@@ -68,17 +68,22 @@ export function buildInsightReport(
 	});
 	const loadChildren = options.loadChildren ?? loadSubagentSessions;
 	const children = loadChildren(ctx.sessionManager);
-	const subagents = children.sessions.map((child) => ({
-		agent: child.metadata,
-		report: analyzeSessionManager(child.manager, {
-			cwd: child.manager.getCwd(),
-			...(child.metadata.modelName === undefined ? {} : { model: child.metadata.modelName }),
-			...(child.metadata.thinking === undefined ? {} : { thinkingLevel: child.metadata.thinking }),
-		}),
-	}));
+	const subagents: SubagentReport[] = [];
 	const warnings = [...parent.warnings, ...children.warnings.map((warning) => `Subagent discovery: ${warning}`)];
-	for (const child of subagents) {
-		warnings.push(...child.report.warnings.map((warning) => `Subagent ${child.agent.id}: ${warning}`));
+	for (const child of children.sessions) {
+		try {
+			const report = analyzeSessionManager(child.manager, {
+				cwd: child.manager.getCwd(),
+				...(child.metadata.modelName === undefined ? {} : { model: child.metadata.modelName }),
+				...(child.metadata.thinking === undefined ? {} : { thinkingLevel: child.metadata.thinking }),
+			});
+			subagents.push({ agent: child.metadata, report });
+			warnings.push(...report.warnings.map((warning) => `Subagent ${child.metadata.id}: ${warning}`));
+		} catch (error) {
+			warnings.push(
+				`Subagent ${child.metadata.id}: analysis failed: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
 	}
 	return {
 		...parent,

@@ -164,13 +164,15 @@ describe("activity analysis", () => {
 		const entries = Array.from({ length: 201 }, (_, index) => assistant(`a${index}`, [{ id: `call-${index}`, name: "read" }], index * 1_000));
 		const report = analyzeActivity(entries);
 		expect(report.executions).toHaveLength(201);
-		expect(report.tools).toEqual([{ name: "read", nested: false, calls: 201, ok: 0, errors: 0, missing: 201, unfinished: 0, durationMs: 0 }]);
+		expect(report.tools).toEqual([
+			{ name: "read", nested: false, calls: 201, ok: 0, errors: 0, missing: 201, unfinished: 0, durationMs: 0, durationKnown: false, durationIncomplete: true },
+		]);
 	});
 });
 
 describe("timing analysis", () => {
 	it("handles empty entries", () => {
-		expect(analyzeTiming([], [])).toEqual({ wallTimeMs: 0, modelTimeMs: 0, toolTimeMs: 0, modelTimeIncomplete: false, toolTimeEstimated: false });
+		expect(analyzeTiming([], [])).toEqual({ wallTimeMs: 0, modelTimeMs: 0, toolTimeMs: 0, modelTimeIncomplete: false, toolTimeEstimated: false, toolTimeIncomplete: false });
 	});
 
 	it("separates wall, cumulative model and tool time", () => {
@@ -185,6 +187,7 @@ describe("timing analysis", () => {
 			toolTimeMs: 1_050,
 			modelTimeIncomplete: true,
 			toolTimeEstimated: true,
+			toolTimeIncomplete: false,
 		});
 	});
 });

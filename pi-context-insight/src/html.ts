@@ -161,6 +161,14 @@ function eventPosition(items: readonly UsageLedgerItem[], eventTimestamp: string
 	return index < 0 ? items.length - 1 : index;
 }
 
+export function maxUsageTotal(items: readonly UsageLedgerItem[]): number {
+	return items.reduce(
+		(max, item) =>
+			Math.max(max, Math.max(0, item.usage.input + item.usage.cacheRead + item.usage.cacheWrite + item.usage.output)),
+		1,
+	);
+}
+
 function renderTimeline(report: SessionReport): string {
 	if (report.usage.items.length === 0) {
 		return `<section><h2>Recorded usage timeline</h2><div class="empty">No recorded model usage</div>${renderTiming(report)}</section>`;
@@ -170,12 +178,7 @@ function renderTimeline(report: SessionReport): string {
 	const height = 200;
 	const baseline = 160;
 	const chartHeight = 130;
-	const maxTotal = Math.max(
-		1,
-		...items.map((item) =>
-			Math.max(0, item.usage.input + item.usage.cacheRead + item.usage.cacheWrite + item.usage.output),
-		),
-	);
+	const maxTotal = maxUsageTotal(items);
 	const points = items.map((item, index) => {
 		const x = 10 + index * 14;
 		let y = baseline;
@@ -198,7 +201,11 @@ function renderTimeline(report: SessionReport): string {
 
 function renderTiming(report: SessionReport): string {
 	const timing = report.timing;
-	return `<div class="grid-2"><div class="mini-card"><h3>Timing</h3><p>Wall time: ${formatDuration(timing.wallTimeMs)}</p><p>Cumulative model time: ${formatDuration(timing.modelTimeMs)}${timing.modelTimeIncomplete ? " (partial)" : ""}</p><p>Cumulative tool time: ${formatDuration(timing.toolTimeMs)}${timing.toolTimeEstimated ? " (estimated)" : ""}</p></div><div class="mini-card"><h3>Range</h3><p>First: ${escapeHtml(formatTimestamp(timing.startedAt))}</p><p>Last: ${escapeHtml(formatTimestamp(timing.endedAt))}</p><p class="note">Cumulative durations can overlap when work runs in parallel.</p></div></div>`;
+	const hasExecutions = report.activity.executions.length > 0;
+	const hasKnownToolDuration = report.activity.executions.some((execution) => execution.durationMs !== undefined);
+	const toolDuration = hasExecutions && !hasKnownToolDuration ? "—" : formatDuration(timing.toolTimeMs);
+	const partial = timing.toolTimeIncomplete && hasKnownToolDuration ? " (partial)" : "";
+	return `<div class="grid-2"><div class="mini-card"><h3>Timing</h3><p>Wall time: ${formatDuration(timing.wallTimeMs)}</p><p>Cumulative model time: ${formatDuration(timing.modelTimeMs)}${timing.modelTimeIncomplete ? " (partial)" : ""}</p><p>Cumulative tool time: ${toolDuration}${partial}${timing.toolTimeEstimated ? " (estimated)" : ""}</p></div><div class="mini-card"><h3>Range</h3><p>First: ${escapeHtml(formatTimestamp(timing.startedAt))}</p><p>Last: ${escapeHtml(formatTimestamp(timing.endedAt))}</p><p class="note">Cumulative durations can overlap when work runs in parallel.</p></div></div>`;
 }
 
 function statusBadge(status: string): string {
@@ -215,11 +222,12 @@ function renderActivity(report: SessionReport): string {
 	const activity = report.activity;
 	const tools = activity.tools.length
 		? `<h3>Tools</h3><div class="table-wrap"><table><thead><tr><th>Tool</th><th>Scope</th><th class="num">Calls</th><th class="num">OK</th><th class="num">Errors</th><th class="num">Missing</th><th class="num">Unfinished</th><th class="num">Cumulative time</th></tr></thead><tbody>${activity.tools
+				.slice(0, DETAIL_LIMIT)
 				.map(
 					(tool) =>
-						`<tr><td>${escapeHtml(tool.name)}</td><td>${tool.nested ? "nested" : "top-level"}</td><td class="num">${tool.calls}</td><td class="num">${tool.ok}</td><td class="num">${tool.errors}</td><td class="num">${tool.missing}</td><td class="num">${tool.unfinished}</td><td class="num">${formatDuration(tool.durationMs)}</td></tr>`,
+						`<tr class="tool-summary-row"><td>${escapeHtml(tool.name)}</td><td>${tool.nested ? "nested" : "top-level"}</td><td class="num">${tool.calls}</td><td class="num">${tool.ok}</td><td class="num">${tool.errors}</td><td class="num">${tool.missing}</td><td class="num">${tool.unfinished}</td><td class="num">${tool.durationKnown ? `${formatDuration(tool.durationMs)}${tool.durationIncomplete ? " (partial)" : ""}` : "—"}</td></tr>`,
 				)
-				.join("")}</tbody></table></div>`
+				.join("")}</tbody></table></div>${omissionText(Math.max(0, activity.tools.length - DETAIL_LIMIT))}`
 		: `<div class="empty">No tool activity</div>`;
 	const executions = activity.executions.length
 		? `<details class="activity-details"><summary>Tool execution records (${activity.executions.length})</summary><div class="table-wrap"><table><thead><tr><th>ID</th><th>Tool</th><th>Status</th><th>Time</th><th class="num">Duration</th></tr></thead><tbody>${activity.executions

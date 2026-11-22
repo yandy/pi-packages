@@ -75,10 +75,34 @@ export function analyzeContextProjection(
 			continue;
 		}
 		if (message.role === "assistant") {
-			for (const block of message.content) {
-				if (block.type === "text") add("answers", estimateTextTokens(block.text));
-				else if (block.type === "thinking") add("reasoning", estimateTextTokens(block.thinking));
-				else add("toolCalls", estimateTextTokens(block.name + safeJsonStringify(block.arguments)));
+			if (!Array.isArray(message.content)) {
+				complete = false;
+				warnings.push("Invalid assistant content was not included in the estimate");
+				continue;
+			}
+			for (const block of message.content as unknown[]) {
+				if (typeof block !== "object" || block === null) {
+					complete = false;
+					warnings.push("Unknown assistant block was not included in the estimate");
+					continue;
+				}
+				const candidate = block as {
+					type?: unknown;
+					text?: unknown;
+					thinking?: unknown;
+					name?: unknown;
+					arguments?: unknown;
+				};
+				if (candidate.type === "text" && typeof candidate.text === "string")
+					add("answers", estimateTextTokens(candidate.text));
+				else if (candidate.type === "thinking" && typeof candidate.thinking === "string") {
+					add("reasoning", estimateTextTokens(candidate.thinking));
+				} else if (candidate.type === "toolCall" && typeof candidate.name === "string") {
+					add("toolCalls", estimateTextTokens(candidate.name + safeJsonStringify(candidate.arguments)));
+				} else {
+					complete = false;
+					warnings.push(`Unknown assistant block was not included in the estimate: ${String(candidate.type)}`);
+				}
 			}
 			continue;
 		}
@@ -99,6 +123,7 @@ export function analyzeContextProjection(
 			continue;
 		}
 		if (message.role === "bashExecution") {
+			if (message.excludeFromContext === true) continue;
 			add("user", estimateTextTokens(message.output ? `${message.command}\n${message.output}` : message.command));
 			continue;
 		}

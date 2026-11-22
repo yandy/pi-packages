@@ -104,6 +104,8 @@ function summarizeExecutions(executions: readonly ToolExecution[]): ToolSummary[
 				missing: 0,
 				unfinished: 0,
 				durationMs: 0,
+				durationKnown: false,
+				durationIncomplete: false,
 			};
 			summaries.set(key, summary);
 		}
@@ -112,12 +114,17 @@ function summarizeExecutions(executions: readonly ToolExecution[]): ToolSummary[
 		else if (execution.status === "error") summary.errors++;
 		else if (execution.status === "unfinished") summary.unfinished++;
 		else summary.missing++;
-		summary.durationMs += execution.durationMs ?? 0;
+		if (execution.durationMs === undefined) summary.durationIncomplete = true;
+		else {
+			summary.durationKnown = true;
+			summary.durationMs += execution.durationMs;
+		}
 	}
 	return [...summaries.values()];
 }
 
 export function analyzeActivity(entries: readonly SessionEntry[]): ActivityReport {
+	const warnings: string[] = [];
 	const executions: ToolExecution[] = [];
 	const executionById = new Map<string, ToolExecution>();
 	const callTimestamps = new Map<string, number>();
@@ -129,6 +136,10 @@ export function analyzeActivity(entries: readonly SessionEntry[]): ActivityRepor
 		if (entry.type !== "message") continue;
 		const message = entry.message;
 		if (message.role === "assistant") {
+			if (!Array.isArray(message.content)) {
+				warnings.push(`Assistant message ${entry.id} has invalid content; tool activity was skipped`);
+				continue;
+			}
 			for (const block of message.content) {
 				if (block.type !== "toolCall") continue;
 				const execution = newExecution(block.id, block.name, false, entry.timestamp);
@@ -236,6 +247,7 @@ export function analyzeActivity(entries: readonly SessionEntry[]): ActivityRepor
 		tools: summarizeExecutions(executions),
 		files: [...files.values()],
 		commands,
+		warnings,
 	};
 }
 
@@ -260,12 +272,19 @@ export function analyzeTiming(entries: readonly SessionEntry[], executions: read
 			}
 		}
 		if (entry.type === "message" && entry.message.role === "assistant") {
-			if (finiteNumber(entry.message.durationMs)) modelTimeMs += entry.message.durationMs;
+			if (finiteNumber(entry.message.durationMs) && entry.message.durationMs >= 0) modelTimeMs += entry.message.durationMs;
 			else modelTimeIncomplete = true;
 		}
 	}
 	if (!startedAt || !endedAt) {
-		return { wallTimeMs: 0, modelTimeMs, toolTimeMs: 0, modelTimeIncomplete, toolTimeEstimated: false };
+		return {
+			wallTimeMs: 0,
+			modelTimeMs,
+			toolTimeMs: 0,
+			modelTimeIncomplete,
+			toolTimeEstimated: false,
+			toolTimeIncomplete: executions.some((execution) => execution.durationMs === undefined),
+		};
 	}
 	return {
 		startedAt,
@@ -275,5 +294,6 @@ export function analyzeTiming(entries: readonly SessionEntry[], executions: read
 		toolTimeMs: executions.reduce((sum, execution) => sum + (execution.durationMs ?? 0), 0),
 		modelTimeIncomplete,
 		toolTimeEstimated: executions.some((execution) => execution.durationEstimated),
+		toolTimeIncomplete: executions.some((execution) => execution.durationMs === undefined),
 	};
 }

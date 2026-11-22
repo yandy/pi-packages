@@ -84,6 +84,8 @@ export interface ToolSummary {
 	missing: number;
 	unfinished: number;
 	durationMs: number;
+	durationKnown: boolean;
+	durationIncomplete: boolean;
 }
 
 export interface FileActivity {
@@ -113,6 +115,7 @@ export interface ActivityReport {
 	tools: ToolSummary[];
 	files: FileActivity[];
 	commands: CommandActivity[];
+	warnings: string[];
 }
 
 export interface TimingReport {
@@ -123,6 +126,7 @@ export interface TimingReport {
 	toolTimeMs: number;
 	modelTimeIncomplete: boolean;
 	toolTimeEstimated: boolean;
+	toolTimeIncomplete: boolean;
 }
 
 export interface ContextEvent {

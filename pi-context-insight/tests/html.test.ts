@@ -94,7 +94,7 @@ function emptyReport(): InsightReport {
 			complete: false,
 			warnings: [],
 		},
-		activity: { executions: [], tools: [], files: [], commands: [] },
+		activity: { executions: [], tools: [], files: [], commands: [], warnings: [] },
 		events: [],
 		timing: { wallTimeMs: 0, modelTimeMs: 0, toolTimeMs: 0, modelTimeIncomplete: false, toolTimeEstimated: false },
 		warnings: [],
