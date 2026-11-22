@@ -25,11 +25,8 @@ export interface CheckpointOkData extends CheckpointBaseData, DiffPreview {
 	resultCommit: string;
 	headBefore: string | null;
 	headAfter: string | null;
-	/**
-	 * Common Git dir of the repository that holds the snapshot. Entries written before this field
-	 * existed have none; a query then falls back to the current directory and uses hedged wording.
-	 */
-	commonDir?: string;
+	/** Common Git dir of the repository that holds the snapshot; a query verifies it from there. */
+	commonDir: string;
 }
 
 export interface CheckpointErrorData extends CheckpointBaseData {
@@ -56,7 +53,7 @@ export function parseCheckpointEntryData(value: unknown): CheckpointEntryData | 
 			!isNullableString(value.patchPreview) ||
 			typeof value.previewTruncated !== "boolean" ||
 			!isNullableString(value.previewError) ||
-			!isOptionalString(value.commonDir)
+			typeof value.commonDir !== "string"
 		) {
 			return null;
 		}
@@ -76,7 +73,7 @@ export function parseCheckpointEntryData(value: unknown): CheckpointEntryData | 
 			resultCommit: value.resultCommit,
 			headBefore: value.headBefore,
 			headAfter: value.headAfter,
-			...(value.commonDir === undefined ? {} : { commonDir: value.commonDir }),
+			commonDir: value.commonDir,
 			shortstat: value.shortstat,
 			patchPreview: value.patchPreview,
 			previewTruncated: value.previewTruncated,
@@ -187,8 +184,4 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNullableString(value: unknown): value is string | null {
 	return value === null || typeof value === "string";
-}
-
-function isOptionalString(value: unknown): value is string | undefined {
-	return value === undefined || typeof value === "string";
 }

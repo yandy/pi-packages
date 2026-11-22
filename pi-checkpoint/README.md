@@ -73,7 +73,7 @@ Use the command:
 /checkpoint 3
 ```
 
-New successful entries record the common Git dir of the repository that holds the snapshot, so the query can verify the snapshot from any checkout. The lookup has three outcomes:
+Every successful entry records the common Git dir of the repository that holds the snapshot, so the lookup verifies the snapshot in that repository instead of the current directory. The lookup has three outcomes:
 
 1. **Available** — the recorded ref still resolves to the run's recorded result commit. The command prints the ref, the baseline/result commit IDs, and a runnable command that carries the recorded repository:
    ```bash
@@ -82,7 +82,7 @@ New successful entries record the common Git dir of the repository that holds th
 2. **Confirmed unavailable** — the recorded ref is gone or resolves to another commit. The command states that and prints only the retained summary and preview; it never prints a diff command that cannot run.
 3. **Unconfirmed** — the check itself failed (no `git`, not a Git worktree, an unexpected Git error, an interrupted child). The command says availability cannot be confirmed; it does not claim the snapshot was pruned.
 
-Entries written before the field existed have no `commonDir`; the lookup then falls back to the current directory and uses hedged wording (`may have been pruned or belong to a different repository`). No argument or an invalid number prints usage. Lookup is scoped to the current conversation branch. No LLM tool is registered.
+No argument or an invalid number prints usage. Lookup is scoped to the current conversation branch. No LLM tool is registered.
 
 Use the command to inspect or prune stale checkpoints:
 
