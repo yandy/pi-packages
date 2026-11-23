@@ -5,4 +5,18 @@ export const DICT_ZH: Record<string, string> = {
 	"label.step": "第 {s} 步",
 	"label.turn": "第 {t} 轮",
 	"empty.none": "暂无记录",
+	"event.compaction": "压缩上下文（摘要替换 {messages} token）",
+	"event.contextEditRemove": "移除上下文条目",
+	"event.contextEditReplace": "改写上下文条目",
+	"event.branchSummary": "分支摘要",
+	"event.model": "模型切换：{to}",
+	"event.thinking": "思考级别：{to}",
+	"event.skill": "技能注入 · {name}",
+	"event.inject": "注入 · {customType}",
+	"event.delegate": "委派给 {id} · {description}",
+	"event.childDone": "子 Agent {id} {status}",
+	"event.ask": "向用户提问 · ×{count}",
+	"event.todoAdd": "新增 {count} 项待办",
+	"event.todoUpdate": "更新待办 · ×{count}",
+
 };

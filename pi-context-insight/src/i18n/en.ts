@@ -5,4 +5,18 @@ export const DICT_EN: Record<string, string> = {
 	"label.step": "Step {s}",
 	"label.turn": "Turn {t}",
 	"empty.none": "Nothing recorded",
+	"event.compaction": "Compacted context (summary replaced {messages} tokens)",
+	"event.contextEditRemove": "Removed a context entry",
+	"event.contextEditReplace": "Rewrote a context entry",
+	"event.branchSummary": "Branch summary",
+	"event.model": "Model switch: {to}",
+	"event.thinking": "Thinking level: {to}",
+	"event.skill": "Skill injected · {name}",
+	"event.inject": "Injected · {customType}",
+	"event.delegate": "Delegated to {id} · {description}",
+	"event.childDone": "Subagent {id} {status}",
+	"event.ask": "Asked the user · ×{count}",
+	"event.todoAdd": "Added {count} todo item(s)",
+	"event.todoUpdate": "Updated todo items · ×{count}",
+
 };
