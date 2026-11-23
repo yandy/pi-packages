@@ -2,14 +2,14 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import type { NotifyBackend } from "./config.js";
 
-export interface NotifyRequest {
+export interface DesktopNotification {
 	title: string;
 	body: string;
 	urgency: string;
 }
 
 export interface Notifier {
-	notify(req: NotifyRequest): void;
+	notify(req: DesktopNotification): void;
 	readonly degraded: boolean;
 }
 
@@ -55,7 +55,7 @@ export function createNotifier(opts: {
 		get degraded() {
 			return degraded;
 		},
-		notify(req: NotifyRequest): void {
+		notify(req: DesktopNotification): void {
 			if (degraded) return;
 			const args =
 				backend === "notify-send"

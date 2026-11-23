@@ -7,7 +7,6 @@ describe("loadConfig", () => {
 			enabled: true,
 			backend: "notify-send",
 			minDurationMs: 10000,
-			urgencyPrompt: "critical",
 			urgencyDone: "normal",
 			command: "notify-send",
 		});
@@ -46,13 +45,11 @@ describe("loadConfig", () => {
 		expect(loadConfig({ PI_NOTIFY_COMMAND: "notify-send" }, "linux").backend).toBe("custom");
 	});
 
-	it("overrides urgency and command", () => {
+	it("overrides completion urgency and command", () => {
 		const config = loadConfig({
-			PI_NOTIFY_URGENCY_PROMPT: "low",
 			PI_NOTIFY_URGENCY_DONE: "critical",
 			PI_NOTIFY_COMMAND: "my-notify",
 		});
-		expect(config.urgencyPrompt).toBe("low");
 		expect(config.urgencyDone).toBe("critical");
 		expect(config.command).toBe("my-notify");
 	});
@@ -60,13 +57,11 @@ describe("loadConfig", () => {
 	it("falls back to defaults for empty urgency and command", () => {
 		const config = loadConfig(
 			{
-				PI_NOTIFY_URGENCY_PROMPT: "",
 				PI_NOTIFY_URGENCY_DONE: "",
 				PI_NOTIFY_COMMAND: "",
 			},
 			"linux",
 		);
-		expect(config.urgencyPrompt).toBe("critical");
 		expect(config.urgencyDone).toBe("normal");
 		expect(config.command).toBe("notify-send");
 		expect(config.backend).toBe("notify-send");

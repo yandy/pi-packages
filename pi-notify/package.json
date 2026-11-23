@@ -4,7 +4,7 @@
 		"access": "public"
 	},
 	"version": "0.1.5",
-	"description": "pi package sending desktop notifications when a session waits for input or finishes a run",
+	"description": "pi package delivering explicit desktop notification requests and automatic run-completion alerts",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
