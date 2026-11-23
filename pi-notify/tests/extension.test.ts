@@ -156,13 +156,29 @@ describe("ui_prompt_start", () => {
 		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(2);
 	});
 
-	it("drops an announcement when the prompt closes", async () => {
+	it("keeps an announcement across a stale prompt end", async () => {
+		// `ui_prompt_end` carries no identity: an end belonging to an earlier prompt can land
+		// between the announcement and its own start (another extension's end handler may hold
+		// `emit()`), so an end must never drop the announcement. `tests/host-ordering.test.ts`
+		// pins the same invariant against the real `ExtensionRunner`.
 		const h = createHarness();
 		await h.fire("session_start", { reason: "startup" });
 		h.announcePassivePrompt();
-		await h.fire("ui_prompt_end", { kind: "custom" });
+		await h.fire("ui_prompt_end", { kind: "select", title: "Subagent sessions" });
 		await h.firePrompt({ kind: "custom" });
-		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(1);
+		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
+	});
+
+	it("lets a stale announcement silence the next custom prompt", async () => {
+		// Known limit, recorded deliberately: the announcement has no identity, so a publisher
+		// that announces and then never mounts its prompt loses the next custom alert. In-tree
+		// publishers announce in the same synchronous block as `ui.custom`, so the window is
+		// closed; a third-party prompt that cannot guarantee that should not announce.
+		const h = createHarness();
+		await h.fire("session_start", { reason: "startup" });
+		h.announcePassivePrompt();
+		await h.firePrompt({ kind: "custom" });
+		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
 	});
 
 	it("notifies even before session_start (lazy init)", async () => {

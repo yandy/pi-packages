@@ -105,7 +105,13 @@ export default function (
 		// every prompt, whatever its kind, so a stale one cannot silence a later alert.
 		const passive = passivePromptPending;
 		passivePromptPending = false;
-		if (passive && event.kind === "custom") return;
+		if (passive && event.kind === "custom") {
+			// A viewer replaces whatever prompt preceded it (typically the picker that opened it).
+			// Its `ui_prompt_end` may still be in flight — `emit()` awaits every handler — so the
+			// replaced prompt's pending alert must be dropped here, not left to that end event.
+			cancelPendingPrompt();
+			return;
+		}
 		ensure(ctx);
 		if (!enabled) return;
 		const sessionName = pi.getSessionName?.();
@@ -137,7 +143,10 @@ export default function (
 
 	pi.on("ui_prompt_end", async () => {
 		// The operator answered before the delay elapsed: nothing to deliver.
-		passivePromptPending = false;
+		// A pending announcement is deliberately left alone: `ui_prompt_end` carries no identity,
+		// so an end belonging to an earlier prompt (possibly delayed by another handler) could
+		// arrive between a viewer's announcement and its own `ui_prompt_start` and wipe it.
+		// The announcement is consumed by the next start and dropped on session shutdown instead.
 		cancelPendingPrompt();
 	});
 

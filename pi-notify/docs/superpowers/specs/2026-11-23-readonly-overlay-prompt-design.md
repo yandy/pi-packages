@@ -29,7 +29,7 @@ Gating `custom` prompts on a run in flight does **not** work either: an extensio
 - Pi emits `ui_prompt_start` only for `select` / `confirm` / `input` / `editor` / `custom`, and a titled dialog is always one of the first four — `custom` carries no title by contract.
 - `custom` is arbitrary extension UI. In-tree it has two shapes: read-only viewers mounted by operator commands (`/todos`, `/subagents:sessions`) and interactive tools that block a run on an answer (`ask_user` in TUI mode).
 - Only the mounting package knows which shape it is mounting.
-- `pi.events` is a process-wide channel bus extensions already use for cross-package contracts (`subagents:child:*`, `ask:answered`), and `pi.events.on` subscriptions are dropped automatically when an extension instance is invalidated.
+- `pi.events` is the channel bus of one resource loader — the bus extensions already use for cross-package contracts (`subagents:child:*`, `ask:answered`). It is **not** process-wide: each `DefaultResourceLoader` creates its own unless one is passed in, and `pi-subagents` builds child sessions with their own loader, so a parent and a child session do not share announcements today. `pi.events.on` subscriptions are dropped automatically when an extension instance is invalidated.
 
 ## Approaches
 
@@ -46,28 +46,37 @@ pi-notify:
 
 - `PASSIVE_PROMPT_CHANNEL = "notify:passive-prompt"` is exported and subscribed once per extension instance.
 - A handler sets `passivePromptPending`.
-- `ui_prompt_start` reads and clears the flag on **every** prompt, whatever its kind, then returns early when the flag was set and the prompt is `custom`. A stale announcement therefore cannot silence a later alert, and an announcement never suppresses a titled dialog.
-- `ui_prompt_end` and `session_shutdown` clear the flag alongside the pending timer.
+- `ui_prompt_start` reads and clears the flag on **every** prompt, whatever its kind, then returns early when the flag was set and the prompt is `custom`. Consuming on every start keeps one viewer from silencing the next prompt, and an announcement never suppresses a titled dialog.
+- The early return also drops the alert still pending for the prompt the viewer replaced. That prompt's `ui_prompt_end` cannot be relied on: `ExtensionRunner.emit()` awaits every handler, so another extension can hold the end past the 4 s delay — the picker's alert would then fire while the viewer is open.
+- `ui_prompt_end` deliberately does **not** clear the flag: the event carries no identity, so an end belonging to an earlier prompt can arrive between a viewer's announcement and its own start. `session_shutdown` clears it.
 
 Viewers (`pi-subagents`, `pi-todo`):
 
 - The package duplicates the channel string (like every cross-package `pi.events` contract) and emits it synchronously immediately before `ctx.ui.custom(...)`.
 - `SessionNavigatorHandler` takes the emitter as a required parameter, so a caller cannot forget the announcement and pi-notify stays out of the viewer's dependencies.
 
-Ordering is safe because the host emits the prompt event through `queueMicrotask`: an announcement emitted in the same synchronous block as the `ui.custom` call is always observed first.
+Ordering is safe because the host emits the prompt event through `queueMicrotask`: an announcement emitted in the same synchronous block as the `ui.custom` call is always observed before that start. The converse interleaving — the announced start arriving before the replaced prompt's end — is why the passive branch cancels the pending alert itself.
 
 ## Known limits
 
 - A third-party read-only viewer that does not announce still alerts after the delay. Adopting the contract is one `pi.events.emit`.
-- An announcement that is not followed by a prompt (a package emitting and then throwing before `ui.custom`) lingers until the next `ui_prompt_start`, which consumes it.
+- An announcement that is not followed by any prompt (a package emitting and then never calling `ui.custom`) lingers until the next start consumes it — and that next prompt may be a blocking `custom` (`ask_user`), which is then silenced. Announcing must therefore happen in the same synchronous block as the mount; in-tree publishers have nothing in between.
 - The channel is a string contract: the host does not police it, so a package can announce a blocking prompt as passive and silence it.
 
 ## Verification
 
-Extension-level tests prove:
+Unit tests (`tests/extension.test.ts`) prove:
 
-- an announced `custom` prompt never alerts, past the delay, both idle and mid-run;
-- an announcement is one-shot, does not survive `ui_prompt_end`, and does not silence a titled dialog;
-- a `custom` prompt without an announcement still alerts with the `Interactive prompt` subject (that is `ask_user`'s shape);
-- `SessionNavigatorHandler` announces immediately before `ui.custom` and not when it skips the overlay;
-- `/todos` announces before its overlay and not on the RPC/print fallback.
+- an announced `custom` prompt never alerts past the delay, both idle and mid-run;
+- an announcement is one-shot and does not silence a titled dialog;
+- a stale announcement silences the next `custom` prompt (the documented limit, pinned on purpose);
+- a `custom` prompt without an announcement still alerts with the `Interactive prompt` subject (that is `ask_user`'s shape).
+
+Host-scheduling tests (`tests/host-ordering.test.ts`) drive the real `ExtensionRunner` and its `queueMicrotask` dispatch instead of injecting events, and prove:
+
+- the `/subagents:sessions` chain (picker → announced viewer) alerts for neither prompt;
+- the same holds when another extension's `ui_prompt_end` handler holds `emit()` past the delay;
+- an unrelated prompt end delivered between the announcement and the start does not lose the announcement;
+- an unannounced `custom` prompt still alerts.
+
+Viewer tests prove `SessionNavigatorHandler` announces immediately before `ui.custom` — and not when it skips the overlay — that `/todos` announces before its overlay with a strict call order and not on the RPC/print fallback.

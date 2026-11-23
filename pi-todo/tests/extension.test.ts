@@ -315,8 +315,10 @@ describe("command /todos", () => {
 		await commands.todos.handler("", { mode: "tui", hasUI: true, ui: { notify: vi.fn(), custom, theme } });
 
 		expect(custom).toHaveBeenCalledTimes(1);
-		// 看板是只读浮层：挂载前必须声明被动弹窗，否则 pi-notify 会发「等待输入」通知。
+		// 看板是只读浮层：必须在挂载前声明被动弹窗（顺序也是契约的一部分），
+		// 否则 pi-notify 会为这个浮层发「等待输入」通知。
 		expect(events.emit).toHaveBeenCalledWith("notify:passive-prompt", {});
+		expect(events.emit.mock.invocationCallOrder[0]).toBeLessThan(custom.mock.invocationCallOrder[0]);
 		const [factory, options] = custom.mock.calls[0] as [any, any];
 		expect(options.overlay).toBe(true);
 		expect(options.overlayOptions?.maxHeight).toBe("85%");

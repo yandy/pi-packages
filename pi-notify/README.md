@@ -57,7 +57,7 @@ pi.events.emit("notify:passive-prompt", {});
 await ctx.ui.custom(/* read-only viewer */);
 ```
 
-Emit it synchronously in the same block as the `custom` call — the prompt event Pi emits is deferred through a microtask, so the announcement always arrives first. One announcement covers the prompt that immediately follows; anything after that keeps the default behavior.
+Emit it synchronously in the same block as the `custom` call — the prompt event Pi emits is deferred through a microtask, so the announcement always arrives first. One announcement covers the prompt that immediately follows; anything after that keeps the default behavior. An announcement that never gets a prompt (you emit, then return before mounting) keeps waiting and silences the next `custom` prompt instead, so keep the two statements adjacent.
 
 Example:
 

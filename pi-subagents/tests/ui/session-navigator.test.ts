@@ -630,6 +630,7 @@ describe("SessionNavigatorHandler", () => {
 
 	it("notifies and skips the overlay when no sessions are navigable", async () => {
 		const ui = makeUI();
+		const announcePassivePrompt = vi.fn();
 		const notReady = makeNavigable({ isSessionReady: () => false });
 		await new SessionNavigatorHandler().handle({
 			ui,
@@ -638,10 +639,12 @@ describe("SessionNavigatorHandler", () => {
 			registry,
 			cwd: "/test/cwd",
 			readFile: noReadFile,
-			announcePassivePrompt: vi.fn(),
+			announcePassivePrompt,
 		});
 		expect(ui.notify).toHaveBeenCalledWith("No subagent sessions to view.", "info");
 		expect(ui.custom).not.toHaveBeenCalled();
+		// No overlay means no announcement: a stray one would silence the next prompt.
+		expect(announcePassivePrompt).not.toHaveBeenCalled();
 	});
 
 	it("does not open the overlay when the operator cancels the picker", async () => {
@@ -806,6 +809,7 @@ describe("SessionNavigatorHandler", () => {
 			},
 		];
 		const ui = makeUI("Agent (Old task) · 5 tools · completed · 3.0s · evicted (snapshot)");
+		const announcePassivePrompt = vi.fn();
 
 		await new SessionNavigatorHandler().handle({
 			ui,
@@ -814,10 +818,11 @@ describe("SessionNavigatorHandler", () => {
 			registry,
 			cwd: "/test/cwd",
 			readFile,
-			announcePassivePrompt: vi.fn(),
+			announcePassivePrompt,
 		});
 
 		expect(ui.notify).toHaveBeenCalledWith("Could not read the session transcript file.", "error");
 		expect(ui.custom).not.toHaveBeenCalled();
+		expect(announcePassivePrompt).not.toHaveBeenCalled();
 	});
 });
