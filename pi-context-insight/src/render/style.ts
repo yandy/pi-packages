@@ -3,6 +3,7 @@ export const REPORT_CSS = `
 --systemBase:#5b8def;--systemTools:#8f7bf0;--systemProject:#3fb6a8;--systemSkills:#e0a13a;--systemDocs:#7c8698;--systemOther:#55606f;
 --toolDefinitions:#4f9d69;--user:#2fa4d8;--injected:#b173d6;--skillInjections:#f0803c;--compaction:#e05c5c;
 --reasoning:#9b7bf5;--answers:#e56aa8;--toolCalls:#48b884;--toolResults:#2f7f74;--unattributed:#c9a227;
+--timing-model:#5b8def;--timing-tools:#3fb6a8;--timing-other:#6b7688;
 --ok:#3fb950;--warn:#d0a02a;--err:#e05c5c}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:13px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
