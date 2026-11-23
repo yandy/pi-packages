@@ -84,13 +84,18 @@ export class AgentTypeRegistry implements AgentConfigLookup {
 		return this.agents.get(key)?.enabled !== false;
 	}
 
-	/** Get built-in tool names for a type (case-insensitive). */
+	/**
+	 * Get the tool allowlist for a type (case-insensitive).
+	 *
+	 * `undefined` means "not configured" → all built-in tools; an empty array
+	 * means "explicitly no tools" and must not fall back to the default set.
+	 */
 	getToolNamesForType(type: string): string[] {
 		const key = this.resolveKey(type);
 		const raw = key ? this.agents.get(key) : undefined;
 		const config = raw?.enabled !== false ? raw : undefined;
-		const names = config?.builtinToolNames?.length ? config.builtinToolNames : [...BUILTIN_TOOL_NAMES];
-		return names;
+		const configured = config?.builtinToolNames;
+		return configured === undefined ? [...BUILTIN_TOOL_NAMES] : [...configured];
 	}
 
 	/** Resolve agent config with guaranteed non-null return. Falls back: unknown → general-purpose → absolute fallback. */

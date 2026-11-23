@@ -2,8 +2,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BUILTIN_TOOL_NAMES } from "../../src/config/agent-types";
+import { AgentTypeRegistry } from "../../src/config/agent-types";
 import { loadCustomAgents } from "../../src/config/custom-agents";
+import { assembleSessionConfig } from "../../src/session/session-config";
 
 describe("loadCustomAgents", () => {
 	let tmpDir: string;
@@ -95,7 +96,7 @@ Just a prompt.`,
 
 		expect(agent.name).toBe("minimal");
 		expect(agent.description).toBe("minimal"); // defaults to filename
-		expect(agent.builtinToolNames).toEqual(BUILTIN_TOOL_NAMES); // all tools
+		expect(agent.builtinToolNames).toBeUndefined(); // omitted = all tools, resolved at lookup
 		expect(agent.model).toBeUndefined();
 		expect(agent.thinking).toBeUndefined();
 		expect(agent.maxTurns).toBeUndefined();
@@ -113,7 +114,7 @@ Just a prompt.`,
 
 		expect(agent.name).toBe("bare");
 		expect(agent.description).toBe("bare");
-		expect(agent.builtinToolNames).toEqual(BUILTIN_TOOL_NAMES);
+		expect(agent.builtinToolNames).toBeUndefined(); // omitted = all tools, resolved at lookup
 		expect(agent.promptMode).toBe("append");
 		expect(agent.systemPrompt).toBe("Just a system prompt, no frontmatter.");
 	});
@@ -152,6 +153,35 @@ No tools.`,
 
 		const result = loadCustomAgents(tmpDir);
 		expect(result.get("notool")?.builtinToolNames).toEqual([]);
+	});
+
+	it("keeps `tools: none` empty all the way into the session config", () => {
+		writeAgent("notool", `---
+tools: none
+---
+
+No tools.`);
+		writeAgent("notools2", `---
+description: omitted tools field
+---
+
+All tools.`);
+
+		const registry = new AgentTypeRegistry(() => loadCustomAgents(tmpDir));
+		const io = { buildReplacePrompt: () => "", buildAppendSection: () => "" };
+		const ctx = { cwd: tmpDir, modelRegistry: { find: () => undefined } };
+		const env = { isGitRepo: false, branch: "", platform: "linux" as const };
+
+		expect(assembleSessionConfig("notool", ctx, {}, env, registry, io).toolNames).toEqual([]);
+		expect(assembleSessionConfig("notools2", ctx, {}, env, registry, io).toolNames).toEqual([
+			"read",
+			"bash",
+			"edit",
+			"write",
+			"grep",
+			"find",
+			"ls",
+		]);
 	});
 
 	it("passes through unknown tool names (not filtered)", () => {

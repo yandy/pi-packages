@@ -5,7 +5,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
-import { BUILTIN_TOOL_NAMES } from "../config/agent-types";
 import { debugLog } from "../debug";
 import type { AgentConfig, ThinkingLevel } from "../types";
 
@@ -57,7 +56,7 @@ function loadFromDir(dir: string, agents: Map<string, AgentConfig>, source: "pro
 			name,
 			displayName: str(fm.display_name),
 			description: str(fm.description) ?? name,
-			builtinToolNames: csvList(fm.tools, BUILTIN_TOOL_NAMES),
+			builtinToolNames: parseToolList(fm.tools),
 			model: str(fm.model),
 			thinking: str(fm.thinking) as ThinkingLevel | undefined,
 			maxTurns: nonNegativeInt(fm.max_turns),
@@ -86,7 +85,7 @@ function nonNegativeInt(val: unknown): number | undefined {
 }
 
 /**
- * Parse a raw CSV field value into items, or undefined if absent/empty/"none".
+ * Parse a comma-separated list field into items, or undefined if absent/empty/"none".
  */
 function parseCsvField(val: unknown): string[] | undefined {
 	if (val === undefined || val === null) return undefined;
@@ -101,10 +100,14 @@ function parseCsvField(val: unknown): string[] | undefined {
 }
 
 /**
- * Parse a comma-separated list field with defaults.
- * omitted → defaults; "none"/empty → []; csv → listed items.
+ * Parse the `tools` field, preserving the difference between "not configured"
+ * and "explicitly no tools":
+ *
+ *   omitted        → undefined (consumer falls back to all built-in tools)
+ *   "none" / empty → []        (the agent gets zero tools)
+ *   csv list       → the listed tools
  */
-function csvList(val: unknown, defaults: string[]): string[] {
-	if (val === undefined || val === null) return defaults;
+function parseToolList(val: unknown): string[] | undefined {
+	if (val === undefined || val === null) return undefined;
 	return parseCsvField(val) ?? [];
 }

@@ -198,6 +198,27 @@ describe("AgentTypeRegistry", () => {
 			expect(registry.getToolNamesForType("auditor")).toEqual(["read", "grep"]);
 		});
 
+		it("returns BUILTIN_TOOL_NAMES when the field is omitted", () => {
+			const registry = makeRegistry(
+				new Map([["inheritor", makeAgentConfig({ name: "inheritor", builtinToolNames: undefined })]]),
+			);
+			expect(registry.getToolNamesForType("inheritor")).toEqual(BUILTIN_TOOL_NAMES);
+		});
+
+		it("returns an empty list for an explicit empty allowlist", () => {
+			const registry = makeRegistry(
+				new Map([["notool", makeAgentConfig({ name: "notool", builtinToolNames: [] })]]),
+			);
+			expect(registry.getToolNamesForType("notool")).toEqual([]);
+		});
+
+		it("returns a copy so callers cannot mutate registry state", () => {
+			const tools = ["read"];
+			const registry = makeRegistry(new Map([["auditor", makeAgentConfig({ name: "auditor", builtinToolNames: tools })]]));
+			registry.getToolNamesForType("auditor").push("bash");
+			expect(registry.getToolNamesForType("auditor")).toEqual(["read"]);
+		});
+
 		it("returns BUILTIN_TOOL_NAMES for unknown type", () => {
 			const registry = makeRegistry();
 			const names = registry.getToolNamesForType("nonexistent");

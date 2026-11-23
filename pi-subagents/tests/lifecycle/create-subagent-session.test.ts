@@ -113,6 +113,26 @@ describe("createSubagentSession — assembly", () => {
 		expect(loaderOpts.appendSystemPromptOverride?.(["user append"])).toEqual(["user append", "append section"]);
 	});
 
+	it("passes the type's tool allowlist through to the session", async () => {
+		const registry = createAgentLookup({ builtinToolNames: ["read", "grep"] });
+		await createSubagentSession(
+			{ snapshot: STUB_SNAPSHOT, type: "Explore" },
+			createSubagentSessionDeps({ io, exec, registry }),
+		);
+
+		expect(io.createSession).toHaveBeenCalledWith(expect.objectContaining({ tools: ["read", "grep"] }));
+	});
+
+	it("passes an empty allowlist as an empty tool list, not as the default set", async () => {
+		const registry = createAgentLookup({ builtinToolNames: [] });
+		await createSubagentSession(
+			{ snapshot: STUB_SNAPSHOT, type: "Explore" },
+			createSubagentSessionDeps({ io, exec, registry }),
+		);
+
+		expect(io.createSession).toHaveBeenCalledWith(expect.objectContaining({ tools: [] }));
+	});
+
 	it("calls newSession with parentSession when parentSessionId is provided", async () => {
 		await createSubagentSession(
 			{

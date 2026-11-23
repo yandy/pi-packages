@@ -15,9 +15,9 @@ A [pi](https://pi.dev) extension providing a focused, in-process sub-agent core 
 - **Case-insensitive types** — `"explore"`, `"Explore"`, `"EXPLORE"` all work
 - **Fuzzy model selection** — specify models by name (`"haiku"`, `"sonnet"`) instead of full IDs
 - **Model tiers** — map `fast` / `standard` / `advanced` to real models in config; the agent is guided to pick the configured model per task
-- **Context inheritance** — optionally fork the parent conversation into a sub-agent
+- **Context inheritance** — optionally prepend the parent conversation, rendered as text, to the sub-agent's prompt
 - **Styled notifications** — background results render as themed notification boxes
-- **Event bus** — lifecycle events (`subagents:created`, `started`, `completed`, `failed`, `steered`, `compacted`) via `pi.events`
+- **Event bus** — parent-level and child-session lifecycle events via `pi.events` (see [Events](#events))
 
 ## Install
 
@@ -66,9 +66,39 @@ timeout: 300
 You are a security auditor. Review code for vulnerabilities...
 ```
 
-Agents are discovered from `.pi/agents/<name>.md` (project) and `~/.pi/agent/agents/<name>.md` (global). Project-level overrides global.
+Agents are discovered from `<cwd>/.pi/agents/<name>.md` (project) and `$PI_CODING_AGENT_DIR/agents/<name>.md` (global, default `~/.pi/agent/agents/`). Project-level overrides global; the file name is the agent type name.
+
+### Frontmatter fields
+
+| Field | Value | Default | Meaning |
+|-------|-------|---------|---------|
+| `description` | string | file name | One-line description shown in the `subagent` tool's type list |
+| `display_name` | string | type name | Short name used in the widget, notifications, and results |
+| `tools` | CSV / `none` | all built-in tools | Built-in tool allowlist — see below |
+| `model` | string | inherit parent | `provider/modelId` or fuzzy name; when pinned, wins over the per-call `model` |
+| `thinking` | string | inherit parent | off / minimal / low / medium / high / xhigh |
+| `max_turns` | integer | unlimited | Cap for this type; wins over the per-call `max_turns` |
+| `timeout` | integer | unlimited | Wall-clock seconds cap (`0` = unlimited); wins over the per-call `timeout` |
+| `prompt_mode` | `append` / `replace` | `append` | How the body relates to the base prompt — see the next section |
+| `inherit_context` | boolean | unset | Default when a call omits `inherit_context` |
+| `run_in_background` | boolean | unset | Default when a call omits `run_in_background` |
+| `enabled` | boolean | `true` | `false` keeps the type in the registry but makes it unspawnable and hides it from type lists |
+
+`inherit_context` / `run_in_background` are **defaults only** — an explicit argument always wins, so they set strategy, not capability.
 
 `max_turns` and `timeout` (wall-clock seconds, `0` = unlimited) lock their limits for the agent type: a frontmatter value wins over the per-call parameter.
+
+### The `tools` allowlist
+
+`tools` is the only source of which built-in tools this agent type can use, and the three spellings differ:
+
+| Frontmatter | Parsed as | Agent gets |
+|-------------|-----------|------------|
+| field omitted | `undefined` | All built-in tools (`read` / `bash` / `edit` / `write` / `grep` / `find` / `ls`) |
+| `tools: none`, or `tools:` (empty) | `[]` | **Zero tools**: the model only produces text and no tool call is accepted |
+| `tools: read, grep` | list | Only the listed tools; unknown names pass through and are filtered against the real registry at tool-creation time |
+
+An empty list is never treated as "unset" and never falls back to the full set.
 
 ### Prompt mode
 
@@ -99,8 +129,8 @@ Launch a sub-agent.
 | `max_turns` | number | no | Max agentic turns (unlimited by default) |
 | `timeout` | number | no | Hard wall-clock limit in seconds; the agent is killed at the deadline and partial output is returned (unlimited by default) |
 | `run_in_background` | boolean | no | Run without blocking |
-| `resume` | string | no | Agent ID to resume a previous session |
-| `inherit_context` | boolean | no | Fork parent conversation into agent |
+| `resume` | string | no | Agent ID to resume a previous session (limits in "Session resume" below) |
+| `inherit_context` | boolean | no | Prepend the parent conversation, rendered as text, to this prompt (not a fork of the parent branch) |
 
 ### `get_subagent_result`
 
@@ -109,7 +139,7 @@ Check status and retrieve results from a background agent.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `agent_id` | string | yes | Agent ID to check |
-| `wait` | boolean | no | Wait for completion |
+| `wait` | boolean | no | Wait for completion; only effective while the agent is **running** — a queued agent returns immediately |
 | `verbose` | boolean | no | Include full conversation log |
 
 ### `steer_subagent`
@@ -135,7 +165,7 @@ tier when a task calls for a specific cost or capability level — there is no
 | `standard` | Balanced default (sonnet class) |
 | `advanced` | Most capable, most expensive (opus class) |
 
-The mapping lives in `subagents.json` — `~/.pi/agent/subagents.json` (global) and
+The mapping lives in `subagents.json` — `$PI_CODING_AGENT_DIR/subagents.json` (global, default `~/.pi/agent/subagents.json`) and
 `<cwd>/.pi/subagents.json` (project). The two layers merge **per tier**, so a project can
 override one tier without restating the others:
 
@@ -181,31 +211,96 @@ Background agents are subject to a configurable concurrency limit (default: 4). 
 
 ## Persistent Settings
 
-Settings set via `/subagents:settings` persist in `<cwd>/.pi/subagents.json` (project) and can be overridden globally in `~/.pi/agent/subagents.json`. The same files also hold the [`modelTiers`](#model-tiers) mapping; saving other settings preserves it.
+Settings set via `/subagents:settings` persist in `<cwd>/.pi/subagents.json` (project) and can be overridden globally in `$PI_CODING_AGENT_DIR/subagents.json` (default `~/.pi/agent/subagents.json`). The same files also hold the [`modelTiers`](#model-tiers) mapping; saving other settings preserves it.
 
 | Setting | Meaning |
 |---------|---------|
 | `maxConcurrent` | Background agents allowed to run at once |
 | `defaultMaxTurns` | Default max agentic turns (`0` = unlimited) |
-| `defaultTimeoutSeconds` | Default hard wall-clock timeout in seconds (`0` = unlimited, max `86400`) |
+| `defaultTimeoutSeconds` | Default hard wall-clock timeout in seconds (`0` = unlimited; the settings file requires an integer in `0`–`86400`, out-of-range values are dropped) |
 | `graceTurns` | Turns allowed after the wrap-up steer |
 
 `defaultMaxTurns` / `defaultTimeoutSeconds` sit at the bottom of the precedence chain: agent frontmatter wins over the per-call parameter, which wins over these defaults.
 
+The `86400` ceiling only constrains the **settings file** (`sanitize` drops non-integers or values outside `0`–`86400`). The per-call `timeout` parameter only requires ≥ 1 and frontmatter only a non-negative integer; neither is capped.
+
 ## Events
 
-Lifecycle events emitted via `pi.events` for other extensions to consume:
+Two levels of events are emitted via `pi.events` for other extensions to consume.
+
+Agent-level events (state changes of one agent run):
+
+| Event | When | Scope |
+|-------|------|-------|
+| `subagents:created` | Agent registered | **Background only** (before queue admission) |
+| `subagents:started` | Agent transitions to running (including out of the queue) | Background and foreground |
+| `subagents:completed` | Agent finished successfully | **Background only** (also when aborting a queued agent) |
+| `subagents:failed` | Agent errored, stopped, or aborted | **Background only** (same) |
+| `subagents:steered` | Steering message sent | Running agents, foreground or background |
+| `subagents:compacted` | Agent session compacted | Background and foreground |
+| `subagents:settings_loaded` | Persisted settings applied | Once at extension load |
+| `subagents:settings_changed` | Settings mutation applied | Every settings write |
+
+Foreground runs never emit `completed` / `failed`: the `subagent` tool returns their result directly.
+Use a background agent when you need completion events.
+
+Child-session events (the child session itself being created and torn down — not the same thing as a run):
 
 | Event | When |
 |-------|------|
-| `subagents:created` | Background agent registered |
-| `subagents:started` | Agent transitions to running |
-| `subagents:completed` | Agent finished successfully |
-| `subagents:failed` | Agent errored, stopped, or aborted |
-| `subagents:steered` | Steering message sent |
-| `subagents:compacted` | Agent session compacted |
-| `subagents:settings_loaded` | Persisted settings applied |
-| `subagents:settings_changed` | Settings mutation applied |
+| `subagents:child:spawning` | A child run starts, before its session exists |
+| `subagents:child:session-created` | Child session created, immediately before extension binding (payload carries `sessionId`; subscribers must register synchronously) |
+| `subagents:child:completed` | The child prompt resolved (normal, steered to wrap up, or hard-aborted) |
+| `subagents:child:disposed` | The child session record is torn down (eviction sweep, session switch, extension shutdown, bind failure) — **not** emitted at the end of every run |
+
+## Session resume
+
+`resume` can only continue a session that is **still alive in memory**: once the record is cleaned up (see below)
+the call returns not found, and an agent whose session was never created returns no active session. Resuming just
+re-prompts the same session, so these parameters have **no effect** on that call: `model`, `thinking`,
+`max_turns`, `timeout`, `inherit_context` (the session was created with the original configuration). Resume also has
+no turn or wall-clock guard — only the parent's abort signal applies.
+
+## Transcripts and cleanup
+
+A child transcript lives inside the parent session directory:
+`<parent session dir>/<parent file name without .jsonl>/tasks/`. When the parent session is not persisted
+(headless / API mode) it falls back to `$TMPDIR/pi-subagents-<uid>/<encoded cwd>/tasks/`.
+
+10 minutes after an agent finishes it is cleaned up: the session is disposed (emitting `subagents:child:disposed`).
+Only sessions that reached disk leave a navigable record behind for `/subagents:sessions` to re-read.
+
+## Execution constraints for children
+
+- Children cannot spawn grandchildren: `subagent` / `get_subagent_result` / `steer_subagent` are removed from the active
+  tool set at bind time, including when another extension registered them.
+- Children always run in the parent session's cwd; the `subagent` tool has no `cwd` parameter.
+
+## Cross-extension API
+
+Other extensions can drive the sub-agent core without the tools (the package exports an entry point):
+
+```ts
+const { getSubagentsService } = await import("@yandy0725/pi-subagents");
+const svc = getSubagentsService();
+const id = svc?.spawn("Explore", "Check for stale TODOs", { description: "Find stale TODOs", foreground: true });
+```
+
+| Method | Description |
+|--------|-------------|
+| `spawn(type, prompt, options?)` | Start an agent and return its ID immediately (throws outside a session) |
+| `getRecord(id)` | Serializable snapshot of current state (no live session objects) |
+| `listAgents()` | All tracked agents, most recent first |
+| `abort(id)` | Abort a running or queued agent |
+| `steer(id, message)` | Send a steering message to a running agent |
+| `waitForAll()` | Wait for all running and queued agents to complete |
+| `hasRunning()` | Whether any agents are running or queued |
+
+`SpawnOptions`: `description`, `model`, `maxTurns`, `timeoutSeconds` (`0`/omitted = unlimited, normalized at the API
+boundary), `thinkingLevel`, `inheritContext`, `foreground`, `bypassQueue`. The two queue-related options differ:
+`bypassQueue` only skips the concurrency limiter, while `foreground` also means "not background" (no
+`created` / `completed` / `failed` events and no completion notification). `spawn` still returns the ID immediately
+in both cases; read results through `getRecord`.
 
 ## Development
 

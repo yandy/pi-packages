@@ -50,7 +50,7 @@ pi install npm:@yandy0725/pi-sandbox
 }
 ```
 
-没有 `model_tier` 这种额外参数；没配置的档位根本不会出现在参数描述和提示里，也不会有别的模型悄悄顶替；agent 的 frontmatter 写死了模型时永远以它为准。全局 `~/.pi/agent/subagents.json` 与项目 `.pi/subagents.json` 按**档位**合并，项目里只改一档，不用把另外两档再抄一遍。
+没有 `model_tier` 这种额外参数；没配置的档位根本不会出现在参数描述和提示里，也不会有别的模型悄悄顶替；agent 的 frontmatter 写死了模型时永远以它为准。全局 `$PI_CODING_AGENT_DIR/subagents.json`（默认 `~/.pi/agent/subagents.json`）与项目 `.pi/subagents.json` 按**档位**合并，项目里只改一档，不用把另外两档再抄一遍。
 
 ![用 /subagents:sessions 只读回看某个子代理的完整 transcript](https://yandy.github.io/assets/pi-subagents-session.png)
 
