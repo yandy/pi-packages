@@ -248,7 +248,7 @@ export function buildSessionReport(input: SessionInput): SessionReport {
 	const events = collectEvents({
 		entries,
 		steps,
-		subagentRecords: records.map((record) => ({
+		subagentRecords: (input.mode === "short" ? records.map((record) => ({ ...record, description: "" })) : records).map((record) => ({
 			id: record.id,
 			description: record.description,
 			status: record.status,
