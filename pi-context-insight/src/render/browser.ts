@@ -94,7 +94,8 @@ function rowHtml(report: InsightReport, item: Item): string {
 		item.textIndex === null || report.mode === "short"
 			? `<p class="dim" data-empty="browser-body">${t(lang, { key: "empty.shortNoBody" })}</p>`
 			: `<pre class="body">${esc(report.bodies[item.textIndex] ?? "")}</pre>`;
-	return `<details class="row" data-item="${item.id}" data-cat="${item.category}"${kindAttr} data-search="${esc(search)}"><summary><span class="tag">${esc(categoryLabel(lang, item.category))}</span>${chips}<span class="dim">${esc(preview(report, item))}</span> <span class="dim">≈${fmtTokens(item.tokens)} · ${esc(fmtClock(Date.parse(item.entryId ? "1970-01-01T00:00:00.000Z" : "")))}</span></summary>${body}</details>`;
+	const clock = item.timestamp === undefined ? "—" : fmtClock(item.timestamp);
+	return `<details class="row" data-item="${item.id}" data-cat="${item.category}"${kindAttr} data-search="${esc(search)}"><summary><span class="tag">${esc(categoryLabel(lang, item.category))}</span>${chips}<span class="dim">${esc(preview(report, item))}</span> <span class="dim">≈${fmtTokens(item.tokens)} · ${esc(clock)}</span>${item.truncated === true ? ' <span class="flag">✂</span>' : ""}</summary>${body}</details>`;
 }
 
 function categoryRow(report: InsightReport, step: Step, group: CategoryId): string {
@@ -111,13 +112,14 @@ function panelOf(report: InsightReport, step: Step, selected: boolean): string {
 	const lang = report.lang;
 	const items = itemsOfStep(report, step);
 	const groups = GROUPS.map((group) => {
-		const list = items.filter((item) => GROUP_OF[item.category] === group).slice(0, ROW_LIMIT);
-		if (list.length === 0) return "";
+		const all = items.filter((item) => GROUP_OF[item.category] === group);
+		if (all.length === 0) return "";
+		const list = all.slice(0, ROW_LIMIT);
+		const rest = all.slice(ROW_LIMIT, ROW_LIMIT * 10);
 		const rows = list.map((item) => rowHtml(report, item)).join("");
-		const hidden = items.filter((item) => GROUP_OF[item.category] === group).length - list.length;
 		const more =
-			hidden > 0
-				? `<p class="dim" data-more="${group}">${t(lang, { key: "common.omitted", params: { count: hidden } })}</p>`
+			rest.length > 0
+				? `<details data-more="${group}"><summary>${t(lang, { key: "common.omitted", params: { count: rest.length } })}</summary>${rest.map((item) => rowHtml(report, item)).join("")}</details>`
 				: "";
 		return `<h4 data-cat-section="${group}">${esc(t(lang, { key: GROUP_LABEL_KEY[group] ?? group }))}</h4>${rows}${more}`;
 	}).join("");

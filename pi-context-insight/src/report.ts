@@ -79,6 +79,7 @@ export interface SessionInput {
 	cwd: string;
 	mode: "full" | "short";
 	lang: Lang;
+	bodyScale?: number;
 	model?: string;
 	thinkingLevel?: string;
 	contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null };
@@ -90,14 +91,15 @@ export interface SessionInput {
 	family?: InsightReport["family"];
 }
 
-function applyBodyCaps(items: readonly Item[], bodies: string[], truncation: TruncationEntry[]): void {
+function applyBodyCaps(items: readonly Item[], bodies: string[], truncation: TruncationEntry[], scale = 1): void {
 	const buckets = new Map<string, Map<number, number>>();
 	for (const item of items) {
 		if (item.textIndex === null) continue;
-		const cap = BODY_CAPS[item.category] ?? 8000;
+		const cap = Math.max(200, Math.round((BODY_CAPS[item.category] ?? 8000) * scale));
 		const text = bodies[item.textIndex];
 		if (text === undefined || text.length <= cap) continue;
 		bodies[item.textIndex] = text.slice(0, cap);
+		item.truncated = true;
 		let bucket = buckets.get(item.category);
 		if (bucket === undefined) {
 			bucket = new Map<number, number>();
@@ -197,7 +199,11 @@ export function buildSessionReport(input: SessionInput): SessionReport {
 	const warnings: Msg[] = [];
 	const truncation: TruncationEntry[] = [];
 
-	const { steps, items, bodies, turns, finalEstimate, stepItemIds } = buildSteps({ branch, mode: input.mode, putBody: () => null });
+	const { steps, items, bodies, turns, finalEstimate, stepItemIds } = buildSteps({
+		branch,
+		mode: input.mode,
+		putBody: () => null,
+	});
 	allocateCost(steps);
 
 	const ledger = collectUsageLedger(entries);
@@ -234,6 +240,8 @@ export function buildSessionReport(input: SessionInput): SessionReport {
 			...(typeof data.modelName === "string" ? { modelName: data.modelName } : {}),
 			...(typeof data.thinking === "string" ? { thinking: data.thinking } : {}),
 			...(typeof data.outputFile === "string" ? { outputFile: data.outputFile } : {}),
+			...(isLifetime(data.lifetimeUsage) ? { lifetimeUsage: data.lifetimeUsage } : {}),
+			...(typeof data.lifetimeCost === "number" ? { lifetimeCost: data.lifetimeCost } : {}),
 		});
 	}
 
@@ -259,7 +267,7 @@ export function buildSessionReport(input: SessionInput): SessionReport {
 	const commands = collectCommands({ entries, steps, mode: input.mode });
 	const tools = aggregateTools(executions, input.toolInfos ?? [], steps.length);
 
-	applyBodyCaps(items, bodies, truncation);
+	applyBodyCaps(items, bodies, truncation, input.bodyScale ?? 1);
 	if (steps.some((step) => !step.hasDetails)) {
 		truncation.push({ kind: "stepDetails", limit: 300, actual: steps.filter((step) => !step.hasDetails).length });
 	}
@@ -392,6 +400,12 @@ function childSessionOf(
 	};
 }
 
+function isLifetime(value: unknown): value is { input: number; output: number; cacheWrite: number } {
+	if (typeof value !== "object" || value === null) return false;
+	const usage = value as Record<string, unknown>;
+	return ["input", "output", "cacheWrite"].every((key) => typeof usage[key] === "number" && Number.isFinite(usage[key]));
+}
+
 function trimSessionId(value: string | undefined): string | undefined {
 	if (value === undefined) return undefined;
 	return value.endsWith(".jsonl") ? basename(value, ".jsonl") : value;
@@ -400,7 +414,7 @@ function trimSessionId(value: string | undefined): string | undefined {
 /** Build the full report for the current session, including its agent family. */
 export function buildReport(
 	ctx: ExtensionCommandContext,
-	options: { mode: "full" | "short"; lang: Lang; generatedAt?: Date },
+	options: { mode: "full" | "short"; lang: Lang; generatedAt?: Date; bodyScale?: number },
 ): InsightReport {
 	const generatedAt = (options.generatedAt ?? new Date()).toISOString();
 	const contextUsage = ctx.getContextUsage();
@@ -449,7 +463,8 @@ export function buildReport(
 			const accepted =
 				headerParent === expectedParent ||
 				opened.child.parentId === expectedParent ||
-				(expectedParent === parentId && (headerParent === trimSessionId(parentFile) || opened.child.parentId === parentFile));
+				(expectedParent === parentId &&
+					(headerParent === trimSessionId(parentFile) || opened.child.parentId === parentFile));
 			if (!accepted) return { ...opened.child, parentId: "mismatch" };
 			loaded.set(opened.child.id, opened.manager);
 			return opened.child;
@@ -462,6 +477,7 @@ export function buildReport(
 		cwd: ctx.cwd,
 		mode: options.mode,
 		lang: options.lang,
+		bodyScale: options.bodyScale ?? 1,
 		...(ctx.model === undefined ? {} : { model: `${ctx.model.provider}/${ctx.model.id}` }),
 		thinkingLevel: ctx.thinkingLevel,
 		...(contextUsage === undefined ? {} : { contextUsage }),
@@ -477,7 +493,7 @@ export function buildReport(
 
 	const children: InsightReport["family"]["children"] = [];
 	for (const member of sorted) {
-		if (member.depth !== 1) continue;
+		if (member.depth > 3) continue;
 		const manager = loaded.get(member.id);
 		if (manager === undefined) continue;
 		const childReport = buildSessionReport({

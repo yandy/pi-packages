@@ -40,7 +40,10 @@ function filesCard(report: InsightReport): string {
 			: report.files
 					.map((row) => {
 						const badges = FILE_KINDS.filter((kind) => row.counts[kind] > 0)
-							.map((kind) => `<span class="tag" data-kind="${kind}">${esc(t(lang, { key: `files.kind.${kind}` }))} ${row.counts[kind]}</span>`)
+							.map(
+								(kind) =>
+									`<span class="tag" data-kind="${kind}">${esc(t(lang, { key: `files.kind.${kind}` }))} ${row.counts[kind]}</span>`,
+							)
 							.join("");
 						const ops = row.ops
 							.map(

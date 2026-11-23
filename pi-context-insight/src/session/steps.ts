@@ -153,14 +153,18 @@ export function buildSteps(args: {
 	};
 	const chipOf = (item: Item): BriefChip => ({ itemId: item.id, tag: item.tag, preview: previewOf(item) });
 
-	const extract = (entry: SessionEntry): Item[] =>
-		extractItems({
+	const extract = (entry: SessionEntry): Item[] => {
+		const timestamp = Date.parse(entry.timestamp);
+		const list = extractItems({
 			entry,
 			system,
 			nextId: () => nextItemId++,
 			putBody,
 			callArgs: (id) => callArgs.get(id),
 		});
+		for (const item of list) if (Number.isFinite(timestamp)) item.timestamp = timestamp;
+		return list;
+	};
 
 	const register = (list: readonly Item[]): void => {
 		for (const item of list) items.push(item);
@@ -286,7 +290,10 @@ export function buildSteps(args: {
 				if (diff > 0 && diff > estimatedTotal * UNATTRIBUTED_MIN_SHARE) snapshot.unattributed = diff;
 			}
 			stepInTurn += 1;
-			const inputs = activeItems.filter((item) => !previousIds.has(item.id)).slice(0, MAX_CHIPS).map(chipOf);
+			const inputs = activeItems
+				.filter((item) => !previousIds.has(item.id))
+				.slice(0, MAX_CHIPS)
+				.map(chipOf);
 			const delta: Partial<Record<CategoryId, number>> = {};
 			for (const id of CATEGORY_ORDER) {
 				const value = (snapshot[id] ?? 0) - (previousSums[id] ?? 0);
@@ -372,7 +379,6 @@ export function buildSteps(args: {
 		stepItemIds: snapshotIds,
 	};
 }
-
 
 /** The step a timestamp belongs to: the last request that had already started. */
 export function stepIndexOf(timestamp: number, steps: ReadonlyArray<{ index: number; timestamp: number }>): number {

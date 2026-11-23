@@ -20,9 +20,9 @@ export const SECTION_IDS = [
 const WARNING_VISIBLE = 8;
 
 function anchors(lang: InsightReport["lang"]): string {
-	return SECTION_IDS.map((id) => `<a href="#${id}" data-anchor="${id}" data-i18n="anchor.${id}">${esc(t(lang, { key: `anchor.${id}` }))}</a>`).join(
-		"",
-	);
+	return SECTION_IDS.map(
+		(id) => `<a href="#${id}" data-anchor="${id}" data-i18n="anchor.${id}">${esc(t(lang, { key: `anchor.${id}` }))}</a>`,
+	).join("");
 }
 
 function warningsPanel(report: InsightReport): string {
@@ -77,7 +77,9 @@ export function renderDocument(args: {
 			? "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'"
 			: "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'";
 	const banner =
-		report.mode === "full" ? `<div class="banner" data-banner="raw-content" data-i18n="doc.banner">${esc(t(lang, { key: "doc.banner" }))}</div>` : "";
+		report.mode === "full"
+			? `<div class="banner" data-banner="raw-content" data-i18n="doc.banner">${esc(t(lang, { key: "doc.banner" }))}</div>`
+			: "";
 	const runtime = args.runtime ?? "";
 	const meta = [report.metadata.model ?? "—", report.metadata.thinkingLevel, report.metadata.cwd, report.generatedAt]
 		.filter((value): value is string => typeof value === "string" && value.length > 0)

@@ -92,8 +92,7 @@ export function collectToolExecutions(args: {
 			continue;
 		}
 		if (message.role !== "toolResult") continue;
-		const execution =
-			byId.get(message.toolCallId);
+		const execution = byId.get(message.toolCallId);
 		if (execution === undefined) continue;
 		execution.status = message.isError ? "error" : "ok";
 		execution.tokens += tokensOf(message.content);

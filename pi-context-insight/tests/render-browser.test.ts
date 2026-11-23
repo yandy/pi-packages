@@ -60,9 +60,10 @@ describe("renderBrowser", () => {
 		const html = renderBrowser(report());
 		expect(html).toContain('data-tool-source="builtin"');
 	});
-	it("caps rows per category and offers more", () => {
+	it("offers more rows behind a disclosure instead of hiding them", () => {
 		const html = renderBrowser(report("full", 210));
-		expect(html.match(/data-item="\d+" data-cat="toolResults"/g)?.length ?? 0).toBeLessThanOrEqual(200);
+		expect(html).toContain('data-more="toolResults"');
+		expect(html.match(/data-item="\d+" data-cat="toolResults"/g)?.length ?? 0).toBeGreaterThan(200);
 	});
 	it("renders dna rows for the selected step", () => {
 		const html = renderBrowser(report());

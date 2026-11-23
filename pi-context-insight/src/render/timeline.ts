@@ -114,7 +114,10 @@ export function renderTimeline(report: InsightReport): string {
 <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">${toolbar}</div>
 <div class="legend">${legend}</div>
 <div data-timeline-overview hidden style="margin-top:8px">${steps
-		.map((step) => `<i data-overview-step="${step.index}" style="display:inline-block;height:14px;width:${Math.max(1, Math.round((step.estimatedTotal / Math.max(max, 1)) * 60))}px;background:var(--systemBase);margin-right:1px;border-radius:1px" title="${esc(`S${step.index + 1}`)}"></i>`)
+		.map(
+			(step) =>
+				`<i data-overview-step="${step.index}" style="display:inline-block;height:14px;width:${Math.max(1, Math.round((step.estimatedTotal / Math.max(max, 1)) * 60))}px;background:var(--systemBase);margin-right:1px;border-radius:1px" title="${esc(`S${step.index + 1}`)}"></i>`,
+		)
 		.join("")}</div>
 <div class="timeline-scroll" data-timeline-scroll style="margin-top:8px"><svg width="${width}" height="190" viewBox="0 0 ${width} 190" role="img" aria-label="${esc(t(lang, { key: "timeline.title" }))}">
 <line x1="10" x2="${width - 10}" y1="150" y2="150" stroke="var(--line)"/>

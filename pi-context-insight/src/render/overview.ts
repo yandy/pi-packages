@@ -26,13 +26,7 @@ export function renderOverview(report: InsightReport): string {
 			t(lang, { key: "kpi.tokensSub", params: { prompt: fmtTokens(k.prompt), output: fmtTokens(k.output) } }),
 			"tokens",
 		),
-		kpi(
-			t(lang, { key: "kpi.cost" }),
-			"kpi.cost",
-			fmtCost(k.cost),
-			t(lang, { key: costBasisKey(report) }),
-			"cost",
-		),
+		kpi(t(lang, { key: "kpi.cost" }), "kpi.cost", fmtCost(k.cost), t(lang, { key: costBasisKey(report) }), "cost"),
 		kpi(
 			t(lang, { key: "kpi.cacheHit" }),
 			"kpi.cacheHit",

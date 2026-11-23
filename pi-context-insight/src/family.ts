@@ -13,6 +13,8 @@ export interface SubagentRecord {
 	modelName?: string;
 	thinking?: string;
 	outputFile?: string;
+	lifetimeUsage?: { input: number; output: number; cacheWrite: number };
+	lifetimeCost?: number;
 }
 
 export interface ChildSession {
@@ -40,6 +42,8 @@ export interface FamilyMember {
 	steps: number;
 	durationMs?: number;
 	usage?: UsageAggregate;
+	lifetimeTokens?: number;
+	lifetimeCost?: number;
 }
 
 const STATUSES = new Set<FamilyStatus>(["completed", "error", "stopped", "aborted"]);
@@ -103,18 +107,19 @@ export function collectFamily(args: {
 				break;
 			}
 			seen.add(child.id);
-			const redacted: SubagentRecord = mode === "short"
-				? {
-						id: record.id,
-						type: record.type,
-						description: "",
-						status: record.status,
-						startedAt: record.startedAt,
-						...(record.completedAt === undefined ? {} : { completedAt: record.completedAt }),
-						...(record.modelName === undefined ? {} : { modelName: record.modelName }),
-						...(record.thinking === undefined ? {} : { thinking: record.thinking }),
-					}
-				: record;
+			const redacted: SubagentRecord =
+				mode === "short"
+					? {
+							id: record.id,
+							type: record.type,
+							description: "",
+							status: record.status,
+							startedAt: record.startedAt,
+							...(record.completedAt === undefined ? {} : { completedAt: record.completedAt }),
+							...(record.modelName === undefined ? {} : { modelName: record.modelName }),
+							...(record.thinking === undefined ? {} : { thinking: record.thinking }),
+						}
+					: record;
 			members.push({
 				id: child.id,
 				parentId: level.parentId,
@@ -127,6 +132,10 @@ export function collectFamily(args: {
 				steps: child.steps,
 				...(child.durationMs === undefined ? {} : { durationMs: child.durationMs }),
 				...(child.usage === undefined ? {} : { usage: child.usage }),
+				...(record.lifetimeUsage === undefined
+					? {}
+					: { lifetimeTokens: record.lifetimeUsage.input + record.lifetimeUsage.output + record.lifetimeUsage.cacheWrite }),
+				...(record.lifetimeCost === undefined ? {} : { lifetimeCost: record.lifetimeCost }),
 			});
 			if (child.records.length > 0) {
 				queue.push({ parentId: child.id, depth: level.depth + 1, records: child.records });

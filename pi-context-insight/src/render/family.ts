@@ -28,7 +28,7 @@ export function renderFamily(report: InsightReport): string {
 			return `<div class="kpi" data-member="${esc(member.id)}" data-status="${member.status}" style="grid-column:span 2">
 <div class="kpi-label">${esc(labelOf(report, member))} <span class="tag">${esc(member.record?.type ?? "?")}</span> <span class="tag">${esc(t(lang, { key: STATUS_KEY[member.status] ?? member.status }))}</span>${member.depth > 1 ? ` <span class="tag">depth ${member.depth}</span>` : ""}</div>
 <div class="kpi-value">${member.child?.context === undefined || member.child.context.tokens === null ? "—" : `${fmtTokens(member.child.context.tokens)} / ${fmtTokens(member.child.context.window)}`}</div>
-<div class="kpi-sub">${t(lang, { key: "family.meta", params: { steps: member.steps, dur: member.durationMs === undefined ? "—" : fmtDuration(member.durationMs), tokens: fmtTokens(member.usage?.total ?? 0) } })}</div>
+<div class="kpi-sub">${t(lang, { key: "family.meta", params: { steps: member.steps, dur: member.durationMs === undefined ? "—" : fmtDuration(member.durationMs), tokens: fmtTokens(member.usage?.total ?? member.lifetimeTokens ?? 0) } })}</div>
 ${records?.modelName === undefined ? "" : `<div class="kpi-sub dim">${esc(records.modelName)}${records.thinking === undefined ? "" : ` · ${esc(records.thinking)}`}</div>`}
 </div>`;
 		})
@@ -37,7 +37,7 @@ ${records?.modelName === undefined ? "" : `<div class="kpi-sub dim">${esc(record
 	const rows = members
 		.map((member) => {
 			const record = member.record;
-			return `<tr class="row" data-delegation="${esc(member.id)}" data-status="${member.status}"><td>${esc(labelOf(report, member))}</td><td>${esc(t(lang, { key: STATUS_KEY[member.status] ?? member.status }))}</td><td>${report.mode === "short" || member.brief === undefined ? "—" : esc(member.brief)}</td><td>${report.mode === "short" ? "—" : record?.result === undefined ? (record?.error === undefined ? "—" : `<span class="flag">${esc(record.error)}</span>`) : esc(record.result)}</td><td class="num">${fmtTokens(member.usage?.total ?? 0)}</td><td class="num">${record?.toolUses ?? "—"}</td><td class="dim">${member.durationMs === undefined ? "—" : fmtDuration(member.durationMs)}</td></tr>`;
+			return `<tr class="row" data-delegation="${esc(member.id)}" data-status="${member.status}"><td>${esc(labelOf(report, member))}</td><td>${esc(t(lang, { key: STATUS_KEY[member.status] ?? member.status }))}</td><td>${report.mode === "short" || member.brief === undefined ? "—" : esc(member.brief)}</td><td>${report.mode === "short" ? "—" : record?.result === undefined ? (record?.error === undefined ? "—" : `<span class="flag">${esc(record.error)}</span>`) : esc(record.result)}</td><td class="num">${fmtTokens(member.usage?.total ?? member.lifetimeTokens ?? 0)}</td><td class="num">${record?.toolUses ?? "—"}</td><td class="dim">${member.durationMs === undefined ? "—" : fmtDuration(member.durationMs)}</td></tr>`;
 		})
 		.join("");
 

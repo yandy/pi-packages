@@ -29,6 +29,9 @@ export interface Item {
 	isError?: boolean;
 	block?: "thinking" | "text" | "toolCall";
 	skillName?: string;
+	/** Entry timestamp, so row metadata can show when the item entered the transcript. */
+	timestamp?: number;
+	truncated?: boolean;
 }
 
 interface ContentBlock {
@@ -242,26 +245,30 @@ function customEntryItems(entry: SessionEntry, nextId: () => number, putBody: (t
 		const content = entry.content ?? "";
 		const text = typeof content === "string" ? content : contentText(content);
 		const isSkill = /skill/i.test(entry.customType);
-		return [{
-			id: nextId(),
-			entryId: entry.id,
-			category: isSkill ? "skillInjections" : "injected",
-			kind: "custom",
-			tag: entry.customType,
-			tokens: estimateTextAndImageContentTokens(content),
-			textIndex: putBody(text),
-		}];
+		return [
+			{
+				id: nextId(),
+				entryId: entry.id,
+				category: isSkill ? "skillInjections" : "injected",
+				kind: "custom",
+				tag: entry.customType,
+				tokens: estimateTextAndImageContentTokens(content),
+				textIndex: putBody(text),
+			},
+		];
 	}
 	if (entry.type === "branch_summary") {
-		return [{
-			id: nextId(),
-			entryId: entry.id,
-			category: "injected",
-			kind: "summary",
-			tag: "branchSummary",
-			tokens: estimateTextTokens(entry.summary),
-			textIndex: putBody(entry.summary),
-		}];
+		return [
+			{
+				id: nextId(),
+				entryId: entry.id,
+				category: "injected",
+				kind: "summary",
+				tag: "branchSummary",
+				tokens: estimateTextTokens(entry.summary),
+				textIndex: putBody(entry.summary),
+			},
+		];
 	}
 	return [];
 }

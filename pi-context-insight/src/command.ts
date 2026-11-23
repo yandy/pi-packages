@@ -12,7 +12,7 @@ import { renderEvents } from "./render/events";
 import { renderFamily } from "./render/family";
 import { renderOverview } from "./render/overview";
 import { buildPayload } from "./render/payload";
-import { renderTimeline, renderTimelineSummary } from "./render/timeline";
+import { renderTimeline } from "./render/timeline";
 import { renderTimingCard } from "./render/timing";
 import { renderTokens } from "./render/tokens";
 import { buildReport } from "./report";
@@ -24,6 +24,7 @@ export interface InsightArgs {
 }
 
 const USAGE = "usage: /insight [--short] [--lang en|zh] [output.html]";
+const HTML_BUDGET_BYTES = 16 * 1024 * 1024;
 
 export function parseInsightArgs(args: string): InsightArgs {
 	const tokens = args.trim().length === 0 ? [] : args.trim().split(/\s+/);
@@ -87,7 +88,6 @@ function bodyOf(report: ReturnType<typeof buildReport>): string {
 		renderTokens(report),
 		renderTimingCard(report),
 		renderCurrentContext(report),
-		`<section class="card" id="timeline" data-card="timeline">${renderTimelineSummary(report)}</section>`,
 		renderTimeline(report),
 		renderStepDetail(report),
 		renderBrowser(report),
@@ -111,17 +111,27 @@ export async function runInsight(
 	const parsed = parseInsightArgs(args);
 	const outputPath = parsed.path === undefined ? defaultInsightPath(ctx) : resolve(ctx.cwd, parsed.path);
 	const lang = parsed.lang ?? langFromEnv(options.env ?? process.env) ?? "en";
-	const report = buildReport(ctx, {
-		mode: parsed.mode,
-		lang,
-		...(options.generatedAt === undefined ? {} : { generatedAt: options.generatedAt }),
-	});
-	const html = renderDocument({
-		report,
-		body: bodyOf(report),
-		payload: buildPayload(report),
-		runtime: CLIENT_RUNTIME,
-	});
+	const generatedAt = options.generatedAt;
+	const build = (bodyScale: number): string => {
+		const report = buildReport(ctx, {
+			mode: parsed.mode,
+			lang,
+			bodyScale,
+			...(generatedAt === undefined ? {} : { generatedAt }),
+		});
+		const html = renderDocument({
+			report,
+			body: bodyOf(report),
+			payload: buildPayload(report),
+			runtime: CLIENT_RUNTIME,
+		});
+		return html;
+	};
+	let html = build(1);
+	for (const scale of [0.25, 0]) {
+		if (Buffer.byteLength(html, "utf8") <= HTML_BUDGET_BYTES) break;
+		html = build(scale);
+	}
 	await writeFile(outputPath, html, "utf8");
 	return outputPath;
 }

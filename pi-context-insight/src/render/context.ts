@@ -52,7 +52,8 @@ export function renderCurrentContext(report: InsightReport): string {
 		)
 		.join("");
 
-	const percentText = context.percent === null || !Number.isFinite(context.percent) ? "—" : `${context.percent.toFixed(1)}%`;
+	const percentText =
+		context.percent === null || !Number.isFinite(context.percent) ? "—" : `${context.percent.toFixed(1)}%`;
 	const headline = `${context.estimated ? "≈" : ""}${fmtTokens(used)} / ${fmtTokens(window)} · ${percentText}`;
 	const disabled = !context.reserveEnabled ? `<p class="dim">${t(lang, { key: "context.compactionDisabled" })}</p>` : "";
 
