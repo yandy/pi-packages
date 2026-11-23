@@ -228,7 +228,6 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify(`${formatProgress(todos)}\n${listTodos(todos)}`, "info");
 				return;
 			}
-			pi.events.emit("notify:non-blocking-prompt", {});
 			await ctx.ui.custom<void>(
 				(tui, theme, keybindings, done) => new TodoView(todos, theme, tui, keybindings, () => done()),
 				{

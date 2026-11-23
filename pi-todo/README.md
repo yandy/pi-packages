@@ -90,8 +90,6 @@ The widget hides when the list is empty or every task is done. RPC clients get t
 
 The **full view** is a command: `/todos` opens the complete list in an overlay (`↑`/`↓` or `j`/`k` to move, `g`/`G` for the ends, `Esc` or `q` to close); the header carries the progress plus a `(current/total)` position marker whenever the list is longer than the window. It is read-only — nothing in it changes the board. Outside the TUI the command falls back to a notification carrying the full list: RPC forwards it, while print and JSON modes have no UI and produce no output.
 
-The overlay does not block the agent loop, so the TUI command emits `notify:non-blocking-prompt` immediately before opening it. Empty boards and non-TUI fallbacks emit no declaration.
-
 ## UI surface
 
 | Method | Guard | Outside TUI (RPC / headless) |

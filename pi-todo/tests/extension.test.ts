@@ -315,15 +315,14 @@ describe("command /todos", () => {
 	it("opens an overlay with the full list in the TUI", async () => {
 		await run({ action: "set", items: [{ title: "Ship it", status: "pending" }] });
 		const calls: string[] = [];
-		emit.mockImplementation(() => calls.push("announce"));
 		const custom = vi.fn((_factory: any, _options: any) => {
 			calls.push("custom");
 			return Promise.resolve(undefined);
 		});
 		await commands.todos.handler("", { mode: "tui", hasUI: true, ui: { notify: vi.fn(), custom, theme } });
 
-		expect(calls).toEqual(["announce", "custom"]);
-		expect(emit).toHaveBeenCalledWith("notify:non-blocking-prompt", {});
+		expect(calls).toEqual(["custom"]);
+		expect(emit).not.toHaveBeenCalled();
 		expect(custom).toHaveBeenCalledTimes(1);
 		const [factory, options] = custom.mock.calls[0] as [any, any];
 		expect(options.overlay).toBe(true);
