@@ -637,7 +637,6 @@ describe("SessionNavigatorHandler", () => {
 	it("notifies and skips the overlay when no sessions are navigable", async () => {
 		const ui = makeUI();
 		const notReady = makeNavigable({ isSessionReady: () => false });
-		const announceNonBlockingPrompt = vi.fn();
 		await new SessionNavigatorHandler().handle({
 			ui,
 			agents: [notReady],
@@ -645,16 +644,13 @@ describe("SessionNavigatorHandler", () => {
 			registry,
 			cwd: "/test/cwd",
 			readFile: noReadFile,
-			announceNonBlockingPrompt,
 		});
 		expect(ui.notify).toHaveBeenCalledWith("No subagent sessions to view.", "info");
 		expect(ui.custom).not.toHaveBeenCalled();
-		expect(announceNonBlockingPrompt).not.toHaveBeenCalled();
 	});
 
 	it("does not open the overlay when the operator cancels the picker", async () => {
 		const ui = makeUI(undefined);
-		const announceNonBlockingPrompt = vi.fn();
 		await new SessionNavigatorHandler().handle({
 			ui,
 			agents: [makeNavigable()],
@@ -662,11 +658,9 @@ describe("SessionNavigatorHandler", () => {
 			registry,
 			cwd: "/test/cwd",
 			readFile: noReadFile,
-			announceNonBlockingPrompt,
 		});
 		expect(ui.select).toHaveBeenCalledOnce();
 		expect(ui.custom).not.toHaveBeenCalled();
-		expect(announceNonBlockingPrompt).toHaveBeenCalledTimes(1);
 	});
 
 	it("opens a read-only overlay sourced from the picked record", async () => {
@@ -686,10 +680,9 @@ describe("SessionNavigatorHandler", () => {
 			registry,
 			cwd: "/test/cwd",
 			readFile: noReadFile,
-			announceNonBlockingPrompt: () => calls.push("announce"),
 		});
 
-		expect(calls).toEqual(["announce", "select", "announce", "custom"]);
+		expect(calls).toEqual(["select", "custom"]);
 		expect(ui.custom).toHaveBeenCalledOnce();
 		// Invariant #423: the handler is a reactive consumer — it sources the
 		// transcript and never reads tool definitions off the record itself; only
@@ -714,7 +707,6 @@ describe("SessionNavigatorHandler", () => {
 			registry,
 			cwd: "/test/cwd",
 			readFile: noReadFile,
-			announceNonBlockingPrompt: vi.fn(),
 		});
 
 		const header = renderCapturedOverlay(ui).join("\n");
@@ -757,7 +749,6 @@ describe("SessionNavigatorHandler", () => {
 			registry,
 			cwd: "/test/cwd",
 			readFile,
-			announceNonBlockingPrompt: vi.fn(),
 		});
 
 		expect(readFile).toHaveBeenCalledWith("/tasks/e1.jsonl");
@@ -790,7 +781,6 @@ describe("SessionNavigatorHandler", () => {
 			registry,
 			cwd: "/test/cwd",
 			readFile,
-			announceNonBlockingPrompt: vi.fn(),
 		});
 
 		expect(ui.notify).toHaveBeenCalledWith("Could not read the session transcript file.", "error");

@@ -50,6 +50,8 @@ export interface ParentApprovalChannel {
 	readonly sessionId: string;
 	hasUI(): boolean;
 	mode(): string | undefined;
+	/** Emits on the parent instance that displays the approval, never the requesting child. */
+	announce?(title: string): void;
 	select(title: string, options: string[], opts?: ApprovalDialogOptions): Promise<string | undefined>;
 	/** 可选：Deny 后的理由输入（两步式的第二步）。缺失/抛错时请求照常返回 Deny（无理由）。
 	 *  宿主的 `ctx.ui.input` 本就是必填成员，此处仍声明为可选：通道是**跨会话注册**的抽象，
@@ -127,6 +129,7 @@ class InProcessEscalationBroker implements EscalationBroker {
 		const port: ApprovalDialogPort = {
 			// deadline 判据来自父会话（弹窗所在宿主），不是发起的子会话。
 			mode: () => channel.mode(),
+			announce: (title) => channel.announce?.(title),
 			select: (title, options, opts) => channel.select(title, options, opts),
 			// 取值延迟到调用点：通道是跨会话注册的宿主对象，`input` 可能是抛错取值器；抛错由 dialog 层
 			// 收成「Deny、无理由」，不该把整次审批降级成取消。

@@ -87,6 +87,8 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 
 审批并发时由宿主管理弹窗。TUI 中最新弹窗获得焦点；早先弹窗仍留在宿主的对话框栈中，只是暂时隐藏而**不是已取消**，上层弹窗关闭后会重新显示。若新审批持续到达，早到的请求可能延后处理；pi-sandbox **不承诺处理顺序**。`/reload` 或切换会话可能让**当次**调用的审批保持 pending（宿主行为），但不影响其他审批。RPC 模式下，各审批请求独立结算；无人应答的请求在 300 秒本地 deadline 处按 *cancelled* 结算。
 
+在初始审批选择前，实际显示 UI 的实例发出 `notify:request`，payload 为 `{ title: "Approval required", body: <审批标题>, urgency: "critical" }`。转发审批使用父实例的事件总线，不使用发起请求的子实例总线。可选的拒绝理由步骤不再发送。投递是 fire-and-forget，公告失败不改变审批控制流。
+
 **缓存/数据目录搬迁属于越界行为。** 工具的常驻规则要求模型不得为了绕开沙箱把全局缓存/数据目录搬进 workspace——无论是环境变量覆盖（`XDG_CACHE_HOME`、`HOME`、`UV_CACHE_DIR`、`npm_config_cache`、`PNPM_HOME` 等）、改缓存的 flag（`--cache-dir`、`--store-dir` 等）还是配置文件——正确做法是原样运行工具，包括提权重试也不得夹带搬迁：搬迁是无声的，它会消掉本可上膛提权的那次拒绝。这条政策目前仅停留在提示词层：pi-sandbox 不检测、也不拒绝这类命令，用户显式要求搬迁时仍然成立。在 `workspace-write` 模式下，让工具在工作区外写入的合法途径是**用户**把该目录加入 `~/.pi/agent/sandbox-writable.json`；模型仍不得自行迁移缓存/数据目录。
 
 ## 配置

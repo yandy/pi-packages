@@ -28,6 +28,7 @@ import {
 } from "./escalation";
 import { getEscalationBroker } from "./escalation-broker";
 import { assertWriteAllowed, FenceDenialError, type FencePolicy } from "./fence";
+import { announceApproval, type EmitEvent } from "./notification";
 import type { PermissionState } from "./permission";
 import { canonicalPath, resolveEffectiveMode, type SandboxMode } from "./policy";
 import { createSandboxPowerShellOps } from "./powershell-ops";
@@ -53,6 +54,8 @@ function buildHostPowerShellBase(
 
 export interface SandboxToolDeps {
 	cwd: string;
+	/** Event bus of the instance displaying a direct approval UI. */
+	emitEvent?: EmitEvent;
 	/** 测试注入用；生产缺省用 getSandboxConfig()（全局配置，进程内缓存一次）。 */
 	getConfig?(): SandboxConfig;
 	permission: PermissionState;
@@ -151,12 +154,15 @@ function readSessionId(ctx: ToolCtxLike): string | null {
  * 异常口径也统一：审批 UI 抛错一律按"取消"处理（choice undefined），绝不让宿主内部报错冒泡成
  * 用户/模型看到的工具错误文本（理由同 index.ts 的 readHasUI）。
  */
-function approvalChannelFor(ctx: ToolCtxLike, signal: AbortSignal | undefined): EscalationUI {
+function approvalChannelFor(ctx: ToolCtxLike, signal: AbortSignal | undefined, deps: SandboxToolDeps): EscalationUI {
 	const broker = getEscalationBroker();
 	if (ctx.hasUI) {
 		const port: ApprovalDialogPort = {
 			// 直连弹窗显示在本会话的宿主上，所以用本会话的 mode 判定 TUI/RPC。
 			mode: () => ctx.mode,
+			announce: (title) => {
+				if (deps.emitEvent) announceApproval(deps.emitEvent, title);
+			},
 			select: (title, options, opts) => ctx.ui.select(title, options, opts),
 			// 取值延迟到调用点：异常 ctx 的 `input` 可能是抛错取值器，抛错由 dialog 层收成
 			// 「Deny、无理由」（缺失/不可用的理由通道不该把整次审批降级成取消）。
@@ -227,7 +233,7 @@ export async function resolveCall(
 			subject,
 			summary: summary().slice(0, 200),
 		},
-		approvalChannelFor(ctx, signal),
+		approvalChannelFor(ctx, signal, deps),
 	);
 	return { mode, escalated: mode !== effective, ignoredEscalation: false };
 }

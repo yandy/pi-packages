@@ -70,10 +70,7 @@ export default function (pi: ExtensionAPI) {
 		// 板子空了、全绿或全被阻塞：这次到期作废，不追加任何消息（连缓存都不碰）。
 		if (!text) return;
 		return {
-			messages: [
-				...event.messages,
-				{ role: "user" as const, content: [{ type: "text" as const, text }], timestamp: Date.now() },
-			],
+			messages: [...event.messages, { role: "user" as const, content: [{ type: "text" as const, text }], timestamp: Date.now() }],
 		};
 	});
 
@@ -228,7 +225,6 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify(`${formatProgress(todos)}\n${listTodos(todos)}`, "info");
 				return;
 			}
-			pi.events.emit("notify:non-blocking-prompt", {});
 			await ctx.ui.custom<void>(
 				(tui, theme, keybindings, done) => new TodoView(todos, theme, tui, keybindings, () => done()),
 				{

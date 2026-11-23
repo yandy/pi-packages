@@ -3,6 +3,7 @@ import { getSandboxConfig } from "./src/config";
 import { markProcessHasUI, processHasUI, setConfigWarningSink, takeConfigWarnings } from "./src/config-warnings";
 import { getDenialLedger } from "./src/denial-ledger";
 import { getEscalationBroker } from "./src/escalation-broker";
+import { announceApproval } from "./src/notification";
 import { createPermissionCommand, processPermissionState } from "./src/permission";
 import { canonicalPath } from "./src/policy";
 import { selectRunner } from "./src/runners";
@@ -102,7 +103,8 @@ export default function (pi: ExtensionAPI) {
 
 	// C1：/permission 覆盖用进程级模块单例（spec §9）——pi 对每个会话（含 subagent 子会话）
 	// 重新调用本 factory，activate 闭包不跨会话共享；模块单例才能覆盖父/子全部会话。
-	const tools = createSandboxTools({ cwd, permission: processPermissionState });
+	const emitEvent = (channel: string, data: unknown): void => pi.events.emit(channel, data);
+	const tools = createSandboxTools({ cwd, permission: processPermissionState, emitEvent });
 	// win32 上 bash 是“注册但模型不可达”的覆盖（tools.ts 按平台加 exposure: "hidden"）：既不进模型
 	// 工具列表、也不可被命名激活，又保证 bash 这个名字命中的是本包的拒绝壳，而不是 pi 内置的未受限 bash。
 	pi.registerTool(tools.bash as never);
@@ -193,6 +195,7 @@ export default function (pi: ExtensionAPI) {
 			hasUI: () => readHasUI(ctx),
 			// 审批 deadline 的判据：弹窗显示在本会话，所以用本会话的 ctx.mode（mode 缺失时按非 TUI 处理）
 			mode: () => ctx.mode,
+			announce: (title) => announceApproval(emitEvent, title),
 			select: (title, options, opts) => ctx.ui.select(title, options, opts),
 			// 两步式的第二步：Deny 后的可选理由。异常 ctx 可能缺 input——缺失/抛错时 broker 跳过理由追问
 			// （拒绝照常结算）。

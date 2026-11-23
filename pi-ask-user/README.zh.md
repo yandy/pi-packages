@@ -149,6 +149,20 @@ export PI_ASK_USER_COMMENT_TOGGLE_KEY=alt+c
 
 走这条路径得到的结果带 `details.fallback: "dialogs"`。
 
+## 桌面通知 signal
+
+每次调用在打开初始 UI 前发出一次 fire-and-forget 事件；调用已经 aborted 时除外：
+
+```ts
+pi.events.emit("notify:request", {
+  title: "Waiting for input",
+  body: question,
+  urgency: "critical",
+});
+```
+
+custom 到对话框的回退共用同一次发送。多选轮次、自由文本输入和可选注释不会重复发送。无 UI 的错误路径不发送。通知投递是可选能力，不影响工具结果。
+
 ## 结果详情
 
 所有工具结果均包含结构化的 `details` 对象，用于渲染和会话状态重建：

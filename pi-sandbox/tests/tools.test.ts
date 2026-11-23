@@ -1386,3 +1386,48 @@ describe("审批 deadline 与应答白名单（#253 验收）", () => {
 		expect(ctx.ui.select.mock.calls[0][2]).toMatchObject({ timeout: undefined });
 	});
 });
+
+describe("审批桌面通知请求", () => {
+	it("直连审批通过注入的事件出口公告", async () => {
+		const emitEvent = vi.fn();
+		const { deps } = makeDeps({ emitEvent });
+		const ctx = toolCtx(true, "Allow once");
+		seedDenial("command");
+		await resolveCall(
+			{ sandbox_permissions: "danger-full-access", justification: "notify me" },
+			ctx,
+			deps,
+			"command",
+			() => "echo hi",
+		);
+		expect(emitEvent).toHaveBeenCalledExactlyOnceWith("notify:request", {
+			title: "Approval required",
+			body: expect.stringContaining("notify me"),
+			urgency: "critical",
+		});
+	});
+
+	it("转发审批只公告在父通道，不使用子会话事件出口", async () => {
+		const childEmit = vi.fn();
+		const parentAnnounce = vi.fn();
+		const { deps } = makeDeps({ emitEvent: childEmit });
+		getEscalationBroker().registerParent({
+			sessionId: "parent-notify",
+			hasUI: () => true,
+			mode: () => "rpc",
+			select: vi.fn(async () => "Allow once"),
+			announce: parentAnnounce,
+		});
+		getEscalationBroker().linkChild(TEST_SESSION, "parent-notify");
+		seedDenial("command");
+		await resolveCall(
+			{ sandbox_permissions: "danger-full-access", justification: "parent notification" },
+			toolCtx(false),
+			deps,
+			"command",
+			() => "echo hi",
+		);
+		expect(parentAnnounce).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("parent notification"));
+		expect(childEmit).not.toHaveBeenCalled();
+	});
+});

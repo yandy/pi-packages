@@ -15,7 +15,6 @@ import {
 	createAgentSession,
 	DefaultResourceLoader,
 	type ExtensionAPI,
-	type ExtensionCommandContext,
 	getAgentDir,
 	SettingsManager as SdkSettingsManager,
 	SessionManager,
@@ -158,13 +157,6 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerTool(new SteerTool(manager, pi.events).toToolDefinition());
 
-	// TUI serializes operator prompts, so each declaration has an outermost start.
-	// RPC clients can nest or overlap dialogs, while the host emits only the outermost
-	// start; declaring there could leave a count that silences a later blocking prompt.
-	const announceNonBlockingPrompt = (ctx: ExtensionCommandContext): void => {
-		if (ctx.mode === "tui") pi.events.emit("notify:non-blocking-prompt", {});
-	};
-
 	// ---- /subagents:settings command ----
 
 	const subagentsSettings = new SubagentsSettingsHandler(settings);
@@ -172,10 +164,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("subagents:settings", {
 		description: "Configure subagent settings (concurrency, turn limits, timeouts)",
 		handler: async (_args, ctx) => {
-			await subagentsSettings.handle({
-				ui: ctx.ui,
-				announceNonBlockingPrompt: () => announceNonBlockingPrompt(ctx),
-			});
+			await subagentsSettings.handle({ ui: ctx.ui });
 		},
 	});
 
@@ -193,7 +182,6 @@ export default function (pi: ExtensionAPI) {
 				registry,
 				cwd: ctx.cwd,
 				readFile: (path) => readFileSync(path, "utf8"),
-				announceNonBlockingPrompt: () => announceNonBlockingPrompt(ctx),
 			});
 		},
 	});
