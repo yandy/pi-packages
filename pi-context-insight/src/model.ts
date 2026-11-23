@@ -1,5 +1,5 @@
 import type { Usage } from "@earendil-works/pi-ai";
-import type { ContextUsage, ExtensionContext, SessionManager } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 export type ReadonlySessionManager = ExtensionContext["sessionManager"];
 
@@ -39,152 +39,95 @@ export interface UsageReport extends UsageLedger {
 	byModel: Array<{ key: string; totals: UsageAggregate }>;
 }
 
-export type ContextCategoryId =
-	| "system"
+export type Lang = "en" | "zh";
+
+export type CategoryId =
+	| "systemBase"
+	| "systemTools"
+	| "systemProject"
+	| "systemSkills"
+	| "systemDocs"
+	| "systemOther"
 	| "toolDefinitions"
 	| "user"
 	| "injected"
+	| "skillInjections"
 	| "compaction"
 	| "reasoning"
 	| "answers"
 	| "toolCalls"
-	| "toolResults";
+	| "toolResults"
+	| "unattributed";
 
-export interface ContextCategory {
-	id: ContextCategoryId;
-	tokens: number | null;
+export const CATEGORY_ORDER: readonly CategoryId[] = [
+	"systemBase",
+	"systemTools",
+	"systemProject",
+	"systemSkills",
+	"systemDocs",
+	"systemOther",
+	"toolDefinitions",
+	"user",
+	"injected",
+	"skillInjections",
+	"compaction",
+	"reasoning",
+	"answers",
+	"toolCalls",
+	"toolResults",
+	"unattributed",
+];
+
+export interface Msg {
+	key: string;
+	params?: Record<string, string | number>;
 }
 
-export interface ContextComposition {
-	usage?: ContextUsage;
-	categories: ContextCategory[];
-	estimatedTotal: number;
-	complete: boolean;
-	warnings: string[];
-}
-
-export type ExecutionStatus = "ok" | "error" | "missing" | "unfinished";
-
-export interface ToolExecution {
-	id: string;
-	name: string;
-	nested: boolean;
-	status: ExecutionStatus;
-	timestamp: string;
-	durationMs?: number;
-	durationEstimated: boolean;
-}
-
-export interface ToolSummary {
-	name: string;
-	nested: boolean;
-	calls: number;
-	ok: number;
-	errors: number;
-	missing: number;
-	unfinished: number;
-	durationMs: number;
-	durationKnown: boolean;
-	durationIncomplete: boolean;
-}
-
-export interface FileActivity {
-	path: string;
-	read: number;
-	written: number;
-	edited: number;
-	searched: number;
-	addedLines: number;
-	removedLines: number;
-}
-
-export interface CommandActivity {
-	id: string;
-	source: "bash" | "powershell" | "user-bash";
-	nested: boolean;
-	command: string;
-	status: "ok" | "error" | "cancelled" | "missing";
-	timestamp: string;
-	exitCode?: number;
-	durationMs?: number;
-	durationEstimated: boolean;
-}
-
-export interface ActivityReport {
-	executions: ToolExecution[];
-	tools: ToolSummary[];
-	files: FileActivity[];
-	commands: CommandActivity[];
-	warnings: string[];
-}
-
-export interface TimingReport {
-	startedAt?: string;
-	endedAt?: string;
-	wallTimeMs: number;
-	modelTimeMs: number;
-	toolTimeMs: number;
-	modelTimeIncomplete: boolean;
-	toolTimeEstimated: boolean;
-	toolTimeIncomplete: boolean;
-}
-
-export interface ContextEvent {
-	id: string;
-	timestamp: string;
-	type: "compaction" | "branch_summary" | "context_edit" | "model_change" | "thinking_level_change" | "subagent";
-	label: string;
-	tokensBefore?: number;
-	targetId?: string;
-}
-
-export interface SubagentMetadata {
-	id: string;
-	type: string;
-	description: string;
-	status: string;
-	filePath: string;
-	modelName?: string;
-	thinking?: string;
-	startedAt?: number;
-	completedAt?: number;
-}
-
-export interface LoadedSubagent {
-	manager: SessionManager;
-	metadata: SubagentMetadata;
-}
-
-export interface SubagentLoadResult {
-	sessions: LoadedSubagent[];
-	warnings: string[];
-}
-
-export interface SessionMetadata {
+export interface ReportMetadata {
 	id: string;
 	name?: string;
 	cwd: string;
 	filePath?: string;
 	model?: string;
 	thinkingLevel?: string;
+	startedAt: string;
+	endedAt: string;
+	branchEntries: number;
+	totalEntries: number;
 }
 
-export interface SessionReport {
-	metadata: SessionMetadata;
-	usage: UsageReport;
-	context: ContextComposition;
-	activity: ActivityReport;
-	events: ContextEvent[];
-	timing: TimingReport;
-	warnings: string[];
+export interface Kpis {
+	tokens: number;
+	prompt: number;
+	output: number;
+	cost: number;
+	costBasis: CostBasis;
+	cacheHitRate: number | null;
+	modelCalls: number;
+	turns: number;
+	toolCalls: number;
+	activeMs: number;
+	modelMs: number;
+	toolMs: number;
+	subagents: number;
+	forwardedPrompt: number;
+	forwardedCost: number;
 }
 
-export interface SubagentReport {
-	agent: SubagentMetadata;
-	report: SessionReport;
+export interface CurrentContext {
+	tokens: number | null;
+	estimated: boolean;
+	window: number;
+	percent: number | null;
+	categories: Record<CategoryId, number>;
+	reserveTokens: number;
+	reserveEnabled: boolean;
+	maxTokens: number;
+	unknownSystem: boolean;
 }
 
-export interface InsightReport extends SessionReport {
-	generatedAt: string;
-	subagents: SubagentReport[];
+export interface TruncationEntry {
+	kind: "steps" | "stepDetails" | "items" | "body" | "usageRows" | "rows" | "bytes";
+	limit: number;
+	actual: number;
 }
