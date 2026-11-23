@@ -46,7 +46,7 @@ Foreground agents block until complete. Background agents return an ID immediate
 
 | Type | Tools | Model | Description |
 |------|-------|-------|-------------|
-| `general-purpose` | all | inherit | Harness-rendered prompt for the child's own tool set — same conventions, plus the sub-agent bridge |
+| `general-purpose` | all built-in tools (read, bash, edit, write, grep, find, ls) | inherit | Harness-rendered prompt for the child's own tool set — same conventions, plus the sub-agent bridge |
 | `Explore` | read, bash, grep, find, ls | inherit (overridable per call) | Fast codebase exploration (read-only) |
 
 ## Custom Agents
@@ -99,6 +99,16 @@ Agents are discovered from `<cwd>/.pi/agents/<name>.md` (project) and `$PI_CODIN
 | `tools: read, grep` | list | Only the listed tools; unknown names pass through and are filtered against the real registry at tool-creation time |
 
 An empty list is never treated as "unset" and never falls back to the full set.
+
+Extension-registered tools (tools from extension packages — `websearch`, `todo`, MCP servers, your own local extensions) do not come along just because the child loads them: the child always gets an explicit allowlist, so a tool that is not named there is registered but never activated and never declared to the model. List it in `tools` to hand it to the agent:
+
+```markdown
+---
+tools: read, grep, websearch
+---
+```
+
+This is also why omitting the field means "all built-in tools" and not "everything": a plain pi session would get the default built-ins plus every extension tool, whereas a child gets exactly the seven names.
 
 ### Prompt mode
 
