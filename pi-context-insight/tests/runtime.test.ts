@@ -15,6 +15,8 @@ interface Runtime {
 	turnBuckets: (steps: unknown) => Array<{ turn: number; sums: Record<string, number>; delta: Record<string, number>; total: number; count: number }>;
 	groupLabelFor: (dicts: unknown, lang: string, group: string) => string;
 	catLabelFor: (dicts: unknown, lang: string, cat: string) => string;
+	applyLanguageFromDoc: (doc: unknown, lang: string, dicts: unknown) => void;
+	highlightRailFromDoc: (doc: unknown, activeId: string) => void;
 }
 
 function load(): Runtime {
@@ -127,5 +129,89 @@ describe("client labels", () => {
 			const label = runtime.groupLabelFor(dicts as never, "en", group);
 			expect(label).not.toBe(group);
 		}
+	});
+});
+
+describe("browser pane labels", () => {
+	it("routes every pane and chip label through the dictionary helper", () => {
+		expect(CLIENT_RUNTIME).toContain("catLabelFor(payload.dicts");
+		expect(CLIENT_RUNTIME).toContain("groupLabelFor(payload.dicts");
+		expect(CLIENT_RUNTIME).not.toMatch(/textContent = item\.cat/);
+		expect(CLIENT_RUNTIME).not.toMatch(/item\.cat \+ " \u00b7 "/);
+	});
+	it("keeps the tool source chip when it rebuilds a row", () => {
+		expect(CLIENT_RUNTIME).toContain('"data-tool-source"');
+	});
+	it("filters by category index through aria-pressed", () => {
+		expect(CLIENT_RUNTIME).toContain("applyIndexFilter");
+		expect(CLIENT_RUNTIME).toContain("data-cat-index");
+	});
+});
+
+interface FakeNode {
+	attrs: Record<string, string>;
+	textContent: string;
+	getAttribute: (name: string) => string | null;
+	setAttribute: (name: string, value: string) => void;
+	removeAttribute: (name: string) => void;
+}
+
+function fakeNode(attrs: Record<string, string>, text = ""): FakeNode {
+	const node: FakeNode = {
+		attrs: { ...attrs },
+		textContent: text,
+		getAttribute: (name) => node.attrs[name] ?? null,
+		setAttribute: (name, value) => {
+			node.attrs[name] = value;
+		},
+		removeAttribute: (name) => {
+			delete node.attrs[name];
+		},
+	};
+	return node;
+}
+
+function fakeDoc(groups: Record<string, FakeNode[]>) {
+	const root = fakeNode({});
+	return {
+		documentElement: root,
+		querySelectorAll: (selector: string) => groups[selector] ?? [],
+	};
+}
+
+describe("language switching", () => {
+	it("interpolates params carried by data-i18n-params", () => {
+		const node = fakeNode({ "data-i18n": "browser.items", "data-i18n-params": '{"count":7}' });
+		const doc = fakeDoc({ "[data-i18n]": [node] });
+		load().applyLanguageFromDoc(doc as never, "zh", {
+			zh: { "browser.items": "{count} 条" },
+			en: { "browser.items": "{count} items" },
+		} as never);
+		expect(node.textContent).toBe("7 条");
+	});
+
+	it("decodes the escaped attribute entities before parsing params", () => {
+		const node = fakeNode({ "data-i18n": "browser.skillTag", "data-i18n-params": '{"name":"a&#39;b"}' });
+		const doc = fakeDoc({ "[data-i18n]": [node] });
+		load().applyLanguageFromDoc(doc as never, "zh", { zh: { "browser.skillTag": "技能 · {name}" }, en: {} } as never);
+		expect(node.textContent).toBe("技能 · a'b");
+	});
+
+	it("sets documentElement.lang and the button state", () => {
+		const en = fakeNode({ "data-lang-switch": "en" });
+		const zh = fakeNode({ "data-lang-switch": "zh" });
+		const doc = fakeDoc({ "[data-i18n]": [], "[data-lang-switch]": [en, zh] });
+		load().applyLanguageFromDoc(doc as never, "zh", { zh: {}, en: {} } as never);
+		expect(doc.documentElement.attrs.lang).toBe("zh");
+		expect(zh.attrs["aria-pressed"]).toBe("true");
+		expect(en.attrs["aria-pressed"]).toBe("false");
+	});
+
+	it("marks exactly one rail item as current", () => {
+		const items = ["tokens", "browser", "events"].map((id) => fakeNode({ "data-rail-item": id }));
+		const doc = fakeDoc({ "[data-rail-item]": items });
+		load().highlightRailFromDoc(doc as never, "browser");
+		expect(items.filter((node) => node.attrs["aria-current"] === "true")).toHaveLength(1);
+		expect(items[1].attrs["aria-current"]).toBe("true");
 	});
 });
