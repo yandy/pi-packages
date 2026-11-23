@@ -78,6 +78,13 @@ describe("renderTimingCard", () => {
 	it("shows a tps badge", () => {
 		expect(renderTimingCard(report())).toContain('data-tps="1"');
 	});
+	it("has no table once the segments are legend rows", () => {
+		expect(renderTimingCard(report())).not.toContain("<thead>");
+		expect(renderTimingCard(report())).toContain('class="legend-row"');
+	});
+	it("keeps the per-step strip full width", () => {
+		expect(renderTimingCard(report())).toContain('class="strip"');
+	});
 });
 
 describe("renderCurrentContext", () => {

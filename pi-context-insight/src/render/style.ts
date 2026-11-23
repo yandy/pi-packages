@@ -53,6 +53,11 @@ a{color:var(--accent)}
 .legend-share{color:var(--dim);text-align:right;min-width:44px;white-space:nowrap}
 .legend{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:11px;color:var(--dim);margin-top:10px}
 .legend>.row{display:inline-flex;align-items:center;gap:6px;padding:1px 2px;border-radius:4px}
+.strip{display:flex;height:10px;border-radius:3px;overflow:hidden;background:var(--surface-2);border:1px solid var(--line)}
+.strip>i{display:block;height:100%;background:var(--timing-model)}
+.strip>i:hover{filter:brightness(1.2)}
+.timing-facts{display:flex;gap:20px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
+.timing-facts .kpi-value{font-size:16px}
 .swatch{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px}
 
 /* bars and chips */
