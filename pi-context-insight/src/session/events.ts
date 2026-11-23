@@ -1,7 +1,7 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { Msg } from "../model";
 import { skillNameOfPath } from "./categorize";
-import type { Step } from "./steps";
+import { type Step, stepIndexOf } from "./steps";
 
 export type EventKind =
 	| "compaction"
@@ -59,16 +59,6 @@ const EVENT_FILTER_KINDS: readonly EventKind[] = [
 
 export function eventKinds(): readonly EventKind[] {
 	return EVENT_FILTER_KINDS;
-}
-
-function stepIndexOf(timestamp: number, steps: readonly Step[]): number {
-	if (steps.length === 0) return 0;
-	let found = 0;
-	for (const step of steps) {
-		if (step.timestamp <= timestamp) found = step.index;
-		else break;
-	}
-	return found;
 }
 
 function firstStepAtOrAfter(timestamp: number, steps: readonly Step[]): Step | undefined {

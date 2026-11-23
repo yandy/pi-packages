@@ -1,4 +1,4 @@
-import { fmtDuration, fmtShare, fmtTokens } from "../format";
+import { fmtTokens } from "../format";
 import { t } from "../i18n";
 import { CATEGORY_ORDER, type CategoryId } from "../model";
 import type { InsightReport } from "../report";
@@ -129,31 +129,4 @@ ${bars}${flagBand}${tickLabels}${turns}
 </svg></div>
 ${all.length > TIMELINE_MAX ? `<p class="dim" data-timeline-cap="${TIMELINE_MAX}">${t(lang, { key: "timeline.capped", params: { total: all.length, shown: TIMELINE_MAX } })}</p>` : ""}
 <p class="dim">${t(lang, { key: "timeline.note", params: { steps: rendered.length, max: maxLabel } })}</p></section>`;
-}
-
-export function renderTimelineSummary(report: InsightReport): string {
-	const peak = report.peaks;
-	const parts: string[] = [];
-	if (peak.longest !== undefined) {
-		const step = report.steps[peak.longest];
-		if (step)
-			parts.push(
-				t(report.lang, { key: "timeline.peakLongest", params: { step: step.index + 1, dur: fmtDuration(step.activeMs) } }),
-			);
-	}
-	if (peak.growth !== undefined) {
-		const step = report.steps[peak.growth];
-		if (step)
-			parts.push(
-				t(report.lang, {
-					key: "timeline.peakGrowth",
-					params: {
-						step: step.index + 1,
-						delta: `+${fmtTokens(step.deltaTotal)}`,
-						share: fmtShare(step.deltaTotal, step.estimatedTotal),
-					},
-				}),
-			);
-	}
-	return parts.length === 0 ? "" : `<p class="dim">${parts.join(" · ")}</p>`;
 }

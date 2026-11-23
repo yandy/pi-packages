@@ -180,5 +180,3 @@ ${windowNote}
 <details style="margin-top:10px"><summary>${t(lang, { key: "browser.dnaTitle" })}</summary>${dna}</details>
 </section>`;
 }
-
-export { itemsOfStep };

@@ -1,6 +1,6 @@
 import type { CommandStatus } from "../activity/commands";
 import type { FileOpKind } from "../activity/files";
-import { fmtClock, fmtCost, fmtDuration, fmtShare, fmtTokens } from "../format";
+import { fmtClock, fmtDuration, fmtShare, fmtTokens } from "../format";
 import { t } from "../i18n";
 import type { InsightReport } from "../report";
 import { esc } from "./escape";
@@ -111,5 +111,3 @@ export function renderActivity(report: InsightReport): string {
 ${toolsCard(report)}<hr style="border:none;border-top:1px solid var(--line);margin:14px 0">
 <div class="grid2">${filesCard(report)}${commandsCard(report)}</div></section>`;
 }
-
-export { fmtCost };

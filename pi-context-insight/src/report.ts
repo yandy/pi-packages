@@ -1,7 +1,5 @@
 import { basename } from "node:path";
-import type { ExtensionCommandContext, ToolInfo } from "@earendil-works/pi-coding-agent";
-
-type ReadonlySessionManager = ExtensionCommandContext["sessionManager"];
+import type { ExtensionCommandContext, SessionEntry, ToolInfo } from "@earendil-works/pi-coding-agent";
 
 /** The host action surface exists at runtime but is not on the public command-context type. */
 interface HostActions {
@@ -14,7 +12,7 @@ import { type CommandReport, collectCommands } from "./activity/commands";
 import { aggregateFiles, collectFileOps, type FileRow, type FileSort } from "./activity/files";
 import { aggregateTools, collectToolExecutions, type ToolRow } from "./activity/tools";
 import { collectFamily, type FamilyMember, type SubagentRecord, sortFamily } from "./family";
-import type { ReportMetadata, TruncationEntry, UsageAggregate, UsageReport } from "./model";
+import type { ReadonlySessionManager, ReportMetadata, TruncationEntry, UsageReport } from "./model";
 import { CATEGORY_ORDER, type CategoryId, type CurrentContext, type Kpis, type Lang, type Msg } from "./model";
 import type { Item } from "./session/categorize";
 import { buildMilestones, collectEvents, type InsightEvent, type Milestone } from "./session/events";
@@ -222,28 +220,7 @@ export function buildSessionReport(input: SessionInput): SessionReport {
 		})),
 	});
 
-	const records: SubagentRecord[] = [];
-	for (const entry of entries) {
-		if (entry.type !== "custom" || entry.customType !== "subagents:record") continue;
-		const data = (entry.data ?? {}) as Record<string, unknown>;
-		if (typeof data.id !== "string" || typeof data.status !== "string") continue;
-		records.push({
-			id: data.id,
-			type: typeof data.type === "string" ? data.type : "unknown",
-			description: typeof data.description === "string" ? data.description : data.id,
-			status: data.status,
-			...(typeof data.result === "string" ? { result: data.result } : {}),
-			...(typeof data.error === "string" ? { error: data.error } : {}),
-			startedAt: typeof data.startedAt === "number" ? data.startedAt : Date.parse(entry.timestamp),
-			...(typeof data.completedAt === "number" ? { completedAt: data.completedAt } : {}),
-			...(typeof data.toolUses === "number" ? { toolUses: data.toolUses } : {}),
-			...(typeof data.modelName === "string" ? { modelName: data.modelName } : {}),
-			...(typeof data.thinking === "string" ? { thinking: data.thinking } : {}),
-			...(typeof data.outputFile === "string" ? { outputFile: data.outputFile } : {}),
-			...(isLifetime(data.lifetimeUsage) ? { lifetimeUsage: data.lifetimeUsage } : {}),
-			...(typeof data.lifetimeCost === "number" ? { lifetimeCost: data.lifetimeCost } : {}),
-		});
-	}
+	const records = parseSubagentRecords(entries);
 
 	const events = collectEvents({
 		entries,
@@ -375,21 +352,8 @@ function childSessionOf(
 				? firstUser.message.content
 				: ""
 			: undefined;
-	const records: SubagentRecord[] = [];
-	for (const entry of entries) {
-		if (entry.type !== "custom" || entry.customType !== "subagents:record") continue;
-		const data = (entry.data ?? {}) as Record<string, unknown>;
-		if (typeof data.id !== "string" || typeof data.status !== "string") continue;
-		records.push({
-			id: data.id,
-			type: typeof data.type === "string" ? data.type : "unknown",
-			description: typeof data.description === "string" ? data.description : data.id,
-			status: data.status,
-			startedAt: typeof data.startedAt === "number" ? data.startedAt : Date.parse(entry.timestamp),
-			...(typeof data.completedAt === "number" ? { completedAt: data.completedAt } : {}),
-			...(typeof data.outputFile === "string" ? { outputFile: data.outputFile } : {}),
-		});
-	}
+	const records = parseSubagentRecords(entries);
+
 	return {
 		manager,
 		child: {
@@ -413,6 +377,32 @@ function trimSessionId(value: string | undefined): string | undefined {
 	return value.endsWith(".jsonl") ? basename(value, ".jsonl") : value;
 }
 
+function parseSubagentRecords(entries: readonly SessionEntry[]): SubagentRecord[] {
+	const records: SubagentRecord[] = [];
+	for (const entry of entries) {
+		if (entry.type !== "custom" || entry.customType !== "subagents:record") continue;
+		const data = (entry.data ?? {}) as Record<string, unknown>;
+		if (typeof data.id !== "string" || typeof data.status !== "string") continue;
+		records.push({
+			id: data.id,
+			type: typeof data.type === "string" ? data.type : "unknown",
+			description: typeof data.description === "string" ? data.description : data.id,
+			status: data.status,
+			...(typeof data.result === "string" ? { result: data.result } : {}),
+			...(typeof data.error === "string" ? { error: data.error } : {}),
+			startedAt: typeof data.startedAt === "number" ? data.startedAt : Date.parse(entry.timestamp),
+			...(typeof data.completedAt === "number" ? { completedAt: data.completedAt } : {}),
+			...(typeof data.toolUses === "number" ? { toolUses: data.toolUses } : {}),
+			...(typeof data.modelName === "string" ? { modelName: data.modelName } : {}),
+			...(typeof data.thinking === "string" ? { thinking: data.thinking } : {}),
+			...(typeof data.outputFile === "string" ? { outputFile: data.outputFile } : {}),
+			...(isLifetime(data.lifetimeUsage) ? { lifetimeUsage: data.lifetimeUsage } : {}),
+			...(typeof data.lifetimeCost === "number" ? { lifetimeCost: data.lifetimeCost } : {}),
+		});
+	}
+	return records;
+}
+
 /** Build the full report for the current session, including its agent family. */
 export function buildReport(
 	ctx: ExtensionCommandContext,
@@ -430,26 +420,7 @@ export function buildReport(
 	const toolInfos = actions.getAllTools?.() ?? [];
 
 	const parentManager = ctx.sessionManager;
-	const records: SubagentRecord[] = [];
-	for (const entry of parentManager.getEntries()) {
-		if (entry.type !== "custom" || entry.customType !== "subagents:record") continue;
-		const data = (entry.data ?? {}) as Record<string, unknown>;
-		if (typeof data.id !== "string" || typeof data.status !== "string") continue;
-		records.push({
-			id: data.id,
-			type: typeof data.type === "string" ? data.type : "unknown",
-			description: typeof data.description === "string" ? data.description : data.id,
-			status: data.status,
-			...(typeof data.result === "string" ? { result: data.result } : {}),
-			...(typeof data.error === "string" ? { error: data.error } : {}),
-			startedAt: typeof data.startedAt === "number" ? data.startedAt : Date.parse(entry.timestamp),
-			...(typeof data.completedAt === "number" ? { completedAt: data.completedAt } : {}),
-			...(typeof data.toolUses === "number" ? { toolUses: data.toolUses } : {}),
-			...(typeof data.modelName === "string" ? { modelName: data.modelName } : {}),
-			...(typeof data.thinking === "string" ? { thinking: data.thinking } : {}),
-			...(typeof data.outputFile === "string" ? { outputFile: data.outputFile } : {}),
-		});
-	}
+	const records = parseSubagentRecords(parentManager.getEntries());
 
 	const parentId = parentManager.getSessionId();
 	const parentFile = parentManager.getSessionFile();
@@ -520,6 +491,3 @@ export function buildReport(
 	}
 	return insight;
 }
-
-export type { UsageAggregate };
-export { CATEGORY_ORDER };

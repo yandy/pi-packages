@@ -23,11 +23,3 @@ export const CATEGORY_LABEL_KEY: Record<CategoryId, string> = {
 export function categoryLabel(lang: Lang, id: CategoryId): string {
 	return t(lang, { key: CATEGORY_LABEL_KEY[id] });
 }
-
-export function categoryClass(id: CategoryId): string {
-	return `cat-${id}`;
-}
-
-export function valueAttr(value: string): string {
-	return `data-value="${value}"`;
-}

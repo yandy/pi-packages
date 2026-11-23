@@ -1,5 +1,4 @@
-import { DICT, t } from "../i18n";
-import type { Msg } from "../model";
+import { t } from "../i18n";
 import type { InsightReport } from "../report";
 import { esc } from "./escape";
 import { REPORT_CSS } from "./style";
@@ -110,9 +109,3 @@ ${dataNotes(report)}
 <script>${runtime}</script>
 </body></html>`;
 }
-
-export function msgsOf(report: InsightReport, msgs: readonly Msg[]): string[] {
-	return msgs.map((msg) => t(report.lang, msg));
-}
-
-export { DICT };
