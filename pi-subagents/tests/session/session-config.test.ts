@@ -7,7 +7,7 @@ const mockResolveAgentConfig = vi.fn(
 	(): AgentConfig => ({
 		name: "Explore",
 		description: "Fast codebase exploration agent",
-		builtinToolNames: ["read"],
+		toolNames: ["read"],
 		systemPrompt: "You are Explore.",
 		promptMode: "replace",
 	}),
@@ -196,5 +196,39 @@ describe("assembleSessionConfig — thinking level", () => {
 		const result = assembleSessionConfig("Explore", ctx, {}, mockEnv, mockAgentLookup, mockIO);
 
 		expect(result.thinkingLevel).toBe("medium");
+	});
+});
+
+describe("assembleSessionConfig — tools validation", () => {
+	it("passes an inheriting +name/-name list through unchanged", () => {
+		mockGetToolNamesForType.mockReturnValueOnce(["-edit", "-write", "+powershell"]);
+
+		const result = assembleSessionConfig("deltas", ctx, {}, mockEnv, mockAgentLookup, mockIO);
+
+		expect(result.toolNames).toEqual(["-edit", "-write", "+powershell"]);
+	});
+
+	it("names the agent type when plain names are mixed with modifiers", () => {
+		mockGetToolNamesForType.mockReturnValueOnce(["read", "-edit"]);
+
+		expect(() => assembleSessionConfig("mixed", ctx, {}, mockEnv, mockAgentLookup, mockIO)).toThrow(
+			/Agent "mixed" has an invalid "tools" list: plain tool names cannot be mixed/,
+		);
+	});
+
+	it("rejects patterns in +name/-name entries", () => {
+		mockGetToolNamesForType.mockReturnValueOnce(["+web*"]);
+
+		expect(() => assembleSessionConfig("globby", ctx, {}, mockEnv, mockAgentLookup, mockIO)).toThrow(
+			/\+name\/-name entries take exact tool names, not patterns/,
+		);
+	});
+
+	it("does not validate inherit (undefined) or an empty list", () => {
+		mockGetToolNamesForType.mockReturnValueOnce(undefined);
+		expect(assembleSessionConfig("inherit", ctx, {}, mockEnv, mockAgentLookup, mockIO).toolNames).toBeUndefined();
+
+		mockGetToolNamesForType.mockReturnValueOnce([]);
+		expect(assembleSessionConfig("none", ctx, {}, mockEnv, mockAgentLookup, mockIO).toolNames).toEqual([]);
 	});
 });

@@ -8,7 +8,7 @@ import { createMockSession } from "../helpers/mock-session";
 const DEFAULT_AGENT_CONFIG: AgentConfig = {
 	name: "Explore",
 	description: "Explore",
-	builtinToolNames: ["read"],
+	toolNames: ["read"],
 	systemPrompt: "You are Explore.",
 	promptMode: "replace",
 	inheritContext: false,
@@ -63,7 +63,7 @@ export function createAgentLookup(configOverrides?: Partial<AgentConfig>) {
 	const config: AgentConfig = { ...DEFAULT_AGENT_CONFIG, ...configOverrides };
 	return {
 		resolveAgentConfig: vi.fn((_type: string): AgentConfig => config),
-		getToolNamesForType: vi.fn((_type: string): string[] => config.builtinToolNames ?? ["read"]),
+		getToolNamesForType: vi.fn((_type: string): string[] | undefined => config.toolNames),
 	};
 }
 

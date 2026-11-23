@@ -56,7 +56,7 @@ function loadFromDir(dir: string, agents: Map<string, AgentConfig>, source: "pro
 			name,
 			displayName: str(fm.display_name),
 			description: str(fm.description) ?? name,
-			builtinToolNames: parseToolList(fm.tools),
+			toolNames: parseToolList(fm.tools),
 			model: str(fm.model),
 			thinking: str(fm.thinking) as ThinkingLevel | undefined,
 			maxTurns: nonNegativeInt(fm.max_turns),
@@ -103,9 +103,13 @@ function parseCsvField(val: unknown): string[] | undefined {
  * Parse the `tools` field, preserving the difference between "not configured"
  * and "explicitly no tools":
  *
- *   omitted        → undefined (consumer falls back to all built-in tools)
- *   "none" / empty → []        (the agent gets zero tools)
- *   csv list       → the listed tools
+ *   omitted               → undefined (inherit the parent session's tools)
+ *   "none" / empty        → []        (the agent gets zero tools)
+ *   csv of tool names     → an explicit allowlist
+ *   csv of +name / -name  → an inheriting list with those deltas applied
+ *
+ * Entries are passed through untouched; the assembler rejects the invalid
+ * combinations (plain names mixed with modifiers, or a pattern).
  */
 function parseToolList(val: unknown): string[] | undefined {
 	if (val === undefined || val === null) return undefined;

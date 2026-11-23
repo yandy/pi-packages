@@ -27,7 +27,10 @@ const EXCLUDED_TOOL_NAMES = ["subagent", "get_subagent_result", "steer_subagent"
 /**
  * Apply the recursion guard: remove this extension's dispatch tools from the
  * child's active set. Runs after `bindExtensions` so extension-registered tools
- * are also covered. Unconditional: children always load the parent's extensions.
+ * are also covered — an inheriting child (`tools` unset) gets every tool the
+ * parent's extensions register, including these, which is exactly why the
+ * removal has to happen post-bind. Unconditional: children always load the
+ * parent's extensions.
  */
 function applyRecursionGuard(session: AgentSession): void {
 	const filtered = session.getActiveToolNames().filter((t) => !EXCLUDED_TOOL_NAMES.includes(t));
@@ -68,7 +71,8 @@ export interface CreateSessionOptions {
 	settingsManager: SettingsManager;
 	modelRegistry: unknown;
 	model?: unknown;
-	tools: string[];
+	/** Tool allowlist; `undefined` leaves the SDK to inherit the default + extension tools. */
+	tools?: string[];
 	resourceLoader: ResourceLoaderLike;
 	thinkingLevel?: ThinkingLevel;
 }

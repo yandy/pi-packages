@@ -46,7 +46,7 @@ Foreground agents block until complete. Background agents return an ID immediate
 
 | Type | Tools | Model | Description |
 |------|-------|-------|-------------|
-| `general-purpose` | all built-in tools (read, bash, edit, write, grep, find, ls) | inherit | Harness-rendered prompt for the child's own tool set — same conventions, plus the sub-agent bridge |
+| `general-purpose` | inherit the parent's tools, dispatch tools stripped | inherit | Harness-rendered prompt for the child's own tool set — same conventions, plus the sub-agent bridge |
 | `Explore` | read, bash, grep, find, ls | inherit (overridable per call) | Fast codebase exploration (read-only) |
 
 ## Custom Agents
@@ -74,7 +74,7 @@ Agents are discovered from `<cwd>/.pi/agents/<name>.md` (project) and `$PI_CODIN
 |-------|-------|---------|---------|
 | `description` | string | file name | One-line description shown in the `subagent` tool's type list |
 | `display_name` | string | type name | Short name used in the widget, notifications, and results |
-| `tools` | CSV / `none` | all built-in tools | Built-in tool allowlist — see below |
+| `tools` | CSV / `+name` / `-name` / `none` | inherit parent | Tool set — see below |
 | `model` | string | inherit parent | `provider/modelId` or fuzzy name; when pinned, wins over the per-call `model` |
 | `thinking` | string | inherit parent | off / minimal / low / medium / high / xhigh |
 | `max_turns` | integer | unlimited | Cap for this type; wins over the per-call `max_turns` |
@@ -90,25 +90,26 @@ Agents are discovered from `<cwd>/.pi/agents/<name>.md` (project) and `$PI_CODIN
 
 ### The `tools` allowlist
 
-`tools` is the only source of which built-in tools this agent type can use, and the three spellings differ:
+`tools` decides the agent's tool set. The omitted case means **inherit**, not "everything built in":
 
 | Frontmatter | Parsed as | Agent gets |
 |-------------|-----------|------------|
-| field omitted | `undefined` | All built-in tools (`read` / `bash` / `edit` / `write` / `grep` / `find` / `ls`) |
+| field omitted | `undefined` | The parent session's tools: the harness default set plus every tool the loaded extensions register. The dispatch tools of this package (`subagent`, `get_subagent_result`, `steer_subagent`) are stripped after binding, so a child can never spawn children. |
 | `tools: none`, or `tools:` (empty) | `[]` | **Zero tools**: the model only produces text and no tool call is accepted |
-| `tools: read, grep` | list | Only the listed tools; unknown names pass through and are filtered against the real registry at tool-creation time |
+| `tools: read, grep` | list | Only the listed tools. Names may be built-in or extension-provided; unknown names pass through and are filtered against the real registry at tool-creation time |
+| `tools: -edit, -write` | `+name` / `-name` entries | Inherit, then apply the deltas in order: `-name` removes a tool, `+name` adds one. Use this to narrow the inherited set without enumerating it |
 
-An empty list is never treated as "unset" and never falls back to the full set.
+An empty list is never treated as "unset" and never falls back to anything.
 
-Extension-registered tools (tools from extension packages — `websearch`, `todo`, MCP servers, your own local extensions) do not come along just because the child loads them: the child always gets an explicit allowlist, so a tool that is not named there is registered but never activated and never declared to the model. List it in `tools` to hand it to the agent:
+Both list forms take exact names. Mixing plain names with `+name` / `-name` entries is invalid, and a modifier entry may not contain a `*` pattern; both are rejected with an error that names the agent type before any session is created.
 
 ```markdown
 ---
-tools: read, grep, websearch
+tools: -edit, -write, -bash     # read-only research: inherit everything except the writers
 ---
 ```
 
-This is also why omitting the field means "all built-in tools" and not "everything": a plain pi session would get the default built-ins plus every extension tool, whereas a child gets exactly the seven names.
+There is no "all tools" mode and no notion of "all built-in tools" to fall back on. Inheriting gives the model whatever the caller's extensions provide, at the cost of listing them in the child's prompt; naming a list (or `none`) pins the capability to the agent type.
 
 ### Prompt mode
 

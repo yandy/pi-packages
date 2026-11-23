@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { AgentTypeRegistry, BUILTIN_TOOL_NAMES } from "../../src/config/agent-types";
+import { AgentTypeRegistry } from "../../src/config/agent-types";
 import type { AgentConfig } from "../../src/types";
 
 function makeAgentConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
 	return {
 		name: "test-agent",
 		description: "Test agent",
-		builtinToolNames: ["read", "grep"],
+		toolNames: ["read", "grep"],
 		systemPrompt: "You are a test agent.",
 		promptMode: "replace",
 		inheritContext: false,
@@ -179,50 +179,49 @@ describe("AgentTypeRegistry", () => {
 	});
 
 	describe("getToolNamesForType", () => {
-		it("returns all built-in tools for general-purpose", () => {
-			const registry = makeRegistry();
-			const names = registry.getToolNamesForType("general-purpose");
-			expect(names).toEqual(BUILTIN_TOOL_NAMES);
+		it("inherits the parent's tools for general-purpose", () => {
+			expect(makeRegistry().getToolNamesForType("general-purpose")).toBeUndefined();
 		});
 
-		it("returns restricted tools for Explore", () => {
-			const registry = makeRegistry();
-			const names = registry.getToolNamesForType("Explore");
-			expect(names).toEqual(["read", "bash", "grep", "find", "ls"]);
+		it("returns Explore's explicit allowlist", () => {
+			expect(makeRegistry().getToolNamesForType("Explore")).toEqual(["read", "bash", "grep", "find", "ls"]);
 		});
 
-		it("returns custom tool names for user agent", () => {
+		it("returns custom tool names for a user agent", () => {
 			const registry = makeRegistry(
-				new Map([["auditor", makeAgentConfig({ name: "auditor", builtinToolNames: ["read", "grep"] })]]),
+				new Map([["auditor", makeAgentConfig({ name: "auditor", toolNames: ["read", "grep"] })]]),
 			);
 			expect(registry.getToolNamesForType("auditor")).toEqual(["read", "grep"]);
 		});
 
-		it("returns BUILTIN_TOOL_NAMES when the field is omitted", () => {
+		it("inherits when the field is omitted", () => {
 			const registry = makeRegistry(
-				new Map([["inheritor", makeAgentConfig({ name: "inheritor", builtinToolNames: undefined })]]),
+				new Map([["inheritor", makeAgentConfig({ name: "inheritor", toolNames: undefined })]]),
 			);
-			expect(registry.getToolNamesForType("inheritor")).toEqual(BUILTIN_TOOL_NAMES);
+			expect(registry.getToolNamesForType("inheritor")).toBeUndefined();
 		});
 
 		it("returns an empty list for an explicit empty allowlist", () => {
-			const registry = makeRegistry(
-				new Map([["notool", makeAgentConfig({ name: "notool", builtinToolNames: [] })]]),
-			);
+			const registry = makeRegistry(new Map([["notool", makeAgentConfig({ name: "notool", toolNames: [] })]]));
 			expect(registry.getToolNamesForType("notool")).toEqual([]);
 		});
 
 		it("returns a copy so callers cannot mutate registry state", () => {
 			const tools = ["read"];
-			const registry = makeRegistry(new Map([["auditor", makeAgentConfig({ name: "auditor", builtinToolNames: tools })]]));
-			registry.getToolNamesForType("auditor").push("bash");
+			const registry = makeRegistry(new Map([["auditor", makeAgentConfig({ name: "auditor", toolNames: tools })]]));
+			registry.getToolNamesForType("auditor")!.push("bash");
 			expect(registry.getToolNamesForType("auditor")).toEqual(["read"]);
 		});
 
-		it("returns BUILTIN_TOOL_NAMES for unknown type", () => {
-			const registry = makeRegistry();
-			const names = registry.getToolNamesForType("nonexistent");
-			expect(names).toEqual(BUILTIN_TOOL_NAMES);
+		it("inherits for an unknown type", () => {
+			expect(makeRegistry().getToolNamesForType("nonexistent")).toBeUndefined();
+		});
+
+		it("inherits for a disabled agent", () => {
+			const registry = makeRegistry(
+				new Map([["auditor", makeAgentConfig({ name: "auditor", toolNames: ["read"], enabled: false })]]),
+			);
+			expect(registry.getToolNamesForType("auditor")).toBeUndefined();
 		});
 	});
 

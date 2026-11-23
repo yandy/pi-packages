@@ -16,7 +16,8 @@ import type { AgentConfig } from "../types";
  */
 export interface AgentConfigLookup {
 	resolveAgentConfig(type: string): AgentConfig;
-	getToolNamesForType(type: string): string[];
+	/** Tool allowlist, or `undefined` to inherit the parent session's tools. */
+	getToolNamesForType(type: string): string[] | undefined;
 }
 
 // ── AgentTypeRegistry class ──────────────────────────────────────────────────
@@ -87,15 +88,16 @@ export class AgentTypeRegistry implements AgentConfigLookup {
 	/**
 	 * Get the tool allowlist for a type (case-insensitive).
 	 *
-	 * `undefined` means "not configured" → all built-in tools; an empty array
-	 * means "explicitly no tools" and must not fall back to the default set.
+	 * `undefined` = inherit: the child gets the parent's tools (the harness
+	 * activates the default set plus every loaded extension tool) and the
+	 * dispatch tools are stripped after binding. `[]` = explicitly no tools.
+	 * A non-empty list = exactly those names.
 	 */
-	getToolNamesForType(type: string): string[] {
+	getToolNamesForType(type: string): string[] | undefined {
 		const key = this.resolveKey(type);
 		const raw = key ? this.agents.get(key) : undefined;
 		const config = raw?.enabled !== false ? raw : undefined;
-		const configured = config?.builtinToolNames;
-		return configured === undefined ? [...BUILTIN_TOOL_NAMES] : [...configured];
+		return config?.toolNames === undefined ? undefined : [...config.toolNames];
 	}
 
 	/** Resolve agent config with guaranteed non-null return. Falls back: unknown → general-purpose → absolute fallback. */
@@ -112,7 +114,6 @@ export class AgentTypeRegistry implements AgentConfigLookup {
 			name: type,
 			displayName: "Agent",
 			description: "General-purpose agent for complex, multi-step tasks",
-			builtinToolNames: BUILTIN_TOOL_NAMES,
 			systemPrompt: "",
 			promptMode: "append",
 		};
@@ -127,6 +128,3 @@ export class AgentTypeRegistry implements AgentConfigLookup {
 		return undefined;
 	}
 }
-
-/** All known built-in tool names. */
-export const BUILTIN_TOOL_NAMES: string[] = ["read", "bash", "edit", "write", "grep", "find", "ls"];

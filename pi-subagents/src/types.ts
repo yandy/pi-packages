@@ -47,10 +47,13 @@ export interface AgentPromptConfig {
 /** Unified agent configuration — used for both default and user-defined agents. */
 export interface AgentConfig extends AgentIdentity, AgentPromptConfig {
 	/**
-	 * Built-in tool allowlist for this agent.
-	 * `undefined` = not configured (all built-in tools); `[]` = explicitly no tools.
+	 * `tools` for this agent.
+	 * `undefined` = inherit the parent session's tools (the harness activates the
+	 * default set plus every loaded extension tool; dispatch tools are stripped
+	 * after binding); `[]` = explicitly no tools; a plain list = exactly those
+	 * names; a list of only `+name` / `-name` entries = inherit, then add/remove.
 	 */
-	builtinToolNames?: string[];
+	toolNames?: string[];
 	model?: string;
 	thinking?: ThinkingLevel;
 	maxTurns?: number;

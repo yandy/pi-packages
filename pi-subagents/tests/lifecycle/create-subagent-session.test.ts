@@ -114,7 +114,7 @@ describe("createSubagentSession — assembly", () => {
 	});
 
 	it("passes the type's tool allowlist through to the session", async () => {
-		const registry = createAgentLookup({ builtinToolNames: ["read", "grep"] });
+		const registry = createAgentLookup({ toolNames: ["read", "grep"] });
 		await createSubagentSession(
 			{ snapshot: STUB_SNAPSHOT, type: "Explore" },
 			createSubagentSessionDeps({ io, exec, registry }),
@@ -123,8 +123,18 @@ describe("createSubagentSession — assembly", () => {
 		expect(io.createSession).toHaveBeenCalledWith(expect.objectContaining({ tools: ["read", "grep"] }));
 	});
 
+	it("omits the tool list for an inheriting agent so the SDK hands it the parent's tools", async () => {
+		const registry = createAgentLookup({ toolNames: undefined });
+		await createSubagentSession(
+			{ snapshot: STUB_SNAPSHOT, type: "general-purpose" },
+			createSubagentSessionDeps({ io, exec, registry }),
+		);
+
+		expect(io.createSession).toHaveBeenCalledWith(expect.objectContaining({ tools: undefined }));
+	});
+
 	it("passes an empty allowlist as an empty tool list, not as the default set", async () => {
-		const registry = createAgentLookup({ builtinToolNames: [] });
+		const registry = createAgentLookup({ toolNames: [] });
 		await createSubagentSession(
 			{ snapshot: STUB_SNAPSHOT, type: "Explore" },
 			createSubagentSessionDeps({ io, exec, registry }),

@@ -73,8 +73,13 @@ export interface SessionConfig {
 	promptMode: "replace" | "append";
 	/** Mode-specific text: the complete system prompt for "replace", the appended section for "append". */
 	promptSection: string;
-	/** Built-in tool name allowlist for this agent type. */
-	toolNames: string[];
+	/**
+	 * `tools` for the child session.
+	 * `undefined` = inherit the parent's tools (dispatch tools are stripped after
+	 * binding), `[]` = no tools, a plain list = exactly those names, and a list of
+	 * only `+name` / `-name` entries = inherit with those deltas applied.
+	 */
+	toolNames: string[] | undefined;
 	/**
 	 * Resolved model instance (undefined → use parent model as passed to SDK).
 	 * Opaque handle — the assembler passes it through without inspection.
@@ -88,6 +93,33 @@ export interface SessionConfig {
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Validate a `tools` list before it reaches the SDK.
+ *
+ * A list made only of `+name` / `-name` entries is an inheriting list: the child
+ * starts from the parent's tool set and the entries add or remove single tools.
+ * Mixing those with plain names is invalid, and a modifier entry takes an exact
+ * tool name, not a pattern. The SDK rejects both cases too, but it cannot say
+ * which agent type is at fault — check here so the error names the type.
+ */
+function validateToolList(type: SubagentType, names: string[] | undefined): void {
+	if (!names || names.length === 0) return;
+	const modifiers = names.filter((name) => name.startsWith("+") || name.startsWith("-"));
+	if (modifiers.length === 0) return;
+
+	if (modifiers.length < names.length) {
+		throw new Error(
+			`Agent "${type}" has an invalid "tools" list: plain tool names cannot be mixed with +name/-name entries (got: ${names.join(", ")}).`,
+		);
+	}
+	const pattern = modifiers.find((name) => name.includes("*"));
+	if (pattern) {
+		throw new Error(
+			`Agent "${type}" has an invalid "tools" entry "${pattern}": +name/-name entries take exact tool names, not patterns.`,
+		);
+	}
+}
 
 /**
  * Resolve the default model from the agent config's model string.
@@ -145,6 +177,7 @@ export function assembleSessionConfig(
 	const agentConfig = registry.resolveAgentConfig(type);
 
 	const toolNames = registry.getToolNamesForType(type);
+	validateToolList(type, toolNames);
 
 	// Assemble the prompt text: "replace" owns the whole prompt, "append" only
 	// contributes a section on top of the harness-rendered base prompt.
