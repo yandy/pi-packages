@@ -43,6 +43,7 @@ export const DICT_EN: Record<string, string> = {
 	"anchor.family": "Agents",
 	"anchor.notes": "Notes",
 	"warn.more": "{count} more warning(s) not shown.",
+	"warn.title": "Warnings",
 	"notes.title": "Data notes & privacy",
 	"notes.estimate":
 		"Estimation uses the host's own density heuristic (about 4 characters per token); actual values are provider-reported.",

@@ -47,11 +47,26 @@ describe("renderDocument", () => {
 		expect(renderDocument({ report: report("full"), body: "", payload: "{}" })).toContain("data-banner=\"raw-content\"");
 		expect(renderDocument({ report: report("short"), body: "", payload: "{}" })).not.toContain("data-banner=");
 	});
-	it("renders the ten section anchors and both language buttons", () => {
+	it("renders the ten rail items and both language buttons inside the rail", () => {
 		const html = renderDocument({ report: report(), body: "", payload: "{}" });
-		expect(html.match(/data-anchor="/g)).toHaveLength(10);
-		expect(html).toContain('data-lang-switch="zh"');
-		expect(html).toContain('data-lang-switch="en"');
+		expect(html.match(/data-rail-item="/g)).toHaveLength(10);
+		const rail = html.slice(html.indexOf('class="rail"'), html.indexOf('class="main"'));
+		expect(rail).toContain('data-lang-switch="en"');
+		expect(rail).toContain('data-lang-switch="zh"');
+	});
+	it("wraps the report in a rail plus grid shell", () => {
+		const html = renderDocument({ report: report(), body: '<section class="card span-6" id="tokens"></section>', payload: "{}" });
+		expect(html).toContain('class="shell"');
+		expect(html).toContain('class="rail"');
+		expect(html).toContain('class="main"');
+		expect(html).not.toContain("nav.anchors");
+	});
+	it("keeps the banner and the warnings inside the main grid", () => {
+		const many = { ...report(), warnings: [{ key: "warning.noSystem" }] };
+		const html = renderDocument({ report: many, body: "", payload: "{}" });
+		const main = html.slice(html.indexOf('class="main"'));
+		expect(main).toContain('data-banner="raw-content"');
+		expect(main).toContain('data-card="warnings"');
 	});
 	it("caps the warning panel at eight entries", () => {
 		const base = report();

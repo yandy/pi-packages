@@ -41,6 +41,7 @@ export const DICT_ZH: Record<string, string> = {
 	"anchor.family": "Agent",
 	"anchor.notes": "说明",
 	"warn.more": "另有 {count} 条警告未显示。",
+	"warn.title": "警告",
 	"notes.title": "数据说明与隐私",
 	"notes.estimate": "估算使用宿主同一套密度启发式（约 4 字符/token）；实际值来自 provider 上报。",
 	"notes.scope": "用量、活动与事件聚合 session 全部 entry；当前组成与逐步骤重建只走当前分支。",
