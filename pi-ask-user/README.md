@@ -167,6 +167,20 @@ The user never types option titles, so a mismatch cannot be mistaken for a cance
 
 Results collected this way carry `details.fallback: "dialogs"`.
 
+## Desktop notification signal
+
+Before an invocation opens its initial UI, the tool emits one fire-and-forget event unless the invocation was already aborted:
+
+```ts
+pi.events.emit("notify:request", {
+  title: "Waiting for input",
+  body: question,
+  urgency: "critical",
+});
+```
+
+Custom-to-dialog fallback shares the same single emission. Multi-select rounds, freeform input, and optional comments do not emit additional requests. The no-UI error path emits nothing. Delivery is optional and does not affect the tool result.
+
 ## Result details
 
 All tool results include a structured `details` object for rendering and session state reconstruction:

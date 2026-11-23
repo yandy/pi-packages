@@ -1967,6 +1967,10 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 
+			if (signal?.aborted !== true) {
+				pi.events.emit("notify:request", { title: "Waiting for input", body: question, urgency: "critical" });
+			}
+
 			if (options.length === 0) {
 				const prompt = normalizedContext ? `${question}\n\nContext:\n${normalizedContext}` : question;
 				// TUI 里用户在场且可随时 Esc，不设默认上限；其余模式必须自带 deadline。

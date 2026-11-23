@@ -3628,3 +3628,127 @@ describe("ask_user", () => {
 		});
 	});
 });
+
+describe("desktop notification requests", () => {
+	const requests = () => emittedEvents.filter((event) => event.name === "notify:request");
+
+	it("emits one critical request before TUI custom UI completes", async () => {
+		const tool = await setupTool();
+		await tool.execute(
+			"tool-call-id",
+			{ question: "Which option?", options: ["A"], allowComment: false },
+			undefined,
+			undefined,
+			{
+				hasUI: true,
+				mode: "tui",
+				cwd: "/tmp/project",
+				ui: makeUI({
+					custom: async () => {
+						expect(requests()).toEqual([
+							{
+								name: "notify:request",
+								payload: { title: "Waiting for input", body: "Which option?", urgency: "critical" },
+							},
+						]);
+						return null;
+					},
+				}),
+			},
+		);
+		expect(requests()).toHaveLength(1);
+	});
+
+	it("emits once across custom-to-dialog fallback", async () => {
+		const tool = await setupTool();
+		let selectCalls = 0;
+		await tool.execute(
+			"tool-call-id",
+			{ question: "Pick one", options: ["A", "B"], allowFreeform: false, allowComment: false },
+			undefined,
+			undefined,
+			{
+				hasUI: true,
+				mode: "rpc",
+				cwd: "/tmp/project",
+				ui: makeUI({
+					custom: async () => undefined,
+					select: async (_title: string, options: string[]) => {
+						selectCalls += 1;
+						expect(requests()).toHaveLength(1);
+						return options[0];
+					},
+				}),
+			},
+		);
+		expect(selectCalls).toBe(1);
+		expect(requests()).toHaveLength(1);
+	});
+
+	it("emits once before a freeform-only input", async () => {
+		const tool = await setupTool();
+		await tool.execute("tool-call-id", { question: "Why?", options: [] }, undefined, undefined, {
+			hasUI: true,
+			mode: "tui",
+			cwd: "/tmp/project",
+			ui: makeUI({
+				input: async () => {
+					expect(requests()).toEqual([
+						{ name: "notify:request", payload: { title: "Waiting for input", body: "Why?", urgency: "critical" } },
+					]);
+					return "because";
+				},
+			}),
+		});
+		expect(requests()).toHaveLength(1);
+	});
+
+	it("does not repeat requests for multi-select rounds or comments", async () => {
+		const tool = await setupTool();
+		const scripted = scriptedSelect(["Red", "Done selecting"]);
+		const result = await tool.execute(
+			"tool-call-id",
+			{
+				question: "Pick colors",
+				options: ["Red", "Blue"],
+				allowMultiple: true,
+				allowFreeform: false,
+				allowComment: true,
+			},
+			undefined,
+			undefined,
+			{
+				hasUI: true,
+				mode: "rpc",
+				cwd: "/tmp/project",
+				ui: makeUI({ custom: async () => undefined, select: scripted.select, input: async () => "a comment" }),
+			},
+		);
+		expect(result.details.cancelled).toBe(false);
+		expect(scripted.calls).toHaveLength(2);
+		expect(requests()).toHaveLength(1);
+	});
+
+	it("does not emit on the no-UI error path", async () => {
+		const tool = await setupTool();
+		await tool.execute("tool-call-id", { question: "Q", options: ["A"] }, undefined, undefined, {
+			hasUI: false,
+			cwd: "/tmp/project",
+			ui: makeUI(),
+		});
+		expect(requests()).toHaveLength(0);
+	});
+
+	it("does not emit for an already-aborted invocation", async () => {
+		const tool = await setupTool();
+		const controller = new AbortController();
+		controller.abort();
+		await tool.execute("tool-call-id", { question: "Q", options: ["A"] }, controller.signal, undefined, {
+			hasUI: true,
+			mode: "tui",
+			cwd: "/tmp/project",
+			ui: makeUI(),
+		});
+		expect(requests()).toHaveLength(0);
+	});
+});
