@@ -4,12 +4,6 @@
 
 [English](./README.md) | 中文
 
-## 安装 pi
-
-```bash
-npm install -g @earendil-works/pi-coding-agent
-```
-
 ## 包一览
 
 | 包 | 它解决什么问题 | 额外依赖 |
@@ -42,7 +36,9 @@ pi install npm:@yandy0725/pi-sandbox
 
 在同一个 pi 运行时里起子代理（不是子进程），所以工具名、调用约定、UI 都一样。后台并行、超出并发数自动排队、运行中随时转向、中断后还能恢复，用量计入父会话的费用账本。
 
-真正改变日常的是**三档模型**：在 `subagents.json` 里把 `fast` / `standard` / `advanced` 映射到真实模型，映射表会出现在 `subagent` 工具的 `model` 参数描述里，代理自己就能判断「找文件用 fast、做架构评审用 advanced」。
+![pi-subagents 面板：四个并行子代理各自的模型、工具调用数、token、花销与耗时](https://yandy.github.io/assets/pi-subagents-panel.png)
+
+真正改变日常的是**三档模型**：在 `subagents.json` 里把 `fast` / `standard` / `advanced` 映射到真实模型，映射表会出现在 `subagent` 工具的 `model` 参数描述里，模型自己就能判断「找文件用 fast、做架构评审用 advanced」。
 
 ```json
 {
@@ -55,6 +51,8 @@ pi install npm:@yandy0725/pi-sandbox
 ```
 
 没有 `model_tier` 这种额外参数；没配置的档位根本不会出现在参数描述和提示里，也不会有别的模型悄悄顶替；agent 的 frontmatter 写死了模型时永远以它为准。全局 `~/.pi/agent/subagents.json` 与项目 `.pi/subagents.json` 按**档位**合并，项目里只改一档，不用把另外两档再抄一遍。
+
+![用 /subagents:sessions 只读回看某个子代理的完整 transcript](https://yandy.github.io/assets/pi-subagents-session.png)
 
 ```bash
 pi install npm:@yandy0725/pi-subagents
@@ -71,6 +69,10 @@ pi install npm:@yandy0725/pi-coding-tools
 ### pi-context-insight — 上下文账本
 
 `/insight` 出一份单文件 HTML，完全离线（严格 CSP、无外部请求、无 `eval`）。它逐请求重建模型当时真正收到的 prompt——系统提示词各分段、工具 schema、消息、工具结果——再与上一次请求做差，所以「上下文为什么涨这么快」有答案可查：16 类 token 拆分、缓存命中率、成本、耗时（模型 / 工具 / 其他，已剔除空闲）、窗口占用与压缩预留，每个子 Agent 另有一节。默认报告含原文，`--short` 结构完全一致但不含任何正文，可以放心发给别人。
+
+![pi-context-insight 总览：KPI 瓦片、分模型账本、Token 构成与耗时拆分](https://yandy.github.io/assets/pi-insight-overview.png)
+
+![pi-context-insight 当前上下文构成与上下文时间线](https://yandy.github.io/assets/pi-insight-context.png)
 
 ```bash
 pi install npm:@yandy0725/pi-context-insight

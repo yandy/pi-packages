@@ -4,12 +4,6 @@ A set of independent [pi](https://pi.dev) extension packages. Each one solves a 
 
 English | [中文](./README.zh.md)
 
-## Install pi
-
-```bash
-npm install -g @earendil-works/pi-coding-agent
-```
-
 ## Packages
 
 | Package | The problem it solves | Extra requirements |
@@ -42,7 +36,9 @@ pi install npm:@yandy0725/pi-sandbox
 
 Sub-agents run inside the same pi runtime (not as child processes), so tool names, calling conventions and UI are identical. Background execution, automatic queueing past the concurrency limit, steering a running agent, resuming an interrupted one, and usage that rolls up into the parent session's cost.
 
-What changes your day is **model tiers**: map `fast` / `standard` / `advanced` to real models in `subagents.json`, and the mapping is listed right in the `subagent` tool's `model` parameter description — the agent decides on its own that "find the files" is a `fast` job and "review this architecture" is an `advanced` one.
+![pi-subagents panel: four parallel sub-agents with their own model, tool calls, tokens, cost and duration](https://yandy.github.io/assets/pi-subagents-panel.png)
+
+What changes your day is **model tiers**: map `fast` / `standard` / `advanced` to real models in `subagents.json`, and the mapping is listed right in the `subagent` tool's `model` parameter description — the model decides on its own that "find the files" is a `fast` job and "review this architecture" is an `advanced` one.
 
 ```json
 {
@@ -55,6 +51,8 @@ What changes your day is **model tiers**: map `fast` / `standard` / `advanced` t
 ```
 
 There is no extra `model_tier` parameter; unconfigured tiers never appear in the parameter description or the prompt, nothing gets silently substituted, and a model pinned in an agent's frontmatter always wins. The global `~/.pi/agent/subagents.json` and the project `.pi/subagents.json` merge **per tier**, so a project can override one tier without restating the other two.
+
+![Reading a sub-agent's full transcript read-only via /subagents:sessions](https://yandy.github.io/assets/pi-subagents-session.png)
 
 ```bash
 pi install npm:@yandy0725/pi-subagents
@@ -71,6 +69,10 @@ pi install npm:@yandy0725/pi-coding-tools
 ### pi-context-insight — the context ledger
 
 `/insight` writes a single self-contained HTML file, fully offline (strict CSP, no external requests, no `eval`). It reconstructs, request by request, the prompt the model actually received — each system-prompt segment, tool schemas, messages, tool results — and diffs it against the previous request, so "why is the context growing this fast" becomes answerable: a 16-way token breakdown, cache hit rate, cost, time split across model / tools / other with idle removed, window occupancy and compaction reserve, and a separate section for every sub-agent. The default report contains raw text; `--short` keeps an identical structure with none of it, so you can send it to someone else.
+
+![pi-context-insight overview: KPI tiles, per-model ledger, token composition and time split](https://yandy.github.io/assets/pi-insight-overview.png)
+
+![pi-context-insight current context composition and context timeline](https://yandy.github.io/assets/pi-insight-context.png)
 
 ```bash
 pi install npm:@yandy0725/pi-context-insight
