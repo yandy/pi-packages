@@ -1,6 +1,8 @@
-import type { AgentMessage, ImageContent, TextContent } from "@earendil-works/pi-ai";
+import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { estimateTextAndImageContentTokens, estimateTextTokens } from "@earendil-works/pi-ai/utils/estimate";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+
+type SessionMessage = Extract<SessionEntry, { type: "message" }>["message"];
 import type { CategoryId } from "../model";
 import { type ReplayedSystem, SYSTEM_SECTION_CATEGORY } from "./replay";
 
@@ -62,7 +64,7 @@ export function skillNameOfPath(path: string): string | undefined {
 }
 
 function messageItems(args: {
-	message: AgentMessage;
+	message: SessionMessage;
 	entry: SessionEntry;
 	nextId: () => number;
 	putBody: (text: string) => number | null;
@@ -85,7 +87,8 @@ function messageItems(args: {
 				textIndex: putBody(base),
 			});
 		}
-		for (const [name, text] of Object.entries(message.sections ?? {})) {
+		const sections: Record<string, string | null> = message.sections ?? {};
+		for (const [name, text] of Object.entries(sections)) {
 			if (text === null || text.trim().length === 0) continue;
 			push({
 				category: SYSTEM_SECTION_CATEGORY[name] ?? "systemOther",
