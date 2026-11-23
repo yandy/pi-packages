@@ -12,8 +12,8 @@ Agent activity cannot supply the missing semantic. Extension commands may run wh
 
 ## Goals
 
-- Never notify for the `/subagents:sessions` picker or transcript overlay, `/subagents:settings` menus and inputs, or the TUI `/todos` overlay.
-- Preserve notifications for undeclared prompts, including blocking prompts from `pi-ask-user`, `pi-sandbox`, startup extensions, and third-party extensions.
+- Never notify in TUI for the `/subagents:sessions` picker or transcript overlay, `/subagents:settings` menus and inputs, or the `/todos` overlay.
+- Preserve notifications for undeclared prompts, including blocking prompts from `pi-ask-user`, `pi-sandbox`, startup extensions, RPC/headless UI, and third-party extensions.
 - Preserve the existing completion notifications and active-agent/custom-run suppression.
 - Keep the four-second delay only as noise suppression for blocking prompts that are answered immediately.
 
@@ -32,7 +32,7 @@ Agent activity cannot supply the missing semantic. Extension commands may run wh
 
 ## Contract
 
-A non-blocking producer emits the declaration and invokes the wrapped `ctx.ui.select`, `input`, or `custom` in the same synchronous block:
+A non-blocking TUI producer emits the declaration and invokes the wrapped `ctx.ui.select`, `input`, or `custom` in the same synchronous block:
 
 ```ts
 pi.events.emit("notify:non-blocking-prompt", {});
@@ -49,18 +49,20 @@ The host dispatches `ui_prompt_start` through a microtask, so the synchronous de
 - `session_shutdown` clears both the pending timer and all declarations;
 - `session_start` does not clear declarations, preserving the existing startup-prompt ordering.
 
-The counter keeps consecutive declarations distinct when another extension's asynchronous prompt handler delays event delivery. A declaration that does not correspond to a wrapped prompt is a producer contract violation; call sites must emit only when they actually invoke the UI primitive.
+The counter keeps consecutive declarations distinct when another extension's asynchronous prompt handler delays event delivery. A declaration that does not correspond to an outermost prompt start is a producer contract violation. The host coalesces nested or overlapping UI into one outermost start, so declarations are limited to the serialized TUI operator path. RPC/headless calls remain undeclared because concurrent clients cannot guarantee that pairing; this preserves the default notification rather than risking a missed blocking alert.
+
+After `session_shutdown`, the runner is closed to prompt starts already queued behind microtasks. A subsequent `session_start` reopens prompt handling for the new session without restoring cleared declarations.
 
 ## Producer changes
 
 - `SessionNavigatorHandler` receives a required `announceNonBlockingPrompt` callback and invokes it immediately before the sessions picker and before the transcript overlay.
 - `SubagentsSettingsHandler` receives the same required callback per invocation and invokes it before every settings select or input, including each subsequent level.
-- `pi-subagents` wires the callback to `pi.events.emit("notify:non-blocking-prompt", {})`.
+- `pi-subagents` wires the callback to `pi.events.emit("notify:non-blocking-prompt", {})` only when `ctx.mode === "tui"`; RPC/print/json callbacks stay silent.
 - `/todos` emits directly before its TUI `ctx.ui.custom` call. Empty boards and non-TUI text fallbacks emit nothing.
 
 ## Verification
 
 - Unit tests prove each producer emits exactly one declaration per actual prompt and none on early-return/fallback paths.
 - `pi-notify` tests use a real `ExtensionRunner` and its wrapped `getUIContext()` so declaration and prompt events traverse the real microtask dispatch path.
-- Integration cases cover persistent non-blocking overlays, consecutive non-blocking prompts, blocking prompts that still notify after the delay, prompt replacement, declarations surviving unrelated prompt-end events, and shutdown cleanup.
+- Integration cases cover persistent non-blocking overlays, consecutive non-blocking prompts, blocking prompts that still notify after the delay, prompt replacement, declarations surviving unrelated prompt-end events, TUI/RPC/print/json producer modes, and shutdown with a prompt start still queued.
 - Run each changed package's tests, typecheck, and lint, followed by the repository-wide checks.

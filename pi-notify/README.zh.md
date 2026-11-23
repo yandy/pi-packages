@@ -63,9 +63,9 @@ pi.events.emit("notify:non-blocking-prompt", {});
 await ctx.ui.custom(/* ... */);
 ```
 
-声明按计数保存：每个 `ui_prompt_start` 最多消费一个，`ui_prompt_end` 不消费声明，`session_shutdown` 清除未消费的声明。已声明的 start 会取消此前待投递的弹窗通知，并在构造 notifier 前返回。未声明的弹窗保持默认通知行为，因此未改造扩展的阻塞 UI 不会被静默。
+声明按计数保存：每个 `ui_prompt_start` 最多消费一个，`ui_prompt_end` 不消费声明，`session_shutdown` 清除未消费的声明。已声明的 start 会取消此前待投递的弹窗通知，并在构造 notifier 前返回。shutdown 后，同一 runner 上已排队的 start 会被忽略，直到新的 `session_start`。未声明的弹窗保持默认通知行为，因此未改造扩展的阻塞 UI 不会被静默。
 
-只为真正不阻塞 agent 的 UI 声明，且声明后必须实际调用对应的包装 UI。未配对的声明可能抑制后续弹窗，直到会话关闭。
+只为真正不阻塞 agent 的 UI 声明，且声明后必须实际调用对应的包装 UI 并产生最外层 `ui_prompt_start`。Pi 会把嵌套或重叠弹窗合并为一个最外层 start，因此可能嵌套或重叠的调用（包括 RPC 客户端允许的并发对话框）不得声明；这些调用保持未声明的默认行为。未配对的声明可能抑制后续弹窗，直到会话关闭。
 
 ## 配置
 

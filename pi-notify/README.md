@@ -63,9 +63,9 @@ pi.events.emit("notify:non-blocking-prompt", {});
 await ctx.ui.custom(/* ... */);
 ```
 
-Declarations are counted: each `ui_prompt_start` consumes at most one, `ui_prompt_end` does not consume any, and `session_shutdown` clears unused declarations. A declared start cancels any earlier pending prompt alert and returns before constructing a notifier. Undeclared prompts keep the default notification behavior, so blocking UI from unmodified extensions is not silenced.
+Declarations are counted: each `ui_prompt_start` consumes at most one, `ui_prompt_end` does not consume any, and `session_shutdown` clears unused declarations. A declared start cancels any earlier pending prompt alert and returns before constructing a notifier. After shutdown, prompt starts already queued on that runner are ignored until a new `session_start`. Undeclared prompts keep the default notification behavior, so blocking UI from unmodified extensions is not silenced.
 
-Emit only for UI that genuinely does not block agent progress, and only when the corresponding wrapped UI call actually follows. An unmatched declaration can otherwise suppress a later prompt until session shutdown.
+Emit only for UI that genuinely does not block agent progress, and only when the corresponding wrapped UI call actually follows with an outermost `ui_prompt_start`. Pi coalesces nested or overlapping prompts into one outermost start, so producers must not declare calls that can nest or overlap (including RPC clients that permit concurrent dialogs); those calls stay undeclared and retain the default behavior. An unmatched declaration can otherwise suppress a later prompt until session shutdown.
 
 ## Configuration
 

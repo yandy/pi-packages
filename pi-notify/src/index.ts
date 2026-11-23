@@ -35,6 +35,7 @@ export default function (
 	let runOrigin: "user" | "custom" | undefined;
 	let pendingPromptTimer: ReturnType<typeof setTimeout> | undefined;
 	let nonBlockingPromptCount = 0;
+	let sessionClosed = false;
 
 	const cancelPendingPrompt = (): void => {
 		if (pendingPromptTimer === undefined) return;
@@ -65,6 +66,7 @@ export default function (
 	};
 
 	pi.on("session_start", async (_event, ctx) => {
+		sessionClosed = false;
 		activeAgentSession = ACTIVE_AGENT_RE.test(ctx.getSystemPrompt());
 		// A pending prompt alert is deliberately left alone: every session replacement emits
 		// session_shutdown on the outgoing runner first (and reload builds new extension instances),
@@ -82,11 +84,14 @@ export default function (
 	});
 
 	pi.on("session_shutdown", async () => {
+		sessionClosed = true;
 		cancelPendingPrompt();
 		nonBlockingPromptCount = 0;
 	});
 
 	pi.on("ui_prompt_start", async (event, ctx) => {
+		// The runner may already have queued this start when shutdown closed the session.
+		if (sessionClosed) return;
 		const nonBlocking = nonBlockingPromptCount > 0;
 		if (nonBlocking) nonBlockingPromptCount -= 1;
 		if (nonBlocking) {

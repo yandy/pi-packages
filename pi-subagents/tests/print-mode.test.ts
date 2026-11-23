@@ -17,6 +17,7 @@ import { createMockSession, createSubagentSessionStub, toSubagentSession } from 
 function makePi() {
 	const tools = new Map<string, any>();
 	const handlers = new Map<string, any>();
+	const commands = new Map<string, any>();
 	const eventHandlers = new Map<string, any>();
 
 	return {
@@ -25,7 +26,7 @@ function makePi() {
 			registerTool: vi.fn((tool: any) => {
 				tools.set(tool.name, tool);
 			}),
-			registerCommand: vi.fn(),
+			registerCommand: vi.fn((name: string, definition: any) => commands.set(name, definition)),
 			on: vi.fn((event: string, handler: any) => {
 				handlers.set(event, handler);
 			}),
@@ -43,6 +44,7 @@ function makePi() {
 		} as any,
 		tools,
 		handlers,
+		commands,
 	};
 }
 
@@ -106,5 +108,37 @@ describe("print mode background notifications", () => {
 		expect(pi.sendMessage).toHaveBeenCalled();
 
 		await handlers.get("session_shutdown")?.({}, makeHeadlessCtx());
+	});
+});
+
+describe("operator prompt declaration modes", () => {
+	afterEach(() => vi.restoreAllMocks());
+
+	it.each([
+		["tui", 1],
+		["rpc", 0],
+		["print", 0],
+		["json", 0],
+	])("declares settings UI only when it is guaranteed to be outermost: %s", async (mode, expected) => {
+		const { pi, commands } = makePi();
+		subagentsExtension(pi);
+		pi.events.emit.mockClear();
+		const ctx = {
+			...makeHeadlessCtx(),
+			mode,
+			hasUI: mode === "tui" || mode === "rpc",
+			ui: {
+				...makeHeadlessCtx().ui,
+				select: vi.fn().mockResolvedValue(undefined),
+				input: vi.fn(),
+				notify: vi.fn(),
+			},
+		};
+
+		await commands.get("subagents:settings").handler("", ctx);
+
+		expect(ctx.ui.select).toHaveBeenCalledTimes(1);
+		expect(pi.events.emit).toHaveBeenCalledTimes(expected);
+		if (expected === 1) expect(pi.events.emit).toHaveBeenCalledWith("notify:non-blocking-prompt", {});
 	});
 });

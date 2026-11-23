@@ -198,7 +198,7 @@ timeout: 300
 | `subagents:compacted` | 代理会话已压缩 |
 | `subagents:settings_loaded` | 持久化设置已应用 |
 | `subagents:settings_changed` | 设置变更已生效 |
-| `notify:non-blocking-prompt` | 即将打开不阻塞 agent loop 的 sessions/settings UI |
+| `notify:non-blocking-prompt` | 即将打开不阻塞 agent loop 的 TUI sessions/settings UI |
 
 ## 开发
 
@@ -224,7 +224,7 @@ npm test                 # vitest run
 | `select`（`/subagents:sessions`） | 无 | 会转发；没有超时 |
 | `custom`（会话记录浮层） | 无 | RPC 直接返回 `undefined`：选中一个会话后什么都不显示；print / json 同理 |
 
-会话 picker、只读会话浮层以及每级 settings 菜单/输入都由操作员主动打开，不会阻塞 agent loop。每次调用这些 UI 前都会同步发出 `notify:non-blocking-prompt` 声明。
+会话 picker、只读会话浮层以及每级 settings 菜单/输入都由操作员主动打开，不会阻塞 agent loop。TUI 中，每次调用这些 UI 前都会同步发出 `notify:non-blocking-prompt` 声明。RPC/print/json 不声明：嵌套或重叠对话框没有各自的最外层 start，保留未声明的默认行为比留下未配对声明更安全。
 
 ## 许可证
 

@@ -223,6 +223,17 @@ describe("blocking prompt semantics through ExtensionRunner", () => {
 		await prompt;
 	});
 
+	it("ignores a declared prompt whose start is still queued at session_shutdown", async () => {
+		const h = harness();
+		const prompt = h.openNonBlocking();
+		await h.runner.emit({ type: "session_shutdown", reason: "quit" });
+		await vi.advanceTimersByTimeAsync(PROMPT_NOTIFY_DELAY_MS * 2);
+		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
+		expect(h.notifierOpts).toHaveLength(0);
+		await h.resolvePrompt(0);
+		await prompt;
+	});
+
 	it("consumes one declaration per start when an earlier prompt handler is delayed", async () => {
 		const gate = deferred<void>();
 		const h = harness({ beforePromptStart: () => gate.promise });
@@ -296,6 +307,7 @@ describe("blocking prompt semantics through ExtensionRunner", () => {
 		const h = harness();
 		h.declare();
 		await h.runner.emit({ type: "session_shutdown", reason: "quit" });
+		await h.runner.emit({ type: "session_start", reason: "reload" });
 		const blocking = h.openBlocking();
 		await h.flushPromptEvents();
 		await vi.advanceTimersByTimeAsync(PROMPT_NOTIFY_DELAY_MS);
