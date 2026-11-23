@@ -144,13 +144,13 @@ export function renderBrowser(report: InsightReport): string {
 	const lang = report.lang;
 	const steps = report.steps;
 	if (steps.length === 0) {
-		return `<section class="card" id="browser" data-card="browser"><h2>${t(lang, { key: "browser.title" })}</h2><p class="dim" data-empty="browser">${t(lang, { key: "empty.browserStep" })}</p></section>`;
+		return `<section class="card" id="browser" data-card="browser"><h2 data-i18n="browser.title">${esc(t(lang, { key: "browser.title" }))}</h2><p class="dim" data-empty="browser">${t(lang, { key: "empty.browserStep" })}</p></section>`;
 	}
-	const selectable = steps.filter((step) => step.hasDetails).slice(-STEP_PICK_MAX);
+	const selectable = steps.slice(-STEP_PICK_MAX);
 	const options = selectable
 		.map(
 			(step) =>
-				`<option value="${step.index}"${step === steps.at(-1) ? " selected" : ""}>${esc(t(lang, { key: "browser.pickLabel", params: { t: step.turn, s: step.stepInTurn } }))}${step.hasDetails ? "" : " ·"}</option>`,
+				`<option value="${step.index}"${step === steps.at(-1) ? " selected" : ""}>${esc(t(lang, { key: "browser.pickLabel", params: { t: step.turn, s: step.stepInTurn } }))}${step.hasDetails ? "" : " (Σ)"}</option>`,
 		)
 		.join("");
 	const current = steps[steps.length - 1];
@@ -164,7 +164,7 @@ export function renderBrowser(report: InsightReport): string {
 			? `<p class="dim" data-window-note>${t(lang, { key: "browser.windowNote", params: { count: missing } })}</p>`
 			: "";
 
-	return `<section class="card" id="browser" data-card="browser"><h2>${t(lang, { key: "browser.title" })}</h2>
+	return `<section class="card" id="browser" data-card="browser"><h2 data-i18n="browser.title">${esc(t(lang, { key: "browser.title" }))}</h2>
 <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px">
 <label class="dim">${t(lang, { key: "browser.step" })} <select data-browser-step>${options}</select></label>
 <button type="button" data-toggle="dna" data-value="dna" aria-pressed="false">${t(lang, { key: "toggle.dna" })}</button>

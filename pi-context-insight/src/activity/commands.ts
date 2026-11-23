@@ -157,7 +157,7 @@ export function outcomeOfResult(text: string, isError: boolean): Outcome {
 		return { status: "error", exitInferred: false, stderr, timedOut, denied };
 	}
 	if (isError || timedOut || denied)
-		return { status: "error", exitCode: isError ? 1 : undefined, exitInferred: false, stderr, timedOut, denied };
+		return { status: "error", exitCode: undefined, exitInferred: false, stderr, timedOut, denied };
 	return { status: "ok", exitCode: 0, exitInferred: true, stderr, timedOut, denied };
 }
 

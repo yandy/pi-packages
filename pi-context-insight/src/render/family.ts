@@ -58,7 +58,7 @@ ${records?.modelName === undefined ? "" : `<div class="kpi-sub dim">${esc(record
 		)
 		.join("");
 
-	return `<section class="card" id="family" data-card="family"><h2>${t(lang, { key: "family.title" })}</h2>
+	return `<section class="card" id="family" data-card="family"><h2 data-i18n="family.title">${esc(t(lang, { key: "family.title" }))}</h2>
 <div class="kpis">${cards}</div>
 <h3 style="margin-top:14px">${t(lang, { key: "family.delegations" })}</h3>
 <table><thead><tr><th>${t(lang, { key: "table.agent" })}</th><th>${t(lang, { key: "table.status" })}</th><th>${t(lang, { key: "table.brief" })}</th><th>${t(lang, { key: "table.result" })}</th><th class="num">${t(lang, { key: "table.tokens" })}</th><th class="num">${t(lang, { key: "table.toolUses" })}</th><th>${t(lang, { key: "table.duration" })}</th></tr></thead><tbody>${rows}</tbody></table>

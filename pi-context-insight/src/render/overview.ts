@@ -5,8 +5,8 @@ import { esc } from "./escape";
 
 const USAGE_ROW_LIMIT = 200;
 
-function kpi(label: string, value: string, sub: string, key: string): string {
-	return `<div class="kpi" data-kpi="${key}"><div class="kpi-label">${esc(label)}</div><div class="kpi-value">${esc(value)}</div><div class="kpi-sub">${sub}</div></div>`;
+function kpi(label: string, labelKey: string, value: string, sub: string, key: string): string {
+	return `<div class="kpi" data-kpi="${key}"><div class="kpi-label" data-i18n="${labelKey}">${esc(label)}</div><div class="kpi-value">${esc(value)}</div><div class="kpi-sub">${sub}</div></div>`;
 }
 
 function costBasisKey(report: InsightReport): string {
@@ -21,13 +21,21 @@ export function renderOverview(report: InsightReport): string {
 	const kpis = [
 		kpi(
 			t(lang, { key: "kpi.tokens" }),
+			"kpi.tokens",
 			fmtTokens(k.tokens),
 			t(lang, { key: "kpi.tokensSub", params: { prompt: fmtTokens(k.prompt), output: fmtTokens(k.output) } }),
 			"tokens",
 		),
-		kpi(t(lang, { key: "kpi.cost" }), fmtCost(k.cost), t(lang, { key: costBasisKey(report) }), "cost"),
+		kpi(
+			t(lang, { key: "kpi.cost" }),
+			"kpi.cost",
+			fmtCost(k.cost),
+			t(lang, { key: costBasisKey(report) }),
+			"cost",
+		),
 		kpi(
 			t(lang, { key: "kpi.cacheHit" }),
+			"kpi.cacheHit",
 			k.cacheHitRate === null ? "—" : `${(k.cacheHitRate * 100).toFixed(2)}%`,
 			t(lang, {
 				key: "kpi.cacheHitSub",
@@ -37,18 +45,21 @@ export function renderOverview(report: InsightReport): string {
 		),
 		kpi(
 			t(lang, { key: "kpi.calls" }),
+			"kpi.calls",
 			`${k.modelCalls}`,
 			t(lang, { key: "kpi.callsSub", params: { turns: k.turns, tools: k.toolCalls } }),
 			"calls",
 		),
 		kpi(
 			t(lang, { key: "kpi.active" }),
+			"kpi.active",
 			fmtDuration(k.activeMs),
 			t(lang, { key: "kpi.activeSub", params: { model: fmtDuration(k.modelMs), tool: fmtDuration(k.toolMs) } }),
 			"active",
 		),
 		kpi(
 			t(lang, { key: "kpi.subagents" }),
+			"kpi.subagents",
 			`${k.subagents}`,
 			k.subagents > 0
 				? t(lang, {
@@ -79,7 +90,7 @@ export function renderOverview(report: InsightReport): string {
 			? `<p class="dim">${t(lang, { key: "common.omitted", params: { count: report.usageRows.length - USAGE_ROW_LIMIT } })}</p>`
 			: "";
 
-	return `<section class="card" id="overview" data-card="overview"><h2>${t(lang, { key: "overview.title" })}</h2>
+	return `<section class="card" id="overview" data-card="overview"><h2 data-i18n="overview.title">${esc(t(lang, { key: "overview.title" }))}</h2>
 <div class="kpis">${kpis}</div>
 <div class="grid2" style="margin-top:14px">
 <div><h3>${t(lang, { key: "overview.byModel" })}</h3><table><thead><tr><th>${t(lang, { key: "table.model" })}</th><th class="num">prompt</th><th class="num">output</th><th class="num">total</th><th class="num">${t(lang, { key: "table.cacheHit" })}</th><th class="num">${t(lang, { key: "table.cost" })}</th></tr></thead><tbody>${modelRows}</tbody></table></div>

@@ -2,6 +2,15 @@ export const CLIENT_RUNTIME = `
 (function () {
   "use strict";
 
+  var GROUPS = ["systemBase", "toolDefinitions", "user", "injected", "skillInjections", "compaction", "answers", "toolCalls", "toolResults", "unattributed"];
+  var GROUP_OF = {
+    systemBase: "systemBase", systemTools: "systemBase", systemProject: "systemBase",
+    systemSkills: "systemBase", systemDocs: "systemBase", systemOther: "systemBase",
+    toolDefinitions: "toolDefinitions", user: "user", injected: "injected",
+    skillInjections: "skillInjections", compaction: "compaction", reasoning: "answers",
+    answers: "answers", toolCalls: "toolCalls", toolResults: "toolResults", unattributed: "unattributed"
+  };
+
   function visibleRows(rows, query) {
     var needle = String(query || "").toLowerCase();
     return rows
@@ -22,6 +31,13 @@ export const CLIENT_RUNTIME = `
     return initial === "zh" ? "zh" : "en";
   }
 
+  function inRanges(ranges, id) {
+    for (var i = 0; i < (ranges || []).length; i++) {
+      if (id >= ranges[i][0] && id <= ranges[i][1]) return true;
+    }
+    return false;
+  }
+
   function readPayload(doc) {
     var node = doc.getElementById("insight-payload");
     if (!node) return null;
@@ -34,92 +50,189 @@ export const CLIENT_RUNTIME = `
     else node.removeAttribute("hidden");
   }
 
+  function fmtTokens(value) {
+    var n = Number(value);
+    if (!isFinite(n)) return "—";
+    var sign = n < 0 ? "-" : "";
+    var abs = Math.abs(n);
+    if (abs >= 1000000) return sign + (abs / 1000000).toFixed(1) + "M";
+    if (abs >= 1000) return sign + (abs / 1000).toFixed(1) + "k";
+    return sign + Math.round(abs);
+  }
+
   function boot(doc, win) {
     var payload = readPayload(doc);
     if (!payload) return;
     var storage = null;
     try { storage = win.localStorage; } catch (error) { storage = null; }
 
-    function store(key, value) {
-      try { if (storage) storage.setItem(key, value); } catch (error) { /* ignore */ }
-    }
-
-    function load(key) {
-      try { return storage ? storage.getItem(key) : null; } catch (error) { return null; }
-    }
+    function store(key, value) { try { if (storage) storage.setItem(key, value); } catch (error) {} }
+    function load(key) { try { return storage ? storage.getItem(key) : null; } catch (error) { return null; } }
 
     var state = {
       step: payload.steps.length > 0 ? payload.steps[payload.steps.length - 1].i : 0,
       mode: load("insight.mode") || "total",
       granularity: "step",
       dna: false,
-      overview: false
+      overview: false,
+      adaptive: false,
+      duration: false
     };
-
-    function applyToggles() {
-      var buttons = doc.querySelectorAll("[data-toggle]");
-      for (var index = 0; index < buttons.length; index++) {
-        var button = buttons[index];
-        var name = button.getAttribute("data-toggle");
-        var value = button.getAttribute("data-value");
-        var pressed = (name === "mode" && value === state.mode) || (name === "granularity" && value === state.granularity) || (name === value && !!state[value]);
-        button.setAttribute("aria-pressed", pressed ? "true" : "false");
-      }
-      doc.body.setAttribute("data-mode", state.mode);
-      doc.body.setAttribute("data-dna", state.dna ? "on" : "off");
-    }
-
-    function selectStep(index) {
-      state.step = index;
-      var panels = doc.querySelectorAll("[data-browser-panel]");
-      for (var i = 0; i < panels.length; i++) setHidden(panels[i], panels[i].getAttribute("data-browser-panel") !== String(index));
-      var strips = doc.querySelectorAll("[data-step-panel]");
-      for (var j = 0; j < strips.length; j++) setHidden(strips[j], strips[j].getAttribute("data-step-panel") !== String(index));
-      var select = doc.querySelector("[data-browser-step]");
-      if (select && select.value !== String(index)) select.value = String(index);
-      renderPanel(index);
-    }
 
     function stepOf(index) {
       for (var i = 0; i < payload.steps.length; i++) if (payload.steps[i].i === index) return payload.steps[i];
       return null;
     }
 
-    function renderPanel(index) {
+    function itemOf(id) {
+      for (var i = 0; i < payload.items.length; i++) if (payload.items[i].id === id) return payload.items[i];
+      return null;
+    }
+
+    function bodyOf(item) {
+      if (item === null || item.body === null) return null;
+      var text = payload.bodies[item.body];
+      return typeof text === "string" ? text : null;
+    }
+
+    function itemsFor(step) {
+      var list = [];
+      if (!step || !step.details) return list;
+      for (var i = 0; i < payload.items.length; i++) {
+        if (inRanges(step.ranges, payload.items[i].id)) list.push(payload.items[i]);
+      }
+      return list;
+    }
+
+    function applyToggles() {
+      var buttons = doc.querySelectorAll("[data-toggle]");
+      for (var i = 0; i < buttons.length; i++) {
+        var button = buttons[i];
+        var name = button.getAttribute("data-toggle");
+        var value = button.getAttribute("data-value");
+        var pressed = (name === "mode" && value === state.mode) || (name === "granularity" && value === state.granularity) || (name !== "mode" && name !== "granularity" && !!state[value]);
+        button.setAttribute("aria-pressed", pressed ? "true" : "false");
+      }
+      doc.body.setAttribute("data-mode", state.mode);
+      doc.body.setAttribute("data-dna", state.dna ? "on" : "off");
+      doc.body.setAttribute("data-overview", state.overview ? "on" : "off");
+      doc.body.setAttribute("data-granularity", state.granularity);
+      var dna = doc.querySelector("[data-dna-list]");
+      if (dna) setHidden(dna, !state.dna);
+      var chart = doc.querySelector("[data-timeline-scroll]");
+      if (chart) setHidden(chart, state.overview);
+      var overview = doc.querySelector("[data-timeline-overview]");
+      if (overview) setHidden(overview, !state.overview);
+    }
+
+    function renderCategoryRows(step) {
+      var rows = doc.querySelectorAll("[data-cat-row]");
+      var items = itemsFor(step);
+      for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        var group = row.getAttribute("data-cat-row");
+        var count = 0;
+        var tokens = 0;
+        for (var j = 0; j < items.length; j++) {
+          if (GROUP_OF[items[j].cat] !== group) continue;
+          count += 1;
+          tokens += items[j].tok;
+        }
+        var cells = row.querySelectorAll("td");
+        if (cells.length >= 5) {
+          var delta = (step && step.delta[group]) || 0;
+          var value = state.mode === "delta" ? (delta === 0 ? "—" : (delta > 0 ? "+" : "") + fmtTokens(delta)) : "≈" + fmtTokens(tokens);
+          cells[1].textContent = String(count);
+          cells[2].textContent = value;
+          cells[3].textContent = step && step.total > 0 && state.mode !== "delta" ? ((tokens / step.total) * 100).toFixed(1) + "%" : "—";
+          cells[4].textContent = delta === 0 ? "" : (delta > 0 ? "+" : "") + fmtTokens(delta);
+        }
+      }
+    }
+
+    function renderPanel(step) {
       var container = doc.querySelector("[data-browser-panels]");
-      var step = stepOf(index);
       if (!container || !step) return;
-      if (container.querySelector('[data-browser-panel="' + index + '"]')) return;
+      while (container.firstChild) container.removeChild(container.firstChild);
       var panel = doc.createElement("div");
-      panel.setAttribute("data-browser-panel", String(index));
+      panel.setAttribute("data-browser-panel", String(step.i));
       var meta = doc.createElement("p");
       meta.className = "dim";
-      meta.textContent = "T" + step.turn + " · S" + index + " · total " + step.total + " · Δ" + step.deltaTotal;
+      meta.textContent = "T" + step.turn + " · S" + step.stepInTurn + " · ≈" + fmtTokens(step.total) + " · " + fmtTokens(step.prompt);
       panel.appendChild(meta);
-      var items = doc.createElement("div");
-      panel.appendChild(items);
-      for (var i = 0; i < payload.items.length; i++) {
-        var item = payload.items[i];
-        var row = doc.createElement("details");
-        row.className = "row";
-        row.setAttribute("data-item", String(item.id));
-        row.setAttribute("data-cat", item.cat);
-        var summary = doc.createElement("summary");
-        var tag = doc.createElement("span");
-        tag.className = "tag";
-        tag.textContent = item.cat + " · " + item.tag + " ≈" + item.tok;
-        summary.appendChild(tag);
-        row.appendChild(summary);
-        if (item.body !== null && payload.bodies[item.body] !== undefined) {
-          var pre = doc.createElement("pre");
-          pre.className = "body";
-          pre.textContent = payload.bodies[item.body];
-          row.appendChild(pre);
+      if (!step.details) {
+        var note = doc.createElement("p");
+        note.className = "dim";
+        note.setAttribute("data-empty", "browser-window");
+        note.textContent = "summary only";
+        panel.appendChild(note);
+        container.appendChild(panel);
+        return;
+      }
+      var items = itemsFor(step);
+      for (var g = 0; g < GROUPS.length; g++) {
+        var group = GROUPS[g];
+        var groupItems = items.filter(function (item) { return GROUP_OF[item.cat] === group; });
+        if (groupItems.length === 0) continue;
+        var heading = doc.createElement("h4");
+        heading.textContent = group;
+        panel.appendChild(heading);
+        for (var i = 0; i < groupItems.length; i++) {
+          var item = groupItems[i];
+          var row = doc.createElement("details");
+          row.className = "row";
+          row.setAttribute("data-item", String(item.id));
+          row.setAttribute("data-cat", item.cat);
+          row.setAttribute("data-search", (item.cat + " " + item.tag).toLowerCase());
+          var summary = doc.createElement("summary");
+          var tag = doc.createElement("span");
+          tag.className = "tag";
+          tag.textContent = item.cat + " · " + item.tag + " ≈" + fmtTokens(item.tok);
+          summary.appendChild(tag);
+          row.appendChild(summary);
+          var body = bodyOf(item);
+          if (body !== null) {
+            var pre = doc.createElement("pre");
+            pre.className = "body";
+            pre.textContent = body;
+            row.appendChild(pre);
+          }
+          panel.appendChild(row);
         }
-        items.appendChild(row);
       }
       container.appendChild(panel);
-      selectStep(index);
+    }
+
+    function renderDna(step) {
+      var list = doc.querySelector("[data-dna-list]");
+      if (!list || !step) return;
+      while (list.firstChild) list.removeChild(list.firstChild);
+      var items = itemsFor(step);
+      for (var i = items.length - 1; i >= 0; i--) {
+        var item = items[i];
+        var row = doc.createElement("div");
+        row.className = "row";
+        row.setAttribute("data-dna-item", String(item.id));
+        var tag = doc.createElement("span");
+        tag.className = "tag";
+        tag.textContent = item.cat;
+        row.appendChild(tag);
+        row.appendChild(doc.createTextNode(" #" + (i + 1) + " " + item.tag + " ≈" + fmtTokens(item.tok)));
+        list.appendChild(row);
+      }
+    }
+
+    function selectStep(index) {
+      state.step = index;
+      var step = stepOf(index);
+      var strips = doc.querySelectorAll("[data-step-panel]");
+      for (var i = 0; i < strips.length; i++) setHidden(strips[i], strips[i].getAttribute("data-step-panel") !== String(index));
+      var select = doc.querySelector("[data-browser-step]");
+      if (select && select.value !== String(index)) select.value = String(index);
+      renderCategoryRows(step);
+      renderPanel(step);
+      renderDna(step);
+      applyFilters();
     }
 
     function applyFilters() {
@@ -127,11 +240,20 @@ export const CLIENT_RUNTIME = `
       for (var i = 0; i < inputs.length; i++) {
         var input = inputs[i];
         var group = input.getAttribute("data-filter-group");
+        var selector = group === "files" ? "[data-path]" : group === "commands" ? "[data-command]" : group === "events" ? "[data-event]" : "[data-item]";
+        var rows = doc.querySelectorAll(selector);
+        var active = input.getAttribute("data-active-filter") || "all";
         var query = String(input.value || "").toLowerCase();
-        var rows = doc.querySelectorAll(group === "files" ? "[data-path]" : group === "commands" ? "[data-command]" : group === "events" ? "[data-event]" : "[data-item]");
         for (var j = 0; j < rows.length; j++) {
-          var text = (rows[j].getAttribute("data-search") || rows[j].textContent || "").toLowerCase();
-          setHidden(rows[j], query !== "" && text.indexOf(query) < 0);
+          var row = rows[j];
+          var text = (row.getAttribute("data-search") || row.textContent || "").toLowerCase();
+          var kindOk =
+            active === "all" ||
+            (group === "files" && row.querySelector('[data-kind="' + active + '"]') !== null) ||
+            (group === "commands" && ((active === "failed" && row.getAttribute("data-status") === "error") || (active === "nested" && row.getAttribute("data-nested") === "1") || (active === "slow" && Number(row.getAttribute("data-slow")) === 1))) ||
+            (group === "events" && row.getAttribute("data-kind") === active) ||
+            (group === "items" && row.getAttribute("data-cat") === active);
+          setHidden(row, !kindOk || (query !== "" && text.indexOf(query) < 0));
         }
       }
     }
@@ -151,6 +273,25 @@ export const CLIENT_RUNTIME = `
       store("insight.lang", lang);
     }
 
+    function locateItem(itemId) {
+      for (var i = 0; i < payload.steps.length; i++) {
+        var step = payload.steps[i];
+        if (step.details && inRanges(step.ranges, itemId)) { selectStep(step.i); return; }
+      }
+    }
+
+    function locateTool(toolCallId) {
+      if (!toolCallId) return;
+      for (var i = 0; i < payload.steps.length; i++) {
+        var step = payload.steps[i];
+        if (!step.details) continue;
+        var items = itemsFor(step);
+        for (var j = 0; j < items.length; j++) {
+          if (items[j].tag === toolCallId) { selectStep(step.i); return; }
+        }
+      }
+    }
+
     doc.addEventListener("click", function (event) {
       var target = event.target;
       if (!target || !target.closest) return;
@@ -160,20 +301,41 @@ export const CLIENT_RUNTIME = `
         var value = toggle.getAttribute("data-value");
         if (name === "mode") { state.mode = value; store("insight.mode", value); }
         else if (name === "granularity") state.granularity = value;
-        else state[value] = !state[value];
+        else if (state[value] !== undefined) state[value] = !state[value];
         applyToggles();
+        selectStep(state.step);
         return;
       }
       var langButton = target.closest("[data-lang-switch]");
       if (langButton) { applyLanguage(langButton.getAttribute("data-lang-switch")); return; }
+      var chip = target.closest("[data-locate-item]");
+      if (chip) { locateItem(Number(chip.getAttribute("data-locate-item"))); return; }
+      var fileOp = target.closest("[data-locate-tool]");
+      if (fileOp) { locateTool(fileOp.getAttribute("data-locate-tool")); return; }
       var column = target.closest("[data-step]");
       if (column) { selectStep(Number(column.getAttribute("data-step"))); return; }
+      var flag = target.closest("[data-flag-step]");
+      if (flag) { selectStep(Number(flag.getAttribute("data-flag-step"))); return; }
+      var filterButton = target.closest("[data-event-filter],[data-file-filter],[data-command-filter]");
+      if (filterButton) {
+        var group =
+          filterButton.hasAttribute("data-event-filter") ? "events" :
+          filterButton.hasAttribute("data-file-filter") ? "files" : "commands";
+        var input = doc.querySelector('[data-filter-group="' + group + '"]');
+        if (input) {
+          var next = filterButton.getAttribute("data-" + (group === "events" ? "event" : group === "files" ? "file" : "command") + "-filter");
+          input.setAttribute("data-active-filter", next);
+          var siblings = filterButton.parentNode.querySelectorAll("button");
+          for (var i = 0; i < siblings.length; i++) siblings[i].setAttribute("aria-pressed", siblings[i] === filterButton ? "true" : "false");
+          applyFilters();
+        }
+        return;
+      }
     });
 
     doc.addEventListener("change", function (event) {
       var target = event.target;
-      if (!target || !target.getAttribute) return;
-      if (target.hasAttribute("data-browser-step")) selectStep(Number(target.value));
+      if (target && target.hasAttribute && target.hasAttribute("data-browser-step")) selectStep(Number(target.value));
     });
 
     doc.addEventListener("input", function (event) {

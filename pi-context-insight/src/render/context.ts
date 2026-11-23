@@ -5,11 +5,16 @@ import type { InsightReport } from "../report";
 import { categoryLabel } from "./categories";
 import { esc } from "./escape";
 
+function finite(value: number, fallback = 0): number {
+	return Number.isFinite(value) ? value : fallback;
+}
+
 export function renderCurrentContext(report: InsightReport): string {
 	const lang = report.lang;
 	const context = report.currentContext;
-	const window = Math.max(0, context.window);
-	const used = context.tokens ?? 0;
+	const window = Math.max(0, finite(context.window));
+	void 0;
+	const used = Math.max(0, finite(context.tokens ?? 0));
 	const scale = Math.max(window, used, 1);
 	const occupied = Math.min(used, scale) / scale;
 
@@ -47,10 +52,11 @@ export function renderCurrentContext(report: InsightReport): string {
 		)
 		.join("");
 
-	const headline = `${context.estimated ? "≈" : ""}${fmtTokens(used)} / ${fmtTokens(window)} · ${context.percent === null ? "—" : `${context.percent.toFixed(1)}%`}`;
+	const percentText = context.percent === null || !Number.isFinite(context.percent) ? "—" : `${context.percent.toFixed(1)}%`;
+	const headline = `${context.estimated ? "≈" : ""}${fmtTokens(used)} / ${fmtTokens(window)} · ${percentText}`;
 	const disabled = !context.reserveEnabled ? `<p class="dim">${t(lang, { key: "context.compactionDisabled" })}</p>` : "";
 
-	return `<section class="card" id="context" data-card="context"><h2>${t(lang, { key: "context.title" })}<span class="dim" style="font-weight:400"> ${esc(report.metadata.model ?? "")} ${esc(report.metadata.thinkingLevel ?? "")}</span></h2>
+	return `<section class="card" id="context" data-card="context"><h2 data-i18n="context.title">${esc(t(lang, { key: "context.title" }))}<span class="dim" style="font-weight:400"> ${esc(report.metadata.model ?? "")} ${esc(report.metadata.thinkingLevel ?? "")}</span></h2>
 <div class="kpi-value" data-occupancy="1">${headline}</div>
 <div style="position:relative;margin-top:10px"><div class="stack">${segments}${reserve}${output}${freeBar}</div>${trigger}</div>
 <div class="legend">${legend}</div>

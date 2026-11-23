@@ -241,4 +241,5 @@ export const DICT_ZH: Record<string, string> = {
 	"table.brief": "任务简报",
 	"table.result": "最终回报",
 	"table.toolUses": "工具",
+	"timeline.capped": "时间线只显示最后 {shown} 步（共 {total} 步）。",
 };

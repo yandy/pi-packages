@@ -40,7 +40,7 @@ function filesCard(report: InsightReport): string {
 			: report.files
 					.map((row) => {
 						const badges = FILE_KINDS.filter((kind) => row.counts[kind] > 0)
-							.map((kind) => `<span class="tag">${esc(t(lang, { key: `files.kind.${kind}` }))} ${row.counts[kind]}</span>`)
+							.map((kind) => `<span class="tag" data-kind="${kind}">${esc(t(lang, { key: `files.kind.${kind}` }))} ${row.counts[kind]}</span>`)
 							.join("");
 						const ops = row.ops
 							.map(
@@ -48,7 +48,7 @@ function filesCard(report: InsightReport): string {
 									`<div class="row" data-file-op="${esc(op.id)}" data-locate-tool="${esc(op.toolCallId ?? "")}"><span class="tag">${esc(op.tool)}</span>${op.hits === undefined ? "" : `<span class="dim">${t(lang, { key: "files.hits", params: { count: op.hits } })}</span>`}${op.readRange === undefined ? "" : `<span class="dim">${op.readRange.estimated ? "≈" : ""}${op.readRange.start}–${op.readRange.start + op.readRange.count - 1}</span>`}${op.added + op.removed === 0 ? "" : ` <span class="dim">+${op.added} −${op.removed}</span>`}${op.isError ? ' <span class="flag">✕</span>' : ""}<span class="dim"> · ${esc(fmtClock(op.timestamp))}</span></div>`,
 							)
 							.join("");
-						return `<details class="row" data-path="${esc(row.path)}"><summary><code>${esc(row.path)}</code> ${badges} <span class="dim">+${row.added} −${row.removed} · ${esc(fmtClock(row.lastTimestamp))}</span></summary>${ops}</details>`;
+						return `<details class="row" data-path="${esc(row.path)}" data-search="${esc(row.path.toLowerCase())}"><summary><code>${esc(row.path)}</code> ${badges} <span class="dim">+${row.added} −${row.removed} · ${esc(fmtClock(row.lastTimestamp))}</span></summary>${ops}</details>`;
 					})
 					.join("");
 	return `<div data-card="files"><h3>${t(lang, { key: "activity.files" })}</h3>
@@ -91,7 +91,8 @@ ${commands.programs
 							report.mode === "short"
 								? `<p class="dim" data-empty="browser-body">${t(lang, { key: "empty.shortNoBody" })}</p>`
 								: `<pre class="body">${esc(record.command)}</pre>`;
-						return `<details class="row" data-program="${esc(record.program)}" data-status="${status}" data-command="${esc(record.id)}"><summary>${glyph} <span class="tag">${esc(record.tool)}</span><code>${esc(record.command.split(/\r?\n/)[0]?.slice(0, 80) ?? "")}</code> <span class="dim">${record.durationMs === undefined ? "" : `${record.durationEstimated ? "≈" : ""}${fmtDuration(record.durationMs)}`} · ${esc(fmtClock(record.timestamp))}</span></summary>${detail}
+						const slow = (record.durationMs ?? 0) >= 10_000 ? "1" : "0";
+						return `<details class="row" data-program="${esc(record.program)}" data-status="${status}" data-command="${esc(record.id)}" data-nested="${record.nested ? 1 : 0}" data-slow="${slow}" data-search="${esc(`${record.program} ${record.command}`.toLowerCase())}"><summary>${glyph} <span class="tag">${esc(record.tool)}</span><code>${esc(record.command.split(/\r?\n/)[0]?.slice(0, 80) ?? "")}</code> <span class="dim">${record.durationMs === undefined ? "" : `${record.durationEstimated ? "≈" : ""}${fmtDuration(record.durationMs)}`} · ${esc(fmtClock(record.timestamp))}</span></summary>${detail}
 <p class="dim">${record.exitCode === undefined ? "" : `${t(lang, { key: "cmds.exit", params: { code: record.exitCode } })}${record.exitInferred ? " ≈" : ""} · `}${record.outputChars} chars${record.stderr ? " · stderr" : ""}${record.timedOut ? ` · ${t(lang, { key: "cmds.timedOut" })}` : ""}${record.denied ? ` · ${t(lang, { key: "cmds.denied" })}` : ""}</p></details>`;
 					})
 					.join("");
@@ -103,7 +104,7 @@ ${commands.programs
 
 export function renderActivity(report: InsightReport): string {
 	const lang = report.lang;
-	return `<section class="card" id="activity" data-card="activity"><h2>${t(lang, { key: "activity.title" })}</h2>
+	return `<section class="card" id="activity" data-card="activity"><h2 data-i18n="activity.title">${esc(t(lang, { key: "activity.title" }))}</h2>
 ${toolsCard(report)}<hr style="border:none;border-top:1px solid var(--line);margin:14px 0">
 <div class="grid2">${filesCard(report)}${commandsCard(report)}</div></section>`;
 }

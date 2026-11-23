@@ -20,7 +20,7 @@ export const SECTION_IDS = [
 const WARNING_VISIBLE = 8;
 
 function anchors(lang: InsightReport["lang"]): string {
-	return SECTION_IDS.map((id) => `<a href="#${id}" data-anchor="${id}">${t(lang, { key: `anchor.${id}` })}</a>`).join(
+	return SECTION_IDS.map((id) => `<a href="#${id}" data-anchor="${id}" data-i18n="anchor.${id}">${esc(t(lang, { key: `anchor.${id}` }))}</a>`).join(
 		"",
 	);
 }

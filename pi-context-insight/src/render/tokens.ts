@@ -41,8 +41,16 @@ export function renderTokens(report: InsightReport): string {
 		}
 	}
 
+	const unknown = new Set<CategoryId>(
+		report.currentContext.unknownSystem
+			? ["systemBase", "systemTools", "systemProject", "systemSkills", "systemDocs", "systemOther", "toolDefinitions"]
+			: [],
+	);
 	const rows = CATEGORY_ORDER.filter((id) => id !== "unattributed" || (sums.unattributed ?? 0) > 0)
 		.map((id) => {
+			if (unknown.has(id)) {
+				return `<tr class="row" data-cat="${id}" data-unknown="system"><td><span class="swatch" style="background:var(--${id})"></span>${esc(categoryLabel(lang, id))}</td><td class="num">—</td><td class="num">—</td><td class="num dim">—</td></tr>`;
+			}
 			const tokens = sums[id] ?? 0;
 			const share = estimatedTotal > 0 ? (tokens / estimatedTotal) * 100 : 0;
 			const cost = costByCategory.get(id) ?? 0;
@@ -52,7 +60,7 @@ export function renderTokens(report: InsightReport): string {
 
 	const cacheHit = report.kpis.cacheHitRate;
 	const billed = report.usage.total.total;
-	return `<section class="card" id="tokens" data-card="tokens"><h2>${t(lang, { key: "tokens.title" })}
+	return `<section class="card" id="tokens" data-card="tokens"><h2 data-i18n="tokens.title">${esc(t(lang, { key: "tokens.title" }))}
 <span class="badge" data-cache-hit="1">${t(lang, { key: "tokens.cacheHit" })} ${cacheHit === null ? "—" : `${(cacheHit * 100).toFixed(2)}%`}</span></h2>
 <div class="grid2"><div style="display:flex;align-items:center;gap:16px">${donut(lang, estimatedTotal, parts)}
 <div><div class="kpi-label">${t(lang, { key: "tokens.estimateTotal" })}</div><div class="kpi-value">≈${fmtTokens(estimatedTotal)}</div>

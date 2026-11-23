@@ -38,7 +38,7 @@ export function renderTimingCard(report: InsightReport): string {
 		.join("");
 
 	const estimated = timing.estimated.model || timing.estimated.tool;
-	return `<section class="card" id="timing" data-card="timing"><h2>${t(lang, { key: "timing.title" })}
+	return `<section class="card" id="timing" data-card="timing"><h2 data-i18n="timing.title">${esc(t(lang, { key: "timing.title" }))}
 ${timing.tps === null ? "" : `<span class="badge" data-tps="1">${t(lang, { key: "timing.tps", params: { tps: timing.tps >= 10 ? Math.round(timing.tps) : timing.tps.toFixed(1) } })}</span>`}</h2>
 <div class="grid2"><div style="display:flex;align-items:center;gap:16px"><svg viewBox="0 0 100 100" width="96" height="96" role="img" aria-label="${esc(t(lang, { key: "timing.title" }))}">${arcs}
 <text x="50" y="48" text-anchor="middle" fill="var(--text)" font-size="11" font-weight="600">${esc(fmtDuration(timing.activeMs))}</text>

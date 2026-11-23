@@ -93,7 +93,8 @@ export function collectToolExecutions(args: {
 		}
 		if (message.role !== "toolResult") continue;
 		const execution =
-			byId.get(message.toolCallId) ?? make(message.toolCallId, message.toolName, message.timestamp, false);
+			byId.get(message.toolCallId);
+		if (execution === undefined) continue;
 		execution.status = message.isError ? "error" : "ok";
 		execution.tokens += tokensOf(message.content);
 		if (typeof message.durationMs === "number") {

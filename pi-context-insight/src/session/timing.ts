@@ -117,13 +117,15 @@ export function computeTiming(args: {
 		toolCalls += 1;
 		if (execution.nested) continue;
 		if (execution.durationEstimated) toolEstimated = true;
-		toolMs += execution.durationMs ?? 0;
+		const duration = execution.durationMs;
+		if (typeof duration === "number" && Number.isFinite(duration) && duration > 0) toolMs += duration;
 	}
 
 	const askWindows: Array<{ start: number; end: number }> = [];
 	for (const execution of executions) {
 		if (execution.name !== ASK_TOOL || execution.durationMs === undefined) continue;
 		const duration = execution.durationMs;
+		if (!Number.isFinite(duration)) continue;
 		const beat = beats.find((candidate) => candidate.end - candidate.start >= duration);
 		if (beat) askWindows.push({ start: beat.end - execution.durationMs, end: beat.end });
 	}

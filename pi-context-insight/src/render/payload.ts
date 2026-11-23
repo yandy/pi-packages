@@ -13,14 +13,17 @@ export interface InteractivePayload {
 	steps: Array<{
 		i: number;
 		turn: number;
+		stepInTurn: number;
 		sums: Record<string, number>;
 		total: number;
 		delta: Record<string, number>;
 		deltaTotal: number;
 		durMs: number;
 		activeMs: number;
+		prompt: number;
 		ev: number[];
 		details: boolean;
+		ranges: Array<[number, number]>;
 	}>;
 	items: Array<{ id: number; cat: string; tag: string; tok: number; body: number | null; error?: boolean }>;
 	bodies: string[];
@@ -38,14 +41,17 @@ export function payloadOf(report: InsightReport): InteractivePayload {
 		steps: report.steps.map((step) => ({
 			i: step.index,
 			turn: step.turn,
+			stepInTurn: step.stepInTurn,
 			sums: step.sums as unknown as Record<string, number>,
 			total: step.estimatedTotal,
 			delta: step.delta as unknown as Record<string, number>,
 			deltaTotal: step.deltaTotal,
 			durMs: step.durationMs ?? 0,
 			activeMs: step.activeMs,
+			prompt: step.actual?.prompt ?? 0,
 			ev: step.eventIds,
 			details: step.hasDetails,
+			ranges: step.itemRanges,
 		})),
 		items: report.items.map((item) => ({
 			id: item.id,
