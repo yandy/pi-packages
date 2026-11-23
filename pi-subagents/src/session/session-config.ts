@@ -82,8 +82,10 @@ export interface SessionConfig {
 	/**
 	 * Resolved tool names for the child session.
 	 * `undefined` = leave resolution to the host (the parent's active set is
-	 * unknown), `[]` = no tools, otherwise an exact allowlist with this package's
-	 * dispatch tools already stripped.
+	 * unknown), `[]` = no tools. When the parent's active set is known, a
+	 * non-empty value is the final allowlist (deduped, with this package's
+	 * dispatch tools stripped); when it is unknown, a modifier-only list is
+	 * passed through untouched for the host to apply.
 	 */
 	toolNames: string[] | undefined;
 	/**

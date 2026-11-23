@@ -103,15 +103,18 @@ function parseCsvField(val: unknown): string[] | undefined {
  * Parse the `tools` field, preserving the difference between "not configured"
  * and "explicitly no tools":
  *
- *   omitted               → undefined (inherit the parent session's tools)
- *   "none" / empty        → []        (the agent gets zero tools)
+ *   omitted (key absent)  → undefined (inherit the parent session's tools)
+ *   "none" / empty value  → []        (the agent gets zero tools)
  *   csv of tool names     → an explicit allowlist
  *   csv of +name / -name  → an inheriting list with those deltas applied
  *
- * Entries are passed through untouched; the assembler rejects the invalid
- * combinations (plain names mixed with modifiers, or a pattern).
+ * An explicitly written key with no value (`tools:` on its own line) reaches
+ * here as YAML `null` and must mean zero tools, not inherit. Entries are passed
+ * through untouched; the assembler rejects the invalid combinations (plain
+ * names mixed with modifiers, or a pattern).
  */
 function parseToolList(val: unknown): string[] | undefined {
-	if (val === undefined || val === null) return undefined;
+	if (val === undefined) return undefined;
+	if (val === null) return [];
 	return parseCsvField(val) ?? [];
 }

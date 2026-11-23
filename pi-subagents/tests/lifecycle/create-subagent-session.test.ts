@@ -141,6 +141,16 @@ describe("createSubagentSession — assembly", () => {
 		expect(io.createSession).toHaveBeenCalledWith(expect.objectContaining({ tools: [] }));
 	});
 
+	it("passes tools: undefined for an inheriting agent with no known parent set", async () => {
+		const registry = createAgentLookup({ toolNames: undefined });
+		await createSubagentSession(
+			{ snapshot: STUB_SNAPSHOT, type: "general-purpose" },
+			createSubagentSessionDeps({ io, exec, registry }),
+		);
+		// Degraded path: the host resolves the child's tools.
+		expect(io.createSession).toHaveBeenCalledWith(expect.objectContaining({ tools: undefined }));
+	});
+
 	it("calls newSession with parentSession when parentSessionId is provided", async () => {
 		await createSubagentSession(
 			{

@@ -69,14 +69,17 @@ function stripDispatch(names: string[]): string[] {
 /**
  * Resolve the tool names a child session should be created with.
  *
- * `configured` is the raw `tools` frontmatter: `undefined` (unset: inherit the
- * parent's active set), `[]` (no tools at all), a plain list (exact allowlist), or
- * a list of only `+name` / `-name` entries (the inherited set with those entries
- * applied). Mixing plain names with entries is rejected by `validateToolList`.
+ * `configured` is the parsed `tools` list (frontmatter splitting has already
+ * happened): `undefined` (unset: inherit the parent's active set), `[]` (no tools
+ * at all), a plain list (exact allowlist), or a list of only `+name` / `-name`
+ * entries (the inherited set with those entries applied). Mixing plain names
+ * with entries is rejected by `validateToolList`.
  *
- * A returned list is final: duplicates are collapsed and this package's dispatch
- * tools are removed. The return `undefined` means the parent's active set is
- * unknown — let the host resolve the child's tools.
+ * When the parent's active set is known, a returned list is final: duplicates
+ * are collapsed and this package's dispatch tools are removed. When it is
+ * unknown, a modifier-only list is returned untouched (the host applies the
+ * deltas to its own defaults). The return `undefined` means the parent's active
+ * set is unknown — let the host resolve the child's tools.
  */
 export function resolveToolNames(
 	type: string,

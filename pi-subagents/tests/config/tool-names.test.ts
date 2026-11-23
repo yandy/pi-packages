@@ -41,6 +41,10 @@ describe("resolveToolNames", () => {
 		expect(resolveToolNames("deltas", ["-edit"], undefined)).toEqual(["-edit"]);
 	});
 
+	it("strips a dispatch tool named by a +modifier", () => {
+		expect(resolveToolNames("x", ["+subagent"], ["read"])).toEqual(["read"]);
+	});
+
 	it("dedupes while preserving first occurrence", () => {
 		expect(resolveToolNames("dupes", ["read", "read", "grep"], [])).toEqual(["read", "grep"]);
 		expect(resolveToolNames("dupes", undefined, ["read", "read"])).toEqual(["read"]);

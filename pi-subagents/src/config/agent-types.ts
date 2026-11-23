@@ -88,10 +88,11 @@ export class AgentTypeRegistry implements AgentConfigLookup {
 	/**
 	 * Get the tool allowlist for a type (case-insensitive).
 	 *
-	 * `undefined` = inherit: the child gets the parent's tools (the harness
-	 * activates the default set plus every loaded extension tool) and the
-	 * dispatch tools are stripped after binding. `[]` = explicitly no tools.
-	 * A non-empty list = exactly those names.
+	 * `undefined` = inherit: the child gets the parent's captured active set,
+	 * minus this package's dispatch tools. When the parent's active set is
+	 * unknown, resolution falls back to the host's default set plus every loaded
+	 * extension tool. `[]` = explicitly no tools. A non-empty list = exactly
+	 * those names.
 	 */
 	getToolNamesForType(type: string): string[] | undefined {
 		const key = this.resolveKey(type);

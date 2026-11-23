@@ -249,8 +249,8 @@ Agent-level events (state changes of one agent run):
 |-------|------|-------|
 | `subagents:created` | Agent registered | **Background only** (before queue admission) |
 | `subagents:started` | Agent transitions to running (including out of the queue) | Background and foreground |
-| `subagents:completed` | Agent finished successfully | **Background only** (also when aborting a queued agent) |
-| `subagents:failed` | Agent errored, stopped, or aborted | **Background only** (same) |
+| `subagents:completed` | Agent finished successfully | **Background only** |
+| `subagents:failed` | Agent errored, stopped, or aborted (also when aborting a queued agent) | **Background only** |
 | `subagents:steered` | Steering message sent | Running agents, foreground or background |
 | `subagents:compacted` | Agent session compacted | Background and foreground |
 | `subagents:settings_loaded` | Persisted settings applied | Once at extension load |

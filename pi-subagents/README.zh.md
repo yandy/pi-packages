@@ -241,8 +241,8 @@ tools: -edit, -write, -bash     # 只读调研：继承一切，去掉会写文�
 |------|----------|--------|
 | `subagents:created` | 代理已注册 | **仅后台**（在排队准入之前） |
 | `subagents:started` | 代理转入运行状态（含从队列转出） | 后台与前台 |
-| `subagents:completed` | 代理成功结束 | **仅后台**（含中止排队中的代理） |
-| `subagents:failed` | 代理出错/停止/中止 | **仅后台**（同上） |
+| `subagents:completed` | 代理成功结束 | **仅后台** |
+| `subagents:failed` | 代理出错/停止/中止（含中止排队中的代理） | **仅后台** |
 | `subagents:steered` | 转向消息已发送 | 运行中的代理（前后台均可） |
 | `subagents:compacted` | 代理会话已压缩 | 后台与前台 |
 | `subagents:settings_loaded` | 持久化设置已应用 | 扩展加载时一次 |

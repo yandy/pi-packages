@@ -48,10 +48,11 @@ export interface AgentPromptConfig {
 export interface AgentConfig extends AgentIdentity, AgentPromptConfig {
 	/**
 	 * `tools` for this agent.
-	 * `undefined` = inherit the parent session's tools (the harness activates the
-	 * default set plus every loaded extension tool; dispatch tools are stripped
-	 * after binding); `[]` = explicitly no tools; a plain list = exactly those
-	 * names; a list of only `+name` / `-name` entries = inherit, then add/remove.
+	 * `undefined` = inherit the parent session's captured active set, minus this
+	 * package's dispatch tools; `[]` = explicitly no tools; a plain list =
+	 * exactly those names; a list of only `+name` / `-name` entries = inherit,
+	 * then add/remove. When the parent's active set is unknown, `undefined`
+	 * falls back to the host's default set plus every loaded extension tool.
 	 */
 	toolNames?: string[];
 	model?: string;

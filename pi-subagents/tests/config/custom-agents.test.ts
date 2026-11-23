@@ -155,6 +155,45 @@ No tools.`,
 		expect(result.get("notool")?.toolNames).toEqual([]);
 	});
 
+	it("treats a bare `tools:` line as zero tools, not inherit", () => {
+		writeAgent(
+			"barenotool",
+			`---
+tools:
+---
+
+No tools.`,
+		);
+
+		const result = loadCustomAgents(tmpDir);
+		expect(result.get("barenotool")?.toolNames).toEqual([]);
+	});
+
+	it("keeps a bare `tools:` line as zero tools even with a known parent set", () => {
+		writeAgent("barenotool", `---
+tools:
+---
+
+No tools.`);
+
+		const registry = new AgentTypeRegistry(() => loadCustomAgents(tmpDir));
+		const io = { buildReplacePrompt: () => "", buildAppendSection: () => "" };
+		const env = { isGitRepo: false, branch: "", platform: "linux" as const };
+
+		// The key is present (YAML null) but valueless: zero tools, even though
+		// the parent's active set is known — this is the case that was broken.
+		expect(
+			assembleSessionConfig(
+				"barenotool",
+				{ cwd: tmpDir, modelRegistry: { find: () => undefined }, activeToolNames: ["read", "bash", "subagent"] },
+				{},
+				env,
+				registry,
+				io,
+			).toolNames,
+		).toEqual([]);
+	});
+
 	it("keeps `tools: none` empty all the way into the session config", () => {
 		writeAgent("notool", `---
 tools: none
