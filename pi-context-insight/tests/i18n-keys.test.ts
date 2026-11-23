@@ -1,9 +1,11 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { DICT } from "../src/i18n";
 
-const RENDER_DIR = join(process.cwd(), "src/render");
+// Resolved from this file, not process.cwd(): the monorepo root runs the same test file.
+const RENDER_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "render");
 
 function renderSources(): Array<{ file: string; source: string }> {
 	return readdirSync(RENDER_DIR)
