@@ -200,35 +200,40 @@ describe("assembleSessionConfig — thinking level", () => {
 });
 
 describe("assembleSessionConfig — tools validation", () => {
-	it("passes an inheriting +name/-name list through unchanged", () => {
-		mockGetToolNamesForType.mockReturnValueOnce(["-edit", "-write", "+powershell"]);
-
-		const result = assembleSessionConfig("deltas", ctx, {}, mockEnv, mockAgentLookup, mockIO);
-
-		expect(result.toolNames).toEqual(["-edit", "-write", "+powershell"]);
-	});
-
-	it("names the agent type when plain names are mixed with modifiers", () => {
-		mockGetToolNamesForType.mockReturnValueOnce(["read", "-edit"]);
-
-		expect(() => assembleSessionConfig("mixed", ctx, {}, mockEnv, mockAgentLookup, mockIO)).toThrow(
-			/Agent "mixed" has an invalid "tools" list: plain tool names cannot be mixed/,
-		);
-	});
-
-	it("rejects patterns in +name/-name entries", () => {
-		mockGetToolNamesForType.mockReturnValueOnce(["+web*"]);
-
-		expect(() => assembleSessionConfig("globby", ctx, {}, mockEnv, mockAgentLookup, mockIO)).toThrow(
-			/\+name\/-name entries take exact tool names, not patterns/,
-		);
-	});
-
-	it("does not validate inherit (undefined) or an empty list", () => {
+	it("resolves the inherited set from the parent's active tools", () => {
 		mockGetToolNamesForType.mockReturnValueOnce(undefined);
-		expect(assembleSessionConfig("inherit", ctx, {}, mockEnv, mockAgentLookup, mockIO).toolNames).toBeUndefined();
+		const cfg = assembleSessionConfig(
+			"inherit",
+			{ ...ctx, activeToolNames: ["read", "ext_tool", "subagent"] },
+			{},
+			mockEnv,
+			mockAgentLookup,
+			mockIO,
+		);
+		expect(cfg.toolNames).toEqual(["read", "ext_tool"]);
+	});
 
-		mockGetToolNamesForType.mockReturnValueOnce([]);
-		expect(assembleSessionConfig("none", ctx, {}, mockEnv, mockAgentLookup, mockIO).toolNames).toEqual([]);
+	it("passes undefined through when the parent's set is unknown", () => {
+		mockGetToolNamesForType.mockReturnValueOnce(undefined);
+		const cfg = assembleSessionConfig("inherit", ctx, {}, mockEnv, mockAgentLookup, mockIO);
+		expect(cfg.toolNames).toBeUndefined();
+	});
+
+	it("applies deltas to the parent's set", () => {
+		mockGetToolNamesForType.mockReturnValueOnce(["-edit", "-write"]);
+		const cfg = assembleSessionConfig(
+			"deltas",
+			{ ...ctx, activeToolNames: ["read", "edit", "write"] },
+			{},
+			mockEnv,
+			mockAgentLookup,
+			mockIO,
+		);
+		expect(cfg.toolNames).toEqual(["read"]);
+	});
+
+	it("surfaces validation errors from the resolver", () => {
+		mockGetToolNamesForType.mockReturnValueOnce(["read", "-edit"]);
+		expect(() => assembleSessionConfig("mixed", ctx, {}, mockEnv, mockAgentLookup, mockIO)).toThrow(/"mixed"/);
 	});
 });

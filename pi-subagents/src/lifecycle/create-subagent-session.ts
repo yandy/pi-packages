@@ -185,6 +185,7 @@ export async function createSubagentSession(
 			cwd: snapshot.cwd,
 			parentModel: snapshot.model,
 			modelRegistry: snapshot.modelRegistry,
+			activeToolNames: snapshot.activeToolNames,
 		},
 		{
 			model: params.model,

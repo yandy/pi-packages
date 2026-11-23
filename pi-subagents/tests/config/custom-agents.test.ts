@@ -175,6 +175,10 @@ All tools.`);
 		// none/empty → zero tools; omitted → inherit the parent's tools (undefined).
 		expect(assembleSessionConfig("notool", ctx, {}, env, registry, io).toolNames).toEqual([]);
 		expect(assembleSessionConfig("notools2", ctx, {}, env, registry, io).toolNames).toBeUndefined();
+
+		// With a known parent active set, the omitted list resolves to that set minus dispatch tools.
+		const withParent = { ...ctx, activeToolNames: ["read", "bash", "subagent"] };
+		expect(assembleSessionConfig("notools2", withParent, {}, env, registry, io).toolNames).toEqual(["read", "bash"]);
 	});
 
 	it("carries a +name/-name list into the session config and rejects a mixed one", () => {
