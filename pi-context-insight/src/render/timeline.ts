@@ -5,12 +5,32 @@ import type { InsightReport } from "../report";
 import type { Milestone } from "../session/events";
 import { categoryLabel } from "./categories";
 import { esc } from "./escape";
+import { section } from "./layout";
 
-const BAR_W = 14;
-const BAR_GAP = 2;
-const CHART_H = 112;
 const FLAG_EVERY = 5;
 const TIMELINE_MAX = 4000;
+const TARGET_WIDTH = 1050;
+
+export interface TimelineGeometry {
+	barW: number;
+	gap: number;
+	flagH: number;
+	chartH: number;
+	turnH: number;
+	height: number;
+	axisY: number;
+}
+
+/** Bar width adapts to the step count so a short session is not a thin sliver. */
+export function timelineGeometry(stepCount: number): TimelineGeometry {
+	const steps = Math.max(1, stepCount);
+	const barW = Math.max(6, Math.min(24, Math.floor(TARGET_WIDTH / steps)));
+	const gap = barW <= 8 ? 1 : 2;
+	const flagH = 26;
+	const chartH = 150;
+	const turnH = 24;
+	return { barW, gap, flagH, chartH, turnH, height: 240, axisY: flagH + chartH };
+}
 
 function finiteOrZero(value: number): number {
 	return Number.isFinite(value) && value > 0 ? value : 0;
@@ -29,13 +49,14 @@ function flagsByStep(report: InsightReport): Map<number, Milestone[]> {
 function barFor(
 	report: InsightReport,
 	step: { index: number; sums: Record<CategoryId, number>; estimatedTotal: number },
+	geo: TimelineGeometry,
 	max: number,
 	position: number,
 ): string {
-	const x = 10 + position * (BAR_W + BAR_GAP);
-	const scale = max > 0 ? CHART_H / max : 0;
+	const x = 10 + position * (geo.barW + geo.gap);
+	const scale = max > 0 ? geo.chartH / max : 0;
 	const target = Math.round(finiteOrZero(step.estimatedTotal) * scale);
-	let y = 150;
+	let y = geo.axisY;
 	let remaining = target;
 	const segments = CATEGORY_ORDER.filter((id) => id !== "unattributed")
 		.filter((id) => (step.sums[id] ?? 0) > 0)
@@ -45,7 +66,7 @@ function barFor(
 			remaining -= height;
 			if (height <= 0) return "";
 			y -= height;
-			return `<rect x="${x}" y="${y.toFixed(2)}" width="${BAR_W}" height="${height}" fill="var(--${id})"><title>${esc(`${categoryLabel(report.lang, id)} · ≈${fmtTokens(step.sums[id] ?? 0)}`)}</title></rect>`;
+			return `<rect x="${x}" y="${y.toFixed(2)}" width="${geo.barW}" height="${height}" fill="var(--${id})"><title>${esc(`${categoryLabel(report.lang, id)} · ≈${fmtTokens(step.sums[id] ?? 0)}`)}</title></rect>`;
 		})
 		.join("");
 	return `<g data-step="${step.index}">${segments}</g>`;
@@ -55,13 +76,19 @@ export function renderTimeline(report: InsightReport): string {
 	const lang = report.lang;
 	const steps = report.steps;
 	if (steps.length === 0) {
-		return `<section class="card" id="timeline" data-card="timeline"><h2 data-i18n="timeline.title">${esc(t(lang, { key: "timeline.title" }))}</h2><p class="dim" data-empty="timeline">${t(lang, { key: "empty.timeline" })}</p></section>`;
+		return section({
+			id: "timeline",
+			titleKey: "timeline.title",
+			lang,
+			body: `<p class="dim" data-empty="timeline">${t(lang, { key: "empty.timeline" })}</p>`,
+		});
 	}
-	const all = steps;
 	const rendered = steps.length > TIMELINE_MAX ? steps.slice(-TIMELINE_MAX) : steps;
+	const geo = timelineGeometry(rendered.length);
 	const max = Math.max(1, ...rendered.map((step) => finiteOrZero(step.estimatedTotal)));
-	const width = Math.max(720, rendered.length * (BAR_W + BAR_GAP) + 20);
-	const bars = rendered.map((step, position) => barFor(report, step, max, position)).join("");
+	const width = Math.max(320, 20 + rendered.length * (geo.barW + geo.gap));
+	const bars = rendered.map((step, position) => barFor(report, step, geo, max, position)).join("");
+
 	const flags = flagsByStep(report);
 	const firstIndex = rendered[0]?.index ?? 0;
 	const flagBand = [...flags]
@@ -69,23 +96,39 @@ export function renderTimeline(report: InsightReport): string {
 		.map(([stepIndex, milestones]) => {
 			const primary = milestones[0];
 			if (primary === undefined) return "";
-			const x = 10 + (stepIndex - firstIndex) * (BAR_W + BAR_GAP) + BAR_W / 2;
+			const x = 10 + Math.min(rendered.length - 1, stepIndex - firstIndex) * (geo.barW + geo.gap) + geo.barW / 2;
 			const count = milestones.filter((milestone) => milestone.eventIds.length > 0).length;
-			return `<g data-flag="${primary.kind}" data-flag-step="${stepIndex}"><line x1="${x}" x2="${x}" y1="18" y2="150" stroke="var(--dim)" stroke-dasharray="2 3" opacity=".5"/><circle cx="${x}" cy="18" r="5" fill="var(--${primary.kind === "compaction" ? "compaction" : "systemSkills"})"><title>${esc(t(lang, { key: `flag.${primary.kind}` }))}</title></circle>${count > 1 ? `<text x="${x}" y="36" text-anchor="middle" font-size="8" fill="var(--text)">+${count - 1}</text>` : ""}</g>`;
+			return `<g data-flag="${primary.kind}" data-flag-step="${stepIndex}"><line x1="${x}" x2="${x}" y1="${geo.flagH}" y2="${geo.axisY}" stroke="var(--dim)" stroke-dasharray="2 3" opacity=".45"/><circle cx="${x}" cy="13" r="5" fill="var(--${primary.kind === "compaction" ? "compaction" : "systemSkills"})"><title>${esc(t(lang, { key: `flag.${primary.kind}` }))}</title></circle>${count > 1 ? `<text x="${x}" y="30" text-anchor="middle" font-size="9" fill="var(--text)">+${count - 1}</text>` : ""}</g>`;
 		})
 		.join("");
+
+	const ticks = [
+		{ value: max, y: geo.axisY - geo.chartH },
+		{ value: max / 2, y: geo.axisY - geo.chartH / 2 },
+		{ value: 0, y: geo.axisY },
+	]
+		.map(
+			(tick) =>
+				`<g><line class="grid" x1="0" x2="${width}" y1="${tick.y}" y2="${tick.y}" stroke="var(--line)" stroke-dasharray="2 4"/><text class="tick" x="2" y="${tick.y - 4}" font-size="10" fill="var(--dim)">${esc(fmtTokens(tick.value))}</text></g>`,
+		)
+		.join("");
+
 	const tickLabels = rendered
-		.filter((step) => (step.index + 1) % FLAG_EVERY === 0)
+		.filter((_step, position) => (position + 1) % FLAG_EVERY === 0)
 		.map((_step, position) => {
-			const x = 10 + position * (BAR_W + BAR_GAP) + BAR_W / 2;
-			return `<text x="${x}" y="166" text-anchor="middle" font-size="8" fill="var(--dim)">S${firstIndex + position + 1}</text>`;
+			const x = 10 + position * (geo.barW + geo.gap) + geo.barW / 2;
+			return `<text x="${x}" y="${geo.axisY + geo.turnH + 14}" text-anchor="middle" font-size="9" fill="var(--dim)">S${firstIndex + position + 1}</text>`;
 		})
 		.join("");
+
 	const turns = report.turns
 		.map((turn) => {
-			const startX = 10 + Math.max(0, turn.startStep - firstIndex) * (BAR_W + BAR_GAP);
-			const endX = 10 + Math.max(turn.startStep, turn.endStep - firstIndex) * (BAR_W + BAR_GAP) + BAR_W;
-			return `<g class="row" data-turn-block="${turn.index}"><rect x="${startX}" y="172" width="${Math.max(BAR_W, endX - startX)}" height="12" fill="${turn.index % 2 === 0 ? "rgba(147,161,184,.14)" : "rgba(147,161,184,.28)"}" rx="2"><title>${esc(t(lang, { key: "timeline.turnBlock", params: { t: turn.index, steps: turn.endStep - turn.startStep + 1 } }))}</title></rect><text x="${startX + 3}" y="181" font-size="8" fill="var(--text)">${turn.index}</text></g>`;
+			const startPosition = Math.max(0, turn.startStep - firstIndex);
+			const endPosition = Math.max(0, turn.endStep - firstIndex);
+			const startX = 10 + startPosition * (geo.barW + geo.gap);
+			const endX = 10 + Math.min(rendered.length - 1, endPosition) * (geo.barW + geo.gap) + geo.barW;
+			const steps = Math.max(1, turn.endStep - turn.startStep + 1);
+			return `<g class="row" data-turn-block="${turn.index}"><rect x="${startX}" y="${geo.axisY + 4}" width="${Math.max(geo.barW, endX - startX)}" height="12" fill="${turn.index % 2 === 0 ? "rgba(139,151,168,.14)" : "rgba(139,151,168,.28)"}" rx="2"><title>${esc(t(lang, { key: "timeline.turnBlock", params: { t: turn.index, steps } }))}</title></rect><text x="${startX + 3}" y="${geo.axisY + 13}" font-size="9" fill="var(--text)">${turn.index}</text></g>`;
 		})
 		.join("");
 
@@ -101,20 +144,24 @@ export function renderTimeline(report: InsightReport): string {
 		["mode", "delta"],
 		["granularity", "step"],
 		["granularity", "turn"],
-		["adaptive", "adaptive"],
 		["duration", "duration"],
 		["overview", "overview"],
-		["dna", "dna"],
 	]
 		.map(
-			([name, value], index) =>
-				`<button type="button" data-toggle="${name}" data-value="${value}" aria-pressed="${index === 0 || index === 2 || index === 4 || index === 5}">${esc(t(lang, { key: `toggle.${value}` }))}</button>`,
+			([name, value]) =>
+				`<button type="button" data-toggle="${name}" data-value="${value}" aria-pressed="${value === "total" || value === "step"}">${esc(t(lang, { key: `toggle.${value}` }))}</button>`,
 		)
 		.join("");
 
 	const maxLabel = fmtTokens(max);
-	return `<section class="card" id="timeline" data-card="timeline"><h2 data-i18n="timeline.title">${esc(t(lang, { key: "timeline.title" }))}</h2>
-<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">${toolbar}</div>
+	const svg = `<svg data-timeline-svg width="${width}" height="${geo.height}" viewBox="0 0 ${width} ${geo.height}" role="img" aria-label="${esc(t(lang, { key: "timeline.title" }))}" data-geometry="${esc(JSON.stringify(geo))}">
+${ticks}
+<line x1="0" x2="${width}" y1="${geo.axisY}" y2="${geo.axisY}" stroke="var(--line)"/>
+<g data-flag-lane>${flagBand}</g>
+${bars}${turns}${tickLabels}
+</svg>`;
+
+	const body = `<div class="toolbar">${toolbar}</div>
 <div class="legend">${legend}</div>
 <div data-timeline-overview hidden style="margin-top:8px">${steps
 		.map(
@@ -122,14 +169,9 @@ export function renderTimeline(report: InsightReport): string {
 				`<i data-overview-step="${step.index}" style="display:inline-block;height:14px;width:${Math.max(1, Math.round((step.estimatedTotal / Math.max(max, 1)) * 60))}px;background:var(--systemBase);margin-right:1px;border-radius:1px" title="${esc(`S${step.index + 1}`)}"></i>`,
 		)
 		.join("")}</div>
-<div class="timeline-scroll" data-timeline-scroll style="margin-top:8px"><svg width="${width}" height="190" viewBox="0 0 ${width} 190" role="img" aria-label="${esc(t(lang, { key: "timeline.title" }))}">
-<line x1="10" x2="${width - 10}" y1="150" y2="150" stroke="var(--line)"/>
-<text x="10" y="10" font-size="8" fill="var(--dim)">${esc(maxLabel)}</text>
-<text x="10" y="126" font-size="8" fill="var(--dim)">${esc(fmtTokens(max / 4))}</text>
-<text x="10" y="94" font-size="8" fill="var(--dim)">${esc(fmtTokens(max / 2))}</text>
-<text x="10" y="62" font-size="8" fill="var(--dim)">${esc(fmtTokens((max * 3) / 4))}</text>
-${bars}${flagBand}${tickLabels}${turns}
-</svg></div>
-${all.length > TIMELINE_MAX ? `<p class="dim" data-timeline-cap="${TIMELINE_MAX}">${t(lang, { key: "timeline.capped", params: { total: all.length, shown: TIMELINE_MAX } })}</p>` : ""}
-<p class="dim">${t(lang, { key: "timeline.note", params: { steps: rendered.length, max: maxLabel } })}</p></section>`;
+<div class="timeline-scroll" data-timeline-scroll style="margin-top:8px">${svg}</div>
+${steps.length > TIMELINE_MAX ? `<p class="dim" data-timeline-cap="${TIMELINE_MAX}">${t(lang, { key: "timeline.capped", params: { total: steps.length, shown: TIMELINE_MAX } })}</p>` : ""}
+<p class="dim" style="margin:8px 0 0">${t(lang, { key: "timeline.note", params: { steps: rendered.length, max: maxLabel } })}</p>`;
+
+	return section({ id: "timeline", titleKey: "timeline.title", lang, body });
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderStepDetail } from "../src/render/detail";
-import { renderTimeline } from "../src/render/timeline";
+import { renderTimeline, timelineGeometry } from "../src/render/timeline";
 import { buildReport } from "../src/report";
 import { fakeContext } from "./helpers/ctx";
 import {
@@ -39,13 +39,38 @@ describe("renderTimeline", () => {
 			.flatMap((match) => [...(match[1] ?? "").matchAll(/height="([\d.]+)"/g)])
 			.map((height) => Number(height[1]));
 		const total = heights.reduce((sum, value) => sum + value, 0);
-		expect(Math.abs(total - Math.round((r.steps[0]!.estimatedTotal / max) * 112))).toBeLessThanOrEqual(1);
+		const expected = Math.round((r.steps[0]!.estimatedTotal / max) * timelineGeometry(3).chartH);
+		expect(Math.abs(total - expected)).toBeLessThanOrEqual(1);
 	});
-	it("offers the six switches", () => {
+	it("offers only the wired switches", () => {
 		const html = renderTimeline(report(2));
-		for (const name of ["mode", "granularity", "overview", "dna", "adaptive", "duration"]) {
-			expect(html).toContain(`data-toggle="${name}"`);
+		for (const value of ["total", "delta", "step", "turn", "duration", "overview"]) {
+			expect(html).toContain(`data-value="${value}"`);
 		}
+		expect(html).not.toContain('data-value="adaptive"');
+		expect(html).not.toContain('data-toggle="dna"');
+	});
+	it("widens bars for short sessions and narrows them for long ones", () => {
+		expect(timelineGeometry(10).barW).toBe(24);
+		expect(timelineGeometry(400).barW).toBe(6);
+		expect(timelineGeometry(150).barW).toBe(7);
+		expect(timelineGeometry(0).barW).toBe(24);
+	});
+	it("draws three y ticks and a flag lane", () => {
+		const html = renderTimeline(report(4));
+		expect((html.match(/class="tick"/g) ?? []).length).toBe(3);
+		expect(html).toContain("data-flag-lane");
+	});
+	it("renders a single-column timeline for a one-step session", () => {
+		const html = renderTimeline(report(1));
+		expect((html.match(/data-step="\d+"/g) ?? []).length).toBe(1);
+		expect(html).not.toContain('height="-');
+		expect(html).not.toContain("NaN");
+	});
+	it("publishes the geometry the client redraws with", () => {
+		const html = renderTimeline(report(3));
+		expect(html).toContain("data-timeline-svg");
+		expect(html).toContain('data-geometry="');
 	});
 	it("marks compaction as a flag on its step", () => {
 		resetEntryIds();

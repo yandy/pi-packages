@@ -113,7 +113,9 @@ pre.body{white-space:pre-wrap;word-break:break-word;background:var(--surface-2);
 .warn-panel ul{margin:0;padding-left:18px}
 .browser-scroll{max-height:520px;overflow:auto;border:1px solid var(--line);border-radius:var(--r-block);padding:0 10px}
 .browser-scroll h4{position:sticky;top:0;background:var(--surface);margin:0;padding:8px 0 6px;font-size:12px;z-index:1;border-bottom:1px solid var(--line)}
-.timeline-scroll{overflow-x:auto}
+.timeline-scroll{overflow-x:auto;overflow-y:hidden}
+.timeline-scroll>svg{display:block;margin:0 auto;max-width:none}
+.toolbar{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
 .event-row{display:grid;grid-template-columns:88px 10px minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:4px 2px;border-bottom:1px solid var(--line);font-size:12px}
 .event-row:last-child{border-bottom:none}
 
