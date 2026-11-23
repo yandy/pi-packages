@@ -113,7 +113,7 @@ function timelineBody(report: InsightReport): string {
 			if (primary === undefined) return "";
 			const x = 10 + Math.min(rendered.length - 1, stepIndex - firstIndex) * (geo.barW + geo.gap) + geo.barW / 2;
 			const count = milestones.filter((milestone) => milestone.eventIds.length > 0).length;
-			return `<g data-flag="${primary.kind}" data-flag-step="${stepIndex}"><line x1="${x}" x2="${x}" y1="${geo.flagH}" y2="${geo.axisY}" stroke="var(--dim)" stroke-dasharray="2 3" opacity=".45"/><circle cx="${x}" cy="13" r="5" fill="var(--${primary.kind === "compaction" ? "compaction" : "systemSkills"})"><title>${esc(t(lang, { key: `flag.${primary.kind}` }))}</title></circle>${count > 1 ? `<text x="${x}" y="30" text-anchor="middle" font-size="9" fill="var(--text)">+${count - 1}</text>` : ""}</g>`;
+			return `<g data-flag="${primary.kind}" data-flag-step="${stepIndex}"><line x1="${x}" x2="${x}" y1="${geo.flagH}" y2="${geo.axisY}" stroke="var(--dim)" stroke-dasharray="2 3" opacity=".45"/><circle cx="${x}" cy="8" r="5" fill="var(--${primary.kind === "compaction" ? "compaction" : "systemSkills"})"><title>${esc(t(lang, { key: `flag.${primary.kind}` }))}</title></circle>${count > 1 ? `<text x="${x + 7}" y="12" text-anchor="start" font-size="9" fill="var(--text)">+${count - 1}</text>` : ""}</g>`;
 		})
 		.join("");
 
@@ -143,7 +143,13 @@ function timelineBody(report: InsightReport): string {
 			const startX = 10 + startPosition * (geo.barW + geo.gap);
 			const endX = 10 + Math.min(rendered.length - 1, endPosition) * (geo.barW + geo.gap) + geo.barW;
 			const steps = Math.max(1, turn.endStep - turn.startStep + 1);
-			return `<g class="row" data-turn-block="${turn.index}"><rect x="${startX}" y="${geo.axisY + 4}" width="${Math.max(geo.barW, endX - startX)}" height="12" fill="${turn.index % 2 === 0 ? "rgba(139,151,168,.14)" : "rgba(139,151,168,.28)"}" rx="2"><title>${esc(t(lang, { key: "timeline.turnBlock", params: { t: turn.index, steps } }))}</title></rect><text x="${startX + 3}" y="${geo.axisY + 13}" font-size="9" fill="var(--text)">${turn.index}</text></g>`;
+			const blockWidth = Math.max(geo.barW, endX - startX);
+			// A number per turn only reads when its band is wide enough; the T labels below still orient the axis.
+			const label =
+				blockWidth >= 14
+					? `<text x="${startX + 3}" y="${geo.axisY + 13}" font-size="9" fill="var(--text)">${turn.index}</text>`
+					: "";
+			return `<g class="row" data-turn-block="${turn.index}"><rect x="${startX}" y="${geo.axisY + 4}" width="${blockWidth}" height="12" fill="${turn.index % 2 === 0 ? "rgba(139,151,168,.14)" : "rgba(139,151,168,.28)"}" rx="2"><title>${esc(t(lang, { key: "timeline.turnBlock", params: { t: turn.index, steps } }))}</title></rect>${label}</g>`;
 		})
 		.join("");
 

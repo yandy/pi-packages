@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderActivity } from "../src/render/activity";
+import { renderActivity, sparkSeries } from "../src/render/activity";
 import { renderEvents } from "../src/render/events";
 import { renderFamily } from "../src/render/family";
 import { buildReport } from "../src/report";
@@ -39,6 +39,7 @@ describe("renderEvents", () => {
 	it("renders filter tabs and event rows with kind and position", () => {
 		const html = renderEvents(report());
 		expect(html).toContain('data-filter-group="events"');
+		expect(html).toContain('<input type="search" data-filter-group="events"');
 		const rows = [...html.matchAll(/data-event="(\d+)" data-kind="([^"]+)"/g)];
 		expect(rows.length).toBeGreaterThan(0);
 		expect(rows.some((row) => row[2] === "compaction")).toBe(true);
@@ -72,6 +73,29 @@ describe("renderActivity", () => {
 		const html = renderActivity(report());
 		expect(html).toContain('data-filter-group="files"');
 		expect(html).toContain('data-path="src/a.ts"');
+	});
+	it("offers an all filter that is pressed by default", () => {
+		const html = renderActivity(report());
+		expect(html).toMatch(/<button type="button" data-file-filter="all" aria-pressed="true">/);
+		expect(html).toContain('data-file-filter="read"');
+	});
+	it("scrolls the file and command lists instead of growing the card", () => {
+		const html = renderActivity(report());
+		expect(html).toContain('data-scroll-list="files"');
+		expect(html).toContain('data-scroll-list="commands"');
+	});
+	it("caps the per-step spark and keeps the counts", () => {
+		const short = sparkSeries([0, 2, 0, 1]);
+		expect(short).toEqual([
+			{ from: 0, to: 0, count: 0 },
+			{ from: 1, to: 1, count: 2 },
+			{ from: 2, to: 2, count: 0 },
+			{ from: 3, to: 3, count: 1 },
+		]);
+		const long = sparkSeries(new Array(1000).fill(1), 40);
+		expect(long).toHaveLength(40);
+		expect(long.reduce((sum, bucket) => sum + bucket.count, 0)).toBe(1000);
+		expect(long.at(-1)?.to).toBe(999);
 	});
 	it("renders command rows with status and program", () => {
 		const html = renderActivity(report());

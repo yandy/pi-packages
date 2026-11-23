@@ -13,7 +13,7 @@ Generate a standalone, offline HTML insight report for the current Pi session: w
 - **Agent family** — nested delegation records, per-member cards and compact child reports, without double counting forwarded usage
 - **Two modes** — the default report embeds raw content; `--short` carries the same structure with no text bodies at all
 - **English or Chinese UI**, chosen when the report is generated; switching in the page retranslates the whole document, including client-rendered charts and lists
-- **A layout built for reading** — a left section rail and a 12-column card grid instead of one endless column; it folds to a single column on narrow screens and drops the rail when printed
+- **A layout built for reading** — a left section rail and a 12-column card grid instead of one endless column; long item, file and command lists scroll inside their card; it folds to a single column on narrow screens and drops the rail when printed
 
 ## Install
 
@@ -52,10 +52,10 @@ An empty session (no user or assistant message yet) is refused with `Nothing to 
 | Tokens | Donut plus 16 legend rows (dot, estimate, share, micro bar): six system-prompt sections, tool definitions, user, injected, skill injections, compaction, thinking, answers, tool calls, tool results, and an "unrecorded at request time" residual that carries no share; cost lives in each row's tooltip |
 | Timing | Model / tool / overhead ring with legend rows, wall clock, idle excluded, tokens-per-second badge and a per-step active-time strip |
 | Current context | Occupancy against the window, category bar, compaction reserve and max-output reserve, compaction trigger line |
-| Timeline | One stacked bar per request, width adapting to the step count; total/delta (delta stacks reclaimed context below the axis), step/turn, duration polyline, overview ribbon, milestone flags and a turn band; the selected step's detail sits at the bottom of the same card |
+| Timeline | One stacked bar per request, width adapting to the step count; total/delta (delta stacks reclaimed context below the axis), step/turn (turn mode re-scales the bars and labels turns), duration polyline, overview ribbon, milestone flags and a turn band; the selected step's detail sits at the bottom of the same card |
 | Browser | A category index on the left (count, tokens, share, signed delta; click to isolate one category) and a height-capped, scrolling item list on the right (group headings, expandable bodies, tool source chips, red edge on errors); the DNA view shares the same container |
-| Events | Kind pills for filtering plus rows: time, kind dot, text, a clickable position chip and a delta badge |
-| Activity | Three cards: tools (source, call bar, per-step distribution), files (read/write/search/image, line deltas, operation log), commands (status, exit code, duration, program tally) |
+| Events | Kind pills and a text filter plus rows: time, kind dot, text, a clickable position chip and a delta badge |
+| Activity | Three cards: tools (source, call bar, per-step distribution), files (all/read/write/search/image filters with an all reset, line deltas, operation log), commands (status, exit code, duration, program tally); file and command lists scroll inside a capped box |
 | Agents | Family cards, delegation table with brief and final result, compact child reports |
 | Notes | Estimation rules, aggregation scope, the truncation list applied to this report, and the privacy reminder |
 
