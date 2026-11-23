@@ -11,6 +11,8 @@ export interface SectionArgs {
 	lang: Lang;
 	/** Pre-rendered markup shown at the right of the title bar; the caller escapes it. */
 	meta?: string;
+	/** Overrides `data-card` when two cards share one nav anchor. */
+	cardId?: string;
 	span?: GridSpan;
 	body: string;
 }
@@ -38,7 +40,7 @@ export function i18nAttrs(key: string, params?: Record<string, string | number>)
 export function section(args: SectionArgs): string {
 	const span = args.span ?? 12;
 	const meta = args.meta === undefined ? "" : `<span class="card-meta">${args.meta}</span>`;
-	return `<section class="card span-${span}" id="${attr(args.id)}" data-card="${attr(args.id)}"><h2><span ${i18nAttrs(args.titleKey)}>${esc(t(args.lang, { key: args.titleKey }))}</span>${meta}</h2>${args.body}</section>`;
+	return `<section class="card span-${span}" id="${attr(args.id)}" data-card="${attr(args.cardId ?? args.id)}"><h2><span ${i18nAttrs(args.titleKey)}>${esc(t(args.lang, { key: args.titleKey }))}</span>${meta}</h2>${args.body}</section>`;
 }
 
 export interface ChipArgs {

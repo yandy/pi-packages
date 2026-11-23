@@ -52,6 +52,17 @@ describe("renderEvents", () => {
 });
 
 describe("renderActivity", () => {
+	it("splits activity into a tools card and a two-up files/commands row", () => {
+		const html = renderActivity(report());
+		expect(html).toContain('data-card="tools"');
+		expect(html).toContain('data-card="files"');
+		expect(html).toContain('data-card="commands"');
+		expect(html).toContain("span-6");
+		expect(html).not.toContain("<hr");
+	});
+	it("bars each tool row by call count", () => {
+		expect(renderActivity(report())).toContain('data-bar="read"');
+	});
 	it("renders tool rows with source labels and per-step distribution", () => {
 		const html = renderActivity(report());
 		expect(html).toContain('data-tool-row="read"');

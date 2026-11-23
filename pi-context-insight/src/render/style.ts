@@ -130,8 +130,29 @@ pre.body{white-space:pre-wrap;word-break:break-word;background:var(--surface-2);
 .timeline-scroll>svg{display:block;margin:0 auto;max-width:none}
 .toolbar{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
 .detail-scroll{max-height:300px;overflow:auto}
-.event-row{display:grid;grid-template-columns:88px 10px minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:4px 2px;border-bottom:1px solid var(--line);font-size:12px}
+.event-list{max-height:360px;overflow:auto}
+.event-row{display:grid;grid-template-columns:64px 10px minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:5px 2px;border-bottom:1px solid var(--line);font-size:12px}
+.event-clock{font-variant-numeric:tabular-nums}
+.event-row .dot{width:9px;height:9px;border-radius:50%}
+.event-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.delta{text-align:right;min-width:56px;font-variant-numeric:tabular-nums}
+.delta-up{color:var(--ok)}
+.delta-down{color:var(--err)}
+.delta-zero{color:var(--dim)}
+.tool-list{display:flex;flex-direction:column;gap:2px}
+.tool-row{display:grid;grid-template-columns:120px auto minmax(60px,180px) auto auto auto auto auto;gap:10px;align-items:center;font-size:12px;padding:3px 0;border-bottom:1px solid var(--line)}
+.tool-row:last-child{border-bottom:none}
+.tool-name{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tool-spark{white-space:nowrap;line-height:1}
+.file-row,.cmd-row{padding:3px 0;border-bottom:1px solid var(--line);font-size:12px}
+.file-row:last-child,.cmd-row:last-child{border-bottom:none}
+.cmd-row.is-error{border-left:2px solid var(--err);padding-left:6px}
+.file-op,.cmd-row p{margin:2px 0 2px 16px}
+.split-commands{grid-template-columns:minmax(0,0.8fr) minmax(0,1.2fr);margin-top:0}
+.rail-stats{font-size:12px}
+.rail-stats ul{margin:2px 0 0;padding-left:16px}
 .event-row:last-child{border-bottom:none}
+.tool-row .bar{margin:0}
 
 button,select,input[type="search"]{background:var(--surface-2);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:2px 8px;font-size:11.5px;font-family:inherit;cursor:pointer}
 button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
