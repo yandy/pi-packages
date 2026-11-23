@@ -1,5 +1,5 @@
-import { estimateTextAndImageContentTokens, estimateTextTokens } from "@earendil-works/pi-ai/utils/estimate";
 import type { SessionEntry, ToolInfo } from "@earendil-works/pi-coding-agent";
+import { estimateTextAndImageContentTokens, estimateTextTokens } from "../estimate";
 import { stepIndexOf } from "../session/steps";
 
 export type ToolExecutionStatus = "ok" | "error" | "missing" | "unfinished";
