@@ -8,25 +8,28 @@ const ACTIVE_AGENT_RE = /<active_agent\s+name="[^"]+"\s*\/>/;
 /**
  * How long a blocking prompt must stay open before it raises a desktop notification.
  *
- * A prompt the operator answers immediately — typically a picker their own slash
- * command opened — is not a request for attention, so it must not notify. A prompt
- * nobody answers is exactly the case the notification exists for.
+ * Antispam, not the criterion: a prompt that blocks an agent loop and that the operator answers
+ * within seconds is already handled, and a sticky `critical` banner for it is pure noise. A
+ * prompt nobody answers is exactly the case the notification exists for.
  *
  * Exported for the test harness only; the delay is behavior, not a knob.
  */
 export const PROMPT_NOTIFY_DELAY_MS = 4000;
 
 /**
- * Channel another extension emits through `pi.events` immediately before mounting a passive
- * (`custom`) prompt — a read-only viewer such as `/subagents:sessions` or `/todos`.
+ * Channel another extension emits through `pi.events` immediately before opening a prompt that
+ * does *not* block an agent loop — a viewer (`/subagents:sessions` transcript, `/todos`) or a
+ * menu its own command shows (`/subagents:sessions` picker, `/subagents:settings`).
  *
- * A prompt event carries only `kind` and `title`, so a viewer is otherwise indistinguishable
- * from an extension asking a question. The viewer's own package knows which one it is opening,
- * so it announces it; the prompt right after the announcement does not notify. Announcing is
- * opt-in: an extension that says nothing keeps the default (a custom prompt alerts once it has
- * been open for `PROMPT_NOTIFY_DELAY_MS`).
+ * The distinction the whole feature turns on is "who is waiting": a prompt raised by a tool
+ * (`ask_user`, a sandbox approval) blocks the agent loop and must alert; a prompt raised by the
+ * operator's own command only waits for the operator, who is already at the keyboard. A prompt
+ * event carries just `kind` and `title`, so only the package opening it knows which case it is —
+ * hence the announcement. The prompt right after an announcement never notifies; an
+ * unannounced prompt keeps the default and alerts once it has been open for
+ * `PROMPT_NOTIFY_DELAY_MS`.
  */
-export const PASSIVE_PROMPT_CHANNEL = "notify:passive-prompt";
+export const NON_BLOCKING_PROMPT_CHANNEL = "notify:non-blocking-prompt";
 
 export default function (
 	pi: ExtensionAPI,
@@ -49,11 +52,16 @@ export default function (
 	let activeAgentSession: boolean | undefined;
 	let runOrigin: "user" | "custom" | undefined;
 	let pendingPromptTimer: ReturnType<typeof setTimeout> | undefined;
-	/** Set by `PASSIVE_PROMPT_CHANNEL`; consumed by the next `ui_prompt_start`. */
-	let passivePromptPending = false;
+	/**
+	 * Counted, not a flag: one command can announce twice in a row (a picker, then its viewer),
+	 * and the two `ui_prompt_start` events can be delivered out of order when another
+	 * extension's start handler yields. A boolean would collapse both announcements into one and
+	 * let the second start alert. Each start consumes at most one announcement.
+	 */
+	let nonBlockingPromptPending = 0;
 
-	pi.events.on(PASSIVE_PROMPT_CHANNEL, () => {
-		passivePromptPending = true;
+	pi.events.on(NON_BLOCKING_PROMPT_CHANNEL, () => {
+		nonBlockingPromptPending++;
 	});
 
 	const cancelPendingPrompt = (): void => {
@@ -95,20 +103,21 @@ export default function (
 	});
 
 	pi.on("session_shutdown", async () => {
-		passivePromptPending = false;
+		nonBlockingPromptPending = 0;
 		cancelPendingPrompt();
 	});
 
 	pi.on("ui_prompt_start", async (event, ctx) => {
 		if (isActiveAgentSession(ctx)) return;
-		// Announcements are one-shot and only meaningful for the prompt they precede: consume on
-		// every prompt, whatever its kind, so a stale one cannot silence a later alert.
-		const passive = passivePromptPending;
-		passivePromptPending = false;
-		if (passive && event.kind === "custom") {
-			// A viewer replaces whatever prompt preceded it (typically the picker that opened it).
-			// Its `ui_prompt_end` may still be in flight — `emit()` awaits every handler — so the
-			// replaced prompt's pending alert must be dropped here, not left to that end event.
+		// Announcements are one-shot and only meaningful for the prompt they precede: consume one
+		// on every prompt, whatever its kind, so a stale one cannot silence every later alert.
+		const nonBlocking = nonBlockingPromptPending > 0;
+		if (nonBlocking) nonBlockingPromptPending--;
+		if (nonBlocking) {
+			// A menu or viewer replaces whatever prompt preceded it (typically the picker of the
+			// same command). Its `ui_prompt_end` may still be in flight — `emit()` awaits every
+			// handler — so the replaced prompt's pending alert must be dropped here, not left to
+			// that end event.
 			cancelPendingPrompt();
 			return;
 		}
@@ -145,8 +154,8 @@ export default function (
 		// The operator answered before the delay elapsed: nothing to deliver.
 		// A pending announcement is deliberately left alone: `ui_prompt_end` carries no identity,
 		// so an end belonging to an earlier prompt (possibly delayed by another handler) could
-		// arrive between a viewer's announcement and its own `ui_prompt_start` and wipe it.
-		// The announcement is consumed by the next start and dropped on session shutdown instead.
+		// arrive between an announcement and its own `ui_prompt_start` and wipe it. The
+		// announcement is consumed by the next start and dropped on session shutdown instead.
 		cancelPendingPrompt();
 	});
 

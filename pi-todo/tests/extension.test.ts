@@ -315,9 +315,9 @@ describe("command /todos", () => {
 		await commands.todos.handler("", { mode: "tui", hasUI: true, ui: { notify: vi.fn(), custom, theme } });
 
 		expect(custom).toHaveBeenCalledTimes(1);
-		// 看板是只读浮层：必须在挂载前声明被动弹窗（顺序也是契约的一部分），
+		// 看板是只读浮层：必须在挂载前声明非阻塞弹窗（顺序也是契约的一部分），
 		// 否则 pi-notify 会为这个浮层发「等待输入」通知。
-		expect(events.emit).toHaveBeenCalledWith("notify:passive-prompt", {});
+		expect(events.emit).toHaveBeenCalledWith("notify:non-blocking-prompt", {});
 		expect(events.emit.mock.invocationCallOrder[0]).toBeLessThan(custom.mock.invocationCallOrder[0]);
 		const [factory, options] = custom.mock.calls[0] as [any, any];
 		expect(options.overlay).toBe(true);
@@ -326,7 +326,7 @@ describe("command /todos", () => {
 		expect(component.render(60).join("\n")).toContain("Ship it");
 	});
 
-	it("does not announce a passive prompt when it falls back to a notification", async () => {
+	it("does not announce a non-blocking prompt when it falls back to a notification", async () => {
 		await run({ action: "set", items: [{ title: "Ship it", status: "pending" }] });
 		await commands.todos.handler("", { mode: "rpc", hasUI: true, ui: { notify: vi.fn(), custom: vi.fn(), theme } });
 		expect(events.emit).not.toHaveBeenCalled();

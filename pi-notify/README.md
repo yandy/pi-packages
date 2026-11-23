@@ -4,7 +4,7 @@ Desktop notifications for pi: when you run several pi instances in parallel, eac
 
 ## Features
 
-- **Waiting for input**: any blocking `ctx.ui` prompt (select / confirm / input / editor / custom, including prompts from other extensions) sends a notification — held for 4 s and dropped if the prompt closes first — with the prompt title, prompt kind, and instance context. Urgency defaults to `critical`. Read-only overlays opened by your own command (`/todos`, `/subagents:sessions`) stay silent however long they remain open, because the package mounting them announces them as passive.
+- **Waiting for input**: a prompt that blocks an agent loop — a tool asking you something (`ask_user`) or an approval (`pi-sandbox`) — sends a notification with the prompt title, prompt kind, and instance context, urgency `critical`. Prompts your own command opens and that block nothing (`/subagents:sessions` picker and viewer, `/subagents:settings` menus, `/todos`) never notify, however long they stay open: the package opening them declares them non-blocking. Unannounced prompts alert, so a third-party blocking prompt is never missed.
 - **Task finished**: when the agent becomes fully idle (`agent_settled`), the notification shows the run duration and a plain-text summary of the last assistant message. Urgency defaults to `normal`.
 - **Instance identification**: the title leads with the session name (or project directory name when unnamed). A second body line retains the project name when useful and always includes the process pid.
 - **Readable summaries**: markdown markers and extra whitespace are removed. Summaries are limited to 160 grapheme clusters plus an ellipsis, preferring a nearby sentence or word boundary over splitting text or emoji.
@@ -44,20 +44,23 @@ Requires pi >= 1.5.0 and one of the following backends:
 - For a prompt, `<subject>` is its title, or its kind when untitled; `custom` prompts carry no title by contract, so they use the fixed subject `Interactive prompt` instead of the kind name. `<context>` contains the project basename when a distinct named session is active, the prompt kind when it is not already the subject, and `pid <pid>`.
 - For completion, `<summary>` is the last assistant message's cleaned text. If no assistant text exists, the body contains only `<context>`. Duration is rounded to the nearest second and shown as seconds, minutes, or hours.
 - The `\n` denotes an actual newline: the subject or summary stays on the first line, while instance metadata moves to the second line. Custom notifier commands receive both lines in the single body argument.
-- Prompt notifications are **deferred by 4 s**: the alert is scheduled when the prompt opens and dropped if the prompt closes first (`ui_prompt_end`). A picker your own slash command opened and you answered right away therefore never notifies, while a prompt nobody answers still does. Pending alerts are also discarded on session replacement and shutdown.
-- A `custom` prompt is arbitrary extension UI, so a read-only viewer is indistinguishable from a question at the event level. A package that mounts a viewer emits `pi.events.emit("notify:passive-prompt", {})` immediately before `ctx.ui.custom(...)`, and the prompt right after that announcement does not notify. Announcing is one-shot, applies to `custom` only, and is opt-in: an unannounced `custom` prompt (an interactive tool such as `ask_user`) alerts as before.
-- The delay is 4 s; pending alerts are also discarded on session replacement and shutdown.
+- Prompt notifications are **deferred by 4 s**: the alert is scheduled when the prompt opens and dropped if the prompt closes first (`ui_prompt_end`). This is antispam, not the criterion — a blocking prompt you answer immediately never raises a sticky `critical` banner, while one nobody answers still does. Pending alerts are also discarded on session replacement and shutdown.
+- Prompt events carry only `kind` and `title`, so a blocking prompt and a menu look identical. A package that opens a prompt which does not block an agent loop emits `pi.events.emit("notify:non-blocking-prompt", {})` right before the prompt call, and that one prompt never notifies — whatever its `kind`. Announcing is one-shot and opt-in: an unannounced prompt (a tool-blocking `custom` such as `ask_user`, a sandbox approval) alerts as before.
 
-### Suppressing a read-only prompt (for extension authors)
+### Declaring a non-blocking prompt (for extension authors)
 
-Mounting a `custom` prompt that never waits for a decision? Announce it first:
+Opening a prompt that does not block an agent loop — a viewer, a menu your own command shows?
+Announce it first:
 
 ```ts
-pi.events.emit("notify:passive-prompt", {});
+pi.events.emit("notify:non-blocking-prompt", {});
 await ctx.ui.custom(/* read-only viewer */);
 ```
 
-Emit it synchronously in the same block as the `custom` call — the prompt event Pi emits is deferred through a microtask, so the announcement always arrives first. One announcement covers the prompt that immediately follows; anything after that keeps the default behavior. An announcement that never gets a prompt (you emit, then return before mounting) keeps waiting and silences the next `custom` prompt instead, so keep the two statements adjacent.
+The shape of the prompt does not matter: `select`, `input`, `custom` alike. What matters is who is
+waiting — the agent loop (alert) or only the operator (silent).
+
+Emit it synchronously in the same block as the prompt call — the prompt event Pi emits is deferred through a microtask, so the announcement always arrives first. One announcement covers the prompt that immediately follows, so a command that opens two prompts (a picker, then its viewer) announces twice; anything beyond that keeps the default behavior. An announcement that never gets a prompt (you emit, then return before opening anything) keeps waiting and silences the next prompt instead, so keep the two statements adjacent.
 
 Example:
 

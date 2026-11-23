@@ -21,11 +21,11 @@ import { formatProgress, renderWidgetLines, TodoWidget } from "./src/widget.js";
 const PACKAGE_ID = "pi-todo";
 
 /**
- * pi-notify 的被动弹窗约定（跨包字符串，与其它 `pi.events` 通道一样重复声明）：
- * 在挂载只读 `custom` 浮层前发一次，pi-notify 就不为紧随其后的弹窗发「等待输入」通知。
- * 看板只读且由用户主动关闭，不是等人回答的弹窗。
+ * pi-notify 的「不阻塞 agent loop」弹窗约定（跨包字符串，与其它 `pi.events` 通道一样重复声明）：
+ * 在打开这类弹窗前发一次，pi-notify 就不为紧随其后的那个弹窗发「等待输入」通知。
+ * 看板只读、只等操作员，agent 并未被它卡住，因此属于这一类。
  */
-const PASSIVE_PROMPT_CHANNEL = "notify:passive-prompt";
+const NON_BLOCKING_PROMPT_CHANNEL = "notify:non-blocking-prompt";
 
 interface TodoDetails {
 	action: "set" | "update" | "list";
@@ -232,7 +232,7 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify(`${formatProgress(todos)}\n${listTodos(todos)}`, "info");
 				return;
 			}
-			pi.events.emit(PASSIVE_PROMPT_CHANNEL, {});
+			pi.events.emit(NON_BLOCKING_PROMPT_CHANNEL, {});
 			await ctx.ui.custom<void>(
 				(tui, theme, keybindings, done) => new TodoView(todos, theme, tui, keybindings, () => done()),
 				{

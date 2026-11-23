@@ -630,7 +630,7 @@ describe("SessionNavigatorHandler", () => {
 
 	it("notifies and skips the overlay when no sessions are navigable", async () => {
 		const ui = makeUI();
-		const announcePassivePrompt = vi.fn();
+		const announceNonBlockingPrompt = vi.fn();
 		const notReady = makeNavigable({ isSessionReady: () => false });
 		await new SessionNavigatorHandler().handle({
 			ui,
@@ -639,12 +639,12 @@ describe("SessionNavigatorHandler", () => {
 			registry,
 			cwd: "/test/cwd",
 			readFile: noReadFile,
-			announcePassivePrompt,
+			announceNonBlockingPrompt,
 		});
 		expect(ui.notify).toHaveBeenCalledWith("No subagent sessions to view.", "info");
 		expect(ui.custom).not.toHaveBeenCalled();
 		// No overlay means no announcement: a stray one would silence the next prompt.
-		expect(announcePassivePrompt).not.toHaveBeenCalled();
+		expect(announceNonBlockingPrompt).not.toHaveBeenCalled();
 	});
 
 	it("does not open the overlay when the operator cancels the picker", async () => {
@@ -656,7 +656,7 @@ describe("SessionNavigatorHandler", () => {
 			registry,
 			cwd: "/test/cwd",
 			readFile: noReadFile,
-			announcePassivePrompt: vi.fn(),
+			announceNonBlockingPrompt: vi.fn(),
 		});
 		expect(ui.select).toHaveBeenCalledOnce();
 		expect(ui.custom).not.toHaveBeenCalled();
@@ -678,7 +678,7 @@ describe("SessionNavigatorHandler", () => {
 			registry,
 			cwd: "/test/cwd",
 			readFile: noReadFile,
-			announcePassivePrompt: vi.fn(),
+			announceNonBlockingPrompt: vi.fn(),
 		});
 
 		expect(ui.custom).toHaveBeenCalledOnce();
@@ -690,11 +690,16 @@ describe("SessionNavigatorHandler", () => {
 		expect(renderCapturedOverlay(ui).some((l) => l.includes("picked agent reply"))).toBe(true);
 	});
 
-	it("announces the passive prompt immediately before mounting the overlay", async () => {
+	it("announces before each of the two prompts it opens", async () => {
+		// Neither the picker nor the transcript overlay blocks an agent loop — both only wait
+		// for the operator — so each is announced immediately before it opens.
 		const record = makeNavigable();
-		const ui = makeUI();
-		ui.select.mockImplementation((_title, options) => Promise.resolve(options[0]));
 		const order: string[] = [];
+		const ui = makeUI();
+		ui.select.mockImplementation((_title, options) => {
+			order.push("select");
+			return Promise.resolve(options[0]);
+		});
 		ui.custom.mockImplementation(async () => {
 			order.push("custom");
 		});
@@ -706,14 +711,14 @@ describe("SessionNavigatorHandler", () => {
 			registry,
 			cwd: "/test/cwd",
 			readFile: noReadFile,
-			announcePassivePrompt: () => order.push("announce"),
+			announceNonBlockingPrompt: () => order.push("announce"),
 		});
 
-		expect(order).toEqual(["announce", "custom"]);
+		expect(order).toEqual(["announce", "select", "announce", "custom"]);
 	});
 
-	it("does not announce when no overlay is mounted", async () => {
-		const announcePassivePrompt = vi.fn();
+	it("announces the picker only when the operator cancels it", async () => {
+		const announceNonBlockingPrompt = vi.fn();
 		await new SessionNavigatorHandler().handle({
 			ui: makeUI(undefined),
 			agents: [makeNavigable()],
@@ -721,9 +726,9 @@ describe("SessionNavigatorHandler", () => {
 			registry,
 			cwd: "/test/cwd",
 			readFile: noReadFile,
-			announcePassivePrompt,
+			announceNonBlockingPrompt,
 		});
-		expect(announcePassivePrompt).not.toHaveBeenCalled();
+		expect(announceNonBlockingPrompt).toHaveBeenCalledTimes(1);
 	});
 
 	it("passes the picked record's live usage to the overlay header", async () => {
@@ -741,7 +746,7 @@ describe("SessionNavigatorHandler", () => {
 			registry,
 			cwd: "/test/cwd",
 			readFile: noReadFile,
-			announcePassivePrompt: vi.fn(),
+			announceNonBlockingPrompt: vi.fn(),
 		});
 
 		const header = renderCapturedOverlay(ui).join("\n");
@@ -784,7 +789,7 @@ describe("SessionNavigatorHandler", () => {
 			registry,
 			cwd: "/test/cwd",
 			readFile,
-			announcePassivePrompt: vi.fn(),
+			announceNonBlockingPrompt: vi.fn(),
 		});
 
 		expect(readFile).toHaveBeenCalledWith("/tasks/e1.jsonl");
@@ -809,7 +814,7 @@ describe("SessionNavigatorHandler", () => {
 			},
 		];
 		const ui = makeUI("Agent (Old task) · 5 tools · completed · 3.0s · evicted (snapshot)");
-		const announcePassivePrompt = vi.fn();
+		const announceNonBlockingPrompt = vi.fn();
 
 		await new SessionNavigatorHandler().handle({
 			ui,
@@ -818,11 +823,12 @@ describe("SessionNavigatorHandler", () => {
 			registry,
 			cwd: "/test/cwd",
 			readFile,
-			announcePassivePrompt,
+			announceNonBlockingPrompt,
 		});
 
 		expect(ui.notify).toHaveBeenCalledWith("Could not read the session transcript file.", "error");
 		expect(ui.custom).not.toHaveBeenCalled();
-		expect(announcePassivePrompt).not.toHaveBeenCalled();
+		// Only the picker opened, so only it was announced.
+		expect(announceNonBlockingPrompt).toHaveBeenCalledTimes(1);
 	});
 });

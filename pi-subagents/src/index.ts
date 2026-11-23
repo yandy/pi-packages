@@ -44,7 +44,7 @@ import { AgentTool } from "./tools/agent-tool";
 import { GetResultTool } from "./tools/get-result-tool";
 import { SteerTool } from "./tools/steer-tool";
 import { AgentWidget } from "./ui/agent-widget";
-import { PASSIVE_PROMPT_CHANNEL, SessionNavigatorHandler } from "./ui/session-navigator";
+import { NON_BLOCKING_PROMPT_CHANNEL, SessionNavigatorHandler } from "./ui/session-navigator";
 import { SubagentsSettingsHandler } from "./ui/subagents-settings";
 
 export default function (pi: ExtensionAPI) {
@@ -164,7 +164,10 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("subagents:settings", {
 		description: "Configure subagent settings (concurrency, turn limits, timeouts)",
 		handler: async (_args, ctx) => {
-			await subagentsSettings.handle({ ui: ctx.ui });
+			await subagentsSettings.handle({
+				ui: ctx.ui,
+				announceNonBlockingPrompt: () => pi.events.emit(NON_BLOCKING_PROMPT_CHANNEL, {}),
+			});
 		},
 	});
 
@@ -182,7 +185,7 @@ export default function (pi: ExtensionAPI) {
 				registry,
 				cwd: ctx.cwd,
 				readFile: (path) => readFileSync(path, "utf8"),
-				announcePassivePrompt: () => pi.events.emit(PASSIVE_PROMPT_CHANNEL, {}),
+				announceNonBlockingPrompt: () => pi.events.emit(NON_BLOCKING_PROMPT_CHANNEL, {}),
 			});
 		},
 	});

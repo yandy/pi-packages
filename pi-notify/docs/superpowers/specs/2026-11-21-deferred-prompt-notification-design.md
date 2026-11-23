@@ -1,8 +1,9 @@
 # Defer waiting-for-input notifications
 
-> The non-goal below — never gate a prompt on an in-flight run — still holds, and it is one of the
-> reasons [2026-11-23-readonly-overlay-prompt-design.md](2026-11-23-readonly-overlay-prompt-design.md)
-> solves read-only viewers with an opt-in announcement instead of inferring them from run state.
+> The non-goal below — never gate a prompt on an in-flight run — still holds. The 4 s deferral it
+> introduced is kept by [2026-11-23-blocking-prompt-notification-design.md](2026-11-23-blocking-prompt-notification-design.md)
+> as antispam only: prompts that block an agent loop now alert after the delay, prompts declared
+> non-blocking never alert, and run state decides neither.
 
 ## Intent
 

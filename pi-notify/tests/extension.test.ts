@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import extension, { PASSIVE_PROMPT_CHANNEL, PROMPT_NOTIFY_DELAY_MS } from "../src/index.js";
+import extension, { NON_BLOCKING_PROMPT_CHANNEL, PROMPT_NOTIFY_DELAY_MS } from "../src/index.js";
 
 beforeEach(() => {
 	vi.useFakeTimers();
@@ -79,8 +79,8 @@ function createHarness(opts?: {
 		ctx,
 		fire,
 		firePrompt,
-		/** Emit `PASSIVE_PROMPT_CHANNEL` the way a viewer package does right before `ui.custom`. */
-		announcePassivePrompt: () => pi.events.emit(PASSIVE_PROMPT_CHANNEL, {}),
+		/** Emit `NON_BLOCKING_PROMPT_CHANNEL` the way a package does right before its prompt. */
+		announceNonBlockingPrompt: () => pi.events.emit(NON_BLOCKING_PROMPT_CHANNEL, {}),
 		setNow: (t: number) => (current = t),
 		setSystemPrompt: (value: string) => (systemPrompt = value),
 	};
@@ -115,12 +115,12 @@ describe("ui_prompt_start", () => {
 		expect(h.fakeNotifier.notify.mock.calls[0][0].body).toBe("Interactive prompt\npid 4242");
 	});
 
-	it("stays silent for a passive viewer the operator announced", async () => {
-		// `/subagents:sessions` and `/todos` announce before mounting their read-only overlay:
-		// an open viewer is never a request for attention, however long it stays open.
+	it("stays silent for a viewer the operator announced", async () => {
+		// `/subagents:sessions` and `/todos` announce before their prompts: a viewer only waits
+		// for the operator, never for the agent, so it is not a request for attention.
 		const h = createHarness();
 		await h.fire("session_start", { reason: "startup" });
-		h.announcePassivePrompt();
+		h.announceNonBlockingPrompt();
 		await h.firePrompt({ kind: "custom" });
 		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
 	});
@@ -131,7 +131,7 @@ describe("ui_prompt_start", () => {
 		const h = createHarness();
 		await h.fire("session_start", { reason: "startup" });
 		await h.fire("agent_start");
-		h.announcePassivePrompt();
+		h.announceNonBlockingPrompt();
 		await h.firePrompt({ kind: "custom" });
 		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
 	});
@@ -139,21 +139,32 @@ describe("ui_prompt_start", () => {
 	it("consumes an announcement once", async () => {
 		const h = createHarness();
 		await h.fire("session_start", { reason: "startup" });
-		h.announcePassivePrompt();
+		h.announceNonBlockingPrompt();
 		await h.firePrompt({ kind: "custom" });
 		await h.firePrompt({ kind: "custom" });
 		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(1);
 	});
 
-	it("does not let an announcement silence a titled dialog", async () => {
-		// The contract is about passive `custom` viewers. A dialog still means a stuck instance,
-		// and the announcement is consumed so it cannot leak onto a later prompt.
+	it("silences the announced dialog of an operator command", async () => {
+		// `/subagents:sessions` opens a picker (`select`) and `/subagents:settings` opens a menu
+		// (`select` + `input`) before any viewer: neither blocks an agent loop, so each announces.
 		const h = createHarness();
 		await h.fire("session_start", { reason: "startup" });
-		h.announcePassivePrompt();
-		await h.firePrompt({ kind: "select", title: "Pick one" });
-		await h.firePrompt({ kind: "custom" });
-		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(2);
+		h.announceNonBlockingPrompt();
+		await h.firePrompt({ kind: "select", title: "Subagent sessions" });
+		h.announceNonBlockingPrompt();
+		await h.firePrompt({ kind: "input", title: "Max concurrent background agents" });
+		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
+	});
+
+	it("keeps silencing the next prompt only once per announcement", async () => {
+		const h = createHarness();
+		await h.fire("session_start", { reason: "startup" });
+		h.announceNonBlockingPrompt();
+		await h.firePrompt({ kind: "select", title: "Subagent sessions" });
+		await h.firePrompt({ kind: "select", title: "Settings" });
+		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(1);
+		expect(h.fakeNotifier.notify.mock.calls[0][0].body).toContain("Settings");
 	});
 
 	it("keeps an announcement across a stale prompt end", async () => {
@@ -163,20 +174,20 @@ describe("ui_prompt_start", () => {
 		// pins the same invariant against the real `ExtensionRunner`.
 		const h = createHarness();
 		await h.fire("session_start", { reason: "startup" });
-		h.announcePassivePrompt();
+		h.announceNonBlockingPrompt();
 		await h.fire("ui_prompt_end", { kind: "select", title: "Subagent sessions" });
 		await h.firePrompt({ kind: "custom" });
 		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
 	});
 
-	it("lets a stale announcement silence the next custom prompt", async () => {
+	it("lets a stale announcement silence the next prompt", async () => {
 		// Known limit, recorded deliberately: the announcement has no identity, so a publisher
-		// that announces and then never mounts its prompt loses the next custom alert. In-tree
-		// publishers announce in the same synchronous block as `ui.custom`, so the window is
-		// closed; a third-party prompt that cannot guarantee that should not announce.
+		// that announces and then never opens its prompt loses the next alert. In-tree publishers
+		// announce in the same synchronous block as the prompt call, so the window is closed; a
+		// third-party prompt that cannot guarantee that should not announce.
 		const h = createHarness();
 		await h.fire("session_start", { reason: "startup" });
-		h.announcePassivePrompt();
+		h.announceNonBlockingPrompt();
 		await h.firePrompt({ kind: "custom" });
 		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
 	});

@@ -162,10 +162,12 @@ substituted for them. If an agent type pins `model` in its frontmatter, that mod
 | `/subagents:sessions` | View a subagent's session transcript |
 
 The session viewer renders the transcript read-only with Pi's own per-entry
-components and follows the running agent live. Before mounting the overlay it
-emits `pi.events.emit("notify:passive-prompt", {})`, so with pi-notify installed
-the viewer never raises a "waiting for input" alert — you can keep reading a
-subagent while the parent session is still streaming. Tool results appear in Pi's
+components and follows the running agent live. Neither prompt of this command
+blocks an agent loop — the picker and the viewer only wait for you — so each is
+preceded by `pi.events.emit("notify:non-blocking-prompt", {})`; with pi-notify
+installed neither raises a "waiting for input" alert, however long you browse,
+including while the parent session is still streaming. The same applies to every
+`/subagents:settings` menu. Tool results appear in Pi's
 collapsed form (summaries and previews), so a `read` call is represented by its
 call line only. The viewer has no expand key, so the "… to expand" hints some
 tools print do not apply here.
@@ -230,9 +232,9 @@ Both slash commands and the running-agents widget call host UI primitives direct
 |---|---|---|
 | `setWidget(factory)` (running / finished agents widget) | none | RPC drops component factories silently, so the widget never appears. print / json have no UI at all |
 | `setStatus` (agents summary line) | none | Forwarded fire-and-forget; may be dropped |
-| `select` / `input` / `notify` (`/subagents:settings`) | none | Forwarded; no `timeout` is passed, so an unresponsive client keeps the command pending. print / json get no-op dialogs, so the menu exits silently |
-| `select` (`/subagents:sessions`) | none | Forwarded; no timeout |
-| `custom` (transcript overlay) | none | RPC returns `undefined` immediately: picking a session shows nothing. Same in print / json |
+| `select` / `input` / `notify` (`/subagents:settings`) | none | Forwarded; no `timeout` is passed, so an unresponsive client keeps the command pending. print / json get no-op dialogs, so the menu exits silently. Non-blocking, so pi-notify never alerts |
+| `select` (`/subagents:sessions` picker) | none | Forwarded; no timeout. Non-blocking, so pi-notify never alerts |
+| `custom` (transcript overlay) | none | RPC returns `undefined` immediately: picking a session shows nothing. Same in print / json. Non-blocking, so pi-notify never alerts |
 
 ## License
 

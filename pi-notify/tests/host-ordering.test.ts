@@ -5,7 +5,7 @@
  *
  * That distinction matters: the real `/subagents:sessions` chain is
  * `select` closes → its `ui_prompt_end` is queued as a microtask → the awaiting
- * command continuation announces the passive prompt and mounts `custom` → the
+ * command continuation announces the next prompt and mounts `custom` → the
  * `ui_prompt_start(custom)` microtask lands *after* that end. Any state pi-notify
  * clears on `ui_prompt_end` is already gone by the time the announced prompt opens,
  * and an end handler that yields can even let the new start overtake it.
@@ -13,7 +13,7 @@
 
 import { ExtensionRunner } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import extension, { PASSIVE_PROMPT_CHANNEL, PROMPT_NOTIFY_DELAY_MS } from "../src/index.js";
+import extension, { NON_BLOCKING_PROMPT_CHANNEL, PROMPT_NOTIFY_DELAY_MS } from "../src/index.js";
 
 type Handler = (event: any, ctx: any) => unknown;
 
@@ -58,10 +58,14 @@ interface Harness {
 
 /**
  * Build a runner over one pi-notify extension, optionally preceded by a "slow"
- * extension whose `ui_prompt_end` handler yields — the shape of another package
- * doing async work in that handler.
+ * extension whose prompt handler yields — the shape of another package doing async
+ * work in that handler. A slow `ui_prompt_start` handler delays pi-notify's own
+ * start handler, which is how two announcements can be pending at once.
  */
-function createHarness(opts?: { slowEndHandler?: () => Promise<void> }): Harness {
+function createHarness(opts?: {
+	slowEndHandler?: () => Promise<void>;
+	slowStartHandler?: () => Promise<void>;
+}): Harness {
 	const bus = createBus();
 	const handlers: Record<string, Handler[]> = {};
 	const notify = vi.fn();
@@ -86,12 +90,11 @@ function createHarness(opts?: { slowEndHandler?: () => Promise<void> }): Harness
 
 	const notifyExtension = { path: "pi-notify", handlers: new Map(Object.entries(handlers)), tools: new Map() } as any;
 	const extensions = [notifyExtension];
-	if (opts?.slowEndHandler) {
-		extensions.unshift({
-			path: "slow-extension",
-			handlers: new Map<string, Handler[]>([["ui_prompt_end", [async () => await opts.slowEndHandler?.()]]]),
-			tools: new Map(),
-		} as any);
+	const slowHandlers = new Map<string, Handler[]>();
+	if (opts?.slowEndHandler) slowHandlers.set("ui_prompt_end", [async () => await opts.slowEndHandler?.()]);
+	if (opts?.slowStartHandler) slowHandlers.set("ui_prompt_start", [async () => await opts.slowStartHandler?.()]);
+	if (slowHandlers.size > 0) {
+		extensions.unshift({ path: "slow-extension", handlers: slowHandlers, tools: new Map() } as any);
 	}
 
 	const rawUI = {
@@ -125,7 +128,7 @@ function createHarness(opts?: { slowEndHandler?: () => Promise<void> }): Harness
 		resolveSelect: (value) => resolveSelect(value),
 		// The command continuation: resume after the picker resolved, announce, mount.
 		mountAnnouncedViewer: async () => {
-			bus.emit(PASSIVE_PROMPT_CHANNEL, {});
+			bus.emit(NON_BLOCKING_PROMPT_CHANNEL, {});
 			return ui.custom(async () => ({ render: () => [], invalidate: () => {} }), { overlay: true });
 		},
 		mountToolPrompt: () => {
@@ -135,8 +138,12 @@ function createHarness(opts?: { slowEndHandler?: () => Promise<void> }): Harness
 	};
 }
 
-/** Drive the `/subagents:sessions` shape: picker, then the announced viewer. */
+/**
+ * Drive the `/subagents:sessions` shape exactly as the command does it: announce, picker,
+ * announce, viewer. Both prompts are declared non-blocking, so neither may alert.
+ */
 async function openViewerAfterPicker(h: Harness): Promise<void> {
+	h.bus.emit(NON_BLOCKING_PROMPT_CHANNEL, {});
 	const pick = h.ui.select("Subagent sessions", ["agent"]);
 	await flush();
 	h.resolveSelect("agent");
@@ -166,7 +173,7 @@ describe("host scheduling: picker then announced viewer", () => {
 
 	it("cancels the picker's pending alert when its end handler is delayed past the delay", async () => {
 		// `emit()` awaits handlers, so another extension can hold the picker's
-		// `ui_prompt_end` for longer than the 4 s delay. The passive mount must drop the
+		// `ui_prompt_end` for longer than the 4 s delay. The non-blocking mount must drop the
 		// picker's pending alert by itself instead of waiting for that end.
 		const h = createHarness({ slowEndHandler: async () => await new Promise((r) => setTimeout(r, 5000)) });
 		await openViewerAfterPicker(h);
@@ -178,13 +185,39 @@ describe("host scheduling: picker then announced viewer", () => {
 		// A prompt end carries no identity: it may belong to a prompt that closed earlier.
 		// Clearing the announcement on any end would let that stale end cancel a viewer alert.
 		const h = createHarness();
-		h.bus.emit(PASSIVE_PROMPT_CHANNEL, {});
+		h.bus.emit(NON_BLOCKING_PROMPT_CHANNEL, {});
 		await h.runner.emit({ type: "ui_prompt_end", reason: "ui_prompt", kind: "select", title: "Subagent sessions" });
 		await flush();
 		const viewer = h.ui.custom(async () => ({ render: () => [], invalidate: () => {} }), { overlay: true });
 		void viewer;
 		await flush();
 		await vi.advanceTimersByTimeAsync(PROMPT_NOTIFY_DELAY_MS + 1000);
+		expect(h.notify).not.toHaveBeenCalled();
+	});
+
+	it("keeps both announcements when a slow start handler delays the first one", async () => {
+		// The picker's `ui_prompt_start` can still be waiting in another extension's handler when
+		// the command announces the viewer. Two announcements must stay two — a single flag would
+		// let the picker's start consume both and leak an alert for the viewer.
+		const h = createHarness({ slowStartHandler: async () => await new Promise((r) => setTimeout(r, 50)) });
+		await openViewerAfterPicker(h);
+		await vi.advanceTimersByTimeAsync(PROMPT_NOTIFY_DELAY_MS + 1000);
+		expect(h.notify).not.toHaveBeenCalled();
+	});
+
+	it("does not alert for a declared picker left open past the delay", async () => {
+		// `/subagents:sessions` can sit on its picker for a minute while the operator reads the
+		// labels; it blocks nothing, so it must stay silent. This is what pins the picker's own
+		// announcement — without it the viewer's later start would still cancel the timer.
+		const h = createHarness();
+		h.bus.emit(NON_BLOCKING_PROMPT_CHANNEL, {});
+		const pick = h.ui.select("Subagent sessions", ["agent"]);
+		await flush();
+		await vi.advanceTimersByTimeAsync(PROMPT_NOTIFY_DELAY_MS + 1000);
+		expect(h.notify).not.toHaveBeenCalled();
+		h.resolveSelect(undefined);
+		await pick;
+		await flush();
 		expect(h.notify).not.toHaveBeenCalled();
 	});
 

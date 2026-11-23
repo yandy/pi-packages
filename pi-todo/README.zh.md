@@ -88,7 +88,7 @@ todo(action: "set" | "update" | "list", items?, id?, status?, title?, blockedBy?
 
 清单为空或全部完成时 widget 自动隐藏。RPC 客户端收到的是同样的窗口（纯文本行，组件形式只在 TUI 生效），所以那里不做宽度截断。
 
-**全量视图**是一个命令：`/todos` 在浮层里显示完整清单（`↑`/`↓` 或 `j`/`k` 移动，`g`/`G` 跳首尾，`Esc` 或 `q` 关闭），表头带进度，清单长于窗口时额外显示 `(当前/总数)` 位置。视图只读，不会改动看板。挂载浮层前会 `pi.events.emit("notify:passive-prompt", {})`：装了 pi-notify 时，只读浮层不会触发「等待输入」通知。非 TUI 模式下降级为一条含完整清单的通知：RPC 会转发它，print/json 没有 UI、不产生输出。
+**全量视图**是一个命令：`/todos` 在浮层里显示完整清单（`↑`/`↓` 或 `j`/`k` 移动，`g`/`G` 跳首尾，`Esc` 或 `q` 关闭），表头带进度，清单长于窗口时额外显示 `(当前/总数)` 位置。视图只读，不会改动看板。挂载浮层前会 `pi.events.emit("notify:non-blocking-prompt", {})`——看板不卡任何 agent loop——装了 pi-notify 时，这个浮层不会触发「等待输入」通知。非 TUI 模式下降级为一条含完整清单的通知：RPC 会转发它，print/json 没有 UI、不产生输出。
 
 ## UI 能力
 
@@ -97,6 +97,6 @@ todo(action: "set" | "update" | "list", items?, id?, status?, title?, blockedBy?
 | `setWidget(key, factory)`（看板组件；只有组件形式能拿到 `render(width)` 按显示宽度裁行） | `mode === "tui"` | 不使用，改用下面的字符串数组形式 |
 | `setWidget(key, string[])`（同一个窗口的纯文本行） | `hasUI` | 以 `setWidget` 请求转发；客户端不处理 widget 就什么也不显示 |
 | `custom`（`/todos` 全量视图浮层） | `mode === "tui"` | 降级为一条含完整清单的 `notify` |
-| `pi.events.emit("notify:passive-prompt")` | 无 | 仅在挂载浮层前发出，降级路径不发 |
+| `pi.events.emit("notify:non-blocking-prompt")` | 无 | 仅在挂载浮层前发出，降级路径不发 |
 | `notify` | 无 | fire-and-forget 转发，可能被丢弃；print / json 不产生输出 |
 | `theme`（`ctx.ui.theme`，给纯文本行上色） | 无 | 宿主默认主题，不是客户端配置的主题 |

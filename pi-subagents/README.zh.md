@@ -157,7 +157,7 @@ timeout: 300
 | `/subagents:settings` | 配置并发数、轮次限制、超时 |
 | `/subagents:sessions` | 查看子代理的会话记录 |
 
-会话查看器以只读方式复用 Pi 自身的逐条消息组件渲染会话记录，并实时跟随运行中的代理。挂载浮层前会 `pi.events.emit("notify:passive-prompt", {})`：装了 pi-notify 时，查看器开着多久都不会收到「等待输入」通知（你完全可以在父会话仍在流式输出时去看子代理）。
+会话查看器以只读方式复用 Pi 自身的逐条消息组件渲染会话记录，并实时跟随运行中的代理。这条命令的两个弹窗（选择列表与查看器）都不卡 agent loop —— 它们只等你 —— 所以各自在打开前发出 `pi.events.emit("notify:non-blocking-prompt", {})`；装了 pi-notify 时两者都不会触发「等待输入」通知，看多久都行，父会话仍在流式输出时也一样。`/subagents:settings` 的各级菜单同理。
 工具结果按 Pi 的折叠形态显示（摘要与预览），因此 `read` 调用只显示其调用行。
 查看器没有展开键，部分工具调用行里提示的"to expand"键在此不适用。
 
@@ -219,9 +219,9 @@ npm test                 # vitest run
 |---|---|---|
 | `setWidget(factory)`（运行中 / 已完成 agent 的 widget） | 无 | RPC 静默丢弃组件工厂，widget 不会出现；print / json 根本没有 UI |
 | `setStatus`（agent 汇总行） | 无 | fire-and-forget，可能被丢弃 |
-| `select` / `input` / `notify`（`/subagents:settings`） | 无 | 会转发；没有传 `timeout`，客户端不响应时命令一直挂着。print / json 下对话皆为空实现，菜单直接退出 |
-| `select`（`/subagents:sessions`） | 无 | 会转发；没有超时 |
-| `custom`（会话记录浮层） | 无 | RPC 直接返回 `undefined`：选中一个会话后什么都不显示；print / json 同理 |
+| `select` / `input` / `notify`（`/subagents:settings`） | 无 | 会转发；没有传 `timeout`，客户端不响应时命令一直挂着。print / json 下对话皆为空实现，菜单直接退出。各级菜单属非阻塞弹窗，pi-notify 不会通知 |
+| `select`（`/subagents:sessions` 选择列表） | 无 | 会转发；没有超时；属非阻塞弹窗，pi-notify 不会通知 |
+| `custom`（会话记录浮层） | 无 | RPC 直接返回 `undefined`：选中一个会话后什么都不显示；print / json 同理。属非阻塞弹窗，pi-notify 不会通知 |
 
 ## 许可证
 

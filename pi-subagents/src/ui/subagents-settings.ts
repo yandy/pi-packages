@@ -24,23 +24,38 @@ export interface SubagentsSettingsUI {
 /**
  * Handler for the `/subagents:settings` slash command.
  *
- * Call `handle({ ui })` from the Pi command registration to open the interactive
- * settings list. Lifted from `AgentsMenuHandler.showSettings`.
+ * Call `handle({ ui, announceNonBlockingPrompt })` from the Pi command registration to open the
+ * interactive settings list. Lifted from `AgentsMenuHandler.showSettings`.
  */
 export class SubagentsSettingsHandler {
 	constructor(private readonly settings: SubagentsSettingsManager) {}
 
-	async handle({ ui }: { ui: SubagentsSettingsUI }): Promise<void> {
-		const choice = await ui.select("Settings", [
-			`Max concurrency (current: ${this.settings.maxConcurrent})`,
-			`Default max turns (current: ${this.settings.defaultMaxTurns ?? "unlimited"})`,
-			`Default timeout (current: ${this.settings.defaultTimeoutSeconds != null ? `${this.settings.defaultTimeoutSeconds}s` : "unlimited"})`,
-			`Grace turns (current: ${this.settings.graceTurns})`,
-		]);
+	async handle({
+		ui,
+		announceNonBlockingPrompt,
+	}: {
+		ui: SubagentsSettingsUI;
+		/** Emitted before every prompt: `/subagents:settings` only waits for the operator. */
+		announceNonBlockingPrompt: () => void;
+	}): Promise<void> {
+		// Every menu below waits for the operator, never for an agent loop, so each prompt is
+		// announced as non-blocking right before it opens (one announcement covers one prompt).
+		const prompt = <T>(open: () => Promise<T>): Promise<T> => {
+			announceNonBlockingPrompt();
+			return open();
+		};
+		const choice = await prompt(() =>
+			ui.select("Settings", [
+				`Max concurrency (current: ${this.settings.maxConcurrent})`,
+				`Default max turns (current: ${this.settings.defaultMaxTurns ?? "unlimited"})`,
+				`Default timeout (current: ${this.settings.defaultTimeoutSeconds != null ? `${this.settings.defaultTimeoutSeconds}s` : "unlimited"})`,
+				`Grace turns (current: ${this.settings.graceTurns})`,
+			]),
+		);
 		if (!choice) return;
 
 		if (choice.startsWith("Max concurrency")) {
-			const val = await ui.input("Max concurrent background agents", String(this.settings.maxConcurrent));
+			const val = await prompt(() => ui.input("Max concurrent background agents", String(this.settings.maxConcurrent)));
 			if (val) {
 				const n = parseInt(val, 10);
 				if (n >= 1) {
@@ -51,9 +66,8 @@ export class SubagentsSettingsHandler {
 				}
 			}
 		} else if (choice.startsWith("Default max turns")) {
-			const val = await ui.input(
-				"Default max turns before wrap-up (0 = unlimited)",
-				String(this.settings.defaultMaxTurns ?? 0),
+			const val = await prompt(() =>
+				ui.input("Default max turns before wrap-up (0 = unlimited)", String(this.settings.defaultMaxTurns ?? 0)),
 			);
 			if (val) {
 				const n = parseInt(val, 10);
@@ -65,9 +79,8 @@ export class SubagentsSettingsHandler {
 				}
 			}
 		} else if (choice.startsWith("Default timeout")) {
-			const val = await ui.input(
-				"Default timeout in seconds (0 = unlimited)",
-				String(this.settings.defaultTimeoutSeconds ?? 0),
+			const val = await prompt(() =>
+				ui.input("Default timeout in seconds (0 = unlimited)", String(this.settings.defaultTimeoutSeconds ?? 0)),
 			);
 			if (val) {
 				const n = parseInt(val, 10);
@@ -79,7 +92,7 @@ export class SubagentsSettingsHandler {
 				}
 			}
 		} else if (choice.startsWith("Grace turns")) {
-			const val = await ui.input("Grace turns after wrap-up steer", String(this.settings.graceTurns));
+			const val = await prompt(() => ui.input("Grace turns after wrap-up steer", String(this.settings.graceTurns)));
 			if (val) {
 				const n = parseInt(val, 10);
 				if (n >= 1) {

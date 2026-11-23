@@ -40,11 +40,13 @@ import { TranscriptBody } from "../ui/transcript-body";
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * pi-notify's contract for passive prompts (duplicated string, like every cross-package
- * `pi.events` channel): emitted immediately before mounting a read-only `custom` overlay so it
- * does not raise a "waiting for input" alert. One announcement covers the next prompt only.
+ * pi-notify's contract for prompts that do not block an agent loop (duplicated string, like
+ * every cross-package `pi.events` channel): emitted immediately before opening a prompt, it
+ * keeps that prompt out of the "waiting for input" alert path. One announcement covers the next
+ * prompt only. Both prompts of this command — the picker and the read-only overlay — qualify:
+ * they wait for the operator, not for the agent.
  */
-export const PASSIVE_PROMPT_CHANNEL = "notify:passive-prompt";
+export const NON_BLOCKING_PROMPT_CHANNEL = "notify:non-blocking-prompt";
 
 /** Chrome lines: top border + header + header sep + footer sep + footer + bottom border. */
 const CHROME_LINES = 6;
@@ -78,11 +80,11 @@ export interface SessionNavigatorParams {
 	/** Reads a persisted session file for the file-snapshot source. */
 	readFile: (path: string) => string;
 	/**
-	 * Emits `PASSIVE_PROMPT_CHANNEL` right before the overlay is mounted. The viewer is
-	 * read-only — it never waits for a decision — so pi-notify must not raise a
-	 * "waiting for input" alert for as long as it stays open.
+	 * Emits `NON_BLOCKING_PROMPT_CHANNEL` right before each prompt this command opens. Neither
+	 * the picker nor the read-only overlay blocks an agent loop, so pi-notify must not raise a
+	 * "waiting for input" alert for either of them.
 	 */
-	announcePassivePrompt: () => void;
+	announceNonBlockingPrompt: () => void;
 }
 
 /** Options for the read-only transcript overlay. */
@@ -116,7 +118,7 @@ export class SessionNavigatorHandler {
 		registry,
 		cwd,
 		readFile,
-		announcePassivePrompt,
+		announceNonBlockingPrompt,
 	}: SessionNavigatorParams): Promise<void> {
 		const entries = listNavigableAgents(agents, evicted, registry);
 		if (entries.length === 0) {
@@ -124,6 +126,8 @@ export class SessionNavigatorHandler {
 			return;
 		}
 
+		// Announce immediately before each prompt: the announcement covers the one right after it.
+		announceNonBlockingPrompt();
 		const choice = await ui.select(
 			"Subagent sessions",
 			entries.map((entry) => entry.label),
@@ -149,8 +153,7 @@ export class SessionNavigatorHandler {
 			return;
 		}
 		const markdownTheme = getMarkdownTheme();
-		// Announce before mounting: pi-notify drops the prompt event that immediately follows.
-		announcePassivePrompt();
+		announceNonBlockingPrompt();
 		await ui.custom<undefined>(
 			(tui, theme, _keybindings, done) =>
 				new TranscriptOverlay({
