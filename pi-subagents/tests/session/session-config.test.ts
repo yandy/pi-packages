@@ -199,7 +199,7 @@ describe("assembleSessionConfig — thinking level", () => {
 	});
 });
 
-describe("assembleSessionConfig — tools validation", () => {
+describe("assembleSessionConfig — tools resolution", () => {
 	it("resolves the inherited set from the parent's active tools", () => {
 		mockGetToolNamesForType.mockReturnValueOnce(undefined);
 		const cfg = assembleSessionConfig(
