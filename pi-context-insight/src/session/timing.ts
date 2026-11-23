@@ -90,7 +90,8 @@ export function computeTiming(args: {
 		if (entry.type !== "message" || entry.message.role !== "assistant") continue;
 		const startedAt = Date.parse(entry.timestamp);
 		const duration = entry.message.durationMs;
-		if (!Number.isFinite(startedAt) || typeof duration !== "number") continue;
+		if (!Number.isFinite(startedAt) || typeof duration !== "number" || !Number.isFinite(duration) || duration < 0)
+			continue;
 		durations.set(startedAt, duration);
 	}
 

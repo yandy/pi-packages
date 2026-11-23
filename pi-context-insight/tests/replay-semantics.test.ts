@@ -80,14 +80,12 @@ describe("replay semantics", () => {
 		const { steps } = buildSteps({ branch: entries, mode: "full", putBody });
 		expect(steps[0]?.sums.systemSkills).toBe(0);
 		expect(steps[0]?.sums.toolDefinitions).toBeGreaterThan(0);
-		const { steps: oneTool } = buildSteps({
-			branch: [entries[0]!, entries[1]!, entries[2]!, entries[3]!],
+		const readOnly = buildSteps({
+			branch: [systemEntry({ sections: { preamble: "base" }, toolsAdded: [tool("read")], timestamp: 0 }), entries[1]!, entries[3]!],
 			mode: "full",
 			putBody,
 		});
-		expect(oneTool[0]?.sums.toolDefinitions).toBeLessThan(
-			(steps[0]?.sums.toolDefinitions ?? 0) + 1000,
-		);
+		expect(steps[0]?.sums.toolDefinitions).toBe(readOnly.steps[0]?.sums.toolDefinitions);
 	});
 	it("commits the delta baseline only at request boundaries", () => {
 		resetEntryIds();

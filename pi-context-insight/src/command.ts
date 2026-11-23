@@ -112,25 +112,40 @@ export async function runInsight(
 	const outputPath = parsed.path === undefined ? defaultInsightPath(ctx) : resolve(ctx.cwd, parsed.path);
 	const lang = parsed.lang ?? langFromEnv(options.env ?? process.env) ?? "en";
 	const generatedAt = options.generatedAt;
-	const build = (bodyScale: number): string => {
+	const build = (bodyScale: number, detailSteps: number) => {
 		const report = buildReport(ctx, {
 			mode: parsed.mode,
 			lang,
 			bodyScale,
+			detailSteps,
 			...(generatedAt === undefined ? {} : { generatedAt }),
 		});
-		const html = renderDocument({
-			report,
-			body: bodyOf(report),
-			payload: buildPayload(report),
-			runtime: CLIENT_RUNTIME,
-		});
-		return html;
+		const render = (withNotes: boolean): string =>
+			renderDocument({
+				report: withNotes ? report : { ...report, truncation: report.truncation.filter((entry) => entry.kind !== "bytes") },
+				body: bodyOf(report),
+				payload: buildPayload(report),
+				runtime: CLIENT_RUNTIME,
+			});
+		return { report, render };
 	};
-	let html = build(1);
-	for (const scale of [0.25, 0]) {
+
+	// Ordered degradation: shrink bodies, then the per-step detail window, then report it.
+	let current = build(1, 300);
+	let html = current.render(false);
+	for (const phase of [
+		{ scale: 0.5, detailSteps: 300 },
+		{ scale: 0.25, detailSteps: 100 },
+		{ scale: 0, detailSteps: 30 },
+	]) {
 		if (Buffer.byteLength(html, "utf8") <= HTML_BUDGET_BYTES) break;
-		html = build(scale);
+		current = build(phase.scale, phase.detailSteps);
+		html = current.render(false);
+	}
+	const size = Buffer.byteLength(html, "utf8");
+	if (size > HTML_BUDGET_BYTES) {
+		current.report.truncation.push({ kind: "bytes", limit: HTML_BUDGET_BYTES, actual: size });
+		html = current.render(true);
 	}
 	await writeFile(outputPath, html, "utf8");
 	return outputPath;

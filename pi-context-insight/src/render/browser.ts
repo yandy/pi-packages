@@ -95,7 +95,7 @@ function rowHtml(report: InsightReport, item: Item): string {
 			? `<p class="dim" data-empty="browser-body">${t(lang, { key: "empty.shortNoBody" })}</p>`
 			: `<pre class="body">${esc(report.bodies[item.textIndex] ?? "")}</pre>`;
 	const clock = item.timestamp === undefined ? "—" : fmtClock(item.timestamp);
-	return `<details class="row" data-item="${item.id}" data-cat="${item.category}"${kindAttr} data-search="${esc(search)}"><summary><span class="tag">${esc(categoryLabel(lang, item.category))}</span>${chips}<span class="dim">${esc(preview(report, item))}</span> <span class="dim">≈${fmtTokens(item.tokens)} · ${esc(clock)}</span>${item.truncated === true ? ' <span class="flag">✂</span>' : ""}</summary>${body}</details>`;
+	return `<details class="row" data-item="${item.id}" data-cat="${item.category}"${kindAttr} data-search="${esc(search)}"><summary><span class="tag">${esc(categoryLabel(lang, item.category))}</span>${chips}<span class="dim">${esc(preview(report, item))}</span> <span class="dim">≈${fmtTokens(item.tokens)} · ${esc(clock)}</span>${item.truncated === true ? ` <span class="flag">${esc(t(lang, { key: "browser.truncated", params: { chars: item.originalLength ?? 0 } }))}</span>` : ""}</summary>${body}</details>`;
 }
 
 function categoryRow(report: InsightReport, step: Step, group: CategoryId): string {
@@ -148,7 +148,11 @@ export function renderBrowser(report: InsightReport): string {
 	if (steps.length === 0) {
 		return `<section class="card" id="browser" data-card="browser"><h2 data-i18n="browser.title">${esc(t(lang, { key: "browser.title" }))}</h2><p class="dim" data-empty="browser">${t(lang, { key: "empty.browserStep" })}</p></section>`;
 	}
-	const selectable = steps.slice(-STEP_PICK_MAX);
+	const recent = steps.slice(-STEP_PICK_MAX);
+	const withEvents = steps.filter((step) => step.eventIds.length > 0);
+	const selectable = [...new Map([...recent, ...withEvents].map((step) => [step.index, step])).values()].sort(
+		(a, b) => a.index - b.index,
+	);
 	const options = selectable
 		.map(
 			(step) =>

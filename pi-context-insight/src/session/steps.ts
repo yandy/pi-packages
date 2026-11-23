@@ -1,6 +1,6 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { CATEGORY_ORDER, type CategoryId, type Msg } from "../model";
-import { extractItems, type Item } from "./categorize";
+import { extractItems, type Item, systemItemsOf } from "./categorize";
 import { type ReplayedSystem, replaySystem } from "./replay";
 
 export interface StepActual {
@@ -60,6 +60,7 @@ export interface BuildStepsResult {
 	turns: Turn[];
 	warnings: Msg[];
 	finalEstimate: number;
+	finalSums: Record<CategoryId, number>;
 	stepItemIds: number[][];
 }
 
@@ -185,17 +186,18 @@ export function buildSteps(args: {
 	};
 
 	/**
-	 * A later system message re-declares named sections and tool declarations. Anything the
-	 * replay no longer reports must leave the context, or the step would keep charging for a
-	 * section (or tool) the model can no longer see.
+	 * The replayed system state is the truth: replace every system section and tool declaration
+	 * with what the model would see now. This covers appends to the base prompt, section
+	 * removals, tool removals and compaction snapshots in one place.
 	 */
-	const reconcileSystemItems = (): void => {
-		const sectionNames = new Set(Object.keys(system?.sections ?? {}));
-		const toolNames = new Set((system?.tools ?? []).map((tool) => tool.name));
+	const syncSystemItems = (entryId: string): void => {
 		for (const item of [...activeItems]) {
-			if (item.kind === "systemSection" && item.tag !== "base" && !sectionNames.has(item.tag)) dropItem(item);
-			if (item.kind === "toolDefinition" && !toolNames.has(item.tag)) dropItem(item);
+			if (item.kind === "systemSection" || item.kind === "toolDefinition") dropItem(item);
 		}
+		if (system === null) return;
+		const items = systemItemsOf(system, entryId, () => nextItemId++, putBody);
+		register(items);
+		addItems(items);
 	};
 
 	for (const entry of branch) {
@@ -213,6 +215,7 @@ export function buildSteps(args: {
 				activeIds.add(item.id);
 				sums[item.category] = item.tokens;
 			}
+			syncSystemItems(entry.id);
 			for (const keptEntry of kept) {
 				// The host only lets the newest compaction contribute a summary, and drops the
 				// system messages it re-declares from the retained range.
@@ -230,17 +233,9 @@ export function buildSteps(args: {
 
 		if (entry.type === "message" && entry.message.role === "system") {
 			system = replaySystem([...order, entry]);
-			const entryItems = extract(entry);
-			itemsByEntry.set(entry.id, entryItems);
-			// Replace earlier declarations of the same section or tool before adding the new one.
-			for (const item of [...activeItems]) {
-				if (item.entryId === entry.id) continue;
-				if (item.kind !== "systemSection" && item.kind !== "toolDefinition") continue;
-				if (entryItems.some((next) => next.tag === item.tag && next.kind === item.kind)) dropItem(item);
-			}
-			reconcileSystemItems();
-			register(entryItems);
-			addItems(entryItems);
+			// System entries are state, not append-only items: sync rather than add.
+			itemsByEntry.set(entry.id, []);
+			syncSystemItems(entry.id);
 			order.push(entry);
 			continue;
 		}
@@ -296,6 +291,7 @@ export function buildSteps(args: {
 				.map(chipOf);
 			const delta: Partial<Record<CategoryId, number>> = {};
 			for (const id of CATEGORY_ORDER) {
+				if (id === "unattributed") continue;
 				const value = (snapshot[id] ?? 0) - (previousSums[id] ?? 0);
 				if (value !== 0) delta[id] = value;
 			}
@@ -312,7 +308,7 @@ export function buildSteps(args: {
 				estimatedTotal,
 				...(actual === undefined ? {} : { actual }),
 				delta,
-				deltaTotal: Object.values(delta).reduce((sum, value) => sum + value, 0),
+				deltaTotal: estimatedTotal - totalOf(previousSums),
 				itemRanges: [],
 				eventIds: [],
 				hasDetails: true,
@@ -376,6 +372,7 @@ export function buildSteps(args: {
 		turns,
 		warnings,
 		finalEstimate: totalOf(sums),
+		finalSums: { ...sums },
 		stepItemIds: snapshotIds,
 	};
 }
@@ -395,8 +392,12 @@ export function stepIndexOf(timestamp: number, steps: ReadonlyArray<{ index: num
  * Decide which steps keep their detail. Steps carrying an event are always kept, so this
  * runs after events are placed; the rest of the report only reads the result.
  */
-export function applyDetailWindow(steps: Step[], stepItemIds: readonly number[][]): void {
-	const windowStart = Math.max(0, steps.length - DETAIL_WINDOW_STEPS);
+export function applyDetailWindow(
+	steps: Step[],
+	stepItemIds: readonly number[][],
+	detailSteps = DETAIL_WINDOW_STEPS,
+): void {
+	const windowStart = Math.max(0, steps.length - detailSteps);
 	for (const step of steps) {
 		step.hasDetails = step.index >= windowStart || step.eventIds.length > 0;
 		step.itemRanges = step.hasDetails ? rangesOf(stepItemIds[step.index] ?? []) : [];

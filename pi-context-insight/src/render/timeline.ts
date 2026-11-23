@@ -30,10 +30,11 @@ function barFor(
 	report: InsightReport,
 	step: { index: number; sums: Record<CategoryId, number>; estimatedTotal: number },
 	max: number,
+	position: number,
 ): string {
-	const x = 10 + step.index * (BAR_W + BAR_GAP);
+	const x = 10 + position * (BAR_W + BAR_GAP);
 	const scale = max > 0 ? CHART_H / max : 0;
-	const target = Math.round(step.estimatedTotal * scale);
+	const target = Math.round(finiteOrZero(step.estimatedTotal) * scale);
 	let y = 150;
 	let remaining = target;
 	const segments = CATEGORY_ORDER.filter((id) => id !== "unattributed")
@@ -60,28 +61,30 @@ export function renderTimeline(report: InsightReport): string {
 	const rendered = steps.length > TIMELINE_MAX ? steps.slice(-TIMELINE_MAX) : steps;
 	const max = Math.max(1, ...rendered.map((step) => finiteOrZero(step.estimatedTotal)));
 	const width = Math.max(720, rendered.length * (BAR_W + BAR_GAP) + 20);
-	const bars = rendered.map((step) => barFor(report, step, max)).join("");
+	const bars = rendered.map((step, position) => barFor(report, step, max, position)).join("");
 	const flags = flagsByStep(report);
+	const firstIndex = rendered[0]?.index ?? 0;
 	const flagBand = [...flags]
+		.filter(([stepIndex]) => stepIndex >= firstIndex)
 		.map(([stepIndex, milestones]) => {
 			const primary = milestones[0];
 			if (primary === undefined) return "";
-			const x = 10 + stepIndex * (BAR_W + BAR_GAP) + BAR_W / 2;
+			const x = 10 + (stepIndex - firstIndex) * (BAR_W + BAR_GAP) + BAR_W / 2;
 			const count = milestones.filter((milestone) => milestone.eventIds.length > 0).length;
 			return `<g data-flag="${primary.kind}" data-flag-step="${stepIndex}"><line x1="${x}" x2="${x}" y1="18" y2="150" stroke="var(--dim)" stroke-dasharray="2 3" opacity=".5"/><circle cx="${x}" cy="18" r="5" fill="var(--${primary.kind === "compaction" ? "compaction" : "systemSkills"})"><title>${esc(t(lang, { key: `flag.${primary.kind}` }))}</title></circle>${count > 1 ? `<text x="${x}" y="36" text-anchor="middle" font-size="8" fill="var(--text)">+${count - 1}</text>` : ""}</g>`;
 		})
 		.join("");
 	const tickLabels = rendered
 		.filter((step) => (step.index + 1) % FLAG_EVERY === 0)
-		.map((step) => {
-			const x = 10 + step.index * (BAR_W + BAR_GAP) + BAR_W / 2;
-			return `<text x="${x}" y="166" text-anchor="middle" font-size="8" fill="var(--dim)">S${step.index + 1}</text>`;
+		.map((_step, position) => {
+			const x = 10 + position * (BAR_W + BAR_GAP) + BAR_W / 2;
+			return `<text x="${x}" y="166" text-anchor="middle" font-size="8" fill="var(--dim)">S${firstIndex + position + 1}</text>`;
 		})
 		.join("");
 	const turns = report.turns
 		.map((turn) => {
-			const startX = 10 + Math.max(0, turn.startStep) * (BAR_W + BAR_GAP);
-			const endX = 10 + Math.max(turn.startStep, turn.endStep) * (BAR_W + BAR_GAP) + BAR_W;
+			const startX = 10 + Math.max(0, turn.startStep - firstIndex) * (BAR_W + BAR_GAP);
+			const endX = 10 + Math.max(turn.startStep, turn.endStep - firstIndex) * (BAR_W + BAR_GAP) + BAR_W;
 			return `<g class="row" data-turn-block="${turn.index}"><rect x="${startX}" y="172" width="${Math.max(BAR_W, endX - startX)}" height="12" fill="${turn.index % 2 === 0 ? "rgba(147,161,184,.14)" : "rgba(147,161,184,.28)"}" rx="2"><title>${esc(t(lang, { key: "timeline.turnBlock", params: { t: turn.index, steps: turn.endStep - turn.startStep + 1 } }))}</title></rect><text x="${startX + 3}" y="181" font-size="8" fill="var(--text)">${turn.index}</text></g>`;
 		})
 		.join("");

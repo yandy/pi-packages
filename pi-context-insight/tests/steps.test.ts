@@ -43,7 +43,8 @@ describe("buildSteps", () => {
 		const { steps } = buildSteps({ branch: entries, mode: "full", putBody });
 		expect(steps).toHaveLength(2);
 		expect(steps[1]?.sums.compaction).toBeGreaterThan(0);
-		expect(steps[1]?.sums.toolDefinitions).toBe(0);
+		// Without a snapshot the model keeps the prompt it already had; the summary is added.
+		expect(steps[1]?.sums.toolDefinitions).toBeGreaterThan(0);
 	});
 	it("handles two compactions where firstKeptEntryId lies in an earlier kept range", () => {
 		resetEntryIds();

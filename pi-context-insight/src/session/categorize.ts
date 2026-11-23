@@ -32,6 +32,7 @@ export interface Item {
 	/** Entry timestamp, so row metadata can show when the item entered the transcript. */
 	timestamp?: number;
 	truncated?: boolean;
+	originalLength?: number;
 }
 
 interface ContentBlock {
@@ -240,6 +241,50 @@ function messageItems(args: {
  * transcript. `system` is the state replayed up to and including this entry; it is unused
  * for non-system entries today but keeps the call site uniform as the model evolves.
  */
+/** Materialise a replayed system state: the accumulated base prompt, every section and every tool. */
+export function systemItemsOf(
+	system: ReplayedSystem | null,
+	entryId: string,
+	nextId: () => number,
+	putBody: (text: string) => number | null,
+): Item[] {
+	if (system === null) return [];
+	const items: Item[] = [];
+	const push = (partial: Omit<Item, "id" | "entryId">): void => {
+		items.push({ id: nextId(), entryId, ...partial });
+	};
+	if (system.base.trim().length > 0) {
+		push({
+			category: "systemBase",
+			kind: "systemSection",
+			tag: "base",
+			tokens: estimateTextTokens(system.base),
+			textIndex: putBody(system.base),
+		});
+	}
+	for (const [name, text] of Object.entries(system.sections)) {
+		if (text === null || text.trim().length === 0) continue;
+		push({
+			category: SYSTEM_SECTION_CATEGORY[name] ?? "systemOther",
+			kind: "systemSection",
+			tag: name,
+			tokens: estimateTextTokens(text),
+			textIndex: putBody(text),
+		});
+	}
+	for (const tool of system.tools) {
+		const text = jsonText(tool);
+		push({
+			category: "toolDefinitions",
+			kind: "toolDefinition",
+			tag: tool.name,
+			tokens: estimateTextTokens(text),
+			textIndex: putBody(text),
+		});
+	}
+	return items;
+}
+
 function customEntryItems(entry: SessionEntry, nextId: () => number, putBody: (text: string) => number | null): Item[] {
 	if (entry.type === "custom_message") {
 		const content = entry.content ?? "";

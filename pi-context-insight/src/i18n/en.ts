@@ -249,4 +249,5 @@ export const DICT_EN: Record<string, string> = {
 	"table.result": "Result",
 	"table.toolUses": "Tools",
 	"timeline.capped": "Timeline shows the last {shown} of {total} steps.",
+	"browser.truncated": "clipped from {chars} characters",
 };

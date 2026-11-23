@@ -70,7 +70,6 @@ const BODY_CAPS: Partial<Record<CategoryId, number>> = {
 	answers: 8000,
 	reasoning: 8000,
 };
-const HTML_BUDGET_BYTES = 16 * 1024 * 1024;
 
 export interface SessionInput {
 	manager: ReadonlySessionManager;
@@ -78,6 +77,7 @@ export interface SessionInput {
 	mode: "full" | "short";
 	lang: Lang;
 	bodyScale?: number;
+	detailSteps?: number;
 	model?: string;
 	thinkingLevel?: string;
 	contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null };
@@ -98,6 +98,7 @@ function applyBodyCaps(items: readonly Item[], bodies: string[], truncation: Tru
 		if (text === undefined || text.length <= cap) continue;
 		bodies[item.textIndex] = text.slice(0, cap);
 		item.truncated = true;
+		item.originalLength = text.length;
 		let bucket = buckets.get(item.category);
 		if (bucket === undefined) {
 			bucket = new Map<number, number>();
@@ -120,25 +121,16 @@ function currentContextOf(input: {
 	usage: { tokens: number | null; contextWindow: number; percent: number | null } | undefined;
 	steps: readonly Step[];
 	finalEstimate: number;
+	finalSums: Record<CategoryId, number>;
 	window: number;
 	reserveTokens: number;
 	reserveEnabled: boolean;
 	maxTokens: number;
 }): CurrentContext {
+	// The active state after the last entry is what the next request will carry.
 	const categories = emptySums();
+	for (const id of CATEGORY_ORDER) categories[id] = input.finalSums[id] ?? 0;
 	const last = input.steps.at(-1);
-	if (last) {
-		for (const id of CATEGORY_ORDER) categories[id] = last.sums[id] ?? 0;
-		// Fold in whatever entered the context after the last request (its own reply, tool
-		// results, injections), so the card describes the next request, not the previous one.
-		const growth = input.finalEstimate - last.estimatedTotal;
-		if (growth !== 0 && last.estimatedTotal > 0) {
-			for (const id of CATEGORY_ORDER) {
-				if (id === "unattributed") continue;
-				categories[id] = (categories[id] ?? 0) * (1 + growth / last.estimatedTotal);
-			}
-		}
-	}
 
 	let tokens: number | null = input.usage?.tokens ?? null;
 	let estimated = false;
@@ -197,7 +189,7 @@ export function buildSessionReport(input: SessionInput): SessionReport {
 	const warnings: Msg[] = [];
 	const truncation: TruncationEntry[] = [];
 
-	const { steps, items, bodies, turns, finalEstimate, stepItemIds } = buildSteps({
+	const { steps, items, bodies, turns, finalEstimate, finalSums, stepItemIds } = buildSteps({
 		branch,
 		mode: input.mode,
 		putBody: () => null,
@@ -240,7 +232,7 @@ export function buildSessionReport(input: SessionInput): SessionReport {
 		const step = steps[stepIndex];
 		if (step) step.eventIds = eventIds;
 	}
-	applyDetailWindow(steps, stepItemIds);
+	applyDetailWindow(steps, stepItemIds, input.detailSteps ?? 300);
 
 	const files = aggregateFiles(collectFileOps({ entries, steps }), "lines" as FileSort);
 	const commands = collectCommands({ entries, steps, mode: input.mode });
@@ -292,6 +284,7 @@ export function buildSessionReport(input: SessionInput): SessionReport {
 		usage: input.contextUsage,
 		steps,
 		finalEstimate,
+		finalSums,
 		window: input.window,
 		reserveTokens: input.reserveTokens,
 		reserveEnabled: input.reserveEnabled,
@@ -406,7 +399,7 @@ function parseSubagentRecords(entries: readonly SessionEntry[]): SubagentRecord[
 /** Build the full report for the current session, including its agent family. */
 export function buildReport(
 	ctx: ExtensionCommandContext,
-	options: { mode: "full" | "short"; lang: Lang; generatedAt?: Date; bodyScale?: number },
+	options: { mode: "full" | "short"; lang: Lang; generatedAt?: Date; bodyScale?: number; detailSteps?: number },
 ): InsightReport {
 	const generatedAt = (options.generatedAt ?? new Date()).toISOString();
 	const contextUsage = ctx.getContextUsage();
@@ -451,6 +444,7 @@ export function buildReport(
 		mode: options.mode,
 		lang: options.lang,
 		bodyScale: options.bodyScale ?? 1,
+		detailSteps: options.detailSteps ?? 300,
 		...(ctx.model === undefined ? {} : { model: `${ctx.model.provider}/${ctx.model.id}` }),
 		thinkingLevel: ctx.thinkingLevel,
 		...(contextUsage === undefined ? {} : { contextUsage }),
@@ -466,7 +460,6 @@ export function buildReport(
 
 	const children: InsightReport["family"]["children"] = [];
 	for (const member of sorted) {
-		if (member.depth > 3) continue;
 		const manager = loaded.get(member.id);
 		if (manager === undefined) continue;
 		const childReport = buildSessionReport({
@@ -484,10 +477,5 @@ export function buildReport(
 		children.push({ member, report: { ...childReport, generatedAt, family: { members: [], children: [] } } });
 	}
 
-	const insight: InsightReport = { ...report, generatedAt, family: { members: sorted, children } };
-	const bytes = Buffer.byteLength(JSON.stringify({ items: insight.items, bodies: insight.bodies }), "utf8");
-	if (bytes > HTML_BUDGET_BYTES) {
-		insight.truncation.push({ kind: "bytes", limit: HTML_BUDGET_BYTES, actual: bytes });
-	}
-	return insight;
+	return { ...report, generatedAt, family: { members: sorted, children } };
 }
