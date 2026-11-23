@@ -47,4 +47,36 @@ describe("release gates", () => {
 			rmSync(root, { recursive: true, force: true });
 		}
 	});
+
+	it("never leaks internal group or category ids into visible text", async () => {
+		const root = mkdtempSync(join(tmpdir(), "pi-insight-ids-"));
+		try {
+			await runInsight("g.html", chattySession(root));
+			const html = readFileSync(join(root, "g.html"), "utf8");
+			// The JSON payload and the runtime are data/code channels, not visible text.
+			const visible = html
+				.replace(/<script[\s\S]*?<\/script>/g, " ")
+				.replace(/<style[\s\S]*?<\/style>/g, " ")
+				.replace(/<[^>]+>/g, " ");
+			for (const id of ["systemBase", "systemTools", "toolDefinitions", "toolCalls", "toolResults", "skillInjections", "unattributed"]) {
+				expect(visible, id).not.toMatch(new RegExp(`\\b${id}\\b`));
+			}
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+	it("keeps the default timeline and browser pane without javascript", async () => {
+		const root = mkdtempSync(join(tmpdir(), "pi-insight-nojs-"));
+		try {
+			await runInsight("n.html", chattySession(root));
+			const html = readFileSync(join(root, "n.html"), "utf8");
+			const beforeScript = html.slice(0, html.indexOf("<script"));
+			expect((beforeScript.match(/<rect/g) ?? []).length).toBeGreaterThan(0);
+			expect(beforeScript).toContain("data-browser-panel=");
+			expect(beforeScript).toContain('class="rail"');
+			expect(beforeScript).toContain("data-rail-item=");
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
 });

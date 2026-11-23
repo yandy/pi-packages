@@ -82,6 +82,16 @@ describe("donut and stackBar", () => {
 		expect((html.match(/<circle/g) ?? []).length).toBe(2);
 		expect(html).toContain("≈100");
 	});
+	it("titles each arc with the caller's label, never the internal id", () => {
+		const html = donut({
+			total: 100,
+			parts: [{ id: "systemBase", value: 100, label: "系统提示词" }],
+			center: "≈100",
+			sub: "已用",
+		});
+		expect(html).toContain("<title>系统提示词</title>");
+		expect(html).not.toContain("<title>systemBase</title>");
+	});
 	it("skips zero parts and tolerates a zero total", () => {
 		const html = donut({ total: 0, parts: [{ id: "user", value: 0 }], center: "—", sub: "" });
 		expect((html.match(/<circle/g) ?? []).length).toBe(0);

@@ -5,7 +5,7 @@ const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
 export interface DonutArgs {
 	total: number;
-	parts: Array<{ id: string; value: number }>;
+	parts: Array<{ id: string; value: number; label?: string }>;
 	center: string;
 	sub: string;
 	size?: number;
@@ -20,7 +20,7 @@ export function donut(args: DonutArgs): string {
 		.filter((part) => Number.isFinite(part.value) && part.value > 0 && total > 0)
 		.map((part) => {
 			const length = (Math.min(part.value, total) / total) * CIRCUMFERENCE;
-			const arc = `<circle r="${RADIUS}" cx="50" cy="50" fill="none" stroke="var(--${esc(part.id)})" stroke-width="12" stroke-dasharray="${length.toFixed(2)} ${(CIRCUMFERENCE - length).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" transform="rotate(-90 50 50)"><title>${esc(part.id)}</title></circle>`;
+			const arc = `<circle r="${RADIUS}" cx="50" cy="50" fill="none" stroke="var(--${esc(part.id)})" stroke-width="12" stroke-dasharray="${length.toFixed(2)} ${(CIRCUMFERENCE - length).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" transform="rotate(-90 50 50)"><title>${esc(part.label ?? part.id)}</title></circle>`;
 			offset += length;
 			return arc;
 		})

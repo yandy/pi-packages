@@ -168,7 +168,12 @@ footer{color:var(--dim);font-size:11px;text-align:center;padding:8px 0 24px}
 }
 @media (max-width:900px){
 .shell{grid-template-columns:minmax(0,1fr);padding:12px}
-.rail{position:static;max-height:none}
+.rail{position:static;max-height:none;gap:8px}
+.rail-nav{flex-direction:row;flex-wrap:wrap;gap:4px}
+.rail-nav a{border-left:none;border:1px solid var(--line);border-radius:999px;padding:2px 9px}
+.rail-nav a[aria-current="true"]{border-color:var(--accent)}
+.rail-actions{margin-top:0;padding-top:0;border-top:none}
+.rail-label{display:none}
 .main{display:block}
 .card{margin-bottom:var(--sp)}
 .card,.span-3,.span-4,.span-5,.span-6,.span-7,.span-8{grid-column:auto}

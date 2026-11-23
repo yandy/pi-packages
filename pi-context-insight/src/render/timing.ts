@@ -48,7 +48,7 @@ export function renderTimingCard(report: InsightReport): string {
 	const body = `<div class="donut-pair">
 ${donut({
 	total: active,
-	parts: segments.map((segment) => ({ id: segment.id, value: segment.ms })),
+	parts: segments.map((segment) => ({ id: segment.id, value: segment.ms, label: segment.label })),
 	center: fmtDuration(timing.activeMs),
 	sub: t(lang, { key: "timing.active" }),
 })}

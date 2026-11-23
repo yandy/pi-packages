@@ -57,7 +57,11 @@ export function renderTokens(report: InsightReport): string {
 		`<span>${t(lang, { key: "cardMeta.donutShare" })}</span>`,
 	].join("");
 
-	const parts = CATEGORY_ORDER.filter((id) => !unknown.has(id)).map((id) => ({ id, value: sums[id] ?? 0 }));
+	const parts = CATEGORY_ORDER.filter((id) => !unknown.has(id)).map((id) => ({
+		id,
+		value: sums[id] ?? 0,
+		label: categoryLabel(lang, id),
+	}));
 	const body = `<div class="donut-pair">
 ${donut({ total: estimatedTotal, parts, center: `≈${fmtTokens(estimatedTotal)}`, sub: t(lang, { key: "tokens.centerSub" }) })}
 <div class="legend-grid">${rows}</div>
