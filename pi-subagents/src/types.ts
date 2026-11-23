@@ -101,6 +101,8 @@ export interface SessionContext {
 		/** Persist non-context usage so child LLM calls join footer and session totals. */
 		appendUsage?(kind: string, provider: string, model: string, usage: Usage, note?: string): unknown;
 	};
+	/** Names of the tools currently declared to the parent's model, when the host reports them. */
+	getActiveTools?(): string[];
 }
 
 /**
