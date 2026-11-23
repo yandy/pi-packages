@@ -164,7 +164,10 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("subagents:settings", {
 		description: "Configure subagent settings (concurrency, turn limits, timeouts)",
 		handler: async (_args, ctx) => {
-			await subagentsSettings.handle({ ui: ctx.ui });
+			await subagentsSettings.handle({
+				ui: ctx.ui,
+				announceNonBlockingPrompt: () => pi.events.emit("notify:non-blocking-prompt", {}),
+			});
 		},
 	});
 
@@ -182,6 +185,7 @@ export default function (pi: ExtensionAPI) {
 				registry,
 				cwd: ctx.cwd,
 				readFile: (path) => readFileSync(path, "utf8"),
+				announceNonBlockingPrompt: () => pi.events.emit("notify:non-blocking-prompt", {}),
 			});
 		},
 	});

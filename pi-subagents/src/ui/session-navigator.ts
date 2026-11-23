@@ -70,6 +70,8 @@ export interface SessionNavigatorParams {
 	cwd: string;
 	/** Reads a persisted session file for the file-snapshot source. */
 	readFile: (path: string) => string;
+	/** Declares operator-driven UI as non-blocking immediately before it opens. */
+	announceNonBlockingPrompt: () => void;
 }
 
 /** Options for the read-only transcript overlay. */
@@ -96,13 +98,22 @@ export interface TranscriptOverlayOptions {
  * manager, so it stays a reactive consumer with no inbound call into the core.
  */
 export class SessionNavigatorHandler {
-	async handle({ ui, agents, evicted, registry, cwd, readFile }: SessionNavigatorParams): Promise<void> {
+	async handle({
+		ui,
+		agents,
+		evicted,
+		registry,
+		cwd,
+		readFile,
+		announceNonBlockingPrompt,
+	}: SessionNavigatorParams): Promise<void> {
 		const entries = listNavigableAgents(agents, evicted, registry);
 		if (entries.length === 0) {
 			ui.notify("No subagent sessions to view.", "info");
 			return;
 		}
 
+		announceNonBlockingPrompt();
 		const choice = await ui.select(
 			"Subagent sessions",
 			entries.map((entry) => entry.label),
@@ -128,6 +139,7 @@ export class SessionNavigatorHandler {
 			return;
 		}
 		const markdownTheme = getMarkdownTheme();
+		announceNonBlockingPrompt();
 		await ui.custom<undefined>(
 			(tui, theme, _keybindings, done) =>
 				new TranscriptOverlay({
