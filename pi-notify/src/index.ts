@@ -82,6 +82,12 @@ export default function (
 
 	pi.on("ui_prompt_start", async (event, ctx) => {
 		if (isActiveAgentSession(ctx)) return;
+		// `custom` is arbitrary extension UI, not a dialog Pi blocks on: read-only viewers the
+		// operator opens through their own command (`/todos`, `/subagents:sessions`) mount this
+		// way and legitimately stay open far longer than the delay. Only a custom prompt opened
+		// while a run is in flight means Pi is genuinely waiting on the operator — that is how
+		// interactive tools (ask_user and friends) block the agent.
+		if (event.kind === "custom" && runStartedAt === undefined) return;
 		ensure(ctx);
 		if (!enabled) return;
 		const sessionName = pi.getSessionName?.();

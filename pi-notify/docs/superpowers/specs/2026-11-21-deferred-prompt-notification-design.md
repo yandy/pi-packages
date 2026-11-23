@@ -1,5 +1,10 @@
 # Defer waiting-for-input notifications
 
+> The non-goal below — never gate a prompt on an in-flight run — is narrowed by
+> [2026-11-23-readonly-overlay-prompt-design.md](2026-11-23-readonly-overlay-prompt-design.md):
+> `custom` prompts are now gated that way, titled dialogs are not. Idle-session approvals use
+> `select` / `confirm` / `input`, so they keep notifying.
+
 ## Intent
 
 A blocking prompt that the operator answered immediately is not a request for attention. Today every `ui_prompt_start` raises a desktop notification instantly, so a slash command that opens its own picker (for example `/subagents:sessions`) alerts the operator about a wait they themselves started and are looking at.

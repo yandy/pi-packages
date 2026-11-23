@@ -98,9 +98,37 @@ describe("ui_prompt_start", () => {
 	});
 
 	it("never leaks the protocol word for custom prompts, which carry no title", async () => {
+		// A custom prompt raised mid-run is the blocking-tool shape (ask_user and friends).
 		const h = createHarness();
+		await h.fire("agent_start");
 		await h.firePrompt({ kind: "custom" });
 		expect(h.fakeNotifier.notify.mock.calls[0][0].body).toBe("Interactive prompt\npid 4242");
+	});
+
+	it("stays silent for a read-only overlay the operator opened while idle", async () => {
+		// `/todos` or `/subagents:sessions` mount their viewer through `ui.custom` and the operator
+		// reads it for minutes: an open viewer is not a request for attention.
+		const h = createHarness();
+		await h.fire("session_start", { reason: "startup" });
+		await h.firePrompt({ kind: "custom" });
+		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
+	});
+
+	it("stays silent for a custom prompt after a finished run settles", async () => {
+		const h = createHarness();
+		await h.fire("session_start", { reason: "startup" });
+		await h.fire("agent_start");
+		await h.fire("agent_settled", { aborted: false });
+		await h.firePrompt({ kind: "custom" });
+		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
+	});
+
+	it("keeps notifying for titled dialogs while idle", async () => {
+		// The idle gate is for `custom` only: a picker left open still means a stuck instance.
+		const h = createHarness();
+		await h.fire("session_start", { reason: "startup" });
+		await h.firePrompt({ kind: "select", title: "Subagent sessions" });
+		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(1);
 	});
 
 	it("notifies even before session_start (lazy init)", async () => {
