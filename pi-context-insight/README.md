@@ -7,12 +7,13 @@ Generate a standalone, offline HTML insight report for the current Pi session: w
 - **One command, one self-contained file** — `/insight` writes a single HTML with inline CSS, JS and JSON; no external resources, model call, or network access
 - **Per-request reconstruction** — every assistant message is replayed to the prompt the model received (system sections, tool schemas, messages, tool results), with deltas against the previous request
 - **Context browser** — drill from the summary bar into any request and expand each item to its actual text, JSON schema or tool output; DNA (read-order) list included
-- **Timeline with milestone flags** — stacked per-step bars in total or delta mode, step/turn granularity, compaction/edit/model/skill/delegation flags, and the single longest and biggest-growth step
+- **Timeline with milestone flags** — stacked per-step bars in total or delta mode, step/turn granularity, a duration polyline, an overview ribbon, and compaction/edit/model/skill/delegation flags
 - **Token, timing and occupancy cards** — 16-category split with cache-hit and billed totals, model/tool/overhead time with idle removed, window occupancy with compaction reserve
 - **Activity** — tool outcomes with source attribution, file operations with estimated line deltas, command executions with status, exit code and program distribution
 - **Agent family** — nested delegation records, per-member cards and compact child reports, without double counting forwarded usage
 - **Two modes** — the default report embeds raw content; `--short` carries the same structure with no text bodies at all
-- **English or Chinese UI**, chosen when the report is generated and switchable in the page
+- **English or Chinese UI**, chosen when the report is generated; switching in the page retranslates the whole document, including client-rendered charts and lists
+- **A layout built for reading** — a left section rail and a 12-column card grid instead of one endless column; it folds to a single column on narrow screens and drops the rail when printed
 
 ## Install
 
@@ -47,15 +48,14 @@ An empty session (no user or assistant message yet) is refused with `Nothing to 
 
 | Section | What it shows |
 |---|---|
-| Overview | Session metadata, six KPIs (tokens, cost, cache hit, calls, active time, subagents), per-model ledger and usage rows |
-| Tokens | Donut plus 16 category rows: six system-prompt sections, tool definitions, user, injected, skill injections, compaction, thinking, answers, tool calls, tool results, and an "unrecorded at request time" residual |
-| Timing | Model / tool / overhead ring, wall clock, idle excluded, tokens-per-second badge and a per-step active-time strip |
+| Overview | Six KPI tiles (tokens, cost, cache hit, calls, active time, subagents), session facts on the left, per-model ledger with bars on the right, collapsible usage rows |
+| Tokens | Donut plus 16 legend rows (dot, estimate, share, micro bar): six system-prompt sections, tool definitions, user, injected, skill injections, compaction, thinking, answers, tool calls, tool results, and an "unrecorded at request time" residual that carries no share; cost lives in each row's tooltip |
+| Timing | Model / tool / overhead ring with legend rows, wall clock, idle excluded, tokens-per-second badge and a per-step active-time strip |
 | Current context | Occupancy against the window, category bar, compaction reserve and max-output reserve, compaction trigger line |
-| Timeline | One stacked bar per request; total/delta, step/turn, adaptive, duration curve, overview ribbon, DNA mode, milestone flags |
-| Request detail | User / In / Response chips for the selected or hovered step, plus actual prompt, output and cache hit |
-| Browser | Step selector, category rows with count, tokens, share and signed delta, expandable items with bodies, tool source chips, DNA list |
-| Events | Compaction, context edit, branch summary, model/thinking switch, skill, injection, delegation, child completion, ask, todo |
-| Activity | Tools (with source and per-step distribution), files (read/write/search/image, line deltas, operation log), commands (status, exit code, duration, program tally) |
+| Timeline | One stacked bar per request, width adapting to the step count; total/delta (delta stacks reclaimed context below the axis), step/turn, duration polyline, overview ribbon, milestone flags and a turn band; the selected step's detail sits at the bottom of the same card |
+| Browser | A category index on the left (count, tokens, share, signed delta; click to isolate one category) and a height-capped, scrolling item list on the right (group headings, expandable bodies, tool source chips, red edge on errors); the DNA view shares the same container |
+| Events | Kind pills for filtering plus rows: time, kind dot, text, a clickable position chip and a delta badge |
+| Activity | Three cards: tools (source, call bar, per-step distribution), files (read/write/search/image, line deltas, operation log), commands (status, exit code, duration, program tally) |
 | Agents | Family cards, delegation table with brief and final result, compact child reports |
 | Notes | Estimation rules, aggregation scope, the truncation list applied to this report, and the privacy reminder |
 

@@ -1,11 +1,12 @@
 import { fmtClock, fmtTokens } from "../format";
 import { t } from "../i18n";
-import type { CategoryId } from "../model";
+import type { CategoryId, Lang } from "../model";
 import type { InsightReport } from "../report";
 import type { Item } from "../session/categorize";
 import type { Step } from "../session/steps";
-import { categoryLabel } from "./categories";
+import { CATEGORY_LABEL_KEY, categoryLabel } from "./categories";
 import { esc } from "./escape";
+import { i18nAttrs, section } from "./layout";
 
 const ROW_LIMIT = 200;
 const STEP_PICK_MAX = 500;
@@ -55,6 +56,10 @@ const GROUPS: readonly CategoryId[] = [
 	"unattributed",
 ];
 
+function groupLabel(lang: Lang, group: CategoryId): string {
+	return t(lang, { key: GROUP_LABEL_KEY[group] ?? CATEGORY_LABEL_KEY[group] ?? "empty.none" });
+}
+
 function rangeHas(ranges: ReadonlyArray<[number, number]>, id: number): boolean {
 	return ranges.some(([start, end]) => id >= start && id <= end);
 }
@@ -95,17 +100,18 @@ function rowHtml(report: InsightReport, item: Item): string {
 			? `<p class="dim" data-empty="browser-body">${t(lang, { key: "empty.shortNoBody" })}</p>`
 			: `<pre class="body">${esc(report.bodies[item.textIndex] ?? "")}</pre>`;
 	const clock = item.timestamp === undefined ? "—" : fmtClock(item.timestamp);
-	return `<details class="row" data-item="${item.id}" data-cat="${item.category}"${kindAttr} data-search="${esc(search)}"><summary><span class="tag">${esc(categoryLabel(lang, item.category))}</span>${chips}<span class="dim">${esc(preview(report, item))}</span> <span class="dim">≈${fmtTokens(item.tokens)} · ${esc(clock)}</span>${item.truncated === true ? ` <span class="flag">${esc(t(lang, { key: "browser.truncated", params: { chars: item.originalLength ?? 0 } }))}</span>` : ""}</summary>${body}</details>`;
+	const errorClass = item.isError === true ? " is-error" : "";
+	return `<details class="item-row${errorClass}" data-item="${item.id}" data-cat="${item.category}"${kindAttr} data-search="${esc(search)}"><summary><span class="tag">${esc(categoryLabel(lang, item.category))}</span>${chips}<span class="item-preview dim">${esc(preview(report, item))}</span><span class="item-meta dim">≈${fmtTokens(item.tokens)} · ${esc(clock)}</span>${item.truncated === true ? ` <span class="flag">${esc(t(lang, { key: "browser.truncated", params: { chars: item.originalLength ?? 0 } }))}</span>` : ""}</summary>${body}</details>`;
 }
 
-function categoryRow(report: InsightReport, step: Step, group: CategoryId): string {
+function indexRow(report: InsightReport, step: Step, group: CategoryId): string {
 	const list = itemsOfStep(report, step).filter((item) => GROUP_OF[item.category] === group);
 	const tokens = list.reduce((sum, item) => sum + item.tokens, 0);
 	const share = step.estimatedTotal > 0 ? (tokens / step.estimatedTotal) * 100 : 0;
 	const delta = step.delta[group] ?? 0;
 	const badge =
 		delta === 0 ? "" : `<span class="tag" data-delta="${group}">${delta > 0 ? "+" : ""}${fmtTokens(delta)}</span>`;
-	return `<tr class="row" data-cat-row="${group}" data-count="${list.length}"><td><span class="swatch" style="background:var(--${group})"></span>${esc(t(report.lang, { key: GROUP_LABEL_KEY[group] ?? group }))}</td><td class="num">${list.length}</td><td class="num">≈${fmtTokens(tokens)}</td><td class="num">${share === 0 ? "—" : `${share.toFixed(1)}%`}</td><td class="num">${badge}</td></tr>`;
+	return `<button type="button" class="idx-row" data-cat-index="${group}" data-cat-row="${group}" data-count="${list.length}" data-tokens="${tokens}" data-share="${share.toFixed(1)}"><span class="dot" style="background:var(--${group})"></span><span class="idx-label" ${i18nAttrs(GROUP_LABEL_KEY[group] ?? `cat.${group}`)}>${esc(groupLabel(report.lang, group))}</span><span class="idx-count dim">${list.length}</span><span class="idx-value">≈${fmtTokens(tokens)}</span><span class="idx-share dim">${share === 0 ? "—" : `${share.toFixed(1)}%`}</span>${badge}</button>`;
 }
 
 function panelOf(report: InsightReport, step: Step, selected: boolean): string {
@@ -116,12 +122,13 @@ function panelOf(report: InsightReport, step: Step, selected: boolean): string {
 		if (all.length === 0) return "";
 		const list = all.slice(0, ROW_LIMIT);
 		const rest = all.slice(ROW_LIMIT, ROW_LIMIT * 10);
+		const tokens = all.reduce((sum, item) => sum + item.tokens, 0);
 		const rows = list.map((item) => rowHtml(report, item)).join("");
 		const more =
 			rest.length > 0
 				? `<details data-more="${group}"><summary>${t(lang, { key: "common.omitted", params: { count: rest.length } })}</summary>${rest.map((item) => rowHtml(report, item)).join("")}</details>`
 				: "";
-		return `<h4 data-cat-section="${group}">${esc(t(lang, { key: GROUP_LABEL_KEY[group] ?? group }))}</h4>${rows}${more}`;
+		return `<h4 data-cat-section="${group}">${esc(groupLabel(lang, group))} <span class="dim">${t(lang, { key: "browser.items", params: { count: all.length } })} · ≈${fmtTokens(tokens)}</span></h4>${rows}${more}`;
 	}).join("");
 	const empty =
 		items.length === 0
@@ -136,17 +143,22 @@ function dnaList(report: InsightReport, step: Step): string {
 	const rows = items
 		.map(
 			(item, index) =>
-				`<div class="row" data-dna-item="${item.id}"><span class="tag" style="border-color:var(--${item.category})">${esc(categoryLabel(lang, item.category))}</span><span class="dim">#${items.length - index}</span> ${esc(item.tag)} <span class="dim">≈${fmtTokens(item.tokens)}</span></div>`,
+				`<div class="item-row" data-dna-item="${item.id}"><span class="tag" style="border-color:var(--${item.category})">${esc(categoryLabel(lang, item.category))}</span><span class="dim" data-dna-index="${items.length - index}">#${items.length - index}</span> ${esc(item.tag)} <span class="dim">≈${fmtTokens(item.tokens)}</span></div>`,
 		)
 		.join("");
-	return `<div data-dna-list>${rows || `<p class="dim">${t(lang, { key: "empty.none" })}</p>`}</div>`;
+	return `<div data-dna-list hidden>${rows || `<p class="dim">${t(lang, { key: "empty.none" })}</p>`}</div>`;
 }
 
 export function renderBrowser(report: InsightReport): string {
 	const lang = report.lang;
 	const steps = report.steps;
 	if (steps.length === 0) {
-		return `<section class="card" id="browser" data-card="browser"><h2 data-i18n="browser.title">${esc(t(lang, { key: "browser.title" }))}</h2><p class="dim" data-empty="browser">${t(lang, { key: "empty.browserStep" })}</p></section>`;
+		return section({
+			id: "browser",
+			titleKey: "browser.title",
+			lang,
+			body: `<p class="dim" data-empty="browser">${t(lang, { key: "empty.browserStep" })}</p>`,
+		});
 	}
 	const recent = steps.slice(-STEP_PICK_MAX);
 	const withEvents = steps.filter((step) => step.eventIds.length > 0);
@@ -161,7 +173,7 @@ export function renderBrowser(report: InsightReport): string {
 		.join("");
 	const current = steps[steps.length - 1];
 	if (current === undefined) return "";
-	const rows = GROUPS.map((group) => categoryRow(report, current, group)).join("");
+	const index = GROUPS.map((group) => indexRow(report, current, group)).join("");
 	const panel = panelOf(report, current, true);
 	const dna = dnaList(report, current);
 	const missing = steps.filter((step) => !step.hasDetails).length;
@@ -170,17 +182,21 @@ export function renderBrowser(report: InsightReport): string {
 			? `<p class="dim" data-window-note>${t(lang, { key: "browser.windowNote", params: { count: missing } })}</p>`
 			: "";
 
-	return `<section class="card" id="browser" data-card="browser"><h2 data-i18n="browser.title">${esc(t(lang, { key: "browser.title" }))}</h2>
-<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px">
-<label class="dim">${t(lang, { key: "browser.step" })} <select data-browser-step>${options}</select></label>
-<button type="button" data-toggle="dna" data-value="dna" aria-pressed="false">${t(lang, { key: "toggle.dna" })}</button>
-<button type="button" data-toggle="mode" data-value="total" aria-pressed="true">${t(lang, { key: "toggle.total" })}</button>
-<button type="button" data-toggle="mode" data-value="delta" aria-pressed="false">${t(lang, { key: "toggle.delta" })}</button>
+	const body = `<div class="toolbar">
+<label class="dim"><span ${i18nAttrs("browser.step")}>${t(lang, { key: "browser.step" })}</span> <select data-browser-step>${options}</select></label>
+<button type="button" data-toggle="dna" data-value="dna" aria-pressed="false" ${i18nAttrs("toggle.dna")}>${t(lang, { key: "toggle.dna" })}</button>
+<button type="button" data-toggle="mode" data-value="total" aria-pressed="true" ${i18nAttrs("toggle.total")}>${t(lang, { key: "toggle.total" })}</button>
+<button type="button" data-toggle="mode" data-value="delta" aria-pressed="false" ${i18nAttrs("toggle.delta")}>${t(lang, { key: "toggle.delta" })}</button>
 <input type="search" data-filter-group="items" placeholder="${esc(t(lang, { key: "browser.search" }))}">
 </div>
 ${windowNote}
-<table><thead><tr><th>${t(lang, { key: "table.category" })}</th><th class="num">${t(lang, { key: "table.items" })}</th><th class="num">${t(lang, { key: "table.tokens" })}</th><th class="num">${t(lang, { key: "table.share" })}</th><th class="num">Δ</th></tr></thead><tbody>${rows}</tbody></table>
-<div data-browser-panels style="margin-top:10px">${panel}</div>
-<details style="margin-top:10px"><summary>${t(lang, { key: "browser.dnaTitle" })}</summary>${dna}</details>
-</section>`;
+<div class="browser">
+<aside class="browser-index" data-browser-index><div class="kpi-label" ${i18nAttrs("browser.index")}>${t(lang, { key: "browser.index" })}</div>${index}</aside>
+<div class="browser-main">
+<div class="browser-scroll" data-browser-panels>${panel}</div>
+${dna}
+</div>
+</div>`;
+
+	return section({ id: "browser", titleKey: "browser.title", lang, body });
 }

@@ -51,6 +51,24 @@ describe("renderBrowser", () => {
 		expect(html).toContain("data-item=");
 		expect(html).toContain("data-search=");
 	});
+	it("renders the ten-row category index with counts, tokens and shares", () => {
+		const html = renderBrowser(report());
+		expect(html.match(/data-cat-index="/g)).toHaveLength(10);
+		expect(html).toContain("data-count=");
+		expect(html).toContain("data-tokens=");
+		expect(html).toContain("data-share=");
+	});
+	it("pre-renders only the latest step panel", () => {
+		const html = renderBrowser(report("full", 30));
+		expect((html.match(/data-browser-panel=/g) ?? []).length).toBe(1);
+	});
+	it("labels groups and item chips with dictionary text, never internal ids", () => {
+		const html = renderBrowser(report());
+		expect(html).toContain("System prompt");
+		expect(html).not.toMatch(/>\s*toolDefinitions\s*</);
+		expect(html).not.toMatch(/>\s*toolCalls\s*</);
+		expect(html).not.toMatch(/>\s*toolResults\s*</);
+	});
 	it("keeps bodies out of short mode", () => {
 		const html = renderBrowser(report("short"));
 		expect(html).not.toContain('<pre class="body"');

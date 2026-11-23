@@ -4,14 +4,14 @@ import { renderDocument } from "../src/render/document";
 import { renderOverview } from "../src/render/overview";
 import { buildReport } from "../src/report";
 import { fakeContext } from "./helpers/ctx";
-import { assistantEntry, resetEntryIds, systemEntry, userEntry } from "./helpers/entries";
+import { assistantEntry, resetEntryIds, systemEntry, usage, userEntry } from "./helpers/entries";
 
 function report(mode: "full" | "short" = "full", extra: { content?: string } = {}) {
 	resetEntryIds();
 	const entries = [
 		systemEntry({ sections: { preamble: "base" }, timestamp: 1 }),
 		userEntry(extra.content ?? "hi", 2),
-		assistantEntry({ content: [{ type: "text", text: "answer" }], timestamp: 3 }),
+		assistantEntry({ content: [{ type: "text", text: "answer" }], usage: usage(100, 10, 400, 0, 0.25), timestamp: 3 }),
 	];
 	return buildReport(fakeContext({ entries, name: "demo" }), { mode, lang: "en" });
 }
@@ -47,11 +47,31 @@ describe("renderDocument", () => {
 		expect(renderDocument({ report: report("full"), body: "", payload: "{}" })).toContain("data-banner=\"raw-content\"");
 		expect(renderDocument({ report: report("short"), body: "", payload: "{}" })).not.toContain("data-banner=");
 	});
-	it("renders the ten section anchors and both language buttons", () => {
+	it("renders a rail item per section and both language buttons inside the rail", () => {
 		const html = renderDocument({ report: report(), body: "", payload: "{}" });
-		expect(html.match(/data-anchor="/g)).toHaveLength(10);
-		expect(html).toContain('data-lang-switch="zh"');
-		expect(html).toContain('data-lang-switch="en"');
+		expect(html.match(/data-rail-item="/g)).toHaveLength(9);
+		const rail = html.slice(html.indexOf('class="rail"'), html.indexOf('class="main"'));
+		expect(rail).toContain('data-lang-switch="en"');
+		expect(rail).toContain('data-lang-switch="zh"');
+	});
+	it("leaves the agents section out of the rail when there are no subagents", () => {
+		const html = renderDocument({ report: report(), body: "", payload: "{}" });
+		expect(html).not.toContain('data-rail-item="family"');
+		expect(html.match(/data-rail-item="/g)).toHaveLength(9);
+	});
+	it("wraps the report in a rail plus grid shell", () => {
+		const html = renderDocument({ report: report(), body: '<section class="card span-6" id="tokens"></section>', payload: "{}" });
+		expect(html).toContain('class="shell"');
+		expect(html).toContain('class="rail"');
+		expect(html).toContain('class="main"');
+		expect(html).not.toContain("nav.anchors");
+	});
+	it("keeps the banner and the warnings inside the main grid", () => {
+		const many = { ...report(), warnings: [{ key: "warning.noSystem" }] };
+		const html = renderDocument({ report: many, body: "", payload: "{}" });
+		const main = html.slice(html.indexOf('class="main"'));
+		expect(main).toContain('data-banner="raw-content"');
+		expect(main).toContain('data-card="warnings"');
 	});
 	it("caps the warning panel at eight entries", () => {
 		const base = report();
@@ -72,10 +92,24 @@ describe("renderDocument", () => {
 });
 
 describe("renderOverview", () => {
-	it("renders six KPI cards and the ledger", () => {
+	it("renders six KPI tiles inside the overview card", () => {
 		const html = renderOverview(report());
 		expect(html.match(/data-kpi="/g)).toHaveLength(6);
 		expect(html).toContain('data-card="overview"');
+		expect(html).toContain('class="kpis"');
 		expect(html).toContain("demo");
+	});
+	it("lays the session facts and the model ledger side by side", () => {
+		const html = renderOverview(report());
+		expect(html).toContain('data-block="session"');
+		expect(html).toContain('data-block="byModel"');
+	});
+	it("names the cost basis with a translated chip, not a raw key", () => {
+		const html = renderOverview(report());
+		expect(html).toContain('data-i18n="chip.costBasis.');
+		expect(html).not.toContain("cost.estimate");
+	});
+	it("bars the model rows by total tokens", () => {
+		expect(renderOverview(report())).toContain('class="bar"');
 	});
 });
