@@ -4,14 +4,14 @@ import { renderDocument } from "../src/render/document";
 import { renderOverview } from "../src/render/overview";
 import { buildReport } from "../src/report";
 import { fakeContext } from "./helpers/ctx";
-import { assistantEntry, resetEntryIds, systemEntry, userEntry } from "./helpers/entries";
+import { assistantEntry, resetEntryIds, systemEntry, usage, userEntry } from "./helpers/entries";
 
 function report(mode: "full" | "short" = "full", extra: { content?: string } = {}) {
 	resetEntryIds();
 	const entries = [
 		systemEntry({ sections: { preamble: "base" }, timestamp: 1 }),
 		userEntry(extra.content ?? "hi", 2),
-		assistantEntry({ content: [{ type: "text", text: "answer" }], timestamp: 3 }),
+		assistantEntry({ content: [{ type: "text", text: "answer" }], usage: usage(100, 10, 400, 0, 0.25), timestamp: 3 }),
 	];
 	return buildReport(fakeContext({ entries, name: "demo" }), { mode, lang: "en" });
 }
@@ -87,10 +87,24 @@ describe("renderDocument", () => {
 });
 
 describe("renderOverview", () => {
-	it("renders six KPI cards and the ledger", () => {
+	it("renders six KPI tiles inside the overview card", () => {
 		const html = renderOverview(report());
 		expect(html.match(/data-kpi="/g)).toHaveLength(6);
 		expect(html).toContain('data-card="overview"');
+		expect(html).toContain('class="kpis"');
 		expect(html).toContain("demo");
+	});
+	it("lays the session facts and the model ledger side by side", () => {
+		const html = renderOverview(report());
+		expect(html).toContain('data-block="session"');
+		expect(html).toContain('data-block="byModel"');
+	});
+	it("names the cost basis with a translated chip, not a raw key", () => {
+		const html = renderOverview(report());
+		expect(html).toContain('data-i18n="chip.costBasis.');
+		expect(html).not.toContain("cost.estimate");
+	});
+	it("bars the model rows by total tokens", () => {
+		expect(renderOverview(report())).toContain('class="bar"');
 	});
 });

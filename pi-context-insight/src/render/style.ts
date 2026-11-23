@@ -31,6 +31,7 @@ a{color:var(--accent)}
 .card>h3{margin:14px 0 8px;font-size:12px;font-weight:600;color:var(--dim)}
 .card-meta{margin-left:auto;display:flex;align-items:center;gap:6px;font-weight:400;font-size:11px;color:var(--dim)}
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;align-items:start}
+.split{display:grid;grid-template-columns:5fr 7fr;gap:20px;margin-top:16px;align-items:start}
 
 /* kpi tiles */
 .kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
@@ -124,6 +125,7 @@ footer{color:var(--dim);font-size:11px;text-align:center;padding:8px 0 24px}
 .card,.span-3,.span-4,.span-5,.span-6,.span-7,.span-8{grid-column:auto}
 .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
 .donut-pair{flex-direction:column;align-items:flex-start}
+.split{grid-template-columns:minmax(0,1fr)}
 }
 @media print{
 .rail,button,select,input[type="search"]{display:none!important}
