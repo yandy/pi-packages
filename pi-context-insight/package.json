@@ -3,7 +3,7 @@
 	"publishConfig": {
 		"access": "public"
 	},
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Generate standalone offline HTML reports with session context, usage, activity, and child-agent insights",
 	"license": "MIT",
 	"repository": {
