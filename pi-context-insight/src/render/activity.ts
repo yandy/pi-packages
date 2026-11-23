@@ -7,7 +7,37 @@ import { esc } from "./escape";
 import { i18nAttrs, microbar, section } from "./layout";
 
 const FILE_KINDS: readonly FileOpKind[] = ["read", "write", "search", "image"];
+const FILE_FILTERS = ["all", ...FILE_KINDS] as const;
 const COMMAND_FILTERS = ["all", "failed", "slow", "nested"] as const;
+/** The per-step spark is capped so a long session cannot stretch the row. */
+const SPARK_BUCKETS = 40;
+
+interface SparkBucket {
+	from: number;
+	to: number;
+	count: number;
+}
+
+/** Sums a per-step distribution into at most `max` buckets, keeping its shape. */
+export function sparkSeries(perStep: readonly number[], max = SPARK_BUCKETS): SparkBucket[] {
+	if (perStep.length <= max) return perStep.map((count, index) => ({ from: index, to: index, count }));
+	const size = Math.ceil(perStep.length / max);
+	const buckets: SparkBucket[] = [];
+	for (let start = 0; start < perStep.length; start += size) {
+		const slice = perStep.slice(start, start + size);
+		buckets.push({ from: start, to: start + slice.length - 1, count: slice.reduce((sum, value) => sum + value, 0) });
+	}
+	return buckets;
+}
+
+function sparkBar(bucket: SparkBucket): string {
+	if (bucket.count === 0) return `<i style="height:1px;background:transparent"></i>`;
+	const label =
+		bucket.from === bucket.to
+			? `${bucket.from + 1}: ${bucket.count}`
+			: `${bucket.from + 1}-${bucket.to + 1}: ${bucket.count}`;
+	return `<i style="height:${Math.min(12, 3 + bucket.count * 2)}px" title="${esc(label)}"></i>`;
+}
 
 function toolsCard(report: InsightReport): string {
 	const lang = report.lang;
@@ -24,13 +54,7 @@ function toolsCard(report: InsightReport): string {
 	const max = Math.max(1, ...report.tools.map((row) => row.calls));
 	const rows = report.tools
 		.map((row) => {
-			const spark = row.perStep
-				.map((count, index) =>
-					count > 0
-						? `<i style="display:inline-block;width:3px;height:${Math.min(12, 3 + count * 2)}px;background:var(--accent)" title="${esc(`${index + 1}: ${count}`)}"></i>`
-						: "",
-				)
-				.join("");
+			const spark = sparkSeries(row.perStep).map(sparkBar).join("");
 			const duration =
 				row.durationMs === 0 && row.durationEstimated
 					? "—"
@@ -44,11 +68,12 @@ function toolsCard(report: InsightReport): string {
 
 function filesCard(report: InsightReport): string {
 	const lang = report.lang;
-	const chips = FILE_KINDS.map(
-		(kind) =>
-			`<button type="button" data-file-filter="${kind}" aria-pressed="false"><span ${i18nAttrs(`files.kind.${kind}`)}>${esc(t(lang, { key: `files.kind.${kind}` }))}</span> <span class="dim">${report.files.reduce((sum, row) => sum + row.counts[kind], 0)}</span></button>`,
-	).join("");
-	const body =
+	const chips = FILE_FILTERS.map((filter) => {
+		const key = filter === "all" ? "files.filter.all" : `files.kind.${filter}`;
+		const count = filter === "all" ? report.files.length : report.files.filter((row) => row.counts[filter] > 0).length;
+		return `<button type="button" data-file-filter="${filter}" aria-pressed="${filter === "all"}"><span ${i18nAttrs(key)}>${esc(t(lang, { key }))}</span> <span class="dim">${count}</span></button>`;
+	}).join("");
+	const rows =
 		report.files.length === 0
 			? `<p class="dim" data-empty="files">${t(lang, { key: "empty.files" })}</p>`
 			: report.files
@@ -70,7 +95,7 @@ function filesCard(report: InsightReport): string {
 					.join("");
 	const content = `<div class="toolbar">${chips}</div>
 <input type="search" data-filter-group="files" placeholder="${esc(t(lang, { key: "files.search" }))}">
-${body}
+<div class="scroll-list" data-scroll-list="files">${rows}</div>
 <p class="dim" style="margin:8px 0 0">${t(lang, { key: "files.note" })}</p>`;
 	return section({ id: "files", titleKey: "activity.files", lang, span: 6, body: content });
 }
@@ -96,7 +121,7 @@ ${commands.programs
 	)
 	.join("")}</div>`;
 
-	const rows =
+	const commandRows =
 		commands.records.length === 0
 			? `<p class="dim" data-empty="commands">${t(lang, { key: "empty.commands" })}</p>`
 			: commands.records
@@ -120,7 +145,7 @@ ${commands.programs
 					})
 					.join("");
 
-	const content = `<div class="split split-commands"><div>${rail}</div><div><div class="toolbar">${filters}</div><input type="search" data-filter-group="commands" placeholder="${esc(t(lang, { key: "cmds.search" }))}">${rows}</div></div>`;
+	const content = `<div class="split split-commands"><div>${rail}</div><div><div class="toolbar">${filters}</div><input type="search" data-filter-group="commands" placeholder="${esc(t(lang, { key: "cmds.search" }))}"><div class="scroll-list" data-scroll-list="commands">${commandRows}</div></div></div>`;
 	return section({ id: "commands", titleKey: "activity.commands", lang, span: 6, body: content });
 }
 

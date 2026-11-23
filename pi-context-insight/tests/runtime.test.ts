@@ -17,6 +17,7 @@ interface Runtime {
 		turns: Array<{ index: number; width: number }>;
 		labels: Array<{ text: string }>;
 	};
+	timelineGeometry: (count: number) => { barW: number; gap: number; axisY: number; height: number };
 	turnBuckets: (steps: unknown) => Array<{ turn: number; sums: Record<string, number>; delta: Record<string, number>; total: number; count: number }>;
 	groupLabelFor: (dicts: unknown, lang: string, group: string) => string;
 	catLabelFor: (dicts: unknown, lang: string, cat: string) => string;
@@ -182,6 +183,50 @@ describe("timeline geometry in the client", () => {
 	it("grows the canvas with the step count", () => {
 		const many = Array.from({ length: 100 }, (_, index) => step({ i: index, sums: { user: 1 }, total: 1 })) as never;
 		expect(load().buildTimeline(many, geo as never, { mode: "total", granularity: "step", duration: false } as never).width).toBeGreaterThan(1000);
+	});
+
+	it("widens the bars when turn mode collapses many steps into a few buckets", () => {
+		const { timelineGeometry } = load();
+		expect(timelineGeometry(20).barW).toBe(24);
+		expect(timelineGeometry(0).barW).toBe(24);
+		expect(timelineGeometry(200).barW).toBeLessThan(timelineGeometry(20).barW);
+		expect(timelineGeometry(200).axisY).toBe(timelineGeometry(2).axisY);
+		expect(timelineGeometry(200).height).toBe(240);
+	});
+
+	it("labels turn buckets with the turn number", () => {
+		const steps = Array.from({ length: 10 }, (_, index) => step({ i: index, turn: index + 1, sums: { user: 1 }, total: 1 })) as never;
+		const data = load().buildTimeline(steps, geo as never, { mode: "total", granularity: "turn", duration: false } as never);
+		expect(data.labels.map((label) => label.text)).toEqual(["T5", "T10"]);
+	});
+
+	it("draws one band column per turn in turn mode and a spanning band in step mode", () => {
+		const steps = [
+			step({ i: 0, turn: 1, sums: { user: 1 }, total: 1 }),
+			step({ i: 1, turn: 1, sums: { user: 2 }, total: 2 }),
+			step({ i: 2, turn: 2, sums: { user: 3 }, total: 3 }),
+		] as never;
+		const byTurn = load().buildTimeline(steps, geo as never, { mode: "total", granularity: "turn", duration: false } as never);
+		expect(byTurn.turns.map((turn) => turn.width)).toEqual([geo.barW, geo.barW]);
+		const byStep = load().buildTimeline(steps, geo as never, { mode: "total", granularity: "step", duration: false } as never);
+		expect(byStep.turns.map((turn) => turn.width)).toEqual([2 * (geo.barW + geo.gap) - geo.gap, geo.barW]);
+	});
+
+	it("keeps milestone flags on the turn column instead of the step column", () => {
+		const steps = [
+			step({ i: 0, turn: 1, sums: { user: 1 }, total: 1, ev: [9] }),
+			step({ i: 1, turn: 1, sums: { user: 2 }, total: 2, ev: [] }),
+			step({ i: 2, turn: 2, sums: { user: 3 }, total: 3, ev: [] }),
+		] as never;
+		const data = load().buildTimeline(steps, geo as never, {
+			mode: "total",
+			granularity: "turn",
+			duration: false,
+			eventKinds: { 9: "compaction" },
+		} as never);
+		expect(data.flags).toHaveLength(1);
+		expect(data.flags[0]).toMatchObject({ kind: "compaction", count: 1 });
+		expect(data.flags[0]?.x).toBeLessThan(geo.barW + 12);
 	});
 });
 

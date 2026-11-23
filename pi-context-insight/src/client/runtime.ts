@@ -119,6 +119,19 @@ export const CLIENT_RUNTIME = `
     return granularity === "turn" ? turnBuckets(steps) : steps;
   }
 
+  /**
+   * Bar geometry for a bucket count, mirroring the server's timelineGeometry.
+   * Fewer buckets (turn mode) must get wider bars instead of a sliver-sized chart.
+   */
+  function timelineGeometry(count) {
+    var buckets = Math.max(1, count);
+    var barW = Math.max(6, Math.min(24, Math.floor(1050 / buckets)));
+    var flagH = 26;
+    var chartH = 150;
+    var turnH = 24;
+    return { barW: barW, gap: barW <= 8 ? 1 : 2, flagH: flagH, chartH: chartH, turnH: turnH, height: 240, axisY: flagH + chartH };
+  }
+
   function maxOf(buckets, mode) {
     var max = 1;
     for (var i = 0; i < buckets.length; i++) {
@@ -209,13 +222,15 @@ export const CLIENT_RUNTIME = `
     }
 
     // Milestone flags and the turn band belong to the chart, not to the server-rendered copy.
+    // In turn mode the x axis is made of turn buckets, so a flag has to use its bucket's events.
     var eventKinds = opts.eventKinds || {};
-    for (var f = 0; f < steps.length; f++) {
-      var ids = steps[f].ev || [];
+    for (var f = 0; f < buckets.length; f++) {
+      var ids = opts.granularity === "turn" ? (buckets[f].events || []) : (buckets[f].ev || []);
       if (!ids.length) continue;
       var kind = eventKinds[ids[0]] || "inject";
+      var flagStep = buckets[f].i !== undefined ? buckets[f].i : buckets[f].index !== undefined ? buckets[f].index : f;
       data.flags.push({
-        step: steps[f].i,
+        step: flagStep,
         x: 10 + f * (geo.barW + geo.gap) + geo.barW / 2,
         kind: kind,
         count: ids.length
@@ -229,7 +244,8 @@ export const CLIENT_RUNTIME = `
         openTurn = { index: bucket.turn, x: 10 + k * (geo.barW + geo.gap), count: 0, label: bucket.count };
         data.turns.push(openTurn);
       }
-      openTurn.count += opts.granularity === "turn" ? bucket.count : 1;
+      // One band column per rendered bucket: in turn mode a bucket already is a whole turn.
+      openTurn.count += 1;
       openTurn.width = Math.max(geo.barW, openTurn.count * (geo.barW + geo.gap) - geo.gap);
     }
     for (var tn2 = 0; tn2 < data.turns.length; tn2++) delete data.turns[tn2].count;
@@ -237,7 +253,8 @@ export const CLIENT_RUNTIME = `
       if (l % 5 !== 4) continue;
       var labelStep = buckets[l];
       var labelIndex = labelStep.i !== undefined ? labelStep.i : labelStep.index;
-      data.labels.push({ x: 10 + l * (geo.barW + geo.gap) + geo.barW / 2, text: "S" + (labelIndex + 1) });
+      var labelText = opts.granularity === "turn" ? "T" + labelStep.turn : "S" + (labelIndex + 1);
+      data.labels.push({ x: 10 + l * (geo.barW + geo.gap) + geo.barW / 2, text: labelText });
     }
     return data;
   }
@@ -340,7 +357,8 @@ export const CLIENT_RUNTIME = `
       overview: false,
       duration: false,
       lang: resolveLang(load("insight.lang"), payload.lang),
-      group: null
+      group: null,
+      filters: { files: "all", commands: "all", events: "all" }
     };
 
     function dict() { return (payload.dicts && payload.dicts[state.lang]) || {}; }
@@ -385,7 +403,16 @@ export const CLIENT_RUNTIME = `
     function redrawTimeline() {
       var svg = doc.querySelector("[data-timeline-svg]");
       if (!svg) return;
-      var geo = payload.geo;
+      var cap = 4000;
+      var visible = payload.steps.length > cap ? payload.steps.slice(payload.steps.length - cap) : payload.steps;
+      var bucketCount = state.granularity === "turn" ? turnBuckets(visible).length : visible.length;
+      var geo = timelineGeometry(bucketCount);
+      // A short session (or turn mode) would otherwise draw a sliver and centre it: grow the bars to fill the card.
+      var box = svg.parentNode && svg.parentNode.clientWidth ? svg.parentNode.clientWidth : 0;
+      if (box > 0) {
+        var stretched = Math.floor((box - 20 - bucketCount * geo.gap) / bucketCount);
+        if (stretched > geo.barW) geo = { barW: stretched, gap: geo.gap, flagH: geo.flagH, chartH: geo.chartH, turnH: geo.turnH, height: geo.height, axisY: geo.axisY };
+      }
       var kinds = {};
       for (var e = 0; e < (payload.events || []).length; e++) kinds[payload.events[e].id] = payload.events[e].kind;
       var lang = state.lang;
@@ -420,13 +447,13 @@ export const CLIENT_RUNTIME = `
         var flag = data.flags[fl];
         var group = svgEl(doc, "g", { "data-flag": flag.kind, "data-flag-step": flag.step });
         group.appendChild(svgEl(doc, "line", { x1: flag.x, x2: flag.x, y1: geo.flagH, y2: geo.axisY, stroke: "var(--dim)", "stroke-dasharray": "2 3", opacity: 0.45 }));
-        var dot = svgEl(doc, "circle", { cx: flag.x, cy: 13, r: 5, fill: "var(--" + (flag.kind === "compaction" ? "compaction" : "systemSkills") + ")" });
+        var dot = svgEl(doc, "circle", { cx: flag.x, cy: 8, r: 5, fill: "var(--" + (flag.kind === "compaction" ? "compaction" : "systemSkills") + ")" });
         var dotTitle = svgEl(doc, "title", {});
         dotTitle.textContent = flagKindLabel(flag.kind, lang);
         dot.appendChild(dotTitle);
         group.appendChild(dot);
         if (flag.count > 1) {
-          var plus = svgEl(doc, "text", { x: flag.x + 7, y: 17, "text-anchor": "start", "font-size": 9, fill: "var(--text)" });
+          var plus = svgEl(doc, "text", { x: flag.x + 7, y: 12, "text-anchor": "start", "font-size": 9, fill: "var(--text)" });
           plus.textContent = "+" + (flag.count - 1);
           group.appendChild(plus);
         }
@@ -470,9 +497,11 @@ export const CLIENT_RUNTIME = `
         turnTitle.textContent = say("timeline.turnBlock", { t: turn.index, steps: turn.label });
         turnRect.appendChild(turnTitle);
         turnGroup.appendChild(turnRect);
-        var turnText = svgEl(doc, "text", { x: turn.x + 3, y: geo.axisY + 13, "font-size": 9, fill: "var(--text)" });
-        turnText.textContent = String(turn.index);
-        turnGroup.appendChild(turnText);
+        if (turn.width >= 14) {
+          var turnText = svgEl(doc, "text", { x: turn.x + 3, y: geo.axisY + 13, "font-size": 9, fill: "var(--text)" });
+          turnText.textContent = String(turn.index);
+          turnGroup.appendChild(turnText);
+        }
         svg.appendChild(turnGroup);
       }
 
@@ -739,7 +768,7 @@ export const CLIENT_RUNTIME = `
         var group = input.getAttribute("data-filter-group");
         var selector = group === "files" ? "[data-path]" : group === "commands" ? "[data-command]" : group === "events" ? "[data-event]" : "[data-item]";
         var rows = doc.querySelectorAll(selector);
-        var active = input.getAttribute("data-active-filter") || "all";
+        var active = state.filters[group] || "all";
         var query = String(input.value || "").toLowerCase();
         for (var j = 0; j < rows.length; j++) {
           var row = rows[j];
@@ -833,7 +862,7 @@ export const CLIENT_RUNTIME = `
         var input = doc.querySelector('[data-filter-group="' + groupName + '"]');
         if (input) {
           var attr = groupName === "events" ? "data-event-filter" : groupName === "files" ? "data-file-filter" : "data-command-filter";
-          input.setAttribute("data-active-filter", filterButton.getAttribute(attr));
+          state.filters[groupName] = filterButton.getAttribute(attr) || "all";
           var siblings = filterButton.parentNode.querySelectorAll("button");
           for (var i = 0; i < siblings.length; i++) siblings[i].setAttribute("aria-pressed", siblings[i] === filterButton ? "true" : "false");
           applyFilters();
@@ -868,6 +897,18 @@ export const CLIENT_RUNTIME = `
       }
     }
 
+    // The bars stretch to the card width, so a resized window needs a fresh geometry.
+    if (typeof win.addEventListener === "function") {
+      var resizeTimer = null;
+      win.addEventListener("resize", function () {
+        if (resizeTimer !== null) win.clearTimeout(resizeTimer);
+        resizeTimer = win.setTimeout(function () {
+          resizeTimer = null;
+          redrawTimeline();
+        }, 150);
+      });
+    }
+
     applyToggles();
     applyLanguageFromDoc(doc, state.lang, payload.dicts, { sessionTitle: payload.sessionTitle });
     selectStep(state.step);
@@ -880,6 +921,7 @@ export const CLIENT_RUNTIME = `
       nextIndex: nextIndex,
       resolveLang: resolveLang,
       buildTimeline: buildTimeline,
+      timelineGeometry: timelineGeometry,
       turnBuckets: turnBuckets,
       translate: translate,
       groupLabelFor: groupLabelFor,

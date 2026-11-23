@@ -14,6 +14,11 @@ describe("css contract", () => {
 		expect(REPORT_CSS).toContain(".main>*{min-width:0}");
 		expect(REPORT_CSS).toContain("overflow-wrap:anywhere");
 	});
+	it("lets hidden win over a grid display and scrolls long lists", () => {
+		expect(REPORT_CSS).toContain("[hidden]{display:none!important}");
+		expect(REPORT_CSS).toContain(".scroll-list{");
+		expect(REPORT_CSS).toContain("minmax(0,64px)");
+	});
 	it("keeps the rail, the card grid and the print fallback", () => {
 		expect(REPORT_CSS).toContain(".shell{");
 		expect(REPORT_CSS).toContain(".span-6{");

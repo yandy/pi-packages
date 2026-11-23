@@ -53,7 +53,8 @@ export function renderEvents(report: InsightReport): string {
 		})
 		.join("");
 
-	const body = `<div class="toolbar" data-filter-group="events">${tabs}</div>
+	const body = `<div class="toolbar">${tabs}</div>
+<input type="search" data-filter-group="events" placeholder="${esc(t(lang, { key: "events.search" }))}">
 <div class="event-list">${rows}</div>`;
 
 	return section({ id: "events", titleKey: "events.title", lang, body });
