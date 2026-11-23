@@ -71,6 +71,8 @@ proj · pid 4242
 
 Cancellation rides on `ui_prompt_end`, which Pi emits for the outermost prompt only and through a microtask. A prompt that opens and closes within the same tick — before this extension's handler runs, which can happen when another extension's `ui_prompt_start` handler yields first — still alerts. Prompt events carry no initiator, so this window cannot be closed from inside the extension.
 
+Built-in pickers (`/model`, `/resume`, `/settings`, `/fork`, `/tree`) draw themselves on the TUI and never pass through the extension UI channel, so Pi emits no prompt event for them and they never notify — including when one is left open. The host exposes no signal for them.
+
 ## Configuration
 
 All configuration is via environment variables:
