@@ -1,9 +1,8 @@
 # Defer waiting-for-input notifications
 
-> The non-goal below — never gate a prompt on an in-flight run — is narrowed by
-> [2026-11-23-readonly-overlay-prompt-design.md](2026-11-23-readonly-overlay-prompt-design.md):
-> `custom` prompts are now gated that way, titled dialogs are not. Idle-session approvals use
-> `select` / `confirm` / `input`, so they keep notifying.
+> The non-goal below — never gate a prompt on an in-flight run — still holds, and it is one of the
+> reasons [2026-11-23-readonly-overlay-prompt-design.md](2026-11-23-readonly-overlay-prompt-design.md)
+> solves read-only viewers with an opt-in announcement instead of inferring them from run state.
 
 ## Intent
 

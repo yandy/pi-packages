@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import extension, { PROMPT_NOTIFY_DELAY_MS } from "../src/index.js";
+import extension, { PASSIVE_PROMPT_CHANNEL, PROMPT_NOTIFY_DELAY_MS } from "../src/index.js";
 
 beforeEach(() => {
 	vi.useFakeTimers();
@@ -26,6 +26,7 @@ function createHarness(opts?: {
 	const notifierOpts: Array<{ command: string; onError?: (message: string) => void }> = [];
 	let current = 0;
 	let systemPrompt = opts?.systemPrompt ?? "";
+	const bus: Record<string, Array<(data: unknown) => void>> = {};
 	const pi = {
 		on: (event: string, handler: any) => {
 			(handlers[event] ??= []).push(handler);
@@ -35,6 +36,15 @@ function createHarness(opts?: {
 			commands[name] = def;
 		},
 		getSessionName: () => opts?.sessionName,
+		events: {
+			on: (channel: string, handler: (data: unknown) => void) => {
+				(bus[channel] ??= []).push(handler);
+				return () => {};
+			},
+			emit: (channel: string, data: unknown) => {
+				for (const handler of bus[channel] ?? []) handler(data);
+			},
+		},
 	};
 	const ctx = {
 		cwd: "/work/proj",
@@ -69,6 +79,8 @@ function createHarness(opts?: {
 		ctx,
 		fire,
 		firePrompt,
+		/** Emit `PASSIVE_PROMPT_CHANNEL` the way a viewer package does right before `ui.custom`. */
+		announcePassivePrompt: () => pi.events.emit(PASSIVE_PROMPT_CHANNEL, {}),
 		setNow: (t: number) => (current = t),
 		setSystemPrompt: (value: string) => (systemPrompt = value),
 	};
@@ -98,36 +110,58 @@ describe("ui_prompt_start", () => {
 	});
 
 	it("never leaks the protocol word for custom prompts, which carry no title", async () => {
-		// A custom prompt raised mid-run is the blocking-tool shape (ask_user and friends).
 		const h = createHarness();
-		await h.fire("agent_start");
 		await h.firePrompt({ kind: "custom" });
 		expect(h.fakeNotifier.notify.mock.calls[0][0].body).toBe("Interactive prompt\npid 4242");
 	});
 
-	it("stays silent for a read-only overlay the operator opened while idle", async () => {
-		// `/todos` or `/subagents:sessions` mount their viewer through `ui.custom` and the operator
-		// reads it for minutes: an open viewer is not a request for attention.
+	it("stays silent for a passive viewer the operator announced", async () => {
+		// `/subagents:sessions` and `/todos` announce before mounting their read-only overlay:
+		// an open viewer is never a request for attention, however long it stays open.
 		const h = createHarness();
 		await h.fire("session_start", { reason: "startup" });
+		h.announcePassivePrompt();
 		await h.firePrompt({ kind: "custom" });
 		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
 	});
 
-	it("stays silent for a custom prompt after a finished run settles", async () => {
+	it("stays silent for an announced viewer opened while the agent is streaming", async () => {
+		// The operator can open a viewer mid-run, and tools are often in flight then; the
+		// announcement — not the run state — is what distinguishes a viewer from a question.
 		const h = createHarness();
 		await h.fire("session_start", { reason: "startup" });
 		await h.fire("agent_start");
-		await h.fire("agent_settled", { aborted: false });
+		h.announcePassivePrompt();
 		await h.firePrompt({ kind: "custom" });
 		expect(h.fakeNotifier.notify).not.toHaveBeenCalled();
 	});
 
-	it("keeps notifying for titled dialogs while idle", async () => {
-		// The idle gate is for `custom` only: a picker left open still means a stuck instance.
+	it("consumes an announcement once", async () => {
 		const h = createHarness();
 		await h.fire("session_start", { reason: "startup" });
-		await h.firePrompt({ kind: "select", title: "Subagent sessions" });
+		h.announcePassivePrompt();
+		await h.firePrompt({ kind: "custom" });
+		await h.firePrompt({ kind: "custom" });
+		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not let an announcement silence a titled dialog", async () => {
+		// The contract is about passive `custom` viewers. A dialog still means a stuck instance,
+		// and the announcement is consumed so it cannot leak onto a later prompt.
+		const h = createHarness();
+		await h.fire("session_start", { reason: "startup" });
+		h.announcePassivePrompt();
+		await h.firePrompt({ kind: "select", title: "Pick one" });
+		await h.firePrompt({ kind: "custom" });
+		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(2);
+	});
+
+	it("drops an announcement when the prompt closes", async () => {
+		const h = createHarness();
+		await h.fire("session_start", { reason: "startup" });
+		h.announcePassivePrompt();
+		await h.fire("ui_prompt_end", { kind: "custom" });
+		await h.firePrompt({ kind: "custom" });
 		expect(h.fakeNotifier.notify).toHaveBeenCalledTimes(1);
 	});
 

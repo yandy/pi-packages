@@ -22,19 +22,21 @@ function createHarness(getBranch: () => unknown[] = () => []) {
 			(handlers[event] ??= []).push(handler);
 			return () => {};
 		},
+		events: { emit: vi.fn(), on: vi.fn(() => () => {}) },
 	};
 	// hasUI=false 时 refreshWidget 直接返回，无需 stub 更多 UI。
 	const ctx = { hasUI: false, sessionManager: { getBranch }, ui: { setWidget: vi.fn(), theme } };
 	extension(pi as any);
-	return { tools, handlers, commands, ctx };
+	return { tools, handlers, commands, ctx, events: pi.events };
 }
 
 let tools: any[];
 let handlers: Record<string, Array<(event: any, ctx: any) => any>>;
 let commands: Record<string, any>;
 let ctx: any;
+let events: { emit: ReturnType<typeof vi.fn>; on: ReturnType<typeof vi.fn> };
 beforeEach(() => {
-	({ tools, handlers, commands, ctx } = createHarness());
+	({ tools, handlers, commands, ctx, events } = createHarness() as any);
 });
 
 const run = (params: Record<string, unknown>, id = "call", uiCtx: any = ctx) =>
@@ -313,10 +315,18 @@ describe("command /todos", () => {
 		await commands.todos.handler("", { mode: "tui", hasUI: true, ui: { notify: vi.fn(), custom, theme } });
 
 		expect(custom).toHaveBeenCalledTimes(1);
+		// 看板是只读浮层：挂载前必须声明被动弹窗，否则 pi-notify 会发「等待输入」通知。
+		expect(events.emit).toHaveBeenCalledWith("notify:passive-prompt", {});
 		const [factory, options] = custom.mock.calls[0] as [any, any];
 		expect(options.overlay).toBe(true);
 		expect(options.overlayOptions?.maxHeight).toBe("85%");
 		const component = factory({ terminal: { rows: 24, columns: 80 } }, theme, undefined, () => {});
 		expect(component.render(60).join("\n")).toContain("Ship it");
+	});
+
+	it("does not announce a passive prompt when it falls back to a notification", async () => {
+		await run({ action: "set", items: [{ title: "Ship it", status: "pending" }] });
+		await commands.todos.handler("", { mode: "rpc", hasUI: true, ui: { notify: vi.fn(), custom: vi.fn(), theme } });
+		expect(events.emit).not.toHaveBeenCalled();
 	});
 });

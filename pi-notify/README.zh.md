@@ -4,7 +4,7 @@ pi 的桌面通知包：当你并行运行多个 pi 实例时，每个实例在�
 
 ## 功能
 
-- **等待输入**：任何阻塞式 `ctx.ui` 弹窗（select / confirm / input / editor，以及在回合运行期间抛出、以 `custom` 挂载的交互工具，含其它扩展发起的弹窗）都会发送通知——延迟 4 秒投递，弹窗在此之前关闭则不发送——包含弹窗标题、交互类型和实例上下文，urgency 默认 `critical`。你自己用命令打开的只读浏览窗口（`/todos`、`/subagents:sessions`）无论停留多久都不通知。
+- **等待输入**：任何阻塞式 `ctx.ui` 弹窗（select / confirm / input / editor / custom，含其它扩展发起的弹窗）都会发送通知——延迟 4 秒投递，弹窗在此之前关闭则不发送——包含弹窗标题、交互类型和实例上下文，urgency 默认 `critical`。你自己用命令打开的只读浏览窗口（`/todos`、`/subagents:sessions`）无论停留多久都不通知——挂载它们的包会主动声明这是被动弹窗。
 - **任务完成**：agent 完全空闲（`agent_settled`）时发送通知，展示回合耗时和最后一条 assistant 消息的纯文本摘要，urgency 默认 `normal`。
 - **实例标识**：标题以 session 名开头（未命名时回退为项目目录名）；正文第二行在有用时保留项目名，并始终带进程 pid。
 - **可读摘要**：去除 markdown 标记和多余空白；最多保留 160 个字素簇加 `…`，优先选择附近的句子或单词边界，避免截断单词或 emoji。
@@ -45,7 +45,18 @@ pi install npm:@yandy0725/pi-notify
 - 任务完成时，`<summary>` 为最后一条 assistant 消息的清洗后文本；无文本时正文只有 `<context>`。耗时四舍五入到秒，按秒、分钟或小时紧凑展示。
 - `\n` 表示实际换行：标题或摘要位于第一行，实例元数据位于第二行。自定义通知命令仍在同一个 body 参数中收到这两行。
 - 等待输入通知**延迟 4 秒**投递：弹窗打开时排定，若在此之前关闭（`ui_prompt_end`）则丢弃。因此自己用斜杠命令打开、随手点掉的列表不会弹窗，而无人应答的弹窗照常通知。会话替换与关闭也会丢弃待投递的通知。
-- `custom` 是任意扩展 UI，因此只在回合运行期间（`agent_start` → `agent_settled`）打开时才通知——这正是 `ask_user` 这类交互工具把 agent 卡住的形态。否则 `/todos` 与 `/subagents:sessions` 挂载的只读浏览窗口只要看一眼就会被通知。带标题的对话框不受影响：空闲会话里抛出的审批用 `select` / `confirm` / `input`，照常通知。
+- `custom` 是任意扩展 UI，事件层面对「只读浏览窗口」和「真的在等你回答」完全同形。挂载只读窗口的包会在 `ctx.ui.custom(...)` 之前同步 `pi.events.emit("notify:passive-prompt", {})`，紧随其后的那个 `custom` 弹窗不通知。声明是一次性的、只对 `custom` 生效、且是选择性的：没声明的 `custom` 弹窗（例如 `ask_user` 这类交互工具）照旧通知。
+
+### 声明只读弹窗（供扩展作者）
+
+挂载的 `custom` 弹窗永远不会等用户做决定时，先声明：
+
+```ts
+pi.events.emit("notify:passive-prompt", {});
+await ctx.ui.custom(/* 只读浮层 */);
+```
+
+必须与 `custom` 调用在同一个同步块里发出：宿主发出的弹窗事件经微任务延后，声明总在它之前到达。一次声明只覆盖紧随其后的那个弹窗。
 
 示例：
 

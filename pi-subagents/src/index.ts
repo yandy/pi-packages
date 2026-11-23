@@ -44,7 +44,7 @@ import { AgentTool } from "./tools/agent-tool";
 import { GetResultTool } from "./tools/get-result-tool";
 import { SteerTool } from "./tools/steer-tool";
 import { AgentWidget } from "./ui/agent-widget";
-import { SessionNavigatorHandler } from "./ui/session-navigator";
+import { PASSIVE_PROMPT_CHANNEL, SessionNavigatorHandler } from "./ui/session-navigator";
 import { SubagentsSettingsHandler } from "./ui/subagents-settings";
 
 export default function (pi: ExtensionAPI) {
@@ -182,6 +182,7 @@ export default function (pi: ExtensionAPI) {
 				registry,
 				cwd: ctx.cwd,
 				readFile: (path) => readFileSync(path, "utf8"),
+				announcePassivePrompt: () => pi.events.emit(PASSIVE_PROMPT_CHANNEL, {}),
 			});
 		},
 	});

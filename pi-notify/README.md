@@ -4,7 +4,7 @@ Desktop notifications for pi: when you run several pi instances in parallel, eac
 
 ## Features
 
-- **Waiting for input**: any blocking `ctx.ui` prompt (select / confirm / input / editor, plus a `custom` prompt raised while a run is in flight, including prompts from other extensions) sends a notification — held for 4 s and dropped if the prompt closes first — with the prompt title, prompt kind, and instance context. Urgency defaults to `critical`. Read-only overlays opened by your own command (`/todos`, `/subagents:sessions`) never notify, however long they stay open.
+- **Waiting for input**: any blocking `ctx.ui` prompt (select / confirm / input / editor / custom, including prompts from other extensions) sends a notification — held for 4 s and dropped if the prompt closes first — with the prompt title, prompt kind, and instance context. Urgency defaults to `critical`. Read-only overlays opened by your own command (`/todos`, `/subagents:sessions`) stay silent however long they remain open, because the package mounting them announces them as passive.
 - **Task finished**: when the agent becomes fully idle (`agent_settled`), the notification shows the run duration and a plain-text summary of the last assistant message. Urgency defaults to `normal`.
 - **Instance identification**: the title leads with the session name (or project directory name when unnamed). A second body line retains the project name when useful and always includes the process pid.
 - **Readable summaries**: markdown markers and extra whitespace are removed. Summaries are limited to 160 grapheme clusters plus an ellipsis, preferring a nearby sentence or word boundary over splitting text or emoji.
@@ -45,7 +45,19 @@ Requires pi >= 1.5.0 and one of the following backends:
 - For completion, `<summary>` is the last assistant message's cleaned text. If no assistant text exists, the body contains only `<context>`. Duration is rounded to the nearest second and shown as seconds, minutes, or hours.
 - The `\n` denotes an actual newline: the subject or summary stays on the first line, while instance metadata moves to the second line. Custom notifier commands receive both lines in the single body argument.
 - Prompt notifications are **deferred by 4 s**: the alert is scheduled when the prompt opens and dropped if the prompt closes first (`ui_prompt_end`). A picker your own slash command opened and you answered right away therefore never notifies, while a prompt nobody answers still does. Pending alerts are also discarded on session replacement and shutdown.
-- A `custom` prompt is arbitrary extension UI, so it alerts only when it opened during a run (`agent_start` → `agent_settled`) — the shape of an interactive tool like `ask_user` blocking the agent. Without that, the read-only viewers `/todos` and `/subagents:sessions` mount would alert on every read longer than 4 s. Titled dialogs are unaffected: approvals raised in an idle session use `select` / `confirm` / `input` and still notify.
+- A `custom` prompt is arbitrary extension UI, so a read-only viewer is indistinguishable from a question at the event level. A package that mounts a viewer emits `pi.events.emit("notify:passive-prompt", {})` immediately before `ctx.ui.custom(...)`, and the prompt right after that announcement does not notify. Announcing is one-shot, applies to `custom` only, and is opt-in: an unannounced `custom` prompt (an interactive tool such as `ask_user`) alerts as before.
+- The delay is 4 s; pending alerts are also discarded on session replacement and shutdown.
+
+### Suppressing a read-only prompt (for extension authors)
+
+Mounting a `custom` prompt that never waits for a decision? Announce it first:
+
+```ts
+pi.events.emit("notify:passive-prompt", {});
+await ctx.ui.custom(/* read-only viewer */);
+```
+
+Emit it synchronously in the same block as the `custom` call — the prompt event Pi emits is deferred through a microtask, so the announcement always arrives first. One announcement covers the prompt that immediately follows; anything after that keeps the default behavior.
 
 Example:
 

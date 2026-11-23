@@ -162,7 +162,10 @@ substituted for them. If an agent type pins `model` in its frontmatter, that mod
 | `/subagents:sessions` | View a subagent's session transcript |
 
 The session viewer renders the transcript read-only with Pi's own per-entry
-components and follows the running agent live. Tool results appear in Pi's
+components and follows the running agent live. Before mounting the overlay it
+emits `pi.events.emit("notify:passive-prompt", {})`, so with pi-notify installed
+the viewer never raises a "waiting for input" alert — you can keep reading a
+subagent while the parent session is still streaming. Tool results appear in Pi's
 collapsed form (summaries and previews), so a `read` call is represented by its
 call line only. The viewer has no expand key, so the "… to expand" hints some
 tools print do not apply here.

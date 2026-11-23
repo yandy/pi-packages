@@ -88,7 +88,7 @@ The **widget** above the editor is a compact summary capped at 8 lines. When the
 
 The widget hides when the list is empty or every task is done. RPC clients get the same window as plain lines (component widgets are TUI-only), so titles are not width-clipped there.
 
-The **full view** is a command: `/todos` opens the complete list in an overlay (`↑`/`↓` or `j`/`k` to move, `g`/`G` for the ends, `Esc` or `q` to close); the header carries the progress plus a `(current/total)` position marker whenever the list is longer than the window. It is read-only — nothing in it changes the board. Outside the TUI the command falls back to a notification carrying the full list: RPC forwards it, while print and JSON modes have no UI and produce no output.
+The **full view** is a command: `/todos` opens the complete list in an overlay (`↑`/`↓` or `j`/`k` to move, `g`/`G` for the ends, `Esc` or `q` to close); the header carries the progress plus a `(current/total)` position marker whenever the list is longer than the window. It is read-only — nothing in it changes the board — and it emits `pi.events.emit("notify:passive-prompt", {})` before mounting, so pi-notify never raises a "waiting for input" alert for it. Outside the TUI the command falls back to a notification carrying the full list: RPC forwards it, while print and JSON modes have no UI and produce no output.
 
 ## UI surface
 
@@ -97,5 +97,6 @@ The **full view** is a command: `/todos` opens the complete list in an overlay (
 | `setWidget(key, factory)` (board component; only the component form receives `render(width)` and can clip rows) | `mode === "tui"` | Not used — the string-array form below takes over |
 | `setWidget(key, string[])` (the same window as plain lines) | `hasUI` | Forwarded as a `setWidget` request; a client that ignores widgets shows nothing |
 | `custom` (`/todos` full-view overlay) | `mode === "tui"` | Falls back to a single `notify` carrying the full list |
+| `pi.events.emit("notify:passive-prompt")` | none | Emitted only right before the overlay, not on the fallback path |
 | `notify` | none | Forwarded fire-and-forget; may be dropped. print / json produce no output |
 | `theme` (`ctx.ui.theme`, colors the plain lines) | none | Host default theme, not the client's configured theme |

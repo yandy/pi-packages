@@ -27,7 +27,6 @@ import type { AgentConfigLookup } from "../config/agent-types";
 import type { EvictedSubagent } from "../lifecycle/subagent-manager";
 import { getLifetimeTotal } from "../lifecycle/usage";
 import { describeActivity, formatCost, formatTokens, type Theme } from "../ui/display";
-import { TranscriptBody } from "../ui/transcript-body";
 import {
 	fileSnapshotSource,
 	listNavigableAgents,
@@ -36,8 +35,16 @@ import {
 	type TranscriptSource,
 	type UsageDisplayFields,
 } from "../ui/session-navigation";
+import { TranscriptBody } from "../ui/transcript-body";
 
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * pi-notify's contract for passive prompts (duplicated string, like every cross-package
+ * `pi.events` channel): emitted immediately before mounting a read-only `custom` overlay so it
+ * does not raise a "waiting for input" alert. One announcement covers the next prompt only.
+ */
+export const PASSIVE_PROMPT_CHANNEL = "notify:passive-prompt";
 
 /** Chrome lines: top border + header + header sep + footer sep + footer + bottom border. */
 const CHROME_LINES = 6;
@@ -70,6 +77,12 @@ export interface SessionNavigatorParams {
 	cwd: string;
 	/** Reads a persisted session file for the file-snapshot source. */
 	readFile: (path: string) => string;
+	/**
+	 * Emits `PASSIVE_PROMPT_CHANNEL` right before the overlay is mounted. The viewer is
+	 * read-only — it never waits for a decision — so pi-notify must not raise a
+	 * "waiting for input" alert for as long as it stays open.
+	 */
+	announcePassivePrompt: () => void;
 }
 
 /** Options for the read-only transcript overlay. */
@@ -96,7 +109,15 @@ export interface TranscriptOverlayOptions {
  * manager, so it stays a reactive consumer with no inbound call into the core.
  */
 export class SessionNavigatorHandler {
-	async handle({ ui, agents, evicted, registry, cwd, readFile }: SessionNavigatorParams): Promise<void> {
+	async handle({
+		ui,
+		agents,
+		evicted,
+		registry,
+		cwd,
+		readFile,
+		announcePassivePrompt,
+	}: SessionNavigatorParams): Promise<void> {
 		const entries = listNavigableAgents(agents, evicted, registry);
 		if (entries.length === 0) {
 			ui.notify("No subagent sessions to view.", "info");
@@ -128,6 +149,8 @@ export class SessionNavigatorHandler {
 			return;
 		}
 		const markdownTheme = getMarkdownTheme();
+		// Announce before mounting: pi-notify drops the prompt event that immediately follows.
+		announcePassivePrompt();
 		await ui.custom<undefined>(
 			(tui, theme, _keybindings, done) =>
 				new TranscriptOverlay({

@@ -20,6 +20,13 @@ import { formatProgress, renderWidgetLines, TodoWidget } from "./src/widget.js";
 // 编辑器上方 widget 的 slot id（值就是本包的标识）。
 const PACKAGE_ID = "pi-todo";
 
+/**
+ * pi-notify 的被动弹窗约定（跨包字符串，与其它 `pi.events` 通道一样重复声明）：
+ * 在挂载只读 `custom` 浮层前发一次，pi-notify 就不为紧随其后的弹窗发「等待输入」通知。
+ * 看板只读且由用户主动关闭，不是等人回答的弹窗。
+ */
+const PASSIVE_PROMPT_CHANNEL = "notify:passive-prompt";
+
 interface TodoDetails {
 	action: "set" | "update" | "list";
 	todos: TodoItem[];
@@ -225,6 +232,7 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify(`${formatProgress(todos)}\n${listTodos(todos)}`, "info");
 				return;
 			}
+			pi.events.emit(PASSIVE_PROMPT_CHANNEL, {});
 			await ctx.ui.custom<void>(
 				(tui, theme, keybindings, done) => new TodoView(todos, theme, tui, keybindings, () => done()),
 				{

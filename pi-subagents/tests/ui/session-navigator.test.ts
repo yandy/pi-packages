@@ -638,6 +638,7 @@ describe("SessionNavigatorHandler", () => {
 			registry,
 			cwd: "/test/cwd",
 			readFile: noReadFile,
+			announcePassivePrompt: vi.fn(),
 		});
 		expect(ui.notify).toHaveBeenCalledWith("No subagent sessions to view.", "info");
 		expect(ui.custom).not.toHaveBeenCalled();
@@ -652,6 +653,7 @@ describe("SessionNavigatorHandler", () => {
 			registry,
 			cwd: "/test/cwd",
 			readFile: noReadFile,
+			announcePassivePrompt: vi.fn(),
 		});
 		expect(ui.select).toHaveBeenCalledOnce();
 		expect(ui.custom).not.toHaveBeenCalled();
@@ -673,6 +675,7 @@ describe("SessionNavigatorHandler", () => {
 			registry,
 			cwd: "/test/cwd",
 			readFile: noReadFile,
+			announcePassivePrompt: vi.fn(),
 		});
 
 		expect(ui.custom).toHaveBeenCalledOnce();
@@ -682,6 +685,42 @@ describe("SessionNavigatorHandler", () => {
 		expect(record.getToolDefinition).not.toHaveBeenCalled();
 		// Invoke the captured component factory and render to confirm it is sourced from the picked record.
 		expect(renderCapturedOverlay(ui).some((l) => l.includes("picked agent reply"))).toBe(true);
+	});
+
+	it("announces the passive prompt immediately before mounting the overlay", async () => {
+		const record = makeNavigable();
+		const ui = makeUI();
+		ui.select.mockImplementation((_title, options) => Promise.resolve(options[0]));
+		const order: string[] = [];
+		ui.custom.mockImplementation(async () => {
+			order.push("custom");
+		});
+
+		await new SessionNavigatorHandler().handle({
+			ui,
+			agents: [record],
+			evicted: [],
+			registry,
+			cwd: "/test/cwd",
+			readFile: noReadFile,
+			announcePassivePrompt: () => order.push("announce"),
+		});
+
+		expect(order).toEqual(["announce", "custom"]);
+	});
+
+	it("does not announce when no overlay is mounted", async () => {
+		const announcePassivePrompt = vi.fn();
+		await new SessionNavigatorHandler().handle({
+			ui: makeUI(undefined),
+			agents: [makeNavigable()],
+			evicted: [],
+			registry,
+			cwd: "/test/cwd",
+			readFile: noReadFile,
+			announcePassivePrompt,
+		});
+		expect(announcePassivePrompt).not.toHaveBeenCalled();
 	});
 
 	it("passes the picked record's live usage to the overlay header", async () => {
@@ -699,6 +738,7 @@ describe("SessionNavigatorHandler", () => {
 			registry,
 			cwd: "/test/cwd",
 			readFile: noReadFile,
+			announcePassivePrompt: vi.fn(),
 		});
 
 		const header = renderCapturedOverlay(ui).join("\n");
@@ -734,7 +774,15 @@ describe("SessionNavigatorHandler", () => {
 		];
 		const ui = makeUI("Agent (Old task) · 5 tools · completed · 3.0s · evicted (snapshot)");
 
-		await new SessionNavigatorHandler().handle({ ui, agents: [], evicted, registry, cwd: "/test/cwd", readFile });
+		await new SessionNavigatorHandler().handle({
+			ui,
+			agents: [],
+			evicted,
+			registry,
+			cwd: "/test/cwd",
+			readFile,
+			announcePassivePrompt: vi.fn(),
+		});
 
 		expect(readFile).toHaveBeenCalledWith("/tasks/e1.jsonl");
 		expect(ui.custom).toHaveBeenCalledOnce();
@@ -759,7 +807,15 @@ describe("SessionNavigatorHandler", () => {
 		];
 		const ui = makeUI("Agent (Old task) · 5 tools · completed · 3.0s · evicted (snapshot)");
 
-		await new SessionNavigatorHandler().handle({ ui, agents: [], evicted, registry, cwd: "/test/cwd", readFile });
+		await new SessionNavigatorHandler().handle({
+			ui,
+			agents: [],
+			evicted,
+			registry,
+			cwd: "/test/cwd",
+			readFile,
+			announcePassivePrompt: vi.fn(),
+		});
 
 		expect(ui.notify).toHaveBeenCalledWith("Could not read the session transcript file.", "error");
 		expect(ui.custom).not.toHaveBeenCalled();

@@ -16,6 +16,18 @@ const ACTIVE_AGENT_RE = /<active_agent\s+name="[^"]+"\s*\/>/;
  */
 export const PROMPT_NOTIFY_DELAY_MS = 4000;
 
+/**
+ * Channel another extension emits through `pi.events` immediately before mounting a passive
+ * (`custom`) prompt — a read-only viewer such as `/subagents:sessions` or `/todos`.
+ *
+ * A prompt event carries only `kind` and `title`, so a viewer is otherwise indistinguishable
+ * from an extension asking a question. The viewer's own package knows which one it is opening,
+ * so it announces it; the prompt right after the announcement does not notify. Announcing is
+ * opt-in: an extension that says nothing keeps the default (a custom prompt alerts once it has
+ * been open for `PROMPT_NOTIFY_DELAY_MS`).
+ */
+export const PASSIVE_PROMPT_CHANNEL = "notify:passive-prompt";
+
 export default function (
 	pi: ExtensionAPI,
 	deps?: {
@@ -37,6 +49,12 @@ export default function (
 	let activeAgentSession: boolean | undefined;
 	let runOrigin: "user" | "custom" | undefined;
 	let pendingPromptTimer: ReturnType<typeof setTimeout> | undefined;
+	/** Set by `PASSIVE_PROMPT_CHANNEL`; consumed by the next `ui_prompt_start`. */
+	let passivePromptPending = false;
+
+	pi.events.on(PASSIVE_PROMPT_CHANNEL, () => {
+		passivePromptPending = true;
+	});
 
 	const cancelPendingPrompt = (): void => {
 		if (pendingPromptTimer === undefined) return;
@@ -77,17 +95,17 @@ export default function (
 	});
 
 	pi.on("session_shutdown", async () => {
+		passivePromptPending = false;
 		cancelPendingPrompt();
 	});
 
 	pi.on("ui_prompt_start", async (event, ctx) => {
 		if (isActiveAgentSession(ctx)) return;
-		// `custom` is arbitrary extension UI, not a dialog Pi blocks on: read-only viewers the
-		// operator opens through their own command (`/todos`, `/subagents:sessions`) mount this
-		// way and legitimately stay open far longer than the delay. Only a custom prompt opened
-		// while a run is in flight means Pi is genuinely waiting on the operator — that is how
-		// interactive tools (ask_user and friends) block the agent.
-		if (event.kind === "custom" && runStartedAt === undefined) return;
+		// Announcements are one-shot and only meaningful for the prompt they precede: consume on
+		// every prompt, whatever its kind, so a stale one cannot silence a later alert.
+		const passive = passivePromptPending;
+		passivePromptPending = false;
+		if (passive && event.kind === "custom") return;
 		ensure(ctx);
 		if (!enabled) return;
 		const sessionName = pi.getSessionName?.();
@@ -119,6 +137,7 @@ export default function (
 
 	pi.on("ui_prompt_end", async () => {
 		// The operator answered before the delay elapsed: nothing to deliver.
+		passivePromptPending = false;
 		cancelPendingPrompt();
 	});
 
