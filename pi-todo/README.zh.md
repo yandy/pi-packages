@@ -90,6 +90,8 @@ todo(action: "set" | "update" | "list", items?, id?, status?, title?, blockedBy?
 
 **全量视图**是一个命令：`/todos` 在浮层里显示完整清单（`↑`/`↓` 或 `j`/`k` 移动，`g`/`G` 跳首尾，`Esc` 或 `q` 关闭），表头带进度，清单长于窗口时额外显示 `(当前/总数)` 位置。视图只读，不会改动看板。非 TUI 模式下降级为一条含完整清单的通知：RPC 会转发它，print/json 没有 UI、不产生输出。
 
+浮层不会阻塞 agent loop，因此 TUI 命令在打开它之前同步发出 `notify:non-blocking-prompt`。空看板和非 TUI 降级路径不发送声明。
+
 ## UI 能力
 
 | 方法 | 守卫 | 非 TUI（RPC / headless） |

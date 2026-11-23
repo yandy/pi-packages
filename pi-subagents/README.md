@@ -194,7 +194,7 @@ Settings set via `/subagents:settings` persist in `<cwd>/.pi/subagents.json` (pr
 
 ## Events
 
-Lifecycle events emitted via `pi.events` for other extensions to consume:
+Events emitted via `pi.events` for other extensions to consume:
 
 | Event | When |
 |-------|------|
@@ -206,6 +206,7 @@ Lifecycle events emitted via `pi.events` for other extensions to consume:
 | `subagents:compacted` | Agent session compacted |
 | `subagents:settings_loaded` | Persisted settings applied |
 | `subagents:settings_changed` | Settings mutation applied |
+| `notify:non-blocking-prompt` | Immediately before a sessions/settings UI call that does not block the agent loop |
 
 ## Development
 
@@ -230,6 +231,8 @@ Both slash commands and the running-agents widget call host UI primitives direct
 | `select` / `input` / `notify` (`/subagents:settings`) | none | Forwarded; no `timeout` is passed, so an unresponsive client keeps the command pending. print / json get no-op dialogs, so the menu exits silently |
 | `select` (`/subagents:sessions`) | none | Forwarded; no timeout |
 | `custom` (transcript overlay) | none | RPC returns `undefined` immediately: picking a session shows nothing. Same in print / json |
+
+The sessions picker, read-only transcript overlay, and every settings menu/input are operator-driven and do not block the agent loop. Each of these UI calls is immediately preceded by a `notify:non-blocking-prompt` declaration.
 
 ## License
 

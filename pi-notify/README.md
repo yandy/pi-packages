@@ -4,7 +4,7 @@ Desktop notifications for pi: when you run several pi instances in parallel, eac
 
 ## Features
 
-- **Waiting for input**: any blocking `ctx.ui` prompt (select / confirm / input / editor / custom, including prompts from other extensions) sends a notification — held for 4 s and dropped if the prompt closes first — with the prompt title, prompt kind, and instance context. Urgency defaults to `critical`.
+- **Waiting for input**: any `ctx.ui` prompt not declared non-blocking (select / confirm / input / editor / custom, including prompts from other extensions) sends a notification — held for 4 s and dropped if the prompt closes first — with the prompt title, prompt kind, and instance context. UI that does not block agent progress can instead emit `notify:non-blocking-prompt` immediately before the UI call and never notifies. Urgency defaults to `critical`.
 - **Task finished**: when the agent becomes fully idle (`agent_settled`), the notification shows the run duration and a plain-text summary of the last assistant message. Urgency defaults to `normal`.
 - **Instance identification**: the title leads with the session name (or project directory name when unnamed). A second body line retains the project name when useful and always includes the process pid.
 - **Readable summaries**: markdown markers and extra whitespace are removed. Summaries are limited to 160 grapheme clusters plus an ellipsis, preferring a nearby sentence or word boundary over splitting text or emoji.
@@ -44,7 +44,7 @@ Requires pi >= 1.5.0 and one of the following backends:
 - For a prompt, `<subject>` is its title, or its kind when untitled; `custom` prompts carry no title by contract, so they use the fixed subject `Interactive prompt` instead of the kind name. `<context>` contains the project basename when a distinct named session is active, the prompt kind when it is not already the subject, and `pid <pid>`.
 - For completion, `<summary>` is the last assistant message's cleaned text. If no assistant text exists, the body contains only `<context>`. Duration is rounded to the nearest second and shown as seconds, minutes, or hours.
 - The `\n` denotes an actual newline: the subject or summary stays on the first line, while instance metadata moves to the second line. Custom notifier commands receive both lines in the single body argument.
-- Prompt notifications are **deferred by 4 s**: the alert is scheduled when the prompt opens and dropped if the prompt closes first (`ui_prompt_end`). A picker your own slash command opened and you answered right away therefore never notifies, while a prompt nobody answers still does. Pending alerts are also discarded on session replacement and shutdown.
+- Prompt notifications are **deferred by 4 s** solely to suppress alerts for blocking prompts that the operator answers immediately. A prompt declared non-blocking never schedules an alert, regardless of how long it stays open. Pending alerts are also discarded on session replacement and shutdown.
 
 Example:
 
@@ -54,9 +54,18 @@ Updated foo.ts and fixed the notification bug…
 proj · pid 4242
 ```
 
-### Known limit
+### Non-blocking prompt contract
 
-Cancellation rides on `ui_prompt_end`, which Pi emits for the outermost prompt only and through a microtask. A prompt that opens and closes within the same tick — before this extension's handler runs, which can happen when another extension's `ui_prompt_start` handler yields first — still alerts. Prompt events carry no initiator, so this window cannot be closed from inside the extension.
+An extension whose picker, menu, or overlay does not prevent the agent loop from continuing declares each such UI call synchronously, immediately before invoking it:
+
+```ts
+pi.events.emit("notify:non-blocking-prompt", {});
+await ctx.ui.custom(/* ... */);
+```
+
+Declarations are counted: each `ui_prompt_start` consumes at most one, `ui_prompt_end` does not consume any, and `session_shutdown` clears unused declarations. A declared start cancels any earlier pending prompt alert and returns before constructing a notifier. Undeclared prompts keep the default notification behavior, so blocking UI from unmodified extensions is not silenced.
+
+Emit only for UI that genuinely does not block agent progress, and only when the corresponding wrapped UI call actually follows. An unmatched declaration can otherwise suppress a later prompt until session shutdown.
 
 ## Configuration
 
@@ -70,7 +79,7 @@ All configuration is via environment variables:
 | `PI_NOTIFY_URGENCY_DONE` | `normal` | Urgency for completion notifications |
 | `PI_NOTIFY_COMMAND` | `notify-send` on non-Windows; `powershell.exe` on Windows | Custom notifier executable; invoked as `<command> <title> <body>` without urgency |
 
-Run duration is measured from the first `agent_start` of an idle period to `agent_settled`, and the notification fires when it is **>=** the threshold. The timer resets on every settle and on session replacement; waiting-for-input notifications are not subject to the threshold, but they are deferred by 4 s and cancelled when the prompt closes first. A pending prompt alert is discarded on `session_shutdown` (every session replacement emits it on the outgoing runner first), not on `session_start`: the startup prompt Pi emits before `session_start` must not lose its alert.
+Run duration is measured from the first `agent_start` of an idle period to `agent_settled`, and the notification fires when it is **>=** the threshold. The timer resets on every settle and on session replacement. Waiting-for-input notifications are not subject to the threshold: undeclared blocking prompts are deferred by 4 s and cancelled when closed first, while declared non-blocking prompts never schedule one. A pending prompt alert is discarded on `session_shutdown` (every session replacement emits it on the outgoing runner first), not on `session_start`: the startup prompt Pi emits before `session_start` must not lose its alert.
 
 `/notify` toggles the current instance on/off and reports the new state in the pi UI. The toggle is in-memory only: `PI_NOTIFY` sets the initial state, and `session_start` (startup / reload / new / resume / fork) resets it.
 
