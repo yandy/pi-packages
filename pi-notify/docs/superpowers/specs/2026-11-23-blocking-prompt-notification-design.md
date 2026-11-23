@@ -60,6 +60,11 @@ After `session_shutdown`, the runner is closed to prompt starts already queued b
 - `pi-subagents` wires the callback to `pi.events.emit("notify:non-blocking-prompt", {})` only when `ctx.mode === "tui"`; RPC/print/json callbacks stay silent.
 - `/todos` emits directly before its TUI `ctx.ui.custom` call. Empty boards and non-TUI text fallbacks emit nothing.
 
+## Known limits
+
+- Undeclared third-party non-blocking UI retains the default alert; its producer must adopt the declaration contract to suppress it.
+- The host emits prompt events only for the outermost prompt. A blocking prompt nested under an active viewer or dialog has no start event and cannot alert; extension code cannot recover it without host support.
+
 ## Verification
 
 - Unit tests prove each producer emits exactly one declaration per actual prompt and none on early-return/fallback paths.

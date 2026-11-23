@@ -67,6 +67,10 @@ Declarations are counted: each `ui_prompt_start` consumes at most one, `ui_promp
 
 Emit only for UI that genuinely does not block agent progress, and only when the corresponding wrapped UI call actually follows with an outermost `ui_prompt_start`. Pi coalesces nested or overlapping prompts into one outermost start, so producers must not declare calls that can nest or overlap (including RPC clients that permit concurrent dialogs); those calls stay undeclared and retain the default behavior. An unmatched declaration can otherwise suppress a later prompt until session shutdown.
 
+### Host prompt limit
+
+Pi emits `ui_prompt_start` / `ui_prompt_end` only for the outermost prompt. A blocking prompt opened while another prompt is active therefore produces no event and cannot raise a desktop notification. Extensions cannot recover that nested alert without host support for separate prompt identities or nesting events.
+
 ## Configuration
 
 All configuration is via environment variables:
