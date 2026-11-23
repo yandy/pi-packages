@@ -188,3 +188,97 @@ export interface InsightReport extends SessionReport {
 	generatedAt: string;
 	subagents: SubagentReport[];
 }
+
+// --- v2 report model (v1 types above are removed in Task 12) ---
+
+export type Lang = "en" | "zh";
+
+export type CategoryId =
+	| "systemBase"
+	| "systemTools"
+	| "systemProject"
+	| "systemSkills"
+	| "systemDocs"
+	| "systemOther"
+	| "toolDefinitions"
+	| "user"
+	| "injected"
+	| "skillInjections"
+	| "compaction"
+	| "reasoning"
+	| "answers"
+	| "toolCalls"
+	| "toolResults"
+	| "unattributed";
+
+export const CATEGORY_ORDER: readonly CategoryId[] = [
+	"systemBase",
+	"systemTools",
+	"systemProject",
+	"systemSkills",
+	"systemDocs",
+	"systemOther",
+	"toolDefinitions",
+	"user",
+	"injected",
+	"skillInjections",
+	"compaction",
+	"reasoning",
+	"answers",
+	"toolCalls",
+	"toolResults",
+	"unattributed",
+];
+
+export interface Msg {
+	key: string;
+	params?: Record<string, string | number>;
+}
+
+export interface ReportMetadata {
+	id: string;
+	name?: string;
+	cwd: string;
+	filePath?: string;
+	model?: string;
+	thinkingLevel?: string;
+	startedAt: string;
+	endedAt: string;
+	branchEntries: number;
+	totalEntries: number;
+}
+
+export interface Kpis {
+	tokens: number;
+	prompt: number;
+	output: number;
+	cost: number;
+	costBasis: CostBasis;
+	cacheHitRate: number | null;
+	modelCalls: number;
+	turns: number;
+	toolCalls: number;
+	activeMs: number;
+	modelMs: number;
+	toolMs: number;
+	subagents: number;
+	forwardedPrompt: number;
+	forwardedCost: number;
+}
+
+export interface CurrentContext {
+	tokens: number | null;
+	estimated: boolean;
+	window: number;
+	percent: number | null;
+	categories: Record<CategoryId, number>;
+	reserveTokens: number;
+	reserveEnabled: boolean;
+	maxTokens: number;
+}
+
+export interface TruncationEntry {
+	kind: "steps" | "stepDetails" | "items" | "body" | "usageRows" | "rows" | "bytes";
+	limit: number;
+	actual: number;
+}
