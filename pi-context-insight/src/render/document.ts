@@ -62,9 +62,7 @@ function warningsPanel(report: InsightReport): string {
 		})
 		.join("");
 	const more =
-		rest > 0
-			? `<p class="dim" data-warning-more>${esc(t(lang, { key: "warn.more", params: { count: rest } }))}</p>`
-			: "";
+		rest > 0 ? `<p class="dim" data-warning-more>${esc(t(lang, { key: "warn.more", params: { count: rest } }))}</p>` : "";
 	return `<section class="card span-12 warn-panel" data-card="warnings"><h2><span ${i18nAttrs("warn.title")}>${esc(t(lang, { key: "warn.title" }))}</span></h2><ul>${items}</ul>${more}</section>`;
 }
 

@@ -33,6 +33,29 @@ describe("renderTokens", () => {
 		const expected = CATEGORY_ORDER.filter((id) => id !== "unattributed");
 		expect(order.slice(0, expected.length)).toEqual(expected);
 	});
+	it("shows each category as a legend row with a bar, not a table row", () => {
+		const html = renderTokens(report());
+		expect(html).toContain('class="legend-row"');
+		expect(html).not.toContain("<thead>");
+		expect((html.match(/class="bar"/g) ?? []).length).toBeGreaterThan(5);
+	});
+	it("shows the residual row without a share or a bar", () => {
+		const html = renderTokens(report());
+		const row = html.slice(html.indexOf('data-cat="unattributed"'));
+		const cell = row.slice(0, row.indexOf("</div>"));
+		expect(cell).not.toContain('class="bar"');
+		expect(cell).not.toMatch(/\d+(\.\d+)?%/);
+	});
+	it("keeps the unknown-system rows without a bar", () => {
+		resetEntryIds();
+		const entries = [
+			userEntry("hi", 1),
+			assistantEntry({ content: [{ type: "text", text: "x" }], usage: usage(50, 5, 0, 0, 0.1), timestamp: 2 }),
+		];
+		const html = renderTokens(buildReport(fakeContext({ entries }), { mode: "full", lang: "en" }));
+		expect(html).toContain('data-unknown="system"');
+		expect(html).not.toMatch(/data-unknown="system"[^>]*><[^>]*class="bar"/);
+	});
 	it("marks estimates and the billed total", () => {
 		const html = renderTokens(report());
 		expect(html).toContain("≈");

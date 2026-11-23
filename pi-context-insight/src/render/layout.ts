@@ -77,6 +77,8 @@ export interface LegendRowArgs {
 	value: string;
 	share: string;
 	bar?: { value: number; max: number };
+	/** Extra attributes for the row element, already escaped by the caller. */
+	tip?: string;
 }
 
 export function legendRow(args: LegendRowArgs): string {
