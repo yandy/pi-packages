@@ -92,16 +92,19 @@ export function collectToolExecutions(args: {
 			continue;
 		}
 		if (message.role !== "toolResult") continue;
+		// An orphan result (no matching call) contributes no top-level execution, but the
+		// nested calls it recorded are real and still count.
 		const execution = byId.get(message.toolCallId);
-		if (execution === undefined) continue;
-		execution.status = message.isError ? "error" : "ok";
-		execution.tokens += tokensOf(message.content);
-		if (typeof message.durationMs === "number") {
-			execution.durationMs = message.durationMs;
-			execution.durationEstimated = false;
-		} else {
-			execution.durationMs = Math.max(0, message.timestamp - execution.callTimestamp);
-			execution.durationEstimated = true;
+		if (execution !== undefined) {
+			execution.status = message.isError ? "error" : "ok";
+			execution.tokens += tokensOf(message.content);
+			if (typeof message.durationMs === "number") {
+				execution.durationMs = message.durationMs;
+				execution.durationEstimated = false;
+			} else {
+				execution.durationMs = Math.max(0, message.timestamp - execution.callTimestamp);
+				execution.durationEstimated = true;
+			}
 		}
 		for (const nested of message.nestedCalls?.calls ?? []) {
 			const nestedExecution = make(`${message.toolCallId}/${nested.id}`, nested.name, message.timestamp, true);

@@ -24,6 +24,7 @@ describe("release gates", () => {
 				"summary-sentinel",
 				"injected-sentinel",
 				"todo-sentinel",
+				"compaction-sentinel",
 			]) {
 				expect(html, sentinel).not.toContain(sentinel);
 			}
@@ -37,7 +38,9 @@ describe("release gates", () => {
 		try {
 			await runInsight("f.html", chattySession(root));
 			const html = readFileSync(join(root, "f.html"), "utf8");
-			expect(html).toContain("tool-output-sentinel");
+			for (const sentinel of ["prompt-sentinel", "tool-output-sentinel", "command-sentinel", "answer-sentinel"]) {
+				expect(html).toContain(sentinel);
+			}
 			expect(html).toContain("data-banner=\"raw-content\"");
 			expect(html).not.toMatch(/NaN/);
 		} finally {

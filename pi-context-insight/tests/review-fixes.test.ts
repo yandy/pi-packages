@@ -84,10 +84,4 @@ describe("unknown versus zero", () => {
 	});
 });
 
-describe("timeline ids and numbering", () => {
-	it("labels every fifth step by its number", () => {
-		const base = buildReport(fakeContext({ entries: [userEntry("hi", 1)] }), { mode: "full", lang: "en" });
-		const html = renderTimeline({ ...base, steps: [], turns: [] });
-		expect(html).toBeDefined();
-	});
-});
+

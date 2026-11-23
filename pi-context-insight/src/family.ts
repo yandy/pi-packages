@@ -126,7 +126,7 @@ export function collectFamily(args: {
 				depth: level.depth + 1,
 				status: statusOf(record),
 				record: redacted,
-				child: mode === "short" ? { ...child, brief: undefined } : child,
+				child: mode === "short" ? { ...child, brief: undefined, records: [] } : child,
 				...(mode === "short" || child.brief === undefined ? {} : { brief: child.brief }),
 				...(child.context === undefined ? {} : { context: child.context }),
 				steps: child.steps,

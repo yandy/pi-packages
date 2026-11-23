@@ -2,7 +2,6 @@ export const CLIENT_RUNTIME = `
 (function () {
   "use strict";
 
-  var GROUPS = ["systemBase", "toolDefinitions", "user", "injected", "skillInjections", "compaction", "answers", "toolCalls", "toolResults", "unattributed"];
   var GROUP_OF = {
     systemBase: "systemBase", systemTools: "systemBase", systemProject: "systemBase",
     systemSkills: "systemBase", systemDocs: "systemBase", systemOther: "systemBase",
@@ -10,6 +9,8 @@ export const CLIENT_RUNTIME = `
     skillInjections: "skillInjections", compaction: "compaction", reasoning: "answers",
     answers: "answers", toolCalls: "toolCalls", toolResults: "toolResults", unattributed: "unattributed"
   };
+  var GROUPS = ["systemBase", "toolDefinitions", "user", "injected", "skillInjections", "compaction", "answers", "toolCalls", "toolResults", "unattributed"];
+  var ROW_LIMIT = 200;
 
   function visibleRows(rows, query) {
     var needle = String(query || "").toLowerCase();
@@ -38,6 +39,16 @@ export const CLIENT_RUNTIME = `
     return false;
   }
 
+  function fmtTokens(value) {
+    var n = Number(value);
+    if (!isFinite(n)) return "—";
+    var sign = n < 0 ? "-" : "";
+    var abs = Math.abs(n);
+    if (abs >= 1000000) return sign + (abs / 1000000).toFixed(1) + "M";
+    if (abs >= 1000) return sign + (abs / 1000).toFixed(1) + "k";
+    return sign + Math.round(abs);
+  }
+
   function readPayload(doc) {
     var node = doc.getElementById("insight-payload");
     if (!node) return null;
@@ -48,16 +59,6 @@ export const CLIENT_RUNTIME = `
     if (!node) return;
     if (hidden) node.setAttribute("hidden", "hidden");
     else node.removeAttribute("hidden");
-  }
-
-  function fmtTokens(value) {
-    var n = Number(value);
-    if (!isFinite(n)) return "—";
-    var sign = n < 0 ? "-" : "";
-    var abs = Math.abs(n);
-    if (abs >= 1000000) return sign + (abs / 1000000).toFixed(1) + "M";
-    if (abs >= 1000) return sign + (abs / 1000).toFixed(1) + "k";
-    return sign + Math.round(abs);
   }
 
   function boot(doc, win) {
@@ -84,17 +85,6 @@ export const CLIENT_RUNTIME = `
       return null;
     }
 
-    function itemOf(id) {
-      for (var i = 0; i < payload.items.length; i++) if (payload.items[i].id === id) return payload.items[i];
-      return null;
-    }
-
-    function bodyOf(item) {
-      if (item === null || item.body === null) return null;
-      var text = payload.bodies[item.body];
-      return typeof text === "string" ? text : null;
-    }
-
     function itemsFor(step) {
       var list = [];
       if (!step || !step.details) return list;
@@ -102,6 +92,28 @@ export const CLIENT_RUNTIME = `
         if (inRanges(step.ranges, payload.items[i].id)) list.push(payload.items[i]);
       }
       return list;
+    }
+
+    function groupSums(step) {
+      var sums = {};
+      for (var i = 0; i < payload.items.length; i++) {
+        var item = payload.items[i];
+        if (!inRanges(step.ranges, item.id)) continue;
+        var group = GROUP_OF[item.cat] || item.cat;
+        sums[group] = (sums[group] || 0) + item.tok;
+      }
+      return sums;
+    }
+
+    function groupDeltas(step) {
+      var deltas = {};
+      if (!step || !step.delta) return deltas;
+      for (var key in step.delta) {
+        if (!Object.prototype.hasOwnProperty.call(step.delta, key)) continue;
+        var group = GROUP_OF[key] || key;
+        deltas[group] = (deltas[group] || 0) + step.delta[key];
+      }
+      return deltas;
     }
 
     function applyToggles() {
@@ -127,27 +139,28 @@ export const CLIENT_RUNTIME = `
 
     function renderCategoryRows(step) {
       var rows = doc.querySelectorAll("[data-cat-row]");
-      var items = itemsFor(step);
+      var sums = step && step.details ? groupSums(step) : (step ? step.sums : {});
+      var deltas = groupDeltas(step);
       for (var i = 0; i < rows.length; i++) {
         var row = rows[i];
         var group = row.getAttribute("data-cat-row");
-        var count = 0;
-        var tokens = 0;
-        for (var j = 0; j < items.length; j++) {
-          if (GROUP_OF[items[j].cat] !== group) continue;
-          count += 1;
-          tokens += items[j].tok;
-        }
         var cells = row.querySelectorAll("td");
-        if (cells.length >= 5) {
-          var delta = (step && step.delta[group]) || 0;
-          var value = state.mode === "delta" ? (delta === 0 ? "—" : (delta > 0 ? "+" : "") + fmtTokens(delta)) : "≈" + fmtTokens(tokens);
-          cells[1].textContent = String(count);
-          cells[2].textContent = value;
-          cells[3].textContent = step && step.total > 0 && state.mode !== "delta" ? ((tokens / step.total) * 100).toFixed(1) + "%" : "—";
-          cells[4].textContent = delta === 0 ? "" : (delta > 0 ? "+" : "") + fmtTokens(delta);
-        }
+        if (cells.length < 5) continue;
+        var unknownSystem = group === "systemBase" || group === "toolDefinitions" ? step && !step.systemKnown : false;
+        var tokens = sums[group] || 0;
+        var delta = deltas[group] || 0;
+        cells[1].textContent = unknownSystem ? "—" : step && step.details ? String(countItems(step, group)) : "—";
+        cells[2].textContent = unknownSystem ? "—" : state.mode === "delta" ? (delta === 0 ? "—" : (delta > 0 ? "+" : "") + fmtTokens(delta)) : "≈" + fmtTokens(tokens);
+        cells[3].textContent = unknownSystem || !step || !step.total || state.mode === "delta" ? "—" : ((tokens / step.total) * 100).toFixed(1) + "%";
+        cells[4].textContent = unknownSystem || delta === 0 ? "" : (delta > 0 ? "+" : "") + fmtTokens(delta);
       }
+    }
+
+    function countItems(step, group) {
+      var count = 0;
+      var list = itemsFor(step);
+      for (var i = 0; i < list.length; i++) if ((GROUP_OF[list[i].cat] || list[i].cat) === group) count += 1;
+      return count;
     }
 
     function renderPanel(step) {
@@ -172,32 +185,40 @@ export const CLIENT_RUNTIME = `
       var items = itemsFor(step);
       for (var g = 0; g < GROUPS.length; g++) {
         var group = GROUPS[g];
-        var groupItems = items.filter(function (item) { return GROUP_OF[item.cat] === group; });
+        var groupItems = items.filter(function (item) { return (GROUP_OF[item.cat] || item.cat) === group; });
         if (groupItems.length === 0) continue;
         var heading = doc.createElement("h4");
         heading.textContent = group;
         panel.appendChild(heading);
-        for (var i = 0; i < groupItems.length; i++) {
+        for (var i = 0; i < groupItems.length && i < ROW_LIMIT; i++) {
           var item = groupItems[i];
           var row = doc.createElement("details");
           row.className = "row";
           row.setAttribute("data-item", String(item.id));
           row.setAttribute("data-cat", item.cat);
+          row.setAttribute("data-call", item.call || "");
           row.setAttribute("data-search", (item.cat + " " + item.tag).toLowerCase());
           var summary = doc.createElement("summary");
           var tag = doc.createElement("span");
           tag.className = "tag";
-          tag.textContent = item.cat + " · " + item.tag + " ≈" + fmtTokens(item.tok);
+          tag.textContent = item.cat + " · " + item.tag + " ≈" + fmtTokens(item.tok) + (item.truncated ? " ✂" : "");
           summary.appendChild(tag);
           row.appendChild(summary);
-          var body = bodyOf(item);
-          if (body !== null) {
+          if (item.body !== null && payload.bodies[item.body] !== undefined) {
             var pre = doc.createElement("pre");
             pre.className = "body";
-            pre.textContent = body;
+            pre.textContent = payload.bodies[item.body];
             row.appendChild(pre);
           }
           panel.appendChild(row);
+        }
+        if (groupItems.length > ROW_LIMIT) {
+          var more = doc.createElement("details");
+          more.setAttribute("data-more", group);
+          var moreSummary = doc.createElement("summary");
+          moreSummary.textContent = "+" + (groupItems.length - ROW_LIMIT);
+          more.appendChild(moreSummary);
+          panel.appendChild(more);
         }
       }
       container.appendChild(panel);
@@ -250,7 +271,7 @@ export const CLIENT_RUNTIME = `
           var kindOk =
             active === "all" ||
             (group === "files" && row.querySelector('[data-kind="' + active + '"]') !== null) ||
-            (group === "commands" && ((active === "failed" && row.getAttribute("data-status") === "error") || (active === "nested" && row.getAttribute("data-nested") === "1") || (active === "slow" && Number(row.getAttribute("data-slow")) === 1))) ||
+            (group === "commands" && ((active === "failed" && row.getAttribute("data-status") === "error") || (active === "nested" && row.getAttribute("data-nested") === "1") || (active === "slow" && row.getAttribute("data-slow") === "1"))) ||
             (group === "events" && row.getAttribute("data-kind") === active) ||
             (group === "items" && row.getAttribute("data-cat") === active);
           setHidden(row, !kindOk || (query !== "" && text.indexOf(query) < 0));
@@ -276,20 +297,26 @@ export const CLIENT_RUNTIME = `
     function locateItem(itemId) {
       for (var i = 0; i < payload.steps.length; i++) {
         var step = payload.steps[i];
-        if (step.details && inRanges(step.ranges, itemId)) { selectStep(step.i); return; }
+        if (step.details && inRanges(step.ranges, itemId)) { selectStep(step.i); focusItem(itemId); return; }
       }
     }
 
     function locateTool(toolCallId) {
       if (!toolCallId) return;
-      for (var i = 0; i < payload.steps.length; i++) {
-        var step = payload.steps[i];
-        if (!step.details) continue;
-        var items = itemsFor(step);
-        for (var j = 0; j < items.length; j++) {
-          if (items[j].tag === toolCallId) { selectStep(step.i); return; }
+      for (var i = 0; i < payload.items.length; i++) {
+        if (payload.items[i].call !== toolCallId) continue;
+        var target = payload.items[i];
+        for (var j = 0; j < payload.steps.length; j++) {
+          var step = payload.steps[j];
+          if (step.details && inRanges(step.ranges, target.id)) { selectStep(step.i); focusItem(target.id); return; }
         }
       }
+    }
+
+    function focusItem(itemId) {
+      var row = doc.querySelector('[data-item="' + itemId + '"]');
+      if (row && row.setAttribute) row.setAttribute("open", "open");
+      if (row && row.scrollIntoView) row.scrollIntoView({ block: "center" });
     }
 
     doc.addEventListener("click", function (event) {
@@ -318,13 +345,11 @@ export const CLIENT_RUNTIME = `
       if (flag) { selectStep(Number(flag.getAttribute("data-flag-step"))); return; }
       var filterButton = target.closest("[data-event-filter],[data-file-filter],[data-command-filter]");
       if (filterButton) {
-        var group =
-          filterButton.hasAttribute("data-event-filter") ? "events" :
-          filterButton.hasAttribute("data-file-filter") ? "files" : "commands";
+        var group = filterButton.hasAttribute("data-event-filter") ? "events" : filterButton.hasAttribute("data-file-filter") ? "files" : "commands";
         var input = doc.querySelector('[data-filter-group="' + group + '"]');
         if (input) {
-          var next = filterButton.getAttribute("data-" + (group === "events" ? "event" : group === "files" ? "file" : "command") + "-filter");
-          input.setAttribute("data-active-filter", next);
+          var attr = group === "events" ? "data-event-filter" : group === "files" ? "data-file-filter" : "data-command-filter";
+          input.setAttribute("data-active-filter", filterButton.getAttribute(attr));
           var siblings = filterButton.parentNode.querySelectorAll("button");
           for (var i = 0; i < siblings.length; i++) siblings[i].setAttribute("aria-pressed", siblings[i] === filterButton ? "true" : "false");
           applyFilters();

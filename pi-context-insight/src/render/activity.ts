@@ -90,12 +90,16 @@ ${commands.programs
 					.map((record) => {
 						const status: CommandStatus = record.status;
 						const glyph = status === "ok" ? "✓" : status === "error" ? "✕" : status === "cancelled" ? "⏹" : "⏳";
+						const summaryText =
+							report.mode === "short"
+								? `${record.program} · ${t(lang, { key: "cmds.lines", params: { count: record.lineCount } })}`
+								: (record.command.split(/\r?\n/)[0]?.slice(0, 80) ?? "");
 						const detail =
 							report.mode === "short"
 								? `<p class="dim" data-empty="browser-body">${t(lang, { key: "empty.shortNoBody" })}</p>`
 								: `<pre class="body">${esc(record.command)}</pre>`;
 						const slow = (record.durationMs ?? 0) >= 10_000 ? "1" : "0";
-						return `<details class="row" data-program="${esc(record.program)}" data-status="${status}" data-command="${esc(record.id)}" data-nested="${record.nested ? 1 : 0}" data-slow="${slow}" data-search="${esc(`${record.program} ${record.command}`.toLowerCase())}"><summary>${glyph} <span class="tag">${esc(record.tool)}</span><code>${esc(record.command.split(/\r?\n/)[0]?.slice(0, 80) ?? "")}</code> <span class="dim">${record.durationMs === undefined ? "" : `${record.durationEstimated ? "≈" : ""}${fmtDuration(record.durationMs)}`} · ${esc(fmtClock(record.timestamp))}</span></summary>${detail}
+						return `<details class="row" data-program="${esc(record.program)}" data-status="${status}" data-command="${esc(record.id)}" data-nested="${record.nested ? 1 : 0}" data-slow="${slow}" data-search="${esc(`${record.program} ${record.command}`.toLowerCase())}"><summary>${glyph} <span class="tag">${esc(record.tool)}</span><code>${esc(summaryText)}</code> <span class="dim">${record.durationMs === undefined ? "" : `${record.durationEstimated ? "≈" : ""}${fmtDuration(record.durationMs)}`} · ${esc(fmtClock(record.timestamp))}</span></summary>${detail}
 <p class="dim">${record.exitCode === undefined ? "" : `${t(lang, { key: "cmds.exit", params: { code: record.exitCode } })}${record.exitInferred ? " ≈" : ""} · `}${record.outputChars} chars${record.stderr ? " · stderr" : ""}${record.timedOut ? ` · ${t(lang, { key: "cmds.timedOut" })}` : ""}${record.denied ? ` · ${t(lang, { key: "cmds.denied" })}` : ""}</p></details>`;
 					})
 					.join("");

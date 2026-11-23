@@ -28,6 +28,7 @@ describe("interactive payload", () => {
 		for (const [start, end] of first?.ranges ?? []) for (let id = start; id <= end; id++) inFirst.add(id);
 		const inLast = new Set<number>();
 		for (const [start, end] of last?.ranges ?? []) for (let id = start; id <= end; id++) inLast.add(id);
+		for (const id of inFirst) expect(inLast.has(id)).toBe(true);
 		expect(inLast.size).toBeGreaterThan(inFirst.size);
 	});
 });

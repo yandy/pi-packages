@@ -21,11 +21,22 @@ export interface InteractivePayload {
 		durMs: number;
 		activeMs: number;
 		prompt: number;
+		systemKnown: boolean;
 		ev: number[];
 		details: boolean;
 		ranges: Array<[number, number]>;
 	}>;
-	items: Array<{ id: number; cat: string; tag: string; tok: number; body: number | null; error?: boolean }>;
+	items: Array<{
+		id: number;
+		cat: string;
+		kind: string;
+		tag: string;
+		tok: number;
+		body: number | null;
+		error?: boolean;
+		call?: string;
+		truncated?: boolean;
+	}>;
 	bodies: string[];
 	events: Array<{ id: number; kind: string; step: number; t: number }>;
 	dicts: Record<string, Record<string, string>>;
@@ -49,6 +60,7 @@ export function payloadOf(report: InsightReport): InteractivePayload {
 			durMs: step.durationMs ?? 0,
 			activeMs: step.activeMs,
 			prompt: step.actual?.prompt ?? 0,
+			systemKnown: step.system !== null,
 			ev: step.eventIds,
 			details: step.hasDetails,
 			ranges: step.itemRanges,
@@ -57,9 +69,12 @@ export function payloadOf(report: InsightReport): InteractivePayload {
 			id: item.id,
 			cat: item.category,
 			tag: item.tag,
+			kind: item.kind,
 			tok: item.tokens,
 			body: item.textIndex,
 			...(item.isError === true ? { error: true } : {}),
+			...(item.toolCallId === undefined ? {} : { call: item.toolCallId }),
+			...(item.truncated === true ? { truncated: true } : {}),
 		})),
 		bodies: report.mode === "short" ? [] : report.bodies,
 		events: report.events.map((event) => ({ id: event.id, kind: event.kind, step: event.stepIndex, t: event.timestamp })),

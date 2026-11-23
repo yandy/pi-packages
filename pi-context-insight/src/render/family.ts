@@ -37,7 +37,7 @@ ${records?.modelName === undefined ? "" : `<div class="kpi-sub dim">${esc(record
 	const rows = members
 		.map((member) => {
 			const record = member.record;
-			return `<tr class="row" data-delegation="${esc(member.id)}" data-status="${member.status}"><td>${esc(labelOf(report, member))}</td><td>${esc(t(lang, { key: STATUS_KEY[member.status] ?? member.status }))}</td><td>${report.mode === "short" || member.brief === undefined ? "—" : esc(member.brief)}</td><td>${report.mode === "short" ? "—" : record?.result === undefined ? (record?.error === undefined ? "—" : `<span class="flag">${esc(record.error)}</span>`) : esc(record.result)}</td><td class="num">${fmtTokens(member.usage?.total ?? member.lifetimeTokens ?? 0)}</td><td class="num">${record?.toolUses ?? "—"}</td><td class="dim">${member.durationMs === undefined ? "—" : fmtDuration(member.durationMs)}</td></tr>`;
+			return `<tr class="row" data-delegation="${esc(member.id)}" data-status="${member.status}"><td>${esc(labelOf(report, member))}</td><td>${esc(t(lang, { key: STATUS_KEY[member.status] ?? member.status }))}</td><td>${report.mode === "short" || member.brief === undefined ? "—" : esc(member.brief)}</td><td>${report.mode === "short" ? "—" : record?.result === undefined ? (record?.error === undefined ? "—" : `<span class="flag">${esc(record.error)}</span>`) : esc(record.result)}</td><td class="num">${fmtTokens(member.usage?.total ?? member.lifetimeTokens ?? 0)}</td><td class="num">${record?.toolUses ?? "—"}</td><td class="dim">${member.durationMs === undefined ? "—" : fmtDuration(member.durationMs)}</td><td class="num">${member.lifetimeCost === undefined ? "—" : fmtCostOf(member.lifetimeCost)}</td></tr>`;
 		})
 		.join("");
 
@@ -61,7 +61,7 @@ ${records?.modelName === undefined ? "" : `<div class="kpi-sub dim">${esc(record
 	return `<section class="card" id="family" data-card="family"><h2 data-i18n="family.title">${esc(t(lang, { key: "family.title" }))}</h2>
 <div class="kpis">${cards}</div>
 <h3 style="margin-top:14px">${t(lang, { key: "family.delegations" })}</h3>
-<table><thead><tr><th>${t(lang, { key: "table.agent" })}</th><th>${t(lang, { key: "table.status" })}</th><th>${t(lang, { key: "table.brief" })}</th><th>${t(lang, { key: "table.result" })}</th><th class="num">${t(lang, { key: "table.tokens" })}</th><th class="num">${t(lang, { key: "table.toolUses" })}</th><th>${t(lang, { key: "table.duration" })}</th></tr></thead><tbody>${rows}</tbody></table>
+<table><thead><tr><th>${t(lang, { key: "table.agent" })}</th><th>${t(lang, { key: "table.status" })}</th><th>${t(lang, { key: "table.brief" })}</th><th>${t(lang, { key: "table.result" })}</th><th class="num">${t(lang, { key: "table.tokens" })}</th><th class="num">${t(lang, { key: "table.toolUses" })}</th><th>${t(lang, { key: "table.duration" })}</th><th class="num">${t(lang, { key: "table.cost" })}</th></tr></thead><tbody>${rows}</tbody></table>
 ${untracked}
 ${children === "" ? "" : `<h3 style="margin-top:14px">${t(lang, { key: "family.childReports" })}</h3>${children}`}</section>`;
 }
