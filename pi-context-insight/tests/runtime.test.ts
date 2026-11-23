@@ -11,11 +11,16 @@ interface Runtime {
 		negative: boolean;
 		bars: Array<{ segments: Array<{ id: string; y: number; h: number; negative: boolean }> }>;
 		line: Array<[number, number]> | null;
+		marker: [number, number] | null;
+		max: number;
+		flags: Array<{ step: number; kind: string; count: number }>;
+		turns: Array<{ index: number; width: number }>;
+		labels: Array<{ text: string }>;
 	};
 	turnBuckets: (steps: unknown) => Array<{ turn: number; sums: Record<string, number>; delta: Record<string, number>; total: number; count: number }>;
 	groupLabelFor: (dicts: unknown, lang: string, group: string) => string;
 	catLabelFor: (dicts: unknown, lang: string, cat: string) => string;
-	applyLanguageFromDoc: (doc: unknown, lang: string, dicts: unknown) => void;
+	applyLanguageFromDoc: (doc: unknown, lang: string, dicts: unknown, meta?: unknown) => void;
 	highlightRailFromDoc: (doc: unknown, activeId: string) => void;
 }
 
@@ -102,10 +107,76 @@ describe("timeline geometry in the client", () => {
 		expect(segments[1].y).toBe(geo.axisY - geo.chartH);
 	});
 
-	it("adds the duration polyline only when asked", () => {
-		const steps = [step({ sums: { user: 10 }, total: 10, activeMs: 500 })] as never;
-		expect(load().buildTimeline(steps, geo as never, { mode: "total", granularity: "step", duration: true } as never).line).not.toBeNull();
+	it("adds the duration line only when asked", () => {
+		const steps = [
+			step({ i: 0, sums: { user: 10 }, total: 10, activeMs: 500 }),
+			step({ i: 1, sums: { user: 20 }, total: 20, activeMs: 900 }),
+		] as never;
+		expect(load().buildTimeline(steps, geo as never, { mode: "total", granularity: "step", duration: true } as never).line).toHaveLength(2);
 		expect(load().buildTimeline(steps, geo as never, { mode: "total", granularity: "step", duration: false } as never).line).toBeNull();
+	});
+
+	it("draws a marker instead of a one-point line", () => {
+		const data = load().buildTimeline([step({ sums: { user: 10 }, total: 10, activeMs: 500 })] as never, geo as never, {
+			mode: "total",
+			granularity: "step",
+			duration: true,
+		} as never);
+		expect(data.line).toBeNull();
+		expect(data.marker).not.toBeNull();
+	});
+
+	it("keeps negative bars inside the chart box", () => {
+		const data = load().buildTimeline(
+			[step({ delta: { user: -1000 }, sums: { user: 10 }, total: 10 })] as never,
+			geo as never,
+			{ mode: "delta", granularity: "step", duration: false } as never,
+		);
+		const segment = data.bars[0].segments[0];
+		expect(segment.y + segment.h).toBeLessThanOrEqual(geo.height - geo.turnH);
+	});
+
+	it("scales the axis to the delta range, not the cumulative total", () => {
+		const data = load().buildTimeline([step({ delta: { user: -900 }, sums: { user: 5000 }, total: 5000 })] as never, geo as never, {
+			mode: "delta",
+			granularity: "step",
+			duration: false,
+		} as never);
+		expect(data.max).toBe(900);
+	});
+
+	it("jumps a turn bar to the turn's last step", () => {
+		const data = load().buildTimeline(
+			[
+				step({ i: 0, turn: 1, sums: { user: 1 }, total: 1 }),
+				step({ i: 1, turn: 1, sums: { user: 2 }, total: 2 }),
+				step({ i: 2, turn: 2, sums: { user: 3 }, total: 3 }),
+				step({ i: 3, turn: 2, sums: { user: 4 }, total: 4 }),
+			] as never,
+			geo as never,
+			{ mode: "total", granularity: "turn", duration: false } as never,
+		);
+		expect(data.bars.map((bar: { step: number }) => bar.step)).toEqual([1, 3]);
+	});
+
+	it("carries flags, the turn band and step labels", () => {
+		const data = load().buildTimeline(
+			[
+				step({ i: 0, turn: 1, sums: { user: 1 }, total: 1, ev: [7] }),
+				step({ i: 1, turn: 1, sums: { user: 2 }, total: 2, ev: [] }),
+			] as never,
+			geo as never,
+			{ mode: "total", granularity: "step", duration: false, eventKinds: { 7: "compaction" } } as never,
+		);
+		expect(data.flags).toHaveLength(1);
+		expect(data.flags[0]).toMatchObject({ kind: "compaction", step: 0 });
+		expect(data.turns).toHaveLength(1);
+		expect(data.labels).toHaveLength(0);
+	});
+
+	it("caps the redraw at the same step count the server kept", () => {
+		const many = Array.from({ length: 4100 }, (_, index) => step({ i: index, sums: { user: 1 }, total: 1 })) as never;
+		expect(load().buildTimeline(many, geo as never, { mode: "total", granularity: "step", duration: false } as never).bars).toHaveLength(4000);
 	});
 
 	it("grows the canvas with the step count", () => {
@@ -176,6 +247,7 @@ function fakeDoc(groups: Record<string, FakeNode[]>) {
 	return {
 		documentElement: root,
 		querySelectorAll: (selector: string) => groups[selector] ?? [],
+		querySelector: (selector: string) => groups[selector]?.[0] ?? null,
 	};
 }
 
@@ -205,6 +277,14 @@ describe("language switching", () => {
 		expect(doc.documentElement.attrs.lang).toBe("zh");
 		expect(zh.attrs["aria-pressed"]).toBe("true");
 		expect(en.attrs["aria-pressed"]).toBe("false");
+	});
+
+	it("retitles the document from the dictionary and the session title", () => {
+		const title = fakeNode({ "data-i18n-title": "1" }, "会话洞察 — demo");
+		const doc = fakeDoc({ "[data-i18n]": [], "[data-i18n-title]": [title] });
+		const runtime = load();
+		runtime.applyLanguageFromDoc(doc as never, "en", { en: { "doc.title": "Session Insight" } } as never, { sessionTitle: "demo" } as never);
+		expect(title.textContent).toBe("Session Insight — demo");
 	});
 
 	it("marks exactly one rail item as current", () => {

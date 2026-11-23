@@ -11,6 +11,8 @@ export interface InteractivePayload {
 	schema: 2;
 	mode: "full" | "short";
 	lang: string;
+	/** Session name or id, used to rebuild the document title on a language switch. */
+	sessionTitle: string;
 	/** Geometry shared by the server-rendered timeline and the client redraw. */
 	geo: TimelineGeometry;
 	steps: Array<{
@@ -63,6 +65,7 @@ export function payloadOf(report: InsightReport): InteractivePayload {
 		schema: 2,
 		mode: report.mode,
 		lang: report.lang,
+		sessionTitle: report.metadata.name ?? `Session ${report.metadata.id}`,
 		geo: timelineGeometry(report.steps.length),
 		steps: report.steps.map((step) => ({
 			i: step.index,

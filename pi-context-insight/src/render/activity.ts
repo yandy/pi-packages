@@ -4,7 +4,7 @@ import { fmtClock, fmtDuration, fmtShare, fmtTokens } from "../format";
 import { t } from "../i18n";
 import type { InsightReport } from "../report";
 import { esc } from "./escape";
-import { microbar, section } from "./layout";
+import { i18nAttrs, microbar, section } from "./layout";
 
 const FILE_KINDS: readonly FileOpKind[] = ["read", "write", "search", "image"];
 const COMMAND_FILTERS = ["all", "failed", "slow", "nested"] as const;
@@ -46,7 +46,7 @@ function filesCard(report: InsightReport): string {
 	const lang = report.lang;
 	const chips = FILE_KINDS.map(
 		(kind) =>
-			`<button type="button" data-file-filter="${kind}" aria-pressed="false">${esc(t(lang, { key: `files.kind.${kind}` }))} ${report.files.reduce((sum, row) => sum + row.counts[kind], 0)}</button>`,
+			`<button type="button" data-file-filter="${kind}" aria-pressed="false"><span ${i18nAttrs(`files.kind.${kind}`)}>${esc(t(lang, { key: `files.kind.${kind}` }))}</span> <span class="dim">${report.files.reduce((sum, row) => sum + row.counts[kind], 0)}</span></button>`,
 	).join("");
 	const body =
 		report.files.length === 0
@@ -80,7 +80,7 @@ function commandsCard(report: InsightReport): string {
 	const commands = report.commands;
 	const filters = COMMAND_FILTERS.map(
 		(filter) =>
-			`<button type="button" data-command-filter="${filter}" aria-pressed="${filter === "all"}">${esc(t(lang, { key: `cmds.filter.${filter}` }))} ${filter === "all" ? commands.runs : filter === "failed" ? commands.failed : filter === "nested" ? commands.nested : commands.records.filter((record) => (record.durationMs ?? 0) >= 10_000).length}</button>`,
+			`<button type="button" data-command-filter="${filter}" aria-pressed="${filter === "all"}"><span ${i18nAttrs(`cmds.filter.${filter}`)}>${esc(t(lang, { key: `cmds.filter.${filter}` }))}</span> <span class="dim">${filter === "all" ? commands.runs : filter === "failed" ? commands.failed : filter === "nested" ? commands.nested : commands.records.filter((record) => (record.durationMs ?? 0) >= 10_000).length}</span></button>`,
 	).join("");
 	const rail = `<div class="rail-stats">
 <div class="kpi-label">${t(lang, { key: "cmds.summary" })}</div>

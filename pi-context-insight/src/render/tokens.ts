@@ -2,9 +2,9 @@ import { fmtCost, fmtTokens } from "../format";
 import { t } from "../i18n";
 import { CATEGORY_ORDER, type CategoryId } from "../model";
 import type { InsightReport } from "../report";
-import { categoryLabel } from "./categories";
+import { CATEGORY_LABEL_KEY, categoryLabel } from "./categories";
 import { donut } from "./charts";
-import { chip, legendRow, section } from "./layout";
+import { chip, i18nAttrs, legendRow, section } from "./layout";
 
 export function renderTokens(report: InsightReport): string {
 	const lang = report.lang;
@@ -28,7 +28,7 @@ export function renderTokens(report: InsightReport): string {
 		.map((id) => {
 			const label = categoryLabel(lang, id);
 			if (unknown.has(id)) {
-				return `<div class="legend-row" data-cat="${id}" data-unknown="system"><span class="dot" style="background:var(--${id})"></span><span class="legend-label">${label}</span><span class="legend-value">—</span><span class="legend-share">—</span><span></span></div>`;
+				return `<div class="legend-row" data-cat="${id}" data-unknown="system"><span class="dot" style="background:var(--${id})"></span><span class="legend-label" ${i18nAttrs(CATEGORY_LABEL_KEY[id])}>${label}</span><span class="legend-value">—</span><span class="legend-share">—</span><span></span></div>`;
 			}
 			const tokens = sums[id] ?? 0;
 			// The residual sits outside the estimate, so a share of it would read as >100%.
@@ -42,6 +42,7 @@ export function renderTokens(report: InsightReport): string {
 				value: `≈${fmtTokens(tokens)}`,
 				share: share === 0 ? "—" : `${share.toFixed(1)}%`,
 				...(residual ? {} : { bar: { value: tokens, max: estimatedTotal } }),
+				i18nKey: CATEGORY_LABEL_KEY[id],
 				tip,
 			});
 		})
@@ -51,8 +52,12 @@ export function renderTokens(report: InsightReport): string {
 	const billed = report.usage.total.total;
 	const meta = [
 		chip({
-			text: `${t(lang, { key: "tokens.cacheHit" })} ${cacheHit === null ? "—" : `${(cacheHit * 100).toFixed(2)}%`}`,
-			i18n: "tokens.cacheHit",
+			text: t(lang, {
+				key: "tokens.cacheHitChip",
+				params: { p: cacheHit === null ? "—" : (cacheHit * 100).toFixed(2) },
+			}),
+			i18n: "tokens.cacheHitChip",
+			params: { p: cacheHit === null ? "—" : (cacheHit * 100).toFixed(2) },
 		}),
 		`<span>${t(lang, { key: "cardMeta.donutShare" })}</span>`,
 	].join("");

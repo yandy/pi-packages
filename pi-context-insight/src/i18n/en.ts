@@ -112,6 +112,7 @@ export const DICT_EN: Record<string, string> = {
 	"tokens.title": "Token breakdown",
 	"tokens.centerSub": "of used",
 	"tokens.cacheHit": "cache hit",
+	"tokens.cacheHitChip": "cache hit {p}%",
 	"tokens.costTip": "Cost allocated by token share (estimate).",
 	"tokens.estimateTotal": "estimated total",
 	"tokens.billed": "billed (provider)",

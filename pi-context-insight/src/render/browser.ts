@@ -6,7 +6,7 @@ import type { Item } from "../session/categorize";
 import type { Step } from "../session/steps";
 import { CATEGORY_LABEL_KEY, categoryLabel } from "./categories";
 import { esc } from "./escape";
-import { section } from "./layout";
+import { i18nAttrs, section } from "./layout";
 
 const ROW_LIMIT = 200;
 const STEP_PICK_MAX = 500;
@@ -111,7 +111,7 @@ function indexRow(report: InsightReport, step: Step, group: CategoryId): string 
 	const delta = step.delta[group] ?? 0;
 	const badge =
 		delta === 0 ? "" : `<span class="tag" data-delta="${group}">${delta > 0 ? "+" : ""}${fmtTokens(delta)}</span>`;
-	return `<button type="button" class="idx-row" data-cat-index="${group}" data-cat-row="${group}" data-count="${list.length}" data-tokens="${tokens}" data-share="${share.toFixed(1)}"><span class="dot" style="background:var(--${group})"></span><span class="idx-label">${esc(groupLabel(report.lang, group))}</span><span class="idx-count dim">${list.length}</span><span class="idx-value">≈${fmtTokens(tokens)}</span><span class="idx-share dim">${share === 0 ? "—" : `${share.toFixed(1)}%`}</span>${badge}</button>`;
+	return `<button type="button" class="idx-row" data-cat-index="${group}" data-cat-row="${group}" data-count="${list.length}" data-tokens="${tokens}" data-share="${share.toFixed(1)}"><span class="dot" style="background:var(--${group})"></span><span class="idx-label" ${i18nAttrs(GROUP_LABEL_KEY[group] ?? `cat.${group}`)}>${esc(groupLabel(report.lang, group))}</span><span class="idx-count dim">${list.length}</span><span class="idx-value">≈${fmtTokens(tokens)}</span><span class="idx-share dim">${share === 0 ? "—" : `${share.toFixed(1)}%`}</span>${badge}</button>`;
 }
 
 function panelOf(report: InsightReport, step: Step, selected: boolean): string {
@@ -183,15 +183,15 @@ export function renderBrowser(report: InsightReport): string {
 			: "";
 
 	const body = `<div class="toolbar">
-<label class="dim">${t(lang, { key: "browser.step" })} <select data-browser-step>${options}</select></label>
-<button type="button" data-toggle="dna" data-value="dna" aria-pressed="false">${t(lang, { key: "toggle.dna" })}</button>
-<button type="button" data-toggle="mode" data-value="total" aria-pressed="true">${t(lang, { key: "toggle.total" })}</button>
-<button type="button" data-toggle="mode" data-value="delta" aria-pressed="false">${t(lang, { key: "toggle.delta" })}</button>
+<label class="dim"><span ${i18nAttrs("browser.step")}>${t(lang, { key: "browser.step" })}</span> <select data-browser-step>${options}</select></label>
+<button type="button" data-toggle="dna" data-value="dna" aria-pressed="false" ${i18nAttrs("toggle.dna")}>${t(lang, { key: "toggle.dna" })}</button>
+<button type="button" data-toggle="mode" data-value="total" aria-pressed="true" ${i18nAttrs("toggle.total")}>${t(lang, { key: "toggle.total" })}</button>
+<button type="button" data-toggle="mode" data-value="delta" aria-pressed="false" ${i18nAttrs("toggle.delta")}>${t(lang, { key: "toggle.delta" })}</button>
 <input type="search" data-filter-group="items" placeholder="${esc(t(lang, { key: "browser.search" }))}">
 </div>
 ${windowNote}
 <div class="browser">
-<aside class="browser-index" data-browser-index><div class="kpi-label">${t(lang, { key: "browser.index" })}</div>${index}</aside>
+<aside class="browser-index" data-browser-index><div class="kpi-label" ${i18nAttrs("browser.index")}>${t(lang, { key: "browser.index" })}</div>${index}</aside>
 <div class="browser-main">
 <div class="browser-scroll" data-browser-panels>${panel}</div>
 ${dna}

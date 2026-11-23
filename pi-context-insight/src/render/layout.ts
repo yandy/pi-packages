@@ -83,11 +83,14 @@ export interface LegendRowArgs {
 	tip?: string;
 	/** Adds a `data-timing-seg` marker for the timing card's three segments. */
 	seg?: string;
+	/** Dictionary key for the label, so a language switch can retranslate it. */
+	i18nKey?: string;
 }
 
 export function legendRow(args: LegendRowArgs): string {
 	const bar =
 		args.bar === undefined ? "<span></span>" : microbar({ value: args.bar.value, max: args.bar.max, tone: args.id });
 	const seg = args.seg === undefined ? "" : ` data-timing-seg="${attr(args.seg)}"`;
-	return `<div class="legend-row" data-cat="${attr(args.id)}"${seg}${args.tip ?? ""}><span class="dot" style="background:var(--${attr(args.id)})"></span><span class="legend-label">${esc(args.label)}</span><span class="legend-value">${esc(args.value)}</span><span class="legend-share">${esc(args.share)}</span>${bar}</div>`;
+	const i18n = args.i18nKey === undefined ? "" : ` ${i18nAttrs(args.i18nKey)}`;
+	return `<div class="legend-row" data-cat="${attr(args.id)}"${seg}${args.tip ?? ""}><span class="dot" style="background:var(--${attr(args.id)})"></span><span class="legend-label"${i18n}>${esc(args.label)}</span><span class="legend-value">${esc(args.value)}</span><span class="legend-share">${esc(args.share)}</span>${bar}</div>`;
 }

@@ -27,6 +27,7 @@ export function renderTimingCard(report: InsightReport): string {
 				share: fmtShare(segment.ms, active),
 				bar: { value: segment.ms, max: active },
 				seg: segment.id.replace("timing-", ""),
+				i18nKey: `timing.${segment.id.replace("timing-", "")}`,
 				tip: segment.count > 0 ? ` title="${t(lang, { key: "timing.count", params: { count: segment.count } })}"` : "",
 			}),
 		)

@@ -108,6 +108,7 @@ export const DICT_ZH: Record<string, string> = {
 	"tokens.title": "Token 构成",
 	"tokens.centerSub": "已用",
 	"tokens.cacheHit": "缓存命中",
+	"tokens.cacheHitChip": "缓存命中 {p}%",
 	"tokens.costTip": "按 token 占比分摊的成本（估算）。",
 	"tokens.estimateTotal": "估算合计",
 	"tokens.billed": "计费（provider）",

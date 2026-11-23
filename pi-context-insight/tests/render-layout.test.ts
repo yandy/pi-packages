@@ -8,6 +8,12 @@ describe("css contract", () => {
 		expect(REPORT_CSS).toContain("overflow-wrap:anywhere");
 		expect(REPORT_CSS).toContain(".browser-scroll");
 	});
+	it("constrains long unbroken strings inside rows instead of widening the page", () => {
+		expect(REPORT_CSS).toContain(".item-row>summary{");
+		expect(REPORT_CSS).toContain("text-overflow:ellipsis");
+		expect(REPORT_CSS).toContain(".main>*{min-width:0}");
+		expect(REPORT_CSS).toContain("overflow-wrap:anywhere");
+	});
 	it("keeps the rail, the card grid and the print fallback", () => {
 		expect(REPORT_CSS).toContain(".shell{");
 		expect(REPORT_CSS).toContain(".span-6{");

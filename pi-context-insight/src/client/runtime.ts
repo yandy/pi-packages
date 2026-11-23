@@ -109,6 +109,8 @@ export const CLIENT_RUNTIME = `
       bucket.total = step.total;
       bucket.activeMs += step.activeMs || 0;
       bucket.count += 1;
+      bucket.index = step.i;
+      bucket.events = (bucket.events || []).concat(step.ev || []);
     }
     return buckets;
   }
@@ -140,32 +142,41 @@ export const CLIENT_RUNTIME = `
    * Pure geometry for the timeline: no DOM, so the layout can be asserted in tests.
    * Bars stack upward from the axis; in delta mode reclaimed context stacks downward.
    */
-  function buildTimeline(steps, geo, opts) {
+  function buildTimeline(allSteps, geo, opts) {
     var mode = opts.mode === "delta" ? "delta" : "total";
+    var cap = opts.cap || 4000;
+    var steps = allSteps.length > cap ? allSteps.slice(allSteps.length - cap) : allSteps;
+    var firstStep = steps.length > 0 ? steps[0].i : 0;
     var buckets = bucketsFor(steps, opts.granularity);
     var max = opts.max && opts.max > 0 ? opts.max : maxOf(buckets, mode);
     var scale = geo.chartH / max;
+    // Negative deltas grow downward, so they get the room between the axis and the turn band.
+    var downRoom = Math.max(0, geo.height - geo.axisY - geo.turnH - 16);
+    var downScale = downRoom > 0 ? downRoom / max : 0;
     var width = Math.max(320, 20 + buckets.length * (geo.barW + geo.gap));
-    var data = { width: width, axisY: geo.axisY, bars: [], flags: [], turns: [], labels: [], line: null, negative: false };
+    var data = { width: width, axisY: geo.axisY, max: max, bars: [], flags: [], turns: [], labels: [], line: null, marker: null, negative: false, firstStep: firstStep };
     var index = 0;
     for (var i = 0; i < buckets.length; i++) {
       var bucket = buckets[i];
       var x = 10 + i * (geo.barW + geo.gap);
-      var bar = { step: bucket.i !== undefined ? bucket.i : index, x: x, segments: [] };
+      var barStep = bucket.i !== undefined ? bucket.i : bucket.index !== undefined ? bucket.index : index;
+      var bar = { step: barStep, x: x, segments: [] };
       if (mode === "delta") {
         var up = 0, down = 0;
         for (var c = 0; c < CAT_ORDER.length; c++) {
           var id = CAT_ORDER[c];
           var delta = bucket.delta[id] || 0;
           if (delta === 0) continue;
-          var height = Math.abs(delta) * scale;
-          if (height <= 0) continue;
+          var upHeight = Math.abs(delta) * scale;
+          var downHeight = Math.abs(delta) * downScale;
           if (delta > 0) {
-            bar.segments.push({ id: id, y: geo.axisY - up - height, h: height, negative: false });
-            up += height;
+            if (upHeight <= 0) continue;
+            bar.segments.push({ id: id, y: geo.axisY - up - upHeight, h: upHeight, negative: false, value: delta });
+            up += upHeight;
           } else {
-            bar.segments.push({ id: id, y: geo.axisY + down, h: height, negative: true });
-            down += height;
+            if (downHeight <= 0) continue;
+            bar.segments.push({ id: id, y: geo.axisY + down, h: downHeight, negative: true, value: delta });
+            down += downHeight;
             data.negative = true;
           }
         }
@@ -177,7 +188,7 @@ export const CLIENT_RUNTIME = `
           var extent = tokens * scale;
           if (extent <= 0) continue;
           cursor -= extent;
-          bar.segments.push({ id: cat, y: cursor, h: extent, negative: false });
+          bar.segments.push({ id: cat, y: cursor, h: extent, negative: false, value: tokens });
         }
       }
       data.bars.push(bar);
@@ -191,6 +202,42 @@ export const CLIENT_RUNTIME = `
         var pointX = 10 + p * (geo.barW + geo.gap) + geo.barW / 2;
         data.line.push([pointX, geo.axisY - ((buckets[p].activeMs || 0) / maxActive) * geo.chartH]);
       }
+      if (data.line.length === 1) {
+        data.marker = data.line[0];
+        data.line = null;
+      }
+    }
+
+    // Milestone flags and the turn band belong to the chart, not to the server-rendered copy.
+    var eventKinds = opts.eventKinds || {};
+    for (var f = 0; f < steps.length; f++) {
+      var ids = steps[f].ev || [];
+      if (!ids.length) continue;
+      var kind = eventKinds[ids[0]] || "inject";
+      data.flags.push({
+        step: steps[f].i,
+        x: 10 + f * (geo.barW + geo.gap) + geo.barW / 2,
+        kind: kind,
+        count: ids.length
+      });
+    }
+    var openTurn = null;
+    for (var k = 0; k < buckets.length; k++) {
+      var bucket = buckets[k];
+      if (bucket.turn === undefined) continue;
+      if (openTurn === null || openTurn.index !== bucket.turn) {
+        openTurn = { index: bucket.turn, x: 10 + k * (geo.barW + geo.gap), count: 0, label: bucket.count };
+        data.turns.push(openTurn);
+      }
+      openTurn.count += opts.granularity === "turn" ? bucket.count : 1;
+      openTurn.width = Math.max(geo.barW, openTurn.count * (geo.barW + geo.gap) - geo.gap);
+    }
+    for (var tn2 = 0; tn2 < data.turns.length; tn2++) delete data.turns[tn2].count;
+    for (var l = 0; l < buckets.length; l++) {
+      if (l % 5 !== 4) continue;
+      var labelStep = buckets[l];
+      var labelIndex = labelStep.i !== undefined ? labelStep.i : labelStep.index;
+      data.labels.push({ x: 10 + l * (geo.barW + geo.gap) + geo.barW / 2, text: "S" + (labelIndex + 1) });
     }
     return data;
   }
@@ -233,7 +280,7 @@ export const CLIENT_RUNTIME = `
   }
 
   /** Resolves every data-i18n node, with params, in place. */
-  function applyLanguageFromDoc(doc, lang, dicts) {
+  function applyLanguageFromDoc(doc, lang, dicts, meta) {
     var payload = dicts;
     var dict = (payload && payload[lang]) || {};
     var nodes = doc.querySelectorAll("[data-i18n]");
@@ -248,6 +295,11 @@ export const CLIENT_RUNTIME = `
       if (dict[key] !== undefined) node.textContent = translate(dict, key, params);
     }
     doc.documentElement.setAttribute("lang", lang);
+    var titleNode = doc.querySelector("[data-i18n-title]");
+    if (titleNode && dict["doc.title"] !== undefined) {
+      var sessionTitle = (meta && meta.sessionTitle) || "";
+      titleNode.textContent = translate(dict, "doc.title") + (sessionTitle ? " — " + sessionTitle : "");
+    }
     var buttons = doc.querySelectorAll("[data-lang-switch]");
     for (var j = 0; j < buttons.length; j++) {
       buttons[j].setAttribute("aria-pressed", buttons[j].getAttribute("data-lang-switch") === lang ? "true" : "false");
@@ -334,33 +386,57 @@ export const CLIENT_RUNTIME = `
       var svg = doc.querySelector("[data-timeline-svg]");
       if (!svg) return;
       var geo = payload.geo;
+      var kinds = {};
+      for (var e = 0; e < (payload.events || []).length; e++) kinds[payload.events[e].id] = payload.events[e].kind;
+      var lang = state.lang;
       var data = buildTimeline(payload.steps, geo, {
         mode: state.mode,
         granularity: state.granularity,
-        duration: state.duration
+        duration: state.duration,
+        eventKinds: kinds
       });
       while (svg.firstChild) svg.removeChild(svg.firstChild);
       svg.setAttribute("viewBox", "0 0 " + data.width + " " + geo.height);
-      svg.setAttribute("width", String(data.width));
+      svg.setAttribute("width", String(Math.max(data.width, 320)));
       svg.setAttribute("height", String(geo.height));
 
       var ticks = [1, 0.5, 0];
-      var max = 1;
-      for (var b = 0; b < payload.steps.length; b++) if (payload.steps[b].total > max) max = payload.steps[b].total;
       for (var t = 0; t < ticks.length; t++) {
         var y = geo.axisY - geo.chartH * ticks[t];
         svg.appendChild(svgEl(doc, "line", { x1: 0, x2: data.width, y1: y, y2: y, stroke: "var(--line)", "stroke-dasharray": "2 4" }));
-        svg.appendChild(svgEl(doc, "text", { x: 2, y: y - 4, "font-size": 10, fill: "var(--dim)" })).textContent = fmtTokens(max * ticks[t]);
+        svg.appendChild(svgEl(doc, "text", { class: "tick", x: 2, y: y - 4, "font-size": 10, fill: "var(--dim)" })).textContent = fmtTokens(data.max * ticks[t]);
       }
-      if (data.negative) {
-        svg.appendChild(svgEl(doc, "line", { x1: 0, x2: data.width, y1: geo.axisY, y2: geo.axisY, stroke: "var(--warn)", "stroke-dasharray": "3 3" }));
-      } else {
-        svg.appendChild(svgEl(doc, "line", { x1: 0, x2: data.width, y1: geo.axisY, y2: geo.axisY, stroke: "var(--line)" }));
+      svg.appendChild(svgEl(doc, "line", {
+        x1: 0,
+        x2: data.width,
+        y1: geo.axisY,
+        y2: geo.axisY,
+        stroke: data.negative ? "var(--warn)" : "var(--line)",
+        "stroke-dasharray": data.negative ? "3 3" : null
+      }));
+
+      var lane = svgEl(doc, "g", { "data-flag-lane": "1" });
+      for (var fl = 0; fl < data.flags.length; fl++) {
+        var flag = data.flags[fl];
+        var group = svgEl(doc, "g", { "data-flag": flag.kind, "data-flag-step": flag.step });
+        group.appendChild(svgEl(doc, "line", { x1: flag.x, x2: flag.x, y1: geo.flagH, y2: geo.axisY, stroke: "var(--dim)", "stroke-dasharray": "2 3", opacity: 0.45 }));
+        var dot = svgEl(doc, "circle", { cx: flag.x, cy: 13, r: 5, fill: "var(--" + (flag.kind === "compaction" ? "compaction" : "systemSkills") + ")" });
+        var dotTitle = svgEl(doc, "title", {});
+        dotTitle.textContent = flagKindLabel(flag.kind, lang);
+        dot.appendChild(dotTitle);
+        group.appendChild(dot);
+        if (flag.count > 1) {
+          var plus = svgEl(doc, "text", { x: flag.x + 7, y: 17, "text-anchor": "start", "font-size": 9, fill: "var(--text)" });
+          plus.textContent = "+" + (flag.count - 1);
+          group.appendChild(plus);
+        }
+        lane.appendChild(group);
       }
+      svg.appendChild(lane);
 
       for (var i = 0; i < data.bars.length; i++) {
         var bar = data.bars[i];
-        var group = svgEl(doc, "g", { "data-step": bar.step });
+        var barGroup = svgEl(doc, "g", { "data-step": bar.step });
         for (var s = 0; s < bar.segments.length; s++) {
           var segment = bar.segments[s];
           var rect = svgEl(doc, "rect", {
@@ -371,16 +447,54 @@ export const CLIENT_RUNTIME = `
             fill: "var(--" + segment.id + ")"
           });
           if (segment.negative) rect.setAttribute("data-negative", "1");
-          group.appendChild(rect);
+          var title = svgEl(doc, "title", {});
+          title.textContent = catLabel(segment.id) + " · " + (segment.value < 0 ? "-" : "") + "≈" + fmtTokens(Math.abs(segment.value));
+          rect.appendChild(title);
+          barGroup.appendChild(rect);
         }
-        svg.appendChild(group);
+        svg.appendChild(barGroup);
       }
 
-      if (data.line && data.line.length > 1) {
+      for (var tn = 0; tn < data.turns.length; tn++) {
+        var turn = data.turns[tn];
+        var turnGroup = svgEl(doc, "g", { class: "row", "data-turn-block": turn.index });
+        var turnRect = svgEl(doc, "rect", {
+          x: turn.x,
+          y: geo.axisY + 4,
+          width: turn.width,
+          height: 12,
+          rx: 2,
+          fill: turn.index % 2 === 0 ? "rgba(139,151,168,.14)" : "rgba(139,151,168,.28)"
+        });
+        var turnTitle = svgEl(doc, "title", {});
+        turnTitle.textContent = say("timeline.turnBlock", { t: turn.index, steps: turn.label });
+        turnRect.appendChild(turnTitle);
+        turnGroup.appendChild(turnRect);
+        var turnText = svgEl(doc, "text", { x: turn.x + 3, y: geo.axisY + 13, "font-size": 9, fill: "var(--text)" });
+        turnText.textContent = String(turn.index);
+        turnGroup.appendChild(turnText);
+        svg.appendChild(turnGroup);
+      }
+
+      for (var lb = 0; lb < data.labels.length; lb++) {
+        var label = svgEl(doc, "text", { x: data.labels[lb].x, y: geo.axisY + geo.turnH + 14, "text-anchor": "middle", "font-size": 9, fill: "var(--dim)" });
+        label.textContent = data.labels[lb].text;
+        svg.appendChild(label);
+      }
+
+      if (data.line) {
         var points = [];
         for (var p = 0; p < data.line.length; p++) points.push(data.line[p][0].toFixed(1) + "," + data.line[p][1].toFixed(1));
         svg.appendChild(svgEl(doc, "polyline", { points: points.join(" "), fill: "none", stroke: "var(--warn)", "stroke-width": 1.5 }));
+      } else if (data.marker) {
+        var marker = svgEl(doc, "circle", { cx: data.marker[0], cy: data.marker[1], r: 3, fill: "var(--warn)" });
+        svg.appendChild(marker);
       }
+    }
+
+    function flagKindLabel(kind, lang) {
+      var dict = (payload.dicts && payload.dicts[lang]) || {};
+      return translate(dict, "flag." + kind);
     }
 
     function applyToggles() {
@@ -525,6 +639,14 @@ export const CLIENT_RUNTIME = `
         return;
       }
       var items = itemsFor(step);
+      if (items.length === 0) {
+        var empty = el(doc, "p", { class: "dim" });
+        empty.setAttribute("data-empty", "browser");
+        empty.textContent = say("empty.browserStep");
+        panel.appendChild(empty);
+        container.appendChild(panel);
+        return;
+      }
       for (var g = 0; g < GROUPS.length; g++) {
         var group = GROUPS[g];
         var groupItems = [];
@@ -622,13 +744,14 @@ export const CLIENT_RUNTIME = `
         for (var j = 0; j < rows.length; j++) {
           var row = rows[j];
           var text = (row.getAttribute("data-search") || row.textContent || "").toLowerCase();
+          var groupOk = group !== "items" || state.group === null || (GROUP_OF[row.getAttribute("data-cat")] || row.getAttribute("data-cat")) === state.group;
           var kindOk =
             active === "all" ||
             (group === "files" && row.querySelector('[data-kind="' + active + '"]') !== null) ||
             (group === "commands" && ((active === "failed" && row.getAttribute("data-status") === "error") || (active === "nested" && row.getAttribute("data-nested") === "1") || (active === "slow" && row.getAttribute("data-slow") === "1"))) ||
             (group === "events" && row.getAttribute("data-kind") === active) ||
             (group === "items" && row.getAttribute("data-cat") === active);
-          setHidden(row, !kindOk || (query !== "" && text.indexOf(query) < 0));
+          setHidden(row, !groupOk || !kindOk || (query !== "" && text.indexOf(query) < 0));
         }
       }
     }
@@ -660,7 +783,7 @@ export const CLIENT_RUNTIME = `
 
     function applyLanguage(lang) {
       state.lang = lang;
-      applyLanguageFromDoc(doc, lang, payload.dicts);
+      applyLanguageFromDoc(doc, lang, payload.dicts, { sessionTitle: payload.sessionTitle });
       store("insight.lang", lang);
       redrawTimeline();
       selectStep(state.step);
@@ -677,6 +800,7 @@ export const CLIENT_RUNTIME = `
         else if (name === "granularity") state.granularity = value;
         else if (state[value] !== undefined) state[value] = !state[value];
         applyToggles();
+        selectStep(state.step);
         return;
       }
       var langButton = target.closest("[data-lang-switch]");
@@ -745,7 +869,7 @@ export const CLIENT_RUNTIME = `
     }
 
     applyToggles();
-    applyLanguageFromDoc(doc, state.lang, payload.dicts);
+    applyLanguageFromDoc(doc, state.lang, payload.dicts, { sessionTitle: payload.sessionTitle });
     selectStep(state.step);
     applyLanguage(state.lang);
   }

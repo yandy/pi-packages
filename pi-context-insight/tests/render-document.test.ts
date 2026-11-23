@@ -47,12 +47,17 @@ describe("renderDocument", () => {
 		expect(renderDocument({ report: report("full"), body: "", payload: "{}" })).toContain("data-banner=\"raw-content\"");
 		expect(renderDocument({ report: report("short"), body: "", payload: "{}" })).not.toContain("data-banner=");
 	});
-	it("renders the ten rail items and both language buttons inside the rail", () => {
+	it("renders a rail item per section and both language buttons inside the rail", () => {
 		const html = renderDocument({ report: report(), body: "", payload: "{}" });
-		expect(html.match(/data-rail-item="/g)).toHaveLength(10);
+		expect(html.match(/data-rail-item="/g)).toHaveLength(9);
 		const rail = html.slice(html.indexOf('class="rail"'), html.indexOf('class="main"'));
 		expect(rail).toContain('data-lang-switch="en"');
 		expect(rail).toContain('data-lang-switch="zh"');
+	});
+	it("leaves the agents section out of the rail when there are no subagents", () => {
+		const html = renderDocument({ report: report(), body: "", payload: "{}" });
+		expect(html).not.toContain('data-rail-item="family"');
+		expect(html.match(/data-rail-item="/g)).toHaveLength(9);
 	});
 	it("wraps the report in a rail plus grid shell", () => {
 		const html = renderDocument({ report: report(), body: '<section class="card span-6" id="tokens"></section>', payload: "{}" });

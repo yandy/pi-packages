@@ -3,6 +3,7 @@ import { t } from "../i18n";
 import type { InsightReport } from "../report";
 import type { BriefChip } from "../session/steps";
 import { esc } from "./escape";
+import { i18nAttrs } from "./layout";
 
 function chip(brief: BriefChip, locatable: boolean): string {
 	const attrs = locatable ? ` data-locate-item="${brief.itemId}"` : "";
@@ -33,10 +34,10 @@ export function renderStepDetail(report: InsightReport): string {
 <div class="row"><strong>${esc(t(lang, { key: "detail.title", params: { t: step.turn, s: step.stepInTurn } }))}</strong>
 <span class="dim">${fmtClock(step.timestamp)} · ${fmtDuration(step.durationMs ?? 0)} · ≈${fmtTokens(step.estimatedTotal)}${step.deltaTotal === 0 ? "" : ` · Δ${step.deltaTotal > 0 ? "+" : ""}${fmtTokens(step.deltaTotal)}`}${cost}</span></div>
 <table><tbody>
-<tr><th style="width:70px">${t(lang, { key: "detail.user" })}</th><td>${user}</td></tr>
-<tr><th>${t(lang, { key: "detail.inputs" })}</th><td>${inputs}</td></tr>
-<tr><th>${t(lang, { key: "detail.replies" })}</th><td>${replies}</td></tr>
-<tr><th>${t(lang, { key: "detail.actualLabel" })}</th><td>${actual}</td></tr>
+<tr><th style="width:70px" ${i18nAttrs("detail.user")}>${t(lang, { key: "detail.user" })}</th><td>${user}</td></tr>
+<tr><th ${i18nAttrs("detail.inputs")}>${t(lang, { key: "detail.inputs" })}</th><td>${inputs}</td></tr>
+<tr><th ${i18nAttrs("detail.replies")}>${t(lang, { key: "detail.replies" })}</th><td>${replies}</td></tr>
+<tr><th ${i18nAttrs("detail.actualLabel")}>${t(lang, { key: "detail.actualLabel" })}</th><td>${actual}</td></tr>
 </tbody></table></div>`;
 		})
 		.join("");

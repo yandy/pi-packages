@@ -19,11 +19,18 @@ export const SECTION_IDS = [
 
 const WARNING_VISIBLE = 8;
 
-function railNav(lang: InsightReport["lang"]): string {
-	return SECTION_IDS.map(
-		(id) =>
-			`<a href="#${id}" data-rail-item="${id}" ${i18nAttrs(`anchor.${id}`)}>${esc(t(lang, { key: `anchor.${id}` }))}</a>`,
-	).join("");
+/** Sections that render nothing for this session are left out of the nav. */
+function railSections(report: InsightReport): readonly (typeof SECTION_IDS)[number][] {
+	return report.family.members.length > 0 ? SECTION_IDS : SECTION_IDS.filter((id) => id !== "family");
+}
+
+function railNav(lang: InsightReport["lang"], report: InsightReport): string {
+	return railSections(report)
+		.map(
+			(id) =>
+				`<a href="#${id}" data-rail-item="${id}" ${i18nAttrs(`anchor.${id}`)}>${esc(t(lang, { key: `anchor.${id}` }))}</a>`,
+		)
+		.join("");
 }
 
 function rail(report: InsightReport, title: string): string {
@@ -42,7 +49,7 @@ function rail(report: InsightReport, title: string): string {
 <div class="rail-meta">${mode}<span>${esc(report.generatedAt)}</span></div>
 <div class="rail-meta">${meta}</div>
 <div class="rail-label" ${i18nAttrs("rail.title")}>${esc(t(lang, { key: "rail.title" }))}</div>
-<nav class="rail-nav">${railNav(lang)}</nav>
+<nav class="rail-nav">${railNav(lang, report)}</nav>
 <div class="rail-actions">
 <button type="button" data-lang-switch="en" aria-pressed="${lang === "en"}">EN</button>
 <button type="button" data-lang-switch="zh" aria-pressed="${lang === "zh"}">中文</button>
@@ -82,10 +89,10 @@ function dataNotes(report: InsightReport): string {
 	const lang = report.lang;
 	return `<section class="card span-12" id="notes" data-card="notes"><h2><span ${i18nAttrs("notes.title")}>${esc(t(lang, { key: "notes.title" }))}</span></h2>
 <ol class="notes">
-<li>${t(lang, { key: "notes.estimate" })}</li>
-<li>${t(lang, { key: "notes.scope" })}</li>
-<li>${t(lang, { key: "notes.truncation" })}<ul>${truncationNotes(report)}</ul></li>
-<li>${t(lang, { key: report.mode === "full" ? "notes.privacyFull" : "notes.privacyShort" })}</li>
+<li ${i18nAttrs("notes.estimate")}>${t(lang, { key: "notes.estimate" })}</li>
+<li ${i18nAttrs("notes.scope")}>${t(lang, { key: "notes.scope" })}</li>
+<li ${i18nAttrs("notes.truncation")}>${t(lang, { key: "notes.truncation" })}<ul>${truncationNotes(report)}</ul></li>
+<li ${i18nAttrs(report.mode === "full" ? "notes.privacyFull" : "notes.privacyShort")}>${t(lang, { key: report.mode === "full" ? "notes.privacyFull" : "notes.privacyShort" })}</li>
 </ol></section>`;
 }
 
@@ -111,7 +118,7 @@ export function renderDocument(args: {
 	return `<!doctype html>
 <html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="${csp}">
-<title>${esc(t(lang, { key: "doc.title" }))} — ${esc(title)}</title><style>${REPORT_CSS}</style></head>
+<title data-i18n-title="1">${esc(t(lang, { key: "doc.title" }))} — ${esc(title)}</title><style>${REPORT_CSS}</style></head>
 <body>
 <div class="shell">
 ${rail(report, title)}

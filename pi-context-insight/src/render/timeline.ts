@@ -3,10 +3,10 @@ import { t } from "../i18n";
 import { CATEGORY_ORDER, type CategoryId } from "../model";
 import type { InsightReport } from "../report";
 import type { Milestone } from "../session/events";
-import { categoryLabel } from "./categories";
+import { CATEGORY_LABEL_KEY, categoryLabel } from "./categories";
 import { renderStepDetail } from "./detail";
 import { esc } from "./escape";
-import { section } from "./layout";
+import { i18nAttrs, section } from "./layout";
 
 const FLAG_EVERY = 5;
 const TIMELINE_MAX = 4000;
@@ -150,7 +150,7 @@ function timelineBody(report: InsightReport): string {
 	const legend = CATEGORY_ORDER.filter((id) => id !== "unattributed")
 		.map(
 			(id) =>
-				`<span data-cat="${id}" data-legend="1"><span class="swatch" style="background:var(--${id})"></span>${esc(categoryLabel(lang, id))}</span>`,
+				`<span data-cat="${id}" data-legend="1"><span class="swatch" style="background:var(--${id})"></span><span ${i18nAttrs(CATEGORY_LABEL_KEY[id])}>${esc(categoryLabel(lang, id))}</span></span>`,
 		)
 		.join("");
 
@@ -164,7 +164,7 @@ function timelineBody(report: InsightReport): string {
 	]
 		.map(
 			([name, value]) =>
-				`<button type="button" data-toggle="${name}" data-value="${value}" aria-pressed="${value === "total" || value === "step"}">${esc(t(lang, { key: `toggle.${value}` }))}</button>`,
+				`<button type="button" data-toggle="${name}" data-value="${value}" aria-pressed="${value === "total" || value === "step"}" ${i18nAttrs(`toggle.${value}`)}>${esc(t(lang, { key: `toggle.${value}` }))}</button>`,
 		)
 		.join("");
 

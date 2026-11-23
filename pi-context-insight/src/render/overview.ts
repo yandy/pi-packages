@@ -2,7 +2,7 @@ import { fmtCost, fmtDuration, fmtShare, fmtTokens } from "../format";
 import { t } from "../i18n";
 import type { InsightReport } from "../report";
 import { esc } from "./escape";
-import { chip, microbar, section } from "./layout";
+import { chip, i18nAttrs, microbar, section } from "./layout";
 
 const USAGE_ROW_LIMIT = 200;
 
@@ -119,8 +119,8 @@ export function renderOverview(report: InsightReport): string {
 
 	const body = `<div class="kpis">${kpis}</div>
 <div class="split">
-<div data-block="session"><h3>${t(lang, { key: "overview.session" })}</h3>${sessionFacts}</div>
-<div data-block="byModel"><h3>${t(lang, { key: "overview.byModel" })}</h3><table><thead><tr><th>${t(lang, { key: "table.model" })}</th><th class="num">prompt</th><th class="num">output</th><th class="num">total</th><th class="num">${t(lang, { key: "table.cacheHit" })}</th><th class="num">${t(lang, { key: "table.cost" })}</th><th></th></tr></thead><tbody>${modelRows}</tbody></table></div>
+<div data-block="session"><h3 ${i18nAttrs("overview.session")}>${t(lang, { key: "overview.session" })}</h3>${sessionFacts}</div>
+<div data-block="byModel"><h3 ${i18nAttrs("overview.byModel")}>${t(lang, { key: "overview.byModel" })}</h3><table><thead><tr><th ${i18nAttrs("table.model")}>${t(lang, { key: "table.model" })}</th><th class="num">prompt</th><th class="num">output</th><th class="num">total</th><th class="num" ${i18nAttrs("table.cacheHit")}>${t(lang, { key: "table.cacheHit" })}</th><th class="num" ${i18nAttrs("table.cost")}>${t(lang, { key: "table.cost" })}</th><th></th></tr></thead><tbody>${modelRows}</tbody></table></div>
 </div>
 <details><summary>${t(lang, { key: "overview.usageRows", params: { count: report.usageRows.length } })}</summary>
 <table><thead><tr><th>${t(lang, { key: "table.time" })}</th><th>${t(lang, { key: "table.source" })}</th><th>${t(lang, { key: "table.model" })}</th><th class="num">prompt</th><th class="num">output</th><th class="num">${t(lang, { key: "table.cost" })}</th></tr></thead><tbody>${rows}</tbody></table>${omitted}</details>`;

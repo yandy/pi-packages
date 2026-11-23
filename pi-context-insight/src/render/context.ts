@@ -2,10 +2,10 @@ import { fmtShare, fmtTokens } from "../format";
 import { t } from "../i18n";
 import { CATEGORY_ORDER } from "../model";
 import type { InsightReport } from "../report";
-import { categoryLabel } from "./categories";
+import { CATEGORY_LABEL_KEY, categoryLabel } from "./categories";
 import { stackBar } from "./charts";
 import { esc } from "./escape";
-import { section } from "./layout";
+import { i18nAttrs, section } from "./layout";
 
 function finite(value: number, fallback = 0): number {
 	return Number.isFinite(value) ? value : fallback;
@@ -71,7 +71,7 @@ export function renderCurrentContext(report: InsightReport): string {
 	const legend = present
 		.map(
 			(id) =>
-				`<span class="row" data-cat="${id}" data-legend="1"><span class="dot" style="background:var(--${id})"></span>${esc(categoryLabel(lang, id))} <span class="dim">≈${fmtTokens(safe(context.categories[id]))} · ${fmtShare(safe(context.categories[id]), used)}</span></span>`,
+				`<span class="row" data-cat="${id}" data-legend="1"><span class="dot" style="background:var(--${id})"></span><span ${i18nAttrs(CATEGORY_LABEL_KEY[id])}>${esc(categoryLabel(lang, id))}</span> <span class="dim">≈${fmtTokens(safe(context.categories[id]))} · ${fmtShare(safe(context.categories[id]), used)}</span></span>`,
 		)
 		.join("");
 

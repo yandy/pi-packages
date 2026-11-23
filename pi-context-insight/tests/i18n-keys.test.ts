@@ -25,6 +25,19 @@ describe("i18n key coverage", () => {
 		expect(missing).toEqual([]);
 	});
 
+	it("every dynamic category key a render module builds is defined", () => {
+		const dict = DICT.en;
+		const ids = [
+			"systemBase", "systemTools", "systemProject", "systemSkills", "systemDocs", "systemOther",
+			"toolDefinitions", "user", "injected", "skillInjections", "compaction", "reasoning",
+			"answers", "toolCalls", "toolResults", "unattributed",
+		];
+		const missing = ids.filter((id) => dict[`cat.${id}`] === undefined);
+		expect(missing).toEqual([]);
+		expect(dict["browser.system"]).toBeDefined();
+		for (const seg of ["model", "tools", "other"]) expect(dict[`timing.${seg}`]).toBeDefined();
+	});
+
 	it("every dictionary key referenced as a label map value is defined", () => {
 		const missing: string[] = [];
 		for (const { file, source } of renderSources()) {
