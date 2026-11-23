@@ -275,6 +275,7 @@ export interface CurrentContext {
 	reserveTokens: number;
 	reserveEnabled: boolean;
 	maxTokens: number;
+	unknownSystem: boolean;
 }
 
 export interface TruncationEntry {

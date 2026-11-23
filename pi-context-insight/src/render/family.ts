@@ -3,6 +3,12 @@ import { t } from "../i18n";
 import type { InsightReport } from "../report";
 import { esc } from "./escape";
 
+function labelOf(report: InsightReport, member: { id: string; record?: { description: string } }): string {
+	if (report.mode === "short") return member.id;
+	const description = member.record?.description ?? "";
+	return description.length > 0 ? description : member.id;
+}
+
 const STATUS_KEY: Record<string, string> = {
 	completed: "family.status.completed",
 	error: "family.status.error",
@@ -20,7 +26,7 @@ export function renderFamily(report: InsightReport): string {
 		.map((member) => {
 			const records = member.record;
 			return `<div class="kpi" data-member="${esc(member.id)}" data-status="${member.status}" style="grid-column:span 2">
-<div class="kpi-label">${esc(member.record?.description ?? member.id)} <span class="tag">${esc(member.record?.type ?? "?")}</span> <span class="tag">${esc(t(lang, { key: STATUS_KEY[member.status] ?? member.status }))}</span>${member.depth > 1 ? ` <span class="tag">depth ${member.depth}</span>` : ""}</div>
+<div class="kpi-label">${esc(labelOf(report, member))} <span class="tag">${esc(member.record?.type ?? "?")}</span> <span class="tag">${esc(t(lang, { key: STATUS_KEY[member.status] ?? member.status }))}</span>${member.depth > 1 ? ` <span class="tag">depth ${member.depth}</span>` : ""}</div>
 <div class="kpi-value">${member.child?.context === undefined || member.child.context.tokens === null ? "—" : `${fmtTokens(member.child.context.tokens)} / ${fmtTokens(member.child.context.window)}`}</div>
 <div class="kpi-sub">${t(lang, { key: "family.meta", params: { steps: member.steps, dur: member.durationMs === undefined ? "—" : fmtDuration(member.durationMs), tokens: fmtTokens(member.usage?.total ?? 0) } })}</div>
 ${records?.modelName === undefined ? "" : `<div class="kpi-sub dim">${esc(records.modelName)}${records.thinking === undefined ? "" : ` · ${esc(records.thinking)}`}</div>`}
@@ -31,7 +37,7 @@ ${records?.modelName === undefined ? "" : `<div class="kpi-sub dim">${esc(record
 	const rows = members
 		.map((member) => {
 			const record = member.record;
-			return `<tr class="row" data-delegation="${esc(member.id)}" data-status="${member.status}"><td>${esc(record?.description ?? member.id)}</td><td>${esc(t(lang, { key: STATUS_KEY[member.status] ?? member.status }))}</td><td>${member.brief === undefined ? "—" : esc(member.brief)}</td><td>${record?.result === undefined ? (record?.error === undefined ? "—" : `<span class="flag">${esc(record.error)}</span>`) : esc(record.result)}</td><td class="num">${fmtTokens(member.usage?.total ?? 0)}</td><td class="num">${record?.toolUses ?? "—"}</td><td class="dim">${member.durationMs === undefined ? "—" : fmtDuration(member.durationMs)}</td></tr>`;
+			return `<tr class="row" data-delegation="${esc(member.id)}" data-status="${member.status}"><td>${esc(labelOf(report, member))}</td><td>${esc(t(lang, { key: STATUS_KEY[member.status] ?? member.status }))}</td><td>${report.mode === "short" || member.brief === undefined ? "—" : esc(member.brief)}</td><td>${report.mode === "short" ? "—" : record?.result === undefined ? (record?.error === undefined ? "—" : `<span class="flag">${esc(record.error)}</span>`) : esc(record.result)}</td><td class="num">${fmtTokens(member.usage?.total ?? 0)}</td><td class="num">${record?.toolUses ?? "—"}</td><td class="dim">${member.durationMs === undefined ? "—" : fmtDuration(member.durationMs)}</td></tr>`;
 		})
 		.join("");
 
@@ -42,7 +48,7 @@ ${records?.modelName === undefined ? "" : `<div class="kpi-sub dim">${esc(record
 	const children = report.family.children
 		.map(
 			(child) =>
-				`<details data-child-report="${esc(child.member.id)}"><summary>${esc(child.member.record?.description ?? child.member.id)} · ${fmtTokens(child.report.kpis.tokens)} tokens · ${fmtCostOf(child.report.kpis.cost)}</summary>
+				`<details data-child-report="${esc(child.member.id)}"><summary>${esc(labelOf(report, child.member))} · ${fmtTokens(child.report.kpis.tokens)} tokens · ${fmtCostOf(child.report.kpis.cost)}</summary>
 <p class="dim">${t(lang, { key: "family.childScope" })}</p>
 <table><tbody>
 <tr><th>${t(lang, { key: "table.tokens" })}</th><td>${fmtTokens(child.report.kpis.tokens)}</td></tr>

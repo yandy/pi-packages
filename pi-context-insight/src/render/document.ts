@@ -1,6 +1,7 @@
 import { DICT, t } from "../i18n";
 import type { Msg } from "../model";
 import type { InsightReport } from "../report";
+import { esc } from "./escape";
 import { REPORT_CSS } from "./style";
 
 export const SECTION_IDS = [
@@ -28,10 +29,10 @@ function warningsPanel(report: InsightReport): string {
 	if (report.warnings.length === 0) return "";
 	const visible = report.warnings.slice(0, WARNING_VISIBLE);
 	const rest = report.warnings.length - visible.length;
-	const items = visible.map((warning) => `<li data-warning="1">${t(report.lang, warning)}</li>`).join("");
+	const items = visible.map((warning) => `<li data-warning="1">${esc(t(report.lang, warning))}</li>`).join("");
 	const more =
 		rest > 0
-			? `<p class="dim" data-warning-more>${t(report.lang, { key: "warn.more", params: { count: rest } })}</p>`
+			? `<p class="dim" data-warning-more>${esc(t(report.lang, { key: "warn.more", params: { count: rest } }))}</p>`
 			: "";
 	return `<section class="warn-panel" data-card="warnings"><ul>${items}</ul>${more}</section>`;
 }
@@ -76,21 +77,21 @@ export function renderDocument(args: {
 			? "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'"
 			: "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'";
 	const banner =
-		report.mode === "full" ? `<div class="banner" data-banner="raw-content">${t(lang, { key: "doc.banner" })}</div>` : "";
+		report.mode === "full" ? `<div class="banner" data-banner="raw-content" data-i18n="doc.banner">${esc(t(lang, { key: "doc.banner" }))}</div>` : "";
 	const runtime = args.runtime ?? "";
 	const meta = [report.metadata.model ?? "—", report.metadata.thinkingLevel, report.metadata.cwd, report.generatedAt]
 		.filter((value): value is string => typeof value === "string" && value.length > 0)
-		.map((value) => `<span class="dim">${value}</span>`)
+		.map((value) => `<span class="dim">${esc(value)}</span>`)
 		.join(" · ");
 
 	return `<!doctype html>
 <html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="${csp}">
-<title>${t(lang, { key: "doc.title" })} — ${title}</title><style>${REPORT_CSS}</style></head>
+<title>${esc(t(lang, { key: "doc.title" }))} — ${esc(title)}</title><style>${REPORT_CSS}</style></head>
 <body>
-<header class="top"><h1>${t(lang, { key: "doc.title" })}</h1>
+<header class="top"><h1 data-i18n="doc.title">${esc(t(lang, { key: "doc.title" }))}</h1>
 <span class="badge ${report.mode}">${t(lang, { key: report.mode === "full" ? "doc.modeFull" : "doc.modeShort" })}</span>
-<div class="dim">${title} · <code>${report.metadata.id}</code> · ${meta}</div>
+<div class="dim">${esc(title)} · <code>${esc(report.metadata.id)}</code> · ${meta}</div>
 <nav class="anchors">${anchors(lang)}<span class="actions">
 <button type="button" data-lang-switch="en" aria-pressed="${lang === "en"}">EN</button>
 <button type="button" data-lang-switch="zh" aria-pressed="${lang === "zh"}">中文</button></span></nav>
@@ -101,7 +102,7 @@ ${warningsPanel(report)}
 ${body}
 ${dataNotes(report)}
 </main>
-<footer>${t(lang, { key: "doc.footer" })}</footer>
+<footer data-i18n="doc.footer">${esc(t(lang, { key: "doc.footer" }))}</footer>
 <noscript><p class="dim">${t(lang, { key: "doc.noscript" })}</p></noscript>
 <script type="application/json" id="insight-payload">${payload}</script>
 <script>${runtime}</script>

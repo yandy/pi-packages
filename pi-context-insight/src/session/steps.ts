@@ -59,6 +59,8 @@ export interface BuildStepsResult {
 	bodies: string[];
 	turns: Turn[];
 	warnings: Msg[];
+	finalEstimate: number;
+	stepItemIds: number[][];
 }
 
 export const DETAIL_WINDOW_STEPS = 300;
@@ -134,6 +136,7 @@ export function buildSteps(args: {
 	const callArgs = new Map<string, Record<string, unknown>>();
 	const snapshotIds: number[][] = [];
 	let activeItems: Item[] = [];
+	const activeIds = new Set<number>();
 	let sums = emptySums();
 	let system: ReplayedSystem | null = null;
 	let turnIndex = 0;
@@ -148,7 +151,6 @@ export function buildSteps(args: {
 		const flat = text.replace(/\s+/g, " ").trim();
 		return flat.length > PREVIEW_CHARS ? `${flat.slice(0, PREVIEW_CHARS - 1)}…` : flat;
 	};
-
 	const chipOf = (item: Item): BriefChip => ({ itemId: item.id, tag: item.tag, preview: previewOf(item) });
 
 	const extract = (entry: SessionEntry): Item[] =>
@@ -160,32 +162,63 @@ export function buildSteps(args: {
 			callArgs: (id) => callArgs.get(id),
 		});
 
+	const register = (list: readonly Item[]): void => {
+		for (const item of list) items.push(item);
+	};
+
 	const addItems = (list: readonly Item[]): void => {
 		for (const item of list) {
-			items.push(item);
 			activeItems.push(item);
+			activeIds.add(item.id);
 			sums[item.category] = (sums[item.category] ?? 0) + item.tokens;
 		}
 	};
 
 	const dropItem = (item: Item): void => {
 		sums[item.category] = (sums[item.category] ?? 0) - item.tokens;
+		activeIds.delete(item.id);
 		activeItems = activeItems.filter((candidate) => candidate !== item);
+	};
+
+	/**
+	 * A later system message re-declares named sections and tool declarations. Anything the
+	 * replay no longer reports must leave the context, or the step would keep charging for a
+	 * section (or tool) the model can no longer see.
+	 */
+	const reconcileSystemItems = (): void => {
+		const sectionNames = new Set(Object.keys(system?.sections ?? {}));
+		const toolNames = new Set((system?.tools ?? []).map((tool) => tool.name));
+		for (const item of [...activeItems]) {
+			if (item.kind === "systemSection" && item.tag !== "base" && !sectionNames.has(item.tag)) dropItem(item);
+			if (item.kind === "toolDefinition" && !toolNames.has(item.tag)) dropItem(item);
+		}
 	};
 
 	for (const entry of branch) {
 		if (entry.type === "compaction") {
+			system = replaySystem([...order, entry]);
 			const compactionItems = extract(entry);
 			itemsByEntry.set(entry.id, compactionItems);
+			register(compactionItems);
 			const keptIndex = order.findIndex((candidate) => candidate.id === entry.firstKeptEntryId);
 			const kept = keptIndex >= 0 ? order.slice(keptIndex) : [];
 			activeItems = [...compactionItems];
+			activeIds.clear();
 			sums = emptySums();
-			for (const item of compactionItems) sums[item.category] = item.tokens;
+			for (const item of compactionItems) {
+				activeIds.add(item.id);
+				sums[item.category] = item.tokens;
+			}
 			for (const keptEntry of kept) {
-				const entryItems = itemsByEntry.get(keptEntry.id) ?? [];
-				activeItems.push(...entryItems);
-				for (const item of entryItems) sums[item.category] = (sums[item.category] ?? 0) + item.tokens;
+				// The host only lets the newest compaction contribute a summary, and drops the
+				// system messages it re-declares from the retained range.
+				if (keptEntry.type === "compaction") continue;
+				if (keptEntry.type === "message" && keptEntry.message.role === "system") continue;
+				for (const item of itemsByEntry.get(keptEntry.id) ?? []) {
+					activeItems.push(item);
+					activeIds.add(item.id);
+					sums[item.category] = (sums[item.category] ?? 0) + item.tokens;
+				}
 			}
 			order.push(entry);
 			continue;
@@ -195,14 +228,14 @@ export function buildSteps(args: {
 			system = replaySystem([...order, entry]);
 			const entryItems = extract(entry);
 			itemsByEntry.set(entry.id, entryItems);
-			// A later system message re-declares sections and tools; replace the earlier
-			// declaration instead of double counting it.
+			// Replace earlier declarations of the same section or tool before adding the new one.
 			for (const item of [...activeItems]) {
 				if (item.entryId === entry.id) continue;
 				if (item.kind !== "systemSection" && item.kind !== "toolDefinition") continue;
-				if (!entryItems.some((next) => next.tag === item.tag && next.kind === item.kind)) continue;
-				dropItem(item);
+				if (entryItems.some((next) => next.tag === item.tag && next.kind === item.kind)) dropItem(item);
 			}
+			reconcileSystemItems();
+			register(entryItems);
 			addItems(entryItems);
 			order.push(entry);
 			continue;
@@ -223,7 +256,10 @@ export function buildSteps(args: {
 									: {}),
 							} as SessionEntry);
 				itemsByEntry.set(entry.targetId, replacementItems);
-				if (replacementItems.length > 0) addItems(replacementItems);
+				if (replacementItems.length > 0) {
+					register(replacementItems);
+					addItems(replacementItems);
+				}
 			}
 			order.push(entry);
 			continue;
@@ -250,10 +286,7 @@ export function buildSteps(args: {
 				if (diff > 0 && diff > estimatedTotal * UNATTRIBUTED_MIN_SHARE) snapshot.unattributed = diff;
 			}
 			stepInTurn += 1;
-			const inputs = activeItems
-				.filter((item) => !previousIds.has(item.id))
-				.slice(0, MAX_CHIPS)
-				.map(chipOf);
+			const inputs = activeItems.filter((item) => !previousIds.has(item.id)).slice(0, MAX_CHIPS).map(chipOf);
 			const delta: Partial<Record<CategoryId, number>> = {};
 			for (const id of CATEGORY_ORDER) {
 				const value = (snapshot[id] ?? 0) - (previousSums[id] ?? 0);
@@ -272,7 +305,7 @@ export function buildSteps(args: {
 				estimatedTotal,
 				...(actual === undefined ? {} : { actual }),
 				delta,
-				deltaTotal: estimatedTotal - totalOf(previousSums),
+				deltaTotal: Object.values(delta).reduce((sum, value) => sum + value, 0),
 				itemRanges: [],
 				eventIds: [],
 				hasDetails: true,
@@ -283,9 +316,7 @@ export function buildSteps(args: {
 				},
 				system,
 			});
-			snapshotIds.push(activeItems.map((item) => item.id));
-			previousSums = snapshot;
-			previousIds = new Set(activeItems.map((item) => item.id));
+			snapshotIds.push([...activeIds]);
 
 			for (const block of (message.content ?? []) as Array<{ type?: unknown; id?: unknown; arguments?: unknown }>) {
 				if (block.type === "toolCall" && typeof block.id === "string") {
@@ -296,8 +327,11 @@ export function buildSteps(args: {
 			itemsByEntry.set(entry.id, entryItems);
 			const step = steps[steps.length - 1];
 			if (step) step.brief.replies = entryItems.slice(0, MAX_CHIPS).map(chipOf);
+			register(entryItems);
 			addItems(entryItems);
-			previousIds = new Set(activeItems.map((item) => item.id));
+			// The next request starts counting from here: everything added until then is its input.
+			previousSums = snapshot;
+			previousIds = new Set(activeIds);
 			order.push(entry);
 			continue;
 		}
@@ -316,9 +350,8 @@ export function buildSteps(args: {
 			const userItem = entryItems.find((item) => item.category === "user");
 			if (userItem && isUserTurnMessage(entry)) pendingTurnStartItem = chipOf(userItem);
 		}
+		register(entryItems);
 		addItems(entryItems);
-		previousIds = new Set(activeItems.map((item) => item.id));
-		previousSums = { ...sums };
 		order.push(entry);
 	}
 
@@ -327,14 +360,19 @@ export function buildSteps(args: {
 		turn.endStep = (next?.startStep ?? steps.length) - 1;
 	}
 
-	const windowStart = Math.max(0, steps.length - DETAIL_WINDOW_STEPS);
-	for (const step of steps) {
-		step.hasDetails = step.index >= windowStart || step.eventIds.length > 0;
-		step.itemRanges = step.hasDetails ? rangesOf(snapshotIds[step.index] ?? []) : [];
-	}
+	applyDetailWindow(steps, snapshotIds);
 
-	return { steps, items, bodies, turns, warnings };
+	return {
+		steps,
+		items,
+		bodies,
+		turns,
+		warnings,
+		finalEstimate: totalOf(sums),
+		stepItemIds: snapshotIds,
+	};
 }
+
 
 /** The step a timestamp belongs to: the last request that had already started. */
 export function stepIndexOf(timestamp: number, steps: ReadonlyArray<{ index: number; timestamp: number }>): number {
@@ -345,4 +383,16 @@ export function stepIndexOf(timestamp: number, steps: ReadonlyArray<{ index: num
 		else break;
 	}
 	return found;
+}
+
+/**
+ * Decide which steps keep their detail. Steps carrying an event are always kept, so this
+ * runs after events are placed; the rest of the report only reads the result.
+ */
+export function applyDetailWindow(steps: Step[], stepItemIds: readonly number[][]): void {
+	const windowStart = Math.max(0, steps.length - DETAIL_WINDOW_STEPS);
+	for (const step of steps) {
+		step.hasDetails = step.index >= windowStart || step.eventIds.length > 0;
+		step.itemRanges = step.hasDetails ? rangesOf(stepItemIds[step.index] ?? []) : [];
+	}
 }

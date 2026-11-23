@@ -237,6 +237,35 @@ function messageItems(args: {
  * transcript. `system` is the state replayed up to and including this entry; it is unused
  * for non-system entries today but keeps the call site uniform as the model evolves.
  */
+function customEntryItems(entry: SessionEntry, nextId: () => number, putBody: (text: string) => number | null): Item[] {
+	if (entry.type === "custom_message") {
+		const content = entry.content ?? "";
+		const text = typeof content === "string" ? content : contentText(content);
+		const isSkill = /skill/i.test(entry.customType);
+		return [{
+			id: nextId(),
+			entryId: entry.id,
+			category: isSkill ? "skillInjections" : "injected",
+			kind: "custom",
+			tag: entry.customType,
+			tokens: estimateTextAndImageContentTokens(content),
+			textIndex: putBody(text),
+		}];
+	}
+	if (entry.type === "branch_summary") {
+		return [{
+			id: nextId(),
+			entryId: entry.id,
+			category: "injected",
+			kind: "summary",
+			tag: "branchSummary",
+			tokens: estimateTextTokens(entry.summary),
+			textIndex: putBody(entry.summary),
+		}];
+	}
+	return [];
+}
+
 export function extractItems(args: {
 	entry: SessionEntry;
 	system: ReplayedSystem | null;
@@ -245,6 +274,9 @@ export function extractItems(args: {
 	callArgs?: (toolCallId: string) => Record<string, unknown> | undefined;
 }): Item[] {
 	const { entry } = args;
+	if (entry.type === "custom_message" || entry.type === "branch_summary") {
+		return customEntryItems(entry, args.nextId, args.putBody);
+	}
 	if (entry.type === "compaction") {
 		const item: Item = {
 			id: args.nextId(),

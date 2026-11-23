@@ -18,7 +18,7 @@ import type { ReportMetadata, TruncationEntry, UsageAggregate, UsageReport } fro
 import { CATEGORY_ORDER, type CategoryId, type CurrentContext, type Kpis, type Lang, type Msg } from "./model";
 import type { Item } from "./session/categorize";
 import { buildMilestones, collectEvents, type InsightEvent, type Milestone } from "./session/events";
-import { buildSteps, type Step, type Turn } from "./session/steps";
+import { applyDetailWindow, buildSteps, type Step, type Turn } from "./session/steps";
 import { computeTiming, type TimingReport } from "./session/timing";
 import { allocateCost, collectUsageLedger, summarizeUsage } from "./session/usage";
 
@@ -119,6 +119,7 @@ function emptySums(): Record<CategoryId, number> {
 function currentContextOf(input: {
 	usage: { tokens: number | null; contextWindow: number; percent: number | null } | undefined;
 	steps: readonly Step[];
+	finalEstimate: number;
 	window: number;
 	reserveTokens: number;
 	reserveEnabled: boolean;
@@ -126,16 +127,24 @@ function currentContextOf(input: {
 }): CurrentContext {
 	const categories = emptySums();
 	const last = input.steps.at(-1);
-	if (last) for (const id of CATEGORY_ORDER) categories[id] = last.sums[id] ?? 0;
+	if (last) {
+		for (const id of CATEGORY_ORDER) categories[id] = last.sums[id] ?? 0;
+		// Fold in whatever entered the context after the last request (its own reply, tool
+		// results, injections), so the card describes the next request, not the previous one.
+		const growth = input.finalEstimate - last.estimatedTotal;
+		if (growth !== 0 && last.estimatedTotal > 0) {
+			for (const id of CATEGORY_ORDER) {
+				if (id === "unattributed") continue;
+				categories[id] = (categories[id] ?? 0) * (1 + growth / last.estimatedTotal);
+			}
+		}
+	}
 
 	let tokens: number | null = input.usage?.tokens ?? null;
 	let estimated = false;
 	if (tokens === null) {
-		const previous = input.steps.at(-2);
-		const estimate = last?.estimatedTotal ?? 0;
-		const priorEstimate = previous?.estimatedTotal ?? 0;
-		const base = last?.actual?.prompt ?? priorEstimate;
-		tokens = Math.max(0, base + (estimate - priorEstimate));
+		const base = last?.actual?.prompt ?? last?.estimatedTotal ?? 0;
+		tokens = Math.max(0, base + (input.finalEstimate - (last?.estimatedTotal ?? 0)));
 		estimated = true;
 	}
 	const window = input.usage?.contextWindow ?? input.window;
@@ -149,6 +158,7 @@ function currentContextOf(input: {
 		reserveTokens: input.reserveTokens,
 		reserveEnabled: input.reserveEnabled,
 		maxTokens: input.maxTokens,
+		unknownSystem: (input.steps.at(-1)?.system ?? null) === null,
 	};
 }
 
@@ -187,14 +197,14 @@ export function buildSessionReport(input: SessionInput): SessionReport {
 	const warnings: Msg[] = [];
 	const truncation: TruncationEntry[] = [];
 
-	const { steps, items, bodies, turns } = buildSteps({ branch, mode: input.mode, putBody: () => null });
+	const { steps, items, bodies, turns, finalEstimate, stepItemIds } = buildSteps({ branch, mode: input.mode, putBody: () => null });
 	allocateCost(steps);
 
 	const ledger = collectUsageLedger(entries);
 	const usage = summarizeUsage(ledger);
 	for (const warning of ledger.warnings) warnings.push({ key: "warning.usageMalformed", params: { detail: warning } });
 
-	const executions = collectToolExecutions({ entries: branch, steps });
+	const executions = collectToolExecutions({ entries, steps });
 	const timing = computeTiming({
 		entries: branch,
 		steps,
@@ -228,7 +238,7 @@ export function buildSessionReport(input: SessionInput): SessionReport {
 	}
 
 	const events = collectEvents({
-		entries: branch,
+		entries,
 		steps,
 		subagentRecords: records.map((record) => ({
 			id: record.id,
@@ -243,9 +253,10 @@ export function buildSessionReport(input: SessionInput): SessionReport {
 		const step = steps[stepIndex];
 		if (step) step.eventIds = eventIds;
 	}
+	applyDetailWindow(steps, stepItemIds);
 
-	const files = aggregateFiles(collectFileOps({ entries: branch, steps }), "lines" as FileSort);
-	const commands = collectCommands({ entries: branch, steps });
+	const files = aggregateFiles(collectFileOps({ entries, steps }), "lines" as FileSort);
+	const commands = collectCommands({ entries, steps, mode: input.mode });
 	const tools = aggregateTools(executions, input.toolInfos ?? [], steps.length);
 
 	applyBodyCaps(items, bodies, truncation);
@@ -293,6 +304,7 @@ export function buildSessionReport(input: SessionInput): SessionReport {
 	const currentContext = currentContextOf({
 		usage: input.contextUsage,
 		steps,
+		finalEstimate,
 		window: input.window,
 		reserveTokens: input.reserveTokens,
 		reserveEnabled: input.reserveEnabled,
@@ -429,15 +441,15 @@ export function buildReport(
 	const { members, warnings } = collectFamily({
 		parentSessionId: parentId,
 		records,
-		loadChild: (outputFile) => {
+		mode: options.mode,
+		loadChild: (outputFile, expectedParent) => {
 			const opened = childSessionOf(outputFile);
 			if (opened === undefined) return undefined;
 			const headerParent = trimSessionId(opened.manager.getHeader()?.parentSession);
 			const accepted =
-				headerParent === parentId ||
-				headerParent === trimSessionId(parentFile) ||
-				opened.child.parentId === parentId ||
-				opened.child.parentId === parentFile;
+				headerParent === expectedParent ||
+				opened.child.parentId === expectedParent ||
+				(expectedParent === parentId && (headerParent === trimSessionId(parentFile) || opened.child.parentId === parentFile));
 			if (!accepted) return { ...opened.child, parentId: "mismatch" };
 			loaded.set(opened.child.id, opened.manager);
 			return opened.child;

@@ -58,11 +58,12 @@ function statusOf(record: SubagentRecord): FamilyStatus {
 export function collectFamily(args: {
 	parentSessionId: string;
 	records: readonly SubagentRecord[];
-	loadChild: (outputFile: string) => ChildSession | undefined;
+	loadChild: (outputFile: string, parentSessionId: string) => ChildSession | undefined;
 	maxDepth?: number;
 	maxMembers?: number;
+	mode?: "full" | "short";
 }): { members: FamilyMember[]; warnings: Msg[] } {
-	const { parentSessionId, records, loadChild } = args;
+	const { parentSessionId, records, loadChild, mode = "full" } = args;
 	const maxDepth = args.maxDepth ?? DEFAULT_MAX_DEPTH;
 	const maxMembers = args.maxMembers ?? DEFAULT_MAX_MEMBERS;
 	const members: FamilyMember[] = [];
@@ -86,7 +87,7 @@ export function collectFamily(args: {
 				warnings.push({ key: "warning.brokenChild", params: { id: record.id } });
 				continue;
 			}
-			const child = loadChild(record.outputFile);
+			const child = loadChild(record.outputFile, level.parentId);
 			if (child === undefined) {
 				warnings.push({ key: "warning.brokenChild", params: { id: record.id } });
 				continue;
@@ -102,14 +103,26 @@ export function collectFamily(args: {
 				break;
 			}
 			seen.add(child.id);
+			const redacted: SubagentRecord = mode === "short"
+				? {
+						id: record.id,
+						type: record.type,
+						description: "",
+						status: record.status,
+						startedAt: record.startedAt,
+						...(record.completedAt === undefined ? {} : { completedAt: record.completedAt }),
+						...(record.modelName === undefined ? {} : { modelName: record.modelName }),
+						...(record.thinking === undefined ? {} : { thinking: record.thinking }),
+					}
+				: record;
 			members.push({
 				id: child.id,
 				parentId: level.parentId,
 				depth: level.depth + 1,
 				status: statusOf(record),
-				record,
-				child,
-				...(child.brief === undefined ? {} : { brief: child.brief }),
+				record: redacted,
+				child: mode === "short" ? { ...child, brief: undefined } : child,
+				...(mode === "short" || child.brief === undefined ? {} : { brief: child.brief }),
 				...(child.context === undefined ? {} : { context: child.context }),
 				steps: child.steps,
 				...(child.durationMs === undefined ? {} : { durationMs: child.durationMs }),

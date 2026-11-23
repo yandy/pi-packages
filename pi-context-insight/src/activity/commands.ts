@@ -165,8 +165,9 @@ export function outcomeOfResult(text: string, isError: boolean): Outcome {
 export function collectCommands(args: {
 	entries: readonly SessionEntry[];
 	steps?: ReadonlyArray<{ index: number; timestamp: number }>;
+	mode?: "full" | "short";
 }): CommandReport {
-	const { entries, steps = [] } = args;
+	const { entries, steps = [], mode = "full" } = args;
 	const records: CommandRecord[] = [];
 	const calls = new Map<string, { name: string; command: string; timestamp: number }>();
 	const byId = new Map<string, CommandRecord>();
@@ -184,7 +185,7 @@ export function collectCommands(args: {
 			id,
 			tool,
 			program: programOfCommand(name, command),
-			command,
+			command: mode === "short" ? "" : command,
 			status: "missing",
 			exitInferred: false,
 			timestamp,

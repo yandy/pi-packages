@@ -60,6 +60,7 @@ export function collectUsageLedger(entries: readonly SessionEntry[]): UsageLedge
 		if (entry.type !== "message") continue;
 		const message = entry.message;
 		if (message.role === "assistant") {
+			if (message.usage === undefined) continue;
 			append(entry, "assistant", message.usage, {
 				provider: message.provider,
 				model: message.responseModel ?? message.model,
