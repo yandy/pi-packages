@@ -13,6 +13,7 @@ function createHarness(getBranch: () => unknown[] = () => []) {
 	const tools: any[] = [];
 	const handlers: Record<string, Array<(event: any, ctx: any) => any>> = {};
 	const commands: Record<string, any> = {};
+	const emit = vi.fn();
 	const pi = {
 		registerTool: (def: any) => tools.push(def),
 		registerCommand: (name: string, def: any) => {
@@ -22,19 +23,21 @@ function createHarness(getBranch: () => unknown[] = () => []) {
 			(handlers[event] ??= []).push(handler);
 			return () => {};
 		},
+		events: { emit },
 	};
 	// hasUI=false 时 refreshWidget 直接返回，无需 stub 更多 UI。
 	const ctx = { hasUI: false, sessionManager: { getBranch }, ui: { setWidget: vi.fn(), theme } };
 	extension(pi as any);
-	return { tools, handlers, commands, ctx };
+	return { tools, handlers, commands, ctx, emit };
 }
 
 let tools: any[];
 let handlers: Record<string, Array<(event: any, ctx: any) => any>>;
 let commands: Record<string, any>;
 let ctx: any;
+let emit: ReturnType<typeof vi.fn>;
 beforeEach(() => {
-	({ tools, handlers, commands, ctx } = createHarness());
+	({ tools, handlers, commands, ctx, emit } = createHarness());
 });
 
 const run = (params: Record<string, unknown>, id = "call", uiCtx: any = ctx) =>
@@ -296,6 +299,7 @@ describe("command /todos", () => {
 		await commands.todos.handler("", { mode: "tui", hasUI: true, ui: { notify, custom, theme } });
 		expect(notify).toHaveBeenCalledWith("No todos", "info");
 		expect(custom).not.toHaveBeenCalled();
+		expect(emit).not.toHaveBeenCalled();
 	});
 
 	it("falls back to a notification outside the TUI", async () => {
@@ -305,13 +309,21 @@ describe("command /todos", () => {
 		await commands.todos.handler("", { mode: "rpc", hasUI: true, ui: { notify, custom, theme } });
 		expect(notify.mock.calls.at(-1)?.[0]).toContain("Ship it");
 		expect(custom).not.toHaveBeenCalled();
+		expect(emit).not.toHaveBeenCalled();
 	});
 
 	it("opens an overlay with the full list in the TUI", async () => {
 		await run({ action: "set", items: [{ title: "Ship it", status: "pending" }] });
-		const custom = vi.fn((_factory: any, _options: any) => Promise.resolve(undefined));
+		const calls: string[] = [];
+		emit.mockImplementation(() => calls.push("announce"));
+		const custom = vi.fn((_factory: any, _options: any) => {
+			calls.push("custom");
+			return Promise.resolve(undefined);
+		});
 		await commands.todos.handler("", { mode: "tui", hasUI: true, ui: { notify: vi.fn(), custom, theme } });
 
+		expect(calls).toEqual(["announce", "custom"]);
+		expect(emit).toHaveBeenCalledWith("notify:non-blocking-prompt", {});
 		expect(custom).toHaveBeenCalledTimes(1);
 		const [factory, options] = custom.mock.calls[0] as [any, any];
 		expect(options.overlay).toBe(true);

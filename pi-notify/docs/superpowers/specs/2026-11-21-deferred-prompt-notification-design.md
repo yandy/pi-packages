@@ -1,5 +1,9 @@
 # Defer waiting-for-input notifications
 
+> The delay is no longer the blocking classifier. [2026-11-23-blocking-prompt-notification-design.md](2026-11-23-blocking-prompt-notification-design.md)
+> keeps it only as anti-noise for blocking prompts; prompts declared non-blocking never alert,
+> and agent run state decides neither case.
+
 ## Intent
 
 A blocking prompt that the operator answered immediately is not a request for attention. Today every `ui_prompt_start` raises a desktop notification instantly, so a slash command that opens its own picker (for example `/subagents:sessions`) alerts the operator about a wait they themselves started and are looking at.

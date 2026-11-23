@@ -30,7 +30,14 @@ export interface SubagentsSettingsUI {
 export class SubagentsSettingsHandler {
 	constructor(private readonly settings: SubagentsSettingsManager) {}
 
-	async handle({ ui }: { ui: SubagentsSettingsUI }): Promise<void> {
+	async handle({
+		ui,
+		announceNonBlockingPrompt,
+	}: {
+		ui: SubagentsSettingsUI;
+		announceNonBlockingPrompt: () => void;
+	}): Promise<void> {
+		announceNonBlockingPrompt();
 		const choice = await ui.select("Settings", [
 			`Max concurrency (current: ${this.settings.maxConcurrent})`,
 			`Default max turns (current: ${this.settings.defaultMaxTurns ?? "unlimited"})`,
@@ -40,6 +47,7 @@ export class SubagentsSettingsHandler {
 		if (!choice) return;
 
 		if (choice.startsWith("Max concurrency")) {
+			announceNonBlockingPrompt();
 			const val = await ui.input("Max concurrent background agents", String(this.settings.maxConcurrent));
 			if (val) {
 				const n = parseInt(val, 10);
@@ -51,6 +59,7 @@ export class SubagentsSettingsHandler {
 				}
 			}
 		} else if (choice.startsWith("Default max turns")) {
+			announceNonBlockingPrompt();
 			const val = await ui.input(
 				"Default max turns before wrap-up (0 = unlimited)",
 				String(this.settings.defaultMaxTurns ?? 0),
@@ -65,6 +74,7 @@ export class SubagentsSettingsHandler {
 				}
 			}
 		} else if (choice.startsWith("Default timeout")) {
+			announceNonBlockingPrompt();
 			const val = await ui.input(
 				"Default timeout in seconds (0 = unlimited)",
 				String(this.settings.defaultTimeoutSeconds ?? 0),
@@ -79,6 +89,7 @@ export class SubagentsSettingsHandler {
 				}
 			}
 		} else if (choice.startsWith("Grace turns")) {
+			announceNonBlockingPrompt();
 			const val = await ui.input("Grace turns after wrap-up steer", String(this.settings.graceTurns));
 			if (val) {
 				const n = parseInt(val, 10);

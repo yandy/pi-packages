@@ -1,3 +1,4 @@
+import { createEventBus } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import extension, { PROMPT_NOTIFY_DELAY_MS } from "../src/index.js";
 
@@ -22,6 +23,7 @@ function createHarness(opts?: {
 }) {
 	const handlers: Record<string, Array<(event: any, ctx: any) => any>> = {};
 	const commands: Record<string, { handler: (args: string, ctx: any) => any }> = {};
+	const events = createEventBus();
 	const fakeNotifier = { notify: vi.fn(), degraded: false };
 	const notifierOpts: Array<{ command: string; onError?: (message: string) => void }> = [];
 	let current = 0;
@@ -35,6 +37,7 @@ function createHarness(opts?: {
 			commands[name] = def;
 		},
 		getSessionName: () => opts?.sessionName,
+		events,
 	};
 	const ctx = {
 		cwd: "/work/proj",

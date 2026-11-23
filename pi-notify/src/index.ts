@@ -6,12 +6,9 @@ import { extractSummary, formatDuration, instanceContext, instanceName, withCont
 const ACTIVE_AGENT_RE = /<active_agent\s+name="[^"]+"\s*\/>/;
 
 /**
- * How long a blocking prompt must stay open before it raises a desktop notification.
+ * Noise delay for blocking prompts that the operator answers immediately.
  *
- * A prompt the operator answers immediately — typically a picker their own slash
- * command opened — is not a request for attention, so it must not notify. A prompt
- * nobody answers is exactly the case the notification exists for.
- *
+ * Blocking semantics come from `notify:non-blocking-prompt`, not from this timer.
  * Exported for the test harness only; the delay is behavior, not a knob.
  */
 export const PROMPT_NOTIFY_DELAY_MS = 4000;
@@ -37,12 +34,21 @@ export default function (
 	let activeAgentSession: boolean | undefined;
 	let runOrigin: "user" | "custom" | undefined;
 	let pendingPromptTimer: ReturnType<typeof setTimeout> | undefined;
+	let nonBlockingPromptCount = 0;
+	let sessionClosed = false;
 
 	const cancelPendingPrompt = (): void => {
 		if (pendingPromptTimer === undefined) return;
 		clearTimeout(pendingPromptTimer);
 		pendingPromptTimer = undefined;
 	};
+
+	// Declarations are synchronous with the following UI call, while the host dispatches
+	// ui_prompt_start in a microtask. Count them because delayed handlers can coalesce
+	// several declarations before their corresponding starts arrive.
+	pi.events.on("notify:non-blocking-prompt", () => {
+		nonBlockingPromptCount += 1;
+	});
 
 	const isActiveAgentSession = (ctx: ExtensionContext): boolean => {
 		activeAgentSession ??= ACTIVE_AGENT_RE.test(ctx.getSystemPrompt());
@@ -60,6 +66,7 @@ export default function (
 	};
 
 	pi.on("session_start", async (_event, ctx) => {
+		sessionClosed = false;
 		activeAgentSession = ACTIVE_AGENT_RE.test(ctx.getSystemPrompt());
 		// A pending prompt alert is deliberately left alone: every session replacement emits
 		// session_shutdown on the outgoing runner first (and reload builds new extension instances),
@@ -77,10 +84,20 @@ export default function (
 	});
 
 	pi.on("session_shutdown", async () => {
+		sessionClosed = true;
 		cancelPendingPrompt();
+		nonBlockingPromptCount = 0;
 	});
 
 	pi.on("ui_prompt_start", async (event, ctx) => {
+		// The runner may already have queued this start when shutdown closed the session.
+		if (sessionClosed) return;
+		const nonBlocking = nonBlockingPromptCount > 0;
+		if (nonBlocking) nonBlockingPromptCount -= 1;
+		if (nonBlocking) {
+			cancelPendingPrompt();
+			return;
+		}
 		if (isActiveAgentSession(ctx)) return;
 		ensure(ctx);
 		if (!enabled) return;
@@ -112,7 +129,8 @@ export default function (
 	});
 
 	pi.on("ui_prompt_end", async () => {
-		// The operator answered before the delay elapsed: nothing to deliver.
+		// Do not consume declarations here: without prompt identity, this end may belong
+		// to an earlier prompt whose start is still waiting on another extension's handler.
 		cancelPendingPrompt();
 	});
 

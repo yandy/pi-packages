@@ -40,7 +40,7 @@ describe("SubagentsSettingsHandler", () => {
 	it("shows the three settings options with current values", async () => {
 		const { handler } = makeHandler();
 		const ui = makeMenuUI([undefined]); // cancel immediately
-		await handler.handle({ ui });
+		await handler.handle({ ui, announceNonBlockingPrompt: vi.fn() });
 		const options = ui.select.mock.calls[0][1] as string[];
 		expect(options).toEqual([
 			"Max concurrency (current: 4)",
@@ -53,20 +53,31 @@ describe("SubagentsSettingsHandler", () => {
 	it("applies no change when the settings list is cancelled", async () => {
 		const { handler, settings } = makeHandler();
 		const ui = makeMenuUI([undefined]);
-		await handler.handle({ ui });
+		const announceNonBlockingPrompt = vi.fn();
+		await handler.handle({ ui, announceNonBlockingPrompt });
 		expect(settings.applyMaxConcurrent).not.toHaveBeenCalled();
 		expect(settings.applyDefaultMaxTurns).not.toHaveBeenCalled();
 		expect(settings.applyGraceTurns).not.toHaveBeenCalled();
 		expect(ui.input).not.toHaveBeenCalled();
+		expect(announceNonBlockingPrompt).toHaveBeenCalledTimes(1);
 	});
 });
 
 describe("SubagentsSettingsHandler — max concurrency", () => {
 	it("delegates a valid value to applyMaxConcurrent and notifies the returned toast", async () => {
 		const { handler, settings } = makeHandler();
+		const calls: string[] = [];
 		const ui = makeMenuUI(["Max concurrency (current: 4)"]);
-		ui.input = vi.fn().mockResolvedValue("8");
-		await handler.handle({ ui });
+		ui.select.mockImplementation(() => {
+			calls.push("select");
+			return "Max concurrency (current: 4)";
+		});
+		ui.input = vi.fn(() => {
+			calls.push("input");
+			return Promise.resolve("8");
+		});
+		await handler.handle({ ui, announceNonBlockingPrompt: () => calls.push("announce") });
+		expect(calls).toEqual(["announce", "select", "announce", "input"]);
 		expect(settings.applyMaxConcurrent).toHaveBeenCalledWith(8);
 		expect(ui.notify).toHaveBeenCalledWith("Max concurrency set to 8", "info");
 	});
@@ -75,7 +86,7 @@ describe("SubagentsSettingsHandler — max concurrency", () => {
 		const { handler, settings } = makeHandler();
 		const ui = makeMenuUI(["Max concurrency (current: 4)"]);
 		ui.input = vi.fn().mockResolvedValue("0");
-		await handler.handle({ ui });
+		await handler.handle({ ui, announceNonBlockingPrompt: vi.fn() });
 		expect(settings.applyMaxConcurrent).not.toHaveBeenCalled();
 		expect(ui.notify).toHaveBeenCalledWith("Must be a positive integer.", "warning");
 	});
@@ -84,7 +95,7 @@ describe("SubagentsSettingsHandler — max concurrency", () => {
 		const { handler, settings } = makeHandler();
 		const ui = makeMenuUI(["Max concurrency (current: 4)"]);
 		ui.input = vi.fn().mockResolvedValue(undefined);
-		await handler.handle({ ui });
+		await handler.handle({ ui, announceNonBlockingPrompt: vi.fn() });
 		expect(settings.applyMaxConcurrent).not.toHaveBeenCalled();
 	});
 });
@@ -94,7 +105,7 @@ describe("SubagentsSettingsHandler — default max turns", () => {
 		const { handler, settings } = makeHandler();
 		const ui = makeMenuUI(["Default max turns (current: unlimited)"]);
 		ui.input = vi.fn().mockResolvedValue("0");
-		await handler.handle({ ui });
+		await handler.handle({ ui, announceNonBlockingPrompt: vi.fn() });
 		expect(settings.applyDefaultMaxTurns).toHaveBeenCalledWith(0);
 		expect(ui.notify).toHaveBeenCalledWith("Default max turns set to unlimited", "info");
 	});
@@ -103,7 +114,7 @@ describe("SubagentsSettingsHandler — default max turns", () => {
 		const { handler, settings } = makeHandler();
 		const ui = makeMenuUI(["Default max turns (current: unlimited)"]);
 		ui.input = vi.fn().mockResolvedValue("20");
-		await handler.handle({ ui });
+		await handler.handle({ ui, announceNonBlockingPrompt: vi.fn() });
 		expect(settings.applyDefaultMaxTurns).toHaveBeenCalledWith(20);
 	});
 
@@ -111,7 +122,7 @@ describe("SubagentsSettingsHandler — default max turns", () => {
 		const { handler, settings } = makeHandler();
 		const ui = makeMenuUI(["Default max turns (current: unlimited)"]);
 		ui.input = vi.fn().mockResolvedValue("-1");
-		await handler.handle({ ui });
+		await handler.handle({ ui, announceNonBlockingPrompt: vi.fn() });
 		expect(settings.applyDefaultMaxTurns).not.toHaveBeenCalled();
 		expect(ui.notify).toHaveBeenCalledWith("Must be 0 (unlimited) or a positive integer.", "warning");
 	});
@@ -122,7 +133,7 @@ describe("SubagentsSettingsHandler — default timeout", () => {
 		const { handler, settings } = makeHandler();
 		const ui = makeMenuUI(["Default timeout (current: unlimited)"]);
 		ui.input = vi.fn().mockResolvedValue("300");
-		await handler.handle({ ui });
+		await handler.handle({ ui, announceNonBlockingPrompt: vi.fn() });
 		expect(settings.applyDefaultTimeoutSeconds).toHaveBeenCalledWith(300);
 		expect(ui.notify).toHaveBeenCalledWith("Default timeout set to unlimited", "info");
 	});
@@ -131,7 +142,7 @@ describe("SubagentsSettingsHandler — default timeout", () => {
 		const { handler, settings } = makeHandler();
 		const ui = makeMenuUI(["Default timeout (current: unlimited)"]);
 		ui.input = vi.fn().mockResolvedValue("0");
-		await handler.handle({ ui });
+		await handler.handle({ ui, announceNonBlockingPrompt: vi.fn() });
 		expect(settings.applyDefaultTimeoutSeconds).toHaveBeenCalledWith(0);
 	});
 
@@ -139,7 +150,7 @@ describe("SubagentsSettingsHandler — default timeout", () => {
 		const { handler, settings } = makeHandler();
 		const ui = makeMenuUI(["Default timeout (current: unlimited)"]);
 		ui.input = vi.fn().mockResolvedValue("-1");
-		await handler.handle({ ui });
+		await handler.handle({ ui, announceNonBlockingPrompt: vi.fn() });
 		expect(settings.applyDefaultTimeoutSeconds).not.toHaveBeenCalled();
 		expect(ui.notify).toHaveBeenCalledWith("Must be 0 (unlimited) or a positive integer.", "warning");
 	});
@@ -150,7 +161,7 @@ describe("SubagentsSettingsHandler — grace turns", () => {
 		const { handler, settings } = makeHandler();
 		const ui = makeMenuUI(["Grace turns (current: 5)"]);
 		ui.input = vi.fn().mockResolvedValue("3");
-		await handler.handle({ ui });
+		await handler.handle({ ui, announceNonBlockingPrompt: vi.fn() });
 		expect(settings.applyGraceTurns).toHaveBeenCalledWith(3);
 		expect(ui.notify).toHaveBeenCalledWith("Grace turns set to 3", "info");
 	});
@@ -159,7 +170,7 @@ describe("SubagentsSettingsHandler — grace turns", () => {
 		const { handler, settings } = makeHandler();
 		const ui = makeMenuUI(["Grace turns (current: 5)"]);
 		ui.input = vi.fn().mockResolvedValue("0");
-		await handler.handle({ ui });
+		await handler.handle({ ui, announceNonBlockingPrompt: vi.fn() });
 		expect(settings.applyGraceTurns).not.toHaveBeenCalled();
 		expect(ui.notify).toHaveBeenCalledWith("Must be a positive integer.", "warning");
 	});

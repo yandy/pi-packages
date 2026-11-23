@@ -603,11 +603,17 @@ describe("TranscriptOverlay", () => {
 });
 
 describe("SessionNavigatorHandler", () => {
-	function makeUI(selectResult?: string) {
+	function makeUI(selectResult?: string, calls?: string[]) {
 		return {
-			select: vi.fn().mockResolvedValue(selectResult),
+			select: vi.fn(() => {
+				calls?.push("select");
+				return Promise.resolve(selectResult);
+			}),
 			notify: vi.fn(),
-			custom: vi.fn().mockResolvedValue(undefined),
+			custom: vi.fn(() => {
+				calls?.push("custom");
+				return Promise.resolve(undefined);
+			}),
 		};
 	}
 
@@ -631,6 +637,7 @@ describe("SessionNavigatorHandler", () => {
 	it("notifies and skips the overlay when no sessions are navigable", async () => {
 		const ui = makeUI();
 		const notReady = makeNavigable({ isSessionReady: () => false });
+		const announceNonBlockingPrompt = vi.fn();
 		await new SessionNavigatorHandler().handle({
 			ui,
 			agents: [notReady],
@@ -638,13 +645,16 @@ describe("SessionNavigatorHandler", () => {
 			registry,
 			cwd: "/test/cwd",
 			readFile: noReadFile,
+			announceNonBlockingPrompt,
 		});
 		expect(ui.notify).toHaveBeenCalledWith("No subagent sessions to view.", "info");
 		expect(ui.custom).not.toHaveBeenCalled();
+		expect(announceNonBlockingPrompt).not.toHaveBeenCalled();
 	});
 
 	it("does not open the overlay when the operator cancels the picker", async () => {
 		const ui = makeUI(undefined);
+		const announceNonBlockingPrompt = vi.fn();
 		await new SessionNavigatorHandler().handle({
 			ui,
 			agents: [makeNavigable()],
@@ -652,9 +662,11 @@ describe("SessionNavigatorHandler", () => {
 			registry,
 			cwd: "/test/cwd",
 			readFile: noReadFile,
+			announceNonBlockingPrompt,
 		});
 		expect(ui.select).toHaveBeenCalledOnce();
 		expect(ui.custom).not.toHaveBeenCalled();
+		expect(announceNonBlockingPrompt).toHaveBeenCalledTimes(1);
 	});
 
 	it("opens a read-only overlay sourced from the picked record", async () => {
@@ -664,7 +676,8 @@ describe("SessionNavigatorHandler", () => {
 		const record = makeNavigable({ agentMessages: messages });
 		// The handler labels entries identically to listNavigableAgents.
 		const label = "Agent (Test task) · 2 tools · completed · 3.0s";
-		const ui = makeUI(label);
+		const calls: string[] = [];
+		const ui = makeUI(label, calls);
 
 		await new SessionNavigatorHandler().handle({
 			ui,
@@ -673,8 +686,10 @@ describe("SessionNavigatorHandler", () => {
 			registry,
 			cwd: "/test/cwd",
 			readFile: noReadFile,
+			announceNonBlockingPrompt: () => calls.push("announce"),
 		});
 
+		expect(calls).toEqual(["announce", "select", "announce", "custom"]);
 		expect(ui.custom).toHaveBeenCalledOnce();
 		// Invariant #423: the handler is a reactive consumer — it sources the
 		// transcript and never reads tool definitions off the record itself; only
@@ -699,6 +714,7 @@ describe("SessionNavigatorHandler", () => {
 			registry,
 			cwd: "/test/cwd",
 			readFile: noReadFile,
+			announceNonBlockingPrompt: vi.fn(),
 		});
 
 		const header = renderCapturedOverlay(ui).join("\n");
@@ -734,7 +750,15 @@ describe("SessionNavigatorHandler", () => {
 		];
 		const ui = makeUI("Agent (Old task) · 5 tools · completed · 3.0s · evicted (snapshot)");
 
-		await new SessionNavigatorHandler().handle({ ui, agents: [], evicted, registry, cwd: "/test/cwd", readFile });
+		await new SessionNavigatorHandler().handle({
+			ui,
+			agents: [],
+			evicted,
+			registry,
+			cwd: "/test/cwd",
+			readFile,
+			announceNonBlockingPrompt: vi.fn(),
+		});
 
 		expect(readFile).toHaveBeenCalledWith("/tasks/e1.jsonl");
 		expect(ui.custom).toHaveBeenCalledOnce();
@@ -759,7 +783,15 @@ describe("SessionNavigatorHandler", () => {
 		];
 		const ui = makeUI("Agent (Old task) · 5 tools · completed · 3.0s · evicted (snapshot)");
 
-		await new SessionNavigatorHandler().handle({ ui, agents: [], evicted, registry, cwd: "/test/cwd", readFile });
+		await new SessionNavigatorHandler().handle({
+			ui,
+			agents: [],
+			evicted,
+			registry,
+			cwd: "/test/cwd",
+			readFile,
+			announceNonBlockingPrompt: vi.fn(),
+		});
 
 		expect(ui.notify).toHaveBeenCalledWith("Could not read the session transcript file.", "error");
 		expect(ui.custom).not.toHaveBeenCalled();

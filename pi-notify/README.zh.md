@@ -4,7 +4,7 @@ pi 的桌面通知包：当你并行运行多个 pi 实例时，每个实例在�
 
 ## 功能
 
-- **等待输入**：任何阻塞式 `ctx.ui` 弹窗（select / confirm / input / editor / custom，含其它扩展发起的弹窗）都会发送通知——延迟 4 秒投递，弹窗在此之前关闭则不发送——包含弹窗标题、交互类型和实例上下文，urgency 默认 `critical`。
+- **等待输入**：任何未声明为非阻塞的 `ctx.ui` 弹窗（select / confirm / input / editor / custom，含其它扩展发起的弹窗）都会发送通知——延迟 4 秒投递，弹窗在此之前关闭则不发送——包含弹窗标题、交互类型和实例上下文。不会阻塞 agent 继续执行的 UI 可以在调用前发出 `notify:non-blocking-prompt`，这类弹窗永不通知。urgency 默认 `critical`。
 - **任务完成**：agent 完全空闲（`agent_settled`）时发送通知，展示回合耗时和最后一条 assistant 消息的纯文本摘要，urgency 默认 `normal`。
 - **实例标识**：标题以 session 名开头（未命名时回退为项目目录名）；正文第二行在有用时保留项目名，并始终带进程 pid。
 - **可读摘要**：去除 markdown 标记和多余空白；最多保留 160 个字素簇加 `…`，优先选择附近的句子或单词边界，避免截断单词或 emoji。
@@ -44,7 +44,7 @@ pi install npm:@yandy0725/pi-notify
 - 等待输入时，`<subject>` 为弹窗标题，无标题时为其 kind；`custom` 弹窗按契约不带标题，因此固定用 `Interactive prompt` 而非 kind 名称。`<context>` 包含有独立 session 名时的项目 basename、未在首行重复出现的弹窗 kind，以及 `pid <pid>`。
 - 任务完成时，`<summary>` 为最后一条 assistant 消息的清洗后文本；无文本时正文只有 `<context>`。耗时四舍五入到秒，按秒、分钟或小时紧凑展示。
 - `\n` 表示实际换行：标题或摘要位于第一行，实例元数据位于第二行。自定义通知命令仍在同一个 body 参数中收到这两行。
-- 等待输入通知**延迟 4 秒**投递：弹窗打开时排定，若在此之前关闭（`ui_prompt_end`）则丢弃。因此自己用斜杠命令打开、随手点掉的列表不会弹窗，而无人应答的弹窗照常通知。会话替换与关闭也会丢弃待投递的通知。
+- 等待输入通知**延迟 4 秒**投递，唯一用途是避免立即答掉的阻塞弹窗产生打扰。已声明为非阻塞的弹窗无论停留多久都不会排定通知。会话替换与关闭也会丢弃待投递的通知。
 
 示例：
 
@@ -54,9 +54,22 @@ Updated foo.ts and fixed the notification bug…
 proj · pid 4242
 ```
 
-### 已知限制
+### 非阻塞弹窗契约
 
-取消依赖 `ui_prompt_end`，而 Pi 只为最外层弹窗、且经由微任务派发该事件。若弹窗在同一个 tick 内打开又关闭（例如其它扩展的 `ui_prompt_start` 处理器先让出执行权，使本扩展的处理器晚到），仍会发送通知。弹窗事件不携带发起者信息，扩展内部无法消除这一窗口。
+如果扩展的 picker、菜单或浮层不会阻止 agent loop 继续执行，应在每次调用对应 UI 前、同一个同步块内声明：
+
+```ts
+pi.events.emit("notify:non-blocking-prompt", {});
+await ctx.ui.custom(/* ... */);
+```
+
+声明按计数保存：每个 `ui_prompt_start` 最多消费一个，`ui_prompt_end` 不消费声明，`session_shutdown` 清除未消费的声明。已声明的 start 会取消此前待投递的弹窗通知，并在构造 notifier 前返回。shutdown 后，同一 runner 上已排队的 start 会被忽略，直到新的 `session_start`。未声明的弹窗保持默认通知行为，因此未改造扩展的阻塞 UI 不会被静默。
+
+只为真正不阻塞 agent 的 UI 声明，且声明后必须实际调用对应的包装 UI 并产生最外层 `ui_prompt_start`。Pi 会把嵌套或重叠弹窗合并为一个最外层 start，因此可能嵌套或重叠的调用（包括 RPC 客户端允许的并发对话框）不得声明；这些调用保持未声明的默认行为。未配对的声明可能抑制后续弹窗，直到会话关闭。
+
+### 宿主弹窗限制
+
+Pi 只为最外层弹窗发出 `ui_prompt_start` / `ui_prompt_end`。因此，另一个弹窗仍处于活动状态时打开的阻塞弹窗不会产生事件，也无法触发桌面通知。除非宿主提供独立的弹窗身份或嵌套事件，否则扩展无法恢复这种嵌套告警。
 
 ## 配置
 
@@ -70,7 +83,7 @@ proj · pid 4242
 | `PI_NOTIFY_URGENCY_DONE` | `normal` | 完成通知的 urgency |
 | `PI_NOTIFY_COMMAND` | 非 Windows 为 `notify-send`；Windows 为 `powershell.exe` | 自定义通知程序；以 `<command> <title> <body>` 调用（不传 urgency） |
 
-回合时长从当前空闲周期间隔内首个 `agent_start` 计到 `agent_settled`，时长 **>=** 阈值才发送。每次 settle 与 session 替换都会重置计时；等待输入通知不受阈值影响，但会延迟 4 秒投递，且弹窗提前关闭即取消。待投递的等待输入通知在 `session_shutdown` 时丢弃（任何会话替换都会先在旧 runner 上发出它），而**不在** `session_start` 丢弃：Pi 在 `session_start` 之前发出的启动期弹窗不能因此丢掉告警。
+回合时长从当前空闲周期间隔内首个 `agent_start` 计到 `agent_settled`，时长 **>=** 阈值才发送。每次 settle 与 session 替换都会重置计时。等待输入通知不受阈值影响：未声明的阻塞弹窗延迟 4 秒投递、提前关闭即取消，已声明的非阻塞弹窗不排定通知。待投递的等待输入通知在 `session_shutdown` 时丢弃（任何会话替换都会先在旧 runner 上发出它），而**不在** `session_start` 丢弃：Pi 在 `session_start` 之前发出的启动期弹窗不能因此丢掉告警。
 
 `/notify` 切换当前实例的开关并在 pi UI 中反馈新状态。开关仅存于内存：`PI_NOTIFY` 决定初始状态，`session_start`（startup / reload / new / resume / fork）时重置。
 
