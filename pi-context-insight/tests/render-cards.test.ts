@@ -97,6 +97,14 @@ describe("renderCurrentContext", () => {
 		expect(html).toContain('data-reserve="output"');
 		expect(html).toContain('data-trigger="1"');
 	});
+	it("lays the category legend out in a three column grid", () => {
+		const html = renderCurrentContext(report());
+		expect(html).toContain('class="legend legend-3"');
+		expect(html).toContain('data-cat="user"');
+	});
+	it("renders the occupancy as one large number on the right", () => {
+		expect(renderCurrentContext(report())).toContain('class="occupancy"');
+	});
 	it("explains when compaction is disabled", () => {
 		const html = renderCurrentContext(report({ enabled: false }));
 		expect(html).not.toContain('data-trigger="1"');
