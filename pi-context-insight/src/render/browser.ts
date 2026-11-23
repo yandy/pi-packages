@@ -79,7 +79,7 @@ function rowHtml(report: InsightReport, item: Item): string {
 	const lang = report.lang;
 	const source = item.kind === "toolDefinition" ? toolSource(report, item.tag) : undefined;
 	const chips = [
-		item.kind === "toolResult" || item.kind === "toolCall" ? `<span class="tag">${esc(item.tag)}</span>` : "",
+		item.kind === "toolResult" || item.block === "toolCall" ? `<span class="tag">${esc(item.tag)}</span>` : "",
 		item.skillName === undefined ? "" : `<span class="tag">${esc(t(lang, { key: "browser.skillTag", params: { name: item.skillName } }))}</span>`,
 		item.isError === true ? `<span class="flag">✕</span>` : "",
 		source === undefined ? "" : `<span class="tag" data-tool-source="${source.source}">${esc(source.label || source.source)}</span>`,
