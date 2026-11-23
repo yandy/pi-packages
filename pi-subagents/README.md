@@ -206,7 +206,6 @@ Events emitted via `pi.events` for other extensions to consume:
 | `subagents:compacted` | Agent session compacted |
 | `subagents:settings_loaded` | Persisted settings applied |
 | `subagents:settings_changed` | Settings mutation applied |
-| `notify:non-blocking-prompt` | Immediately before a TUI sessions/settings UI call that does not block the agent loop |
 
 ## Development
 
@@ -232,7 +231,7 @@ Both slash commands and the running-agents widget call host UI primitives direct
 | `select` (`/subagents:sessions`) | none | Forwarded; no timeout |
 | `custom` (transcript overlay) | none | RPC returns `undefined` immediately: picking a session shows nothing. Same in print / json |
 
-The sessions picker, read-only transcript overlay, and every settings menu/input are operator-driven and do not block the agent loop. In TUI, each of these UI calls is immediately preceded by a `notify:non-blocking-prompt` declaration. RPC/print/json do not declare: nested or overlapping dialogs have no separate outermost prompt start, so an undeclared default is safer than leaving an unmatched declaration.
+The sessions picker, read-only transcript overlay, and every settings menu/input are operator-driven and do not block the agent loop.
 
 ## License
 

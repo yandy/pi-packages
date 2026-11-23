@@ -111,15 +111,10 @@ describe("print mode background notifications", () => {
 	});
 });
 
-describe("operator prompt declaration modes", () => {
+describe("operator prompt default silence", () => {
 	afterEach(() => vi.restoreAllMocks());
 
-	it.each([
-		["tui", 1],
-		["rpc", 0],
-		["print", 0],
-		["json", 0],
-	])("declares settings UI only when it is guaranteed to be outermost: %s", async (mode, expected) => {
+	it.each(["tui", "rpc", "print", "json"])("emits no legacy declaration for settings UI: %s", async (mode) => {
 		const { pi, commands } = makePi();
 		subagentsExtension(pi);
 		pi.events.emit.mockClear();
@@ -138,7 +133,6 @@ describe("operator prompt declaration modes", () => {
 		await commands.get("subagents:settings").handler("", ctx);
 
 		expect(ctx.ui.select).toHaveBeenCalledTimes(1);
-		expect(pi.events.emit).toHaveBeenCalledTimes(expected);
-		if (expected === 1) expect(pi.events.emit).toHaveBeenCalledWith("notify:non-blocking-prompt", {});
+		expect(pi.events.emit).not.toHaveBeenCalled();
 	});
 });
