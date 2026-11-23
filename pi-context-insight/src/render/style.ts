@@ -116,6 +116,7 @@ pre.body{white-space:pre-wrap;word-break:break-word;background:var(--surface-2);
 .timeline-scroll{overflow-x:auto;overflow-y:hidden}
 .timeline-scroll>svg{display:block;margin:0 auto;max-width:none}
 .toolbar{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.detail-scroll{max-height:300px;overflow:auto}
 .event-row{display:grid;grid-template-columns:88px 10px minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:4px 2px;border-bottom:1px solid var(--line);font-size:12px}
 .event-row:last-child{border-bottom:none}
 

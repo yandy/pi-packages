@@ -4,6 +4,7 @@ import { CATEGORY_ORDER, type CategoryId } from "../model";
 import type { InsightReport } from "../report";
 import type { Milestone } from "../session/events";
 import { categoryLabel } from "./categories";
+import { renderStepDetail } from "./detail";
 import { esc } from "./escape";
 import { section } from "./layout";
 
@@ -73,15 +74,29 @@ function barFor(
 }
 
 export function renderTimeline(report: InsightReport): string {
+	return section({
+		id: "timeline",
+		titleKey: "timeline.title",
+		lang: report.lang,
+		body: timelineBody(report),
+	});
+}
+
+/** The timeline card with the selected step's detail folded into its bottom. */
+export function renderTimelineSection(report: InsightReport): string {
+	return section({
+		id: "timeline",
+		titleKey: "timeline.title",
+		lang: report.lang,
+		body: timelineBody(report) + renderStepDetail(report),
+	});
+}
+
+function timelineBody(report: InsightReport): string {
 	const lang = report.lang;
 	const steps = report.steps;
 	if (steps.length === 0) {
-		return section({
-			id: "timeline",
-			titleKey: "timeline.title",
-			lang,
-			body: `<p class="dim" data-empty="timeline">${t(lang, { key: "empty.timeline" })}</p>`,
-		});
+		return `<p class="dim" data-empty="timeline">${t(lang, { key: "empty.timeline" })}</p>`;
 	}
 	const rendered = steps.length > TIMELINE_MAX ? steps.slice(-TIMELINE_MAX) : steps;
 	const geo = timelineGeometry(rendered.length);
@@ -161,7 +176,7 @@ ${ticks}
 ${bars}${turns}${tickLabels}
 </svg>`;
 
-	const body = `<div class="toolbar">${toolbar}</div>
+	return `<div class="toolbar">${toolbar}</div>
 <div class="legend">${legend}</div>
 <div data-timeline-overview hidden style="margin-top:8px">${steps
 		.map(
@@ -172,6 +187,4 @@ ${bars}${turns}${tickLabels}
 <div class="timeline-scroll" data-timeline-scroll style="margin-top:8px">${svg}</div>
 ${steps.length > TIMELINE_MAX ? `<p class="dim" data-timeline-cap="${TIMELINE_MAX}">${t(lang, { key: "timeline.capped", params: { total: steps.length, shown: TIMELINE_MAX } })}</p>` : ""}
 <p class="dim" style="margin:8px 0 0">${t(lang, { key: "timeline.note", params: { steps: rendered.length, max: maxLabel } })}</p>`;
-
-	return section({ id: "timeline", titleKey: "timeline.title", lang, body });
 }

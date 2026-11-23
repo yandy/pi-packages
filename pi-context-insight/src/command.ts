@@ -6,13 +6,12 @@ import type { Lang } from "./model";
 import { renderActivity } from "./render/activity";
 import { renderBrowser } from "./render/browser";
 import { renderCurrentContext } from "./render/context";
-import { renderStepDetail } from "./render/detail";
 import { renderDocument } from "./render/document";
 import { renderEvents } from "./render/events";
 import { renderFamily } from "./render/family";
 import { renderOverview } from "./render/overview";
 import { buildPayload } from "./render/payload";
-import { renderTimeline } from "./render/timeline";
+import { renderTimelineSection } from "./render/timeline";
 import { renderTimingCard } from "./render/timing";
 import { renderTokens } from "./render/tokens";
 import { buildReport } from "./report";
@@ -88,8 +87,7 @@ function bodyOf(report: ReturnType<typeof buildReport>): string {
 		renderTokens(report),
 		renderTimingCard(report),
 		renderCurrentContext(report),
-		renderTimeline(report),
-		renderStepDetail(report),
+		renderTimelineSection(report),
 		renderBrowser(report),
 		renderEvents(report),
 		renderActivity(report),

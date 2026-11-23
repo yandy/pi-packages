@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderStepDetail } from "../src/render/detail";
-import { renderTimeline, timelineGeometry } from "../src/render/timeline";
+import { renderTimeline, renderTimelineSection, timelineGeometry } from "../src/render/timeline";
 import { buildReport } from "../src/report";
 import { fakeContext } from "./helpers/ctx";
 import {
@@ -87,6 +87,19 @@ describe("renderTimeline", () => {
 	it("renders a turn band with one block per turn", () => {
 		const html = renderTimeline(report(3));
 		expect(html.match(/data-turn-block="\d+"/g)).toHaveLength(3);
+	});
+});
+
+describe("renderTimelineSection", () => {
+	it("nests the step detail inside the timeline card", () => {
+		const html = renderTimelineSection(report(3));
+		expect(html).toContain('data-card="timeline"');
+		expect(html).toContain("data-step-detail");
+		expect(html.match(/data-step-panel="\d+"/g)).toHaveLength(3);
+		expect(html.indexOf("data-step-detail")).toBeGreaterThan(html.indexOf('data-card="timeline"'));
+	});
+	it("does not emit a standalone detail card", () => {
+		expect(renderStepDetail(report(3))).not.toContain('data-card="detail"');
 	});
 });
 

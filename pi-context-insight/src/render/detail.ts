@@ -40,5 +40,5 @@ export function renderStepDetail(report: InsightReport): string {
 </tbody></table></div>`;
 		})
 		.join("");
-	return `<div class="card" data-card="detail" style="margin-top:-8px"><div style="max-height:280px;overflow:auto">${panels}</div></div>`;
+	return `<div data-step-detail><div class="detail-scroll">${panels}</div></div>`;
 }
