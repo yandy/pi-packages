@@ -332,3 +332,14 @@ export function buildSteps(args: {
 
 	return { steps, items, bodies, turns, warnings };
 }
+
+/** The step a timestamp belongs to: the last request that had already started. */
+export function stepIndexOf(timestamp: number, steps: ReadonlyArray<{ index: number; timestamp: number }>): number {
+	if (steps.length === 0) return 0;
+	let found = steps[0]!.index;
+	for (const step of steps) {
+		if (step.timestamp <= timestamp) found = step.index;
+		else break;
+	}
+	return found;
+}
