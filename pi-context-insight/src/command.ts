@@ -2,7 +2,7 @@ import { writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { renderInsightHtml } from "./html";
-import { buildInsightReport } from "./report";
+import { buildInsightReport } from "./report-v1";
 
 function filenameStem(value: string): string {
 	return value.replace(/[^A-Za-z0-9_.-]/g, "_") || "session";

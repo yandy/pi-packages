@@ -5,7 +5,7 @@ import type { Usage } from "@earendil-works/pi-ai";
 import { type ExtensionCommandContext, SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { estimateTextTokens } from "@earendil-works/pi-ai/utils/estimate";
-import { analyzeSessionManager, buildInsightReport } from "../src/report";
+import { analyzeSessionManager, buildInsightReport } from "../src/report-v1";
 import { addRecord, createChild, createParent } from "./helpers/subagent-fixtures";
 
 let root: string;

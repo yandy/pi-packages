@@ -23,5 +23,7 @@ export const DICT_ZH: Record<string, string> = {
 	"warning.brokenChild": "子会话 {id} 无法读取。",
 	"warning.depthLimit": "Agent 家族在深度 {depth} 处截断。",
 	"warning.memberLimit": "Agent 家族在 {count} 个成员处截断。",
+	"warning.noSystem": "该会话未记录系统提示词，系统提示词与工具定义无法还原。",
 };
+
 

@@ -23,5 +23,7 @@ export const DICT_EN: Record<string, string> = {
 	"warning.brokenChild": "Child session {id} could not be read.",
 	"warning.depthLimit": "Agent family truncated at depth {depth}.",
 	"warning.memberLimit": "Agent family truncated at {count} members.",
+	"warning.noSystem": "This session never recorded a system prompt; system prompt and tool definitions cannot be rebuilt.",
 };
+
 

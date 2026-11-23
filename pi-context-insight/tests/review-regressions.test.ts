@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { analyzeActivity, analyzeTiming } from "../src/activity";
 import { analyzeContextProjection } from "../src/context";
 import { maxUsageTotal, renderInsightHtml } from "../src/html";
-import { analyzeSessionManager, buildInsightReport } from "../src/report";
+import { analyzeSessionManager, buildInsightReport } from "../src/report-v1";
 import { loadSubagentSessions } from "../src/subagents";
 import { addRecord, createChild, createParent, tasksDir } from "./helpers/subagent-fixtures";
 
