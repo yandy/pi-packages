@@ -186,7 +186,7 @@ timeout: 300
 
 ## 事件
 
-通过 `pi.events` 发出的事件，供其他扩展消费：
+通过 `pi.events` 发出的生命周期事件，供其他扩展消费：
 
 | 事件 | 触发时机 |
 |------|----------|
@@ -222,8 +222,6 @@ npm test                 # vitest run
 | `select` / `input` / `notify`（`/subagents:settings`） | 无 | 会转发；没有传 `timeout`，客户端不响应时命令一直挂着。print / json 下对话皆为空实现，菜单直接退出 |
 | `select`（`/subagents:sessions`） | 无 | 会转发；没有超时 |
 | `custom`（会话记录浮层） | 无 | RPC 直接返回 `undefined`：选中一个会话后什么都不显示；print / json 同理 |
-
-会话 picker、只读会话浮层以及每级 settings 菜单/输入都由操作员主动打开，不会阻塞 agent loop。
 
 ## 许可证
 

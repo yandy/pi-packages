@@ -128,7 +128,6 @@ export class SessionNavigatorHandler {
 			return;
 		}
 		const markdownTheme = getMarkdownTheme();
-
 		await ui.custom<undefined>(
 			(tui, theme, _keybindings, done) =>
 				new TranscriptOverlay({

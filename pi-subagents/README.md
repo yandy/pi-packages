@@ -194,7 +194,7 @@ Settings set via `/subagents:settings` persist in `<cwd>/.pi/subagents.json` (pr
 
 ## Events
 
-Events emitted via `pi.events` for other extensions to consume:
+Lifecycle events emitted via `pi.events` for other extensions to consume:
 
 | Event | When |
 |-------|------|
@@ -230,8 +230,6 @@ Both slash commands and the running-agents widget call host UI primitives direct
 | `select` / `input` / `notify` (`/subagents:settings`) | none | Forwarded; no `timeout` is passed, so an unresponsive client keeps the command pending. print / json get no-op dialogs, so the menu exits silently |
 | `select` (`/subagents:sessions`) | none | Forwarded; no timeout |
 | `custom` (transcript overlay) | none | RPC returns `undefined` immediately: picking a session shows nothing. Same in print / json |
-
-The sessions picker, read-only transcript overlay, and every settings menu/input are operator-driven and do not block the agent loop.
 
 ## License
 
