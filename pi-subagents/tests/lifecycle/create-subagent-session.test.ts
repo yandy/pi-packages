@@ -113,33 +113,31 @@ describe("createSubagentSession — assembly", () => {
 		expect(loaderOpts.appendSystemPromptOverride?.(["user append"])).toEqual(["user append", "append section"]);
 	});
 
-	it("passes the type's tool allowlist through to the session", async () => {
+	it("passes the resolved allowlist to the session", async () => {
 		const registry = createAgentLookup({ toolNames: ["read", "grep"] });
 		await createSubagentSession(
-			{ snapshot: STUB_SNAPSHOT, type: "Explore" },
+			{ snapshot: STUB_SNAPSHOT, type: "auditor" },
 			createSubagentSessionDeps({ io, exec, registry }),
 		);
-
 		expect(io.createSession).toHaveBeenCalledWith(expect.objectContaining({ tools: ["read", "grep"] }));
 	});
 
-	it("omits the tool list for an inheriting agent so the SDK hands it the parent's tools", async () => {
+	it("hands the session the parent's active tools for an inheriting agent", async () => {
 		const registry = createAgentLookup({ toolNames: undefined });
+		const snapshot = { ...STUB_SNAPSHOT, activeToolNames: ["read", "bash", "subagent"] };
 		await createSubagentSession(
-			{ snapshot: STUB_SNAPSHOT, type: "general-purpose" },
+			{ snapshot, type: "general-purpose" },
 			createSubagentSessionDeps({ io, exec, registry }),
 		);
-
-		expect(io.createSession).toHaveBeenCalledWith(expect.objectContaining({ tools: undefined }));
+		expect(io.createSession).toHaveBeenCalledWith(expect.objectContaining({ tools: ["read", "bash"] }));
 	});
 
-	it("passes an empty allowlist as an empty tool list, not as the default set", async () => {
+	it("passes an empty allowlist for tools: none", async () => {
 		const registry = createAgentLookup({ toolNames: [] });
 		await createSubagentSession(
-			{ snapshot: STUB_SNAPSHOT, type: "Explore" },
+			{ snapshot: STUB_SNAPSHOT, type: "notool" },
 			createSubagentSessionDeps({ io, exec, registry }),
 		);
-
 		expect(io.createSession).toHaveBeenCalledWith(expect.objectContaining({ tools: [] }));
 	});
 
@@ -249,9 +247,9 @@ describe("createSubagentSession — dispose on creation failure", () => {
 
 describe("createSubagentSession — post-bind recursion guard", () => {
 	// Extension-registered tools join the active set during bindExtensions; a
-	// single post-bind filter pass applies the EXCLUDED_TOOL_NAMES recursion
-	// guard to the full post-bind set. The factory session flips getActiveToolNames
-	// from its before-bind set to its after-bind set once bindExtensions resolves.
+	// single post-bind filter pass applies the dispatch-tool recursion guard to
+	// the full post-bind set. The factory session flips getActiveToolNames from
+	// its before-bind set to its after-bind set once bindExtensions resolves.
 
 	it("calls setActiveToolsByName once, after bindExtensions", async () => {
 		const session = arrangeFactory({ toolsBeforeBind: ["read"], toolsAfterBind: ["read", "extension_tool"] });
@@ -271,7 +269,7 @@ describe("createSubagentSession — post-bind recursion guard", () => {
 			expected: ["read", "extension_tool"],
 		},
 		{
-			name: "excludes EXCLUDED_TOOL_NAMES while keeping other tools",
+			name: "excludes the dispatch tools while keeping other tools",
 			toolsAfterBind: ["read", "subagent", "get_subagent_result", "steer_subagent", "external"],
 			expected: ["read", "external"],
 		},

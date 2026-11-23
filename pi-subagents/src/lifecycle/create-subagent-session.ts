@@ -14,6 +14,7 @@
 import type { Model } from "@earendil-works/pi-ai";
 import type { AgentSession, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { AgentConfigLookup } from "../config/agent-types";
+import { DISPATCH_TOOL_NAMES } from "../config/tool-names";
 import type { ChildLifecyclePublisher } from "../lifecycle/child-lifecycle";
 import type { ParentSnapshot } from "../lifecycle/parent-snapshot";
 import { SubagentSession } from "../lifecycle/subagent-session";
@@ -21,19 +22,16 @@ import type { EnvInfo } from "../session/env";
 import { type AssemblerIO, assembleSessionConfig, type SessionConfig } from "../session/session-config";
 import type { ParentSessionInfo, ShellExec, SubagentType, ThinkingLevel } from "../types";
 
-/** Names of tools registered by this extension that subagents must NOT inherit. */
-const EXCLUDED_TOOL_NAMES = ["subagent", "get_subagent_result", "steer_subagent"];
-
 /**
- * Apply the recursion guard: remove this extension's dispatch tools from the
- * child's active set. Runs after `bindExtensions` so extension-registered tools
- * are also covered — an inheriting child (`tools` unset) gets every tool the
- * parent's extensions register, including these, which is exactly why the
- * removal has to happen post-bind. Unconditional: children always load the
- * parent's extensions.
+ * Apply the recursion guard: remove this package's dispatch tools
+ * (`DISPATCH_TOOL_NAMES`) from the child's active set. Runs after
+ * `bindExtensions` so extension-registered tools are also covered — an
+ * inheriting child (`tools` unset) gets every tool the parent's extensions
+ * register, including these, which is exactly why the removal has to happen
+ * post-bind. Unconditional: children always load the parent's extensions.
  */
 function applyRecursionGuard(session: AgentSession): void {
-	const filtered = session.getActiveToolNames().filter((t) => !EXCLUDED_TOOL_NAMES.includes(t));
+	const filtered = session.getActiveToolNames().filter((t) => !DISPATCH_TOOL_NAMES.includes(t));
 	session.setActiveToolsByName(filtered);
 }
 
@@ -71,7 +69,7 @@ export interface CreateSessionOptions {
 	settingsManager: SettingsManager;
 	modelRegistry: unknown;
 	model?: unknown;
-	/** Tool allowlist; `undefined` leaves the SDK to inherit the default + extension tools. */
+	/** Resolved tool list; `undefined` = leave resolution to the host. */
 	tools?: string[];
 	resourceLoader: ResourceLoaderLike;
 	thinkingLevel?: ThinkingLevel;
