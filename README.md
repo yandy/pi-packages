@@ -19,10 +19,6 @@ Monorepo for @yandy pi packages. Uses npm workspaces.
 | [pi-vision-tools](./pi-vision-tools) | `describe_image` tool — delegate image analysis to a vision model | `@yandy0725/pi-vision-tools` |
 | [pi-web-tools](./pi-web-tools) | websearch + webfetch tools | `@yandy0725/pi-web-tools` |
 
-> `pi-memory` now lives in [simple-memory](https://github.com/yandy/simple-memory).
-> `pi-container-sandbox` is retired: the npm package is deprecated and its source lives in git history (`pi-container-sandbox-v1.3.0`).
-> `pi-superpowers` is retired: the npm package is deprecated and its source lives in git history (`pi-superpowers-v0.7.3`). Install the skills from upstream [obra/superpowers](https://github.com/obra/superpowers) instead.
-
 ## Development
 
 ```bash

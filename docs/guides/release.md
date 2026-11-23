@@ -72,7 +72,3 @@ curl -s "https://registry.npmjs.org/@yandy0725%2F<pkg>" | node -p "JSON.parse(re
 ```
 
 版本文档返回 200 后，把 `dist.shasum` 与 publish 日志里 `npm notice shasum:` 逐字比对，并确认 `dist-tags.latest` 已翻到新版本。本机 npm 指向镜像源时以 `registry.npmjs.org` 为准。
-
-## `pi-memory`
-
-`pi-memory` 已迁往 [simple-memory](https://github.com/yandy/simple-memory)，其发布流程（含「core 必须先发」这条顺序约束）见该仓 `docs/guides/release.md`。
