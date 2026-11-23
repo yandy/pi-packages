@@ -54,14 +54,16 @@ type PortBehavior = {
 	mode?: string | undefined;
 	select: (title: string, options: string[], opts: ApprovalDialogOptions) => Promise<string | undefined>;
 	input?: (title: string, placeholder: string | undefined, opts: ApprovalDialogOptions) => Promise<string | undefined>;
+	announce?: (title: string) => void;
 };
 
 /** 记录调用并按用例行为结算的弹窗宿主。 */
 function fakePort(behavior: PortBehavior) {
 	const select = vi.fn(behavior.select);
 	const input = behavior.input === undefined ? undefined : vi.fn(behavior.input);
-	const port: ApprovalDialogPort = { mode: () => behavior.mode, select, input };
-	return { port, select, input };
+	const announce = behavior.announce === undefined ? undefined : vi.fn(behavior.announce);
+	const port: ApprovalDialogPort = { mode: () => behavior.mode, select, input, announce };
+	return { port, select, input, announce };
 }
 
 /** 追踪 promise 是否已结算（不改变原 promise 的语义）。 */
@@ -166,13 +168,58 @@ describe("runApprovalDialog：TUI 不设默认上限", () => {
 	});
 });
 
+describe("runApprovalDialog：桌面通知公告", () => {
+	it("在初始 select 前公告一次", async () => {
+		const events: string[] = [];
+		const { port } = fakePort({
+			mode: "rpc",
+			announce: (title) => events.push(`announce:${title}`),
+			select: async (title) => {
+				events.push(`select:${title}`);
+				return APPROVAL_ALLOW;
+			},
+		});
+		await runApprovalDialog(port, REQUEST);
+		expect(events).toEqual(["announce:Allow this command?", "select:Allow this command?"]);
+	});
+
+	it("公告出口抛错不影响审批", async () => {
+		const { port, select } = fakePort({
+			mode: "rpc",
+			announce: () => {
+				throw new Error("stale event bus");
+			},
+			select: async () => APPROVAL_ALLOW,
+		});
+		await expect(runApprovalDialog(port, REQUEST)).resolves.toEqual({ choice: APPROVAL_ALLOW });
+		expect(select).toHaveBeenCalledTimes(1);
+	});
+
+	it("Deny 后的理由输入不重复公告", async () => {
+		const { port, announce, input } = fakePort({
+			mode: "rpc",
+			announce: () => {},
+			select: async () => APPROVAL_DENY,
+			input: async () => "reason",
+		});
+		await runApprovalDialog(port, REQUEST);
+		expect(announce).toHaveBeenCalledExactlyOnceWith(REQUEST.title);
+		expect(input).toHaveBeenCalledTimes(1);
+	});
+});
+
 describe("runApprovalDialog：外部中断", () => {
 	it("调用前已 abort：不打开弹窗，直接 cancelled", async () => {
 		const external = fakeSignal();
 		external.abort();
-		const { port, select } = fakePort({ mode: "rpc", select: async () => APPROVAL_ALLOW });
+		const { port, select, announce } = fakePort({
+			mode: "rpc",
+			select: async () => APPROVAL_ALLOW,
+			announce: () => {},
+		});
 		await expect(runApprovalDialog(port, REQUEST, external.signal)).resolves.toEqual({ choice: undefined });
 		expect(select).not.toHaveBeenCalled();
+		expect(announce).not.toHaveBeenCalled();
 	});
 
 	it("在飞 abort（宿主完全忽略 signal）：本地仍能结算，并把中断传给宿主 signal", async () => {

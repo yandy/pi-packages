@@ -29,6 +29,8 @@ export interface ApprovalDialogOptions {
  */
 export interface ApprovalDialogPort {
 	mode(): string | undefined;
+	/** Announces the initial blocking approval at the instance that displays it. */
+	announce?(title: string): void;
 	select(title: string, options: string[], opts: ApprovalDialogOptions): Promise<string | undefined>;
 	input?(title: string, placeholder: string | undefined, opts: ApprovalDialogOptions): Promise<string | undefined>;
 }
@@ -109,6 +111,11 @@ export async function runApprovalDialog(
 	externalSignal?: AbortSignal,
 ): Promise<EscalationDecision> {
 	if (externalSignal?.aborted === true) return { choice: undefined };
+	try {
+		port.announce?.(request.title);
+	} catch {
+		// Desktop notification is best-effort and must never change approval control flow.
+	}
 
 	const timeout = deadlineFor(port);
 	const dialogAbort = new AbortController();
