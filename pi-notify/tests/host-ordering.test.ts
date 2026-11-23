@@ -53,6 +53,8 @@ interface Harness {
 	mountAnnouncedViewer(): Promise<unknown>;
 	/** Mount an unannounced `custom` prompt (an interactive tool such as `ask_user`). */
 	mountToolPrompt(): void;
+	/** Close the most recently opened `custom` prompt, as `done()` does. */
+	closeLastCustom(): void;
 	runner: { emit: (event: unknown) => Promise<unknown> };
 }
 
@@ -97,12 +99,13 @@ function createHarness(opts?: {
 		extensions.unshift({ path: "slow-extension", handlers: slowHandlers, tools: new Map() } as any);
 	}
 
+	const pendingCustom: Array<(value: unknown) => void> = [];
 	const rawUI = {
 		select: () => new Promise<string | undefined>((resolve) => (resolveSelect = resolve)),
 		confirm: async () => false,
 		input: async () => undefined,
 		editor: async () => undefined,
-		custom: async () => new Promise<never>(() => {}),
+		custom: () => new Promise<unknown>((resolve) => pendingCustom.push(resolve)),
 		notify: vi.fn(),
 		onTerminalInput: () => () => {},
 		setStatus: () => {},
@@ -134,6 +137,7 @@ function createHarness(opts?: {
 		mountToolPrompt: () => {
 			void ui.custom(async () => ({ render: () => [], invalidate: () => {} }), { overlay: true });
 		},
+		closeLastCustom: () => pendingCustom.pop()?.(undefined),
 		runner: { emit: (event) => runner.emit(event as any) },
 	};
 }
@@ -218,6 +222,78 @@ describe("host scheduling: picker then announced viewer", () => {
 		h.resolveSelect(undefined);
 		await pick;
 		await flush();
+		expect(h.notify).not.toHaveBeenCalled();
+	});
+
+	it("handles a non-blocking, blocking, non-blocking sequence", async () => {
+		// Real in-tree shape: `/subagents:sessions` picker (declared), then an unannounced
+		// blocking prompt (`ask_user`), then another declared prompt (the viewer).
+		const h = createHarness();
+
+		h.bus.emit(NON_BLOCKING_PROMPT_CHANNEL, {});
+		const pick = h.ui.select("Subagent sessions", ["agent"]);
+		await flush();
+		h.resolveSelect("agent");
+		await pick;
+		await flush();
+
+		h.mountToolPrompt();
+		await flush();
+		await vi.advanceTimersByTimeAsync(PROMPT_NOTIFY_DELAY_MS);
+		expect(h.notify).toHaveBeenCalledTimes(1);
+		expect(h.notify.mock.calls[0][0].body).toContain("Interactive prompt");
+
+		void h.mountAnnouncedViewer();
+		await flush();
+		await vi.advanceTimersByTimeAsync(PROMPT_NOTIFY_DELAY_MS);
+		expect(h.notify).toHaveBeenCalledTimes(1);
+	});
+
+	it("handles non-blocking, blocking, non-blocking when a start handler is slow", async () => {
+		// Same sequence with every prompt event held one turn by another extension: delivery
+		// stays ordered, so each announcement is still consumed by the prompt it belongs to.
+		const h = createHarness({ slowStartHandler: async () => await new Promise((r) => setTimeout(r, 20)) });
+
+		h.bus.emit(NON_BLOCKING_PROMPT_CHANNEL, {});
+		const pick = h.ui.select("Subagent sessions", ["agent"]);
+		await flush();
+		h.resolveSelect("agent");
+		await pick;
+		await flush();
+
+		h.mountToolPrompt();
+		await flush();
+		// The slow handler delays the start by one turn, so its own 4 s timer starts later.
+		await vi.advanceTimersByTimeAsync(PROMPT_NOTIFY_DELAY_MS + 200);
+		expect(h.notify).toHaveBeenCalledTimes(1);
+		expect(h.notify.mock.calls[0][0].body).toContain("Interactive prompt");
+
+		h.closeLastCustom();
+		await flush();
+
+		void h.mountAnnouncedViewer();
+		await flush();
+		await vi.advanceTimersByTimeAsync(PROMPT_NOTIFY_DELAY_MS + 200);
+		expect(h.notify).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not alert for a blocking prompt opened while a declared overlay is open", async () => {
+		// The host only emits prompt events for the OUTERMOST prompt (`withUIPrompt` depth
+		// guard), so a blocking prompt nested inside an open viewer emits nothing at all —
+		// no start, no end, and therefore no alert. Pinned here because it is reachable:
+		// a background subagent's approval can arrive while the operator reads a transcript.
+		const h = createHarness();
+		h.bus.emit(NON_BLOCKING_PROMPT_CHANNEL, {});
+		const pick = h.ui.select("Subagent sessions", ["agent"]);
+		await flush();
+		h.resolveSelect("agent");
+		await pick;
+		void h.mountAnnouncedViewer();
+		await flush();
+
+		h.mountToolPrompt();
+		await flush();
+		await vi.advanceTimersByTimeAsync(PROMPT_NOTIFY_DELAY_MS + 1000);
 		expect(h.notify).not.toHaveBeenCalled();
 	});
 
