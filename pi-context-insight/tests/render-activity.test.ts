@@ -88,36 +88,52 @@ describe("renderActivity", () => {
 });
 
 describe("renderFamily", () => {
-	it("renders member cards and the delegation table", () => {
-		const base = report();
-		const withFamily = {
-			...base,
-			family: {
-				members: [
-					{
-						id: "a1",
-						parentId: "s1",
-						depth: 1,
-						status: "completed" as const,
-						record: { id: "a1", type: "general-purpose", description: "audit", status: "completed", startedAt: 1, completedAt: 2, result: "done" },
-						steps: 4,
-						brief: "audit the parser",
-					},
-					{
-						id: "a2",
-						parentId: "s1",
-						depth: 1,
-						status: "untracked" as const,
-						steps: 1,
-					},
-				],
-				children: [],
+	const family = {
+		members: [
+			{
+				id: "a1",
+				parentId: "s1",
+				depth: 1,
+				status: "completed" as const,
+				record: {
+					id: "a1",
+					type: "general-purpose",
+					description: "audit",
+					status: "completed",
+					startedAt: 1,
+					completedAt: 2,
+					result: "done",
+				},
+				steps: 4,
+				brief: "audit the parser",
+				child: { id: "a1", steps: 4, records: [], context: { tokens: 80_000, window: 200_000, percent: 40 } },
 			},
-		};
-		const html = renderFamily(withFamily);
+			{
+				id: "a2",
+				parentId: "s1",
+				depth: 1,
+				status: "untracked" as const,
+				steps: 1,
+			},
+		],
+		children: [],
+	};
+	const withFamilyReport = () => ({ ...report(), family });
+
+	it("renders member cards and the delegation table", () => {
+		const html = renderFamily(withFamilyReport());
 		expect(html).toContain('data-member="a1"');
 		expect(html).toContain('data-status="untracked"');
 		expect(html).toContain("audit the parser");
+	});
+	it("gives each member a third-width card with an occupancy bar", () => {
+		const html = renderFamily(withFamilyReport());
+		expect(html).toContain("span-4");
+		expect(html).toContain('class="bar"');
+		expect(html).toContain('data-member="a1"');
+	});
+	it("clamps long brief and result text", () => {
+		expect(renderFamily(withFamilyReport())).toContain("clamp-2");
 	});
 	it("renders nothing when the session has no subagents", () => {
 		expect(renderFamily(report())).toBe("");

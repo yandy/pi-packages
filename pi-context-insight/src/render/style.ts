@@ -101,6 +101,10 @@ details>summary::-webkit-details-marker{display:none}
 details>summary::before{content:"▸";color:var(--dim);margin-right:6px;display:inline-block;transition:transform .12s ease}
 details[open]>summary::before{transform:rotate(90deg)}
 pre.body{white-space:pre-wrap;word-break:break-word;background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:8px;max-height:420px;overflow:auto;margin:6px 0}
+.member-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:10px}
+.member-card{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-block);padding:10px 12px;min-width:0;grid-column:span 4}
+.member-tags{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0}
+.member-card .kpi-value{font-size:16px}
 .clamp-2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .dim{color:var(--dim)}
 .hidden{display:none!important}
