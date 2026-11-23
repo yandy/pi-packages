@@ -19,7 +19,7 @@
  * 用法：npm run check:host-deps
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** 宿主在运行时提供的包（对齐 pi-coding-agent 的 HOST_PROVIDED_EXTENSION_PACKAGES）。 */
@@ -46,6 +46,50 @@ const SUBPATH_TO_PACKAGE = new Map([
 	["@sinclair/typebox/compile", "@sinclair/typebox"],
 	["@sinclair/typebox/value", "@sinclair/typebox"],
 ]);
+
+/**
+ * 宿主扩展加载器按模块 ID 精确匹配注入宿主模块（pi-coding-agent 的
+ * `dist/core/extensions/virtual-modules.js`）：除包根外只认下面这些子路径。
+ * 其它子路径在 `pi install` 安装出来的扩展里解析不到（宿主 node_modules 不在扩展的
+ * 解析链上），启动时报 `Cannot find module`；开发树里因为 node_modules 里躺着真实包，
+ * 测试和类型检查都发现不了。新增子路径前先确认宿主 VIRTUAL_MODULES 里确实有。
+ */
+const ALLOWED_HOST_SUBPATHS = new Map([
+	["@earendil-works/pi-ai", new Set(["compat", "models", "oauth", "providers/all"])],
+	["@mariozechner/pi-ai", new Set(["compat", "models", "oauth", "providers/all"])],
+	["typebox", new Set(["compile", "value"])],
+	["@sinclair/typebox", new Set(["compile", "value"])],
+]);
+
+/** 宿主提供包中允许被扩展 import 的子路径；没有条目的包只允许 import 包根。 */
+function describeAllowedSubpaths(packageName) {
+	const subpaths = ALLOWED_HOST_SUBPATHS.get(packageName);
+	return subpaths === undefined ? "包根" : `包根与 ${[...subpaths].map((subpath) => `${packageName}/${subpath}`).join("、")}`;
+}
+
+/** 源码中出现的宿主提供包子路径导入（`包名/子路径`，且不在白名单内）。 */
+function collectHostSubpathImports(files) {
+	const found = [];
+	for (const file of files) {
+		const source = readFileSync(file, "utf8");
+		for (const pattern of IMPORT_PATTERNS) {
+			for (const match of source.matchAll(pattern)) {
+				const specifier = match[1];
+				const slash = specifier.indexOf("/");
+				if (slash === -1) continue;
+				// scoped 包名含两个 `/`，切分时保留 `@scope/name`。
+				const splitAt = specifier.startsWith("@") ? specifier.indexOf("/", slash + 1) : slash;
+				if (splitAt === -1) continue;
+				const packageName = specifier.slice(0, splitAt);
+				if (!HOST_PROVIDED_PACKAGES.has(packageName)) continue;
+				const subpath = specifier.slice(splitAt + 1);
+				if (ALLOWED_HOST_SUBPATHS.get(packageName)?.has(subpath)) continue;
+				found.push({ file, specifier, packageName });
+			}
+		}
+	}
+	return found;
+}
 
 const SOURCE_EXTENSIONS = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 const IMPORT_PATTERNS = [
@@ -118,7 +162,17 @@ for (const workspace of rootPkg.workspaces ?? []) {
 		);
 	}
 
-	for (const name of collectHostImports(collectSourceFiles(workspaceDir))) {
+	const sourceFiles = collectSourceFiles(workspaceDir);
+
+	for (const { file, specifier, packageName } of collectHostSubpathImports(sourceFiles)) {
+		problems.push(
+			`${label}: ${relative(repoRoot, file)} import 了宿主提供包的未映射子路径 "${specifier}"` +
+				`（宿主只注入 ${describeAllowedSubpaths(packageName)}，安装后启动会报 Cannot find module）。` +
+				"改为从包根 import，或把需要的实现放进本包源码",
+		);
+	}
+
+	for (const name of collectHostImports(sourceFiles)) {
 		const peerRange = peers[name];
 		if (peerRange === undefined) {
 			problems.push(`${label}: 源码 import 了宿主提供包 "${name}"，但未在 peerDependencies 中声明`);
@@ -139,4 +193,7 @@ if (problems.length > 0) {
 	process.exit(1);
 }
 
-console.log(`宿主提供包声明检查通过：${checkedCount} 个 workspace 均未把宿主提供包写入 dependencies，且 import 的宿主提供包均已在 peerDependencies 声明。`);
+console.log(
+	`宿主提供包检查通过：${checkedCount} 个 workspace 均未把宿主提供包写入 dependencies，import 的宿主提供包均已在 peerDependencies 声明，` +
+		"且没有 import 宿主未映射的子路径。",
+);

@@ -1,6 +1,6 @@
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
-import { estimateTextAndImageContentTokens, estimateTextTokens } from "@earendil-works/pi-ai/utils/estimate";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import { estimateTextAndImageContentTokens, estimateTextTokens } from "../estimate";
 
 type SessionMessage = Extract<SessionEntry, { type: "message" }>["message"];
 

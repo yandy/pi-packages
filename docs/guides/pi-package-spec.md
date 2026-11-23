@@ -510,10 +510,13 @@ Pure Skills 类型虽无测试脚本，仍需添加 filters 条目，否则 PR �
 - 其中 `typebox` 系按宿主约定使用 `*` 范围，并在 `devDependencies` 固定具体版本供本地开发/测试（例如 `"typebox": "^1.3.34"`）；
 - pi 核心包（`@earendil-works/*`）的范围用最小宿主版本表达（当前 `>=1.5.0`），不要写成 `*`。
 
+**只能 import 包根**（`typebox` 系例外，见下文）。宿主的模块注入表按模块 ID **精确匹配**：`@earendil-works/pi-ai` 只有包根与 `/compat`、`/models`、`/oauth`、`/providers/all` 这几个子路径，`@earendil-works/pi-coding-agent`、`/pi-agent-core`、`/pi-tui` 只映射包根。其它子路径（例如 `@earendil-works/pi-ai/utils/estimate`）在 `pi install` 装出来的扩展里解析不到——宿主自己的 `node_modules` 不在扩展的解析链上——启动就报 `Cannot find module`；而开发树里 `node_modules` 躺着真实包，**测试、类型检查都发现不了**。需要这类内部实现时，把它复制进本包源码。
+
 一致性由 `npm run check:host-deps` 校验（CI 中执行）：
 
 - 任何 workspace 的 `dependencies` 含宿主提供包 → 失败；
 - 源码 import 了宿主提供包但未在 `peerDependencies` 声明 → 失败；
+- 源码 import 了宿主提供包的未映射子路径（如 `@earendil-works/pi-ai/utils/estimate`）→ 失败；
 - `typebox` 系的 `peerDependencies` 范围不是 `*` → 失败。
 
 ### 常用 peerDependencies
