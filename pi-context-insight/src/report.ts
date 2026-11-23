@@ -98,6 +98,7 @@ function applyBodyCaps(items: readonly Item[], bodies: string[], truncation: Tru
 		if (text === undefined || text.length <= cap) continue;
 		bodies[item.textIndex] = text.slice(0, cap);
 		item.truncated = true;
+		item.originalLength = text.length;
 		let bucket = buckets.get(item.category);
 		if (bucket === undefined) {
 			bucket = new Map<number, number>();

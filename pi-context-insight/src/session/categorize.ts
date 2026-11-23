@@ -32,6 +32,7 @@ export interface Item {
 	/** Entry timestamp, so row metadata can show when the item entered the transcript. */
 	timestamp?: number;
 	truncated?: boolean;
+	originalLength?: number;
 }
 
 interface ContentBlock {

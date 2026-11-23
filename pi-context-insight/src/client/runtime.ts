@@ -201,7 +201,7 @@ export const CLIENT_RUNTIME = `
           var summary = doc.createElement("summary");
           var tag = doc.createElement("span");
           tag.className = "tag";
-          tag.textContent = item.cat + " · " + item.tag + " ≈" + fmtTokens(item.tok) + (item.truncated ? " ✂" : "");
+          tag.textContent = item.cat + " · " + item.tag + " ≈" + fmtTokens(item.tok) + (item.truncated ? " ✂ " + item.truncated + " chars" : "");
           summary.appendChild(tag);
           row.appendChild(summary);
           if (item.body !== null && payload.bodies[item.body] !== undefined) {
