@@ -90,18 +90,22 @@ Agents are discovered from `<cwd>/.pi/agents/<name>.md` (project) and `$PI_CODIN
 
 ### The `tools` allowlist
 
-`tools` decides the agent's tool set. The omitted case means **inherit**, not "everything built in":
+`tools` decides the agent's tool set. There are four spellings:
 
-| Frontmatter | Parsed as | Agent gets |
-|-------------|-----------|------------|
-| field omitted | `undefined` | The parent session's tools: the harness default set plus every tool the loaded extensions register. The dispatch tools of this package (`subagent`, `get_subagent_result`, `steer_subagent`) are stripped after binding, so a child can never spawn children. |
-| `tools: none`, or `tools:` (empty) | `[]` | **Zero tools**: the model only produces text and no tool call is accepted |
-| `tools: read, grep` | list | Only the listed tools. Names may be built-in or extension-provided; unknown names pass through and are filtered against the real registry at tool-creation time |
-| `tools: -edit, -write` | `+name` / `-name` entries | Inherit, then apply the deltas in order: `-name` removes a tool, `+name` adds one. Use this to narrow the inherited set without enumerating it |
+| Frontmatter | Agent gets |
+|-------------|------------|
+| field omitted | The parent session's **currently active** tools, minus this package's dispatch tools (`subagent`, `get_subagent_result`, `steer_subagent`) |
+| `tools: none`, or `tools:` (empty) | **Zero tools**: the model only produces text and no tool call is accepted |
+| `tools: read, grep` | Exactly those tools, by exact name |
+| `tools: -edit, -write, +powershell` | The inherited set edited in order (`-name` removes, `+name` adds), then the dispatch tools stripped |
 
-An empty list is never treated as "unset" and never falls back to anything.
+There is no "hand the model every built-in tool" fallback: an omitted field inherits what the parent session has bound at that moment, so a tool the parent hid with `/tools` or `--tools` is not available to the child either.
 
-Both list forms take exact names. Mixing plain names with `+name` / `-name` entries is invalid, and a modifier entry may not contain a `*` pattern; both are rejected with an error that names the agent type before any session is created.
+Every list entry must be an exact tool name — `*` is rejected. Mixing plain names with `+name` / `-name` entries is rejected as well. Both errors name the agent type and are raised before any session is created.
+
+That rule and the new default are breaking for agents written against the previous release: an omitted `tools` used to mean a fixed list of built-in tool names rather than inheritance, and a `*` entry used to be forwarded to the host verbatim, where it silently matched. If an agent relied on the old omitted-field list, state the set, or narrow the inherited one with `-name`.
+
+The dispatch tools of this package are stripped from every form, so a child can never spawn children. An empty list is never treated as "unset" and never falls back to anything.
 
 ```markdown
 ---
@@ -109,7 +113,7 @@ tools: -edit, -write, -bash     # read-only research: inherit everything except 
 ---
 ```
 
-There is no "all tools" mode and no notion of "all built-in tools" to fall back on. Inheriting gives the model whatever the caller's extensions provide, at the cost of listing them in the child's prompt; naming a list (or `none`) pins the capability to the agent type.
+Inheriting keeps the child in step with the parent, at the cost of listing those tools in its prompt; naming a list (or `none`) pins the capability to the agent type.
 
 ### Prompt mode
 
