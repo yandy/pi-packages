@@ -145,12 +145,14 @@ export function summarizeUsage(ledger: UsageLedger): UsageReport {
  * Spread each step's billed cost across its estimated categories by token share.
  * The unattributed residual is never allocated: it is a difference, not content.
  */
-export function allocateCost<T extends {
-	sums: Record<string, number>;
-	estimatedTotal: number;
-	actual?: { cost: number };
-	costByCategory?: Partial<Record<string, number>>;
-}>(steps: readonly T[]): T[] {
+export function allocateCost<
+	T extends {
+		sums: Record<string, number>;
+		estimatedTotal: number;
+		actual?: { cost: number };
+		costByCategory?: Partial<Record<string, number>>;
+	},
+>(steps: readonly T[]): T[] {
 	for (const step of steps) {
 		const actual = step.actual;
 		if (actual === undefined || step.estimatedTotal <= 0) continue;

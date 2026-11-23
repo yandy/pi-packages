@@ -39,7 +39,19 @@ export interface CommandReport {
 	};
 }
 
-const WRAPPERS = new Set(["env", "sudo", "doas", "command", "exec", "time", "nohup", "nice", "stdbuf", "timeout", "caffeinate"]);
+const WRAPPERS = new Set([
+	"env",
+	"sudo",
+	"doas",
+	"command",
+	"exec",
+	"time",
+	"nohup",
+	"nice",
+	"stdbuf",
+	"timeout",
+	"caffeinate",
+]);
 const SHELL_KEYWORDS = /^(if|then|else|elif|for|while|until|case|do|done|fi|esac|function|select|coproc|\{|\()\b/;
 
 function normalizeProgram(raw: string): string {
@@ -144,7 +156,8 @@ export function outcomeOfResult(text: string, isError: boolean): Outcome {
 	if (/Command terminated without an exit code|shell exited/i.test(text)) {
 		return { status: "error", exitInferred: false, stderr, timedOut, denied };
 	}
-	if (isError || timedOut || denied) return { status: "error", exitCode: isError ? 1 : undefined, exitInferred: false, stderr, timedOut, denied };
+	if (isError || timedOut || denied)
+		return { status: "error", exitCode: isError ? 1 : undefined, exitInferred: false, stderr, timedOut, denied };
 	return { status: "ok", exitCode: 0, exitInferred: true, stderr, timedOut, denied };
 }
 
@@ -158,7 +171,14 @@ export function collectCommands(args: {
 	const calls = new Map<string, { name: string; command: string; timestamp: number }>();
 	const byId = new Map<string, CommandRecord>();
 
-	const make = (id: string, tool: CommandRecord["tool"], name: string, command: string, timestamp: number, nested: boolean): CommandRecord => {
+	const make = (
+		id: string,
+		tool: CommandRecord["tool"],
+		name: string,
+		command: string,
+		timestamp: number,
+		nested: boolean,
+	): CommandRecord => {
 		const origin = steps.length > 0 ? stepIndexOf(timestamp, steps) : 0;
 		const record: CommandRecord = {
 			id,
@@ -186,12 +206,24 @@ export function collectCommands(args: {
 		if (entry.type !== "message") continue;
 		const message = entry.message;
 		if (message.role === "assistant") {
-			for (const block of (message.content ?? []) as Array<{ type?: unknown; id?: unknown; name?: unknown; arguments?: unknown }>) {
+			for (const block of (message.content ?? []) as Array<{
+				type?: unknown;
+				id?: unknown;
+				name?: unknown;
+				arguments?: unknown;
+			}>) {
 				if (block.type !== "toolCall" || typeof block.id !== "string" || typeof block.name !== "string") continue;
 				const raw = (block.arguments as Record<string, unknown>) ?? {};
 				const command = typeof raw.command === "string" ? raw.command : typeof raw.code === "string" ? raw.code : undefined;
 				if (command === undefined) continue;
-				const tool = block.name === "bash" ? "bash" : block.name === "powershell" ? "powershell" : block.name === "run_code" ? "nested" : undefined;
+				const tool =
+					block.name === "bash"
+						? "bash"
+						: block.name === "powershell"
+							? "powershell"
+							: block.name === "run_code"
+								? "nested"
+								: undefined;
 				if (tool === undefined) continue;
 				if (tool === "nested") {
 					calls.set(block.id, { name: block.name, command, timestamp: message.timestamp });
@@ -206,7 +238,13 @@ export function collectCommands(args: {
 
 		if (message.role === "bashExecution") {
 			const record = make(entry.id, "user-bash", "bash", message.command, message.timestamp, false);
-			record.status = message.cancelled ? "cancelled" : message.exitCode === 0 ? "ok" : message.exitCode === undefined ? "missing" : "error";
+			record.status = message.cancelled
+				? "cancelled"
+				: message.exitCode === 0
+					? "ok"
+					: message.exitCode === undefined
+						? "missing"
+						: "error";
 			record.exitCode = message.exitCode;
 			record.outputChars = message.output.length;
 			continue;
@@ -238,7 +276,14 @@ export function collectCommands(args: {
 			const raw = (nested.arguments ?? {}) as Record<string, unknown>;
 			const command = typeof raw.command === "string" ? raw.command : typeof raw.code === "string" ? raw.code : undefined;
 			if (command === undefined) continue;
-			const nestedRecord = make(`${message.toolCallId}/${nested.id}`, "nested", nested.name, command, message.timestamp, true);
+			const nestedRecord = make(
+				`${message.toolCallId}/${nested.id}`,
+				"nested",
+				nested.name,
+				command,
+				message.timestamp,
+				true,
+			);
 			nestedRecord.status = nested.status === "ok" ? "ok" : nested.status === "error" ? "error" : "missing";
 			nestedRecord.exitCode = nested.status === "ok" ? 0 : undefined;
 			nestedRecord.exitInferred = nested.status !== "error";
@@ -267,7 +312,12 @@ export function collectCommands(args: {
 		.filter((record) => (record.durationMs ?? 0) >= 1000)
 		.sort((a, b) => (b.durationMs ?? 0) - (a.durationMs ?? 0))[0];
 	const mostFailing = [...programCounts]
-		.map(([name, value]) => ({ name, count: records.filter((record) => record.program === name && (record.status === "error" || record.status === "cancelled")).length }))
+		.map(([name, _value]) => ({
+			name,
+			count: records.filter(
+				(record) => record.program === name && (record.status === "error" || record.status === "cancelled"),
+			).length,
+		}))
 		.sort((a, b) => b.count - a.count)[0];
 	const mostRepeated = [...commandCounts]
 		.filter(([, count]) => count >= 2)

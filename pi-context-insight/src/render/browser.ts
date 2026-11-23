@@ -1,6 +1,6 @@
-import { fmtClock, fmtShare, fmtTokens } from "../format";
+import { fmtClock, fmtTokens } from "../format";
 import { t } from "../i18n";
-import { CATEGORY_ORDER, type CategoryId } from "../model";
+import type { CategoryId } from "../model";
 import type { InsightReport } from "../report";
 import type { Item } from "../session/categorize";
 import type { Step } from "../session/steps";
@@ -80,9 +80,13 @@ function rowHtml(report: InsightReport, item: Item): string {
 	const source = item.kind === "toolDefinition" ? toolSource(report, item.tag) : undefined;
 	const chips = [
 		item.kind === "toolResult" || item.block === "toolCall" ? `<span class="tag">${esc(item.tag)}</span>` : "",
-		item.skillName === undefined ? "" : `<span class="tag">${esc(t(lang, { key: "browser.skillTag", params: { name: item.skillName } }))}</span>`,
+		item.skillName === undefined
+			? ""
+			: `<span class="tag">${esc(t(lang, { key: "browser.skillTag", params: { name: item.skillName } }))}</span>`,
 		item.isError === true ? `<span class="flag">✕</span>` : "",
-		source === undefined ? "" : `<span class="tag" data-tool-source="${source.source}">${esc(source.label || source.source)}</span>`,
+		source === undefined
+			? ""
+			: `<span class="tag" data-tool-source="${source.source}">${esc(source.label || source.source)}</span>`,
 	].join("");
 	const kindAttr = item.block === undefined ? "" : ` data-kind="${item.block}"`;
 	const search = `${item.tag} ${preview(report, item)}`.toLowerCase();
@@ -99,9 +103,7 @@ function categoryRow(report: InsightReport, step: Step, group: CategoryId): stri
 	const share = step.estimatedTotal > 0 ? (tokens / step.estimatedTotal) * 100 : 0;
 	const delta = step.delta[group] ?? 0;
 	const badge =
-		delta === 0
-			? ""
-			: `<span class="tag" data-delta="${group}">${delta > 0 ? "+" : ""}${fmtTokens(delta)}</span>`;
+		delta === 0 ? "" : `<span class="tag" data-delta="${group}">${delta > 0 ? "+" : ""}${fmtTokens(delta)}</span>`;
 	return `<tr class="row" data-cat-row="${group}" data-count="${list.length}"><td><span class="swatch" style="background:var(--${group})"></span>${esc(t(report.lang, { key: GROUP_LABEL_KEY[group] ?? group }))}</td><td class="num">${list.length}</td><td class="num">≈${fmtTokens(tokens)}</td><td class="num">${share === 0 ? "—" : `${share.toFixed(1)}%`}</td><td class="num">${badge}</td></tr>`;
 }
 
@@ -151,7 +153,8 @@ export function renderBrowser(report: InsightReport): string {
 				`<option value="${step.index}"${step === steps.at(-1) ? " selected" : ""}>${esc(t(lang, { key: "browser.pickLabel", params: { t: step.turn, s: step.stepInTurn } }))}${step.hasDetails ? "" : " ·"}</option>`,
 		)
 		.join("");
-	const current = steps.at(-1)!;
+	const current = steps[steps.length - 1];
+	if (current === undefined) return "";
 	const rows = GROUPS.map((group) => categoryRow(report, current, group)).join("");
 	const panel = panelOf(report, current, true);
 	const dna = dnaList(report, current);

@@ -8,19 +8,19 @@ interface HostActions {
 	getAllTools?: () => ToolInfo[];
 	getSettings?: () => { compaction?: { enabled?: boolean; reserveTokens?: number } };
 }
+
 import { SessionManager as SessionManagerClass } from "@earendil-works/pi-coding-agent";
-import { aggregateFiles, type FileRow, type FileSort, collectFileOps } from "./activity/files";
 import { type CommandReport, collectCommands } from "./activity/commands";
-import { type ToolRow, aggregateTools, collectToolExecutions } from "./activity/tools";
-import { type FamilyMember, type SubagentRecord, collectFamily, sortFamily } from "./family";
+import { aggregateFiles, collectFileOps, type FileRow, type FileSort } from "./activity/files";
+import { aggregateTools, collectToolExecutions, type ToolRow } from "./activity/tools";
+import { collectFamily, type FamilyMember, type SubagentRecord, sortFamily } from "./family";
+import type { ReportMetadata, TruncationEntry, UsageAggregate, UsageReport } from "./model";
 import { CATEGORY_ORDER, type CategoryId, type CurrentContext, type Kpis, type Lang, type Msg } from "./model";
-import type { ReportMetadata, TruncationEntry } from "./model";
-import { collectUsageLedger, summarizeUsage, allocateCost } from "./session/usage";
-import { type InsightEvent, type Milestone, buildMilestones, collectEvents } from "./session/events";
-import { type Item } from "./session/categorize";
-import { type Step, type Turn, buildSteps } from "./session/steps";
-import { type TimingReport, computeTiming } from "./session/timing";
-import type { UsageAggregate, UsageReport } from "./model";
+import type { Item } from "./session/categorize";
+import { buildMilestones, collectEvents, type InsightEvent, type Milestone } from "./session/events";
+import { buildSteps, type Step, type Turn } from "./session/steps";
+import { computeTiming, type TimingReport } from "./session/timing";
+import { allocateCost, collectUsageLedger, summarizeUsage } from "./session/usage";
 
 export interface UsageRow {
 	entryId: string;
@@ -88,12 +88,6 @@ export interface SessionInput {
 	reserveTokens: number;
 	reserveEnabled: boolean;
 	family?: InsightReport["family"];
-}
-
-function clampBody(text: string, cap: number, bucket: Map<number, number>, index: number): string {
-	if (text.length <= cap) return text;
-	bucket.set(index, text.length);
-	return text.slice(0, cap);
 }
 
 function applyBodyCaps(items: readonly Item[], bodies: string[], truncation: TruncationEntry[]): void {
@@ -277,7 +271,9 @@ export function buildSessionReport(input: SessionInput): SessionReport {
 
 	const first = entries[0]?.timestamp ?? new Date(0).toISOString();
 	const last = entries.at(-1)?.timestamp ?? first;
-	const lastAssistant = [...branch].reverse().find((entry) => entry.type === "message" && entry.message.role === "assistant");
+	const lastAssistant = [...branch]
+		.reverse()
+		.find((entry) => entry.type === "message" && entry.message.role === "assistant");
 	const metadata: ReportMetadata = {
 		id: input.manager.getSessionId(),
 		...(input.manager.getSessionName() === undefined ? {} : { name: input.manager.getSessionName() }),
@@ -290,11 +286,7 @@ export function buildSessionReport(input: SessionInput): SessionReport {
 		branchEntries: branch.length,
 		totalEntries: entries.length,
 	};
-	if (
-		lastAssistant?.type === "message" &&
-		lastAssistant.message.role === "assistant" &&
-		metadata.model === undefined
-	) {
+	if (lastAssistant?.type === "message" && lastAssistant.message.role === "assistant" && metadata.model === undefined) {
 		metadata.model = `${lastAssistant.message.provider}/${lastAssistant.message.responseModel ?? lastAssistant.message.model}`;
 	}
 
@@ -341,7 +333,9 @@ export function buildSessionReport(input: SessionInput): SessionReport {
 	};
 }
 
-function childSessionOf(filePath: string): { child: import("./family").ChildSession; manager: ReadonlySessionManager } | undefined {
+function childSessionOf(
+	filePath: string,
+): { child: import("./family").ChildSession; manager: ReadonlySessionManager } | undefined {
 	let manager: ReadonlySessionManager;
 	try {
 		manager = SessionManagerClass.open(filePath);
@@ -497,5 +491,5 @@ export function buildReport(
 	return insight;
 }
 
-export { CATEGORY_ORDER };
 export type { UsageAggregate };
+export { CATEGORY_ORDER };

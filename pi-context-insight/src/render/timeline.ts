@@ -21,7 +21,11 @@ function flagsByStep(report: InsightReport): Map<number, Milestone[]> {
 	return map;
 }
 
-function barFor(report: InsightReport, step: { index: number; sums: Record<CategoryId, number>; estimatedTotal: number }, max: number): string {
+function barFor(
+	report: InsightReport,
+	step: { index: number; sums: Record<CategoryId, number>; estimatedTotal: number },
+	max: number,
+): string {
 	const x = 10 + step.index * (BAR_W + BAR_GAP);
 	const scale = max > 0 ? CHART_H / max : 0;
 	const target = Math.round(step.estimatedTotal * scale);
@@ -53,7 +57,8 @@ export function renderTimeline(report: InsightReport): string {
 	const flags = flagsByStep(report);
 	const flagBand = [...flags]
 		.map(([stepIndex, milestones]) => {
-			const primary = milestones[0]!;
+			const primary = milestones[0];
+			if (primary === undefined) return "";
 			const x = 10 + stepIndex * (BAR_W + BAR_GAP) + BAR_W / 2;
 			const count = milestones.filter((milestone) => milestone.eventIds.length > 0).length;
 			return `<g data-flag="${primary.kind}" data-flag-step="${stepIndex}"><line x1="${x}" x2="${x}" y1="18" y2="150" stroke="var(--dim)" stroke-dasharray="2 3" opacity=".5"/><circle cx="${x}" cy="18" r="5" fill="var(--${primary.kind === "compaction" ? "compaction" : "systemSkills"})"><title>${esc(t(lang, { key: `flag.${primary.kind}` }))}</title></circle>${count > 1 ? `<text x="${x}" y="36" text-anchor="middle" font-size="8" fill="var(--text)">+${count - 1}</text>` : ""}</g>`;
@@ -75,7 +80,10 @@ export function renderTimeline(report: InsightReport): string {
 		.join("");
 
 	const legend = CATEGORY_ORDER.filter((id) => id !== "unattributed")
-		.map((id) => `<span data-cat="${id}" data-legend="1"><span class="swatch" style="background:var(--${id})"></span>${esc(categoryLabel(lang, id))}</span>`)
+		.map(
+			(id) =>
+				`<span data-cat="${id}" data-legend="1"><span class="swatch" style="background:var(--${id})"></span>${esc(categoryLabel(lang, id))}</span>`,
+		)
 		.join("");
 
 	const toolbar = [
@@ -114,11 +122,24 @@ export function renderTimelineSummary(report: InsightReport): string {
 	const parts: string[] = [];
 	if (peak.longest !== undefined) {
 		const step = report.steps[peak.longest];
-		if (step) parts.push(t(report.lang, { key: "timeline.peakLongest", params: { step: step.index + 1, dur: fmtDuration(step.activeMs) } }));
+		if (step)
+			parts.push(
+				t(report.lang, { key: "timeline.peakLongest", params: { step: step.index + 1, dur: fmtDuration(step.activeMs) } }),
+			);
 	}
 	if (peak.growth !== undefined) {
 		const step = report.steps[peak.growth];
-		if (step) parts.push(t(report.lang, { key: "timeline.peakGrowth", params: { step: step.index + 1, delta: `+${fmtTokens(step.deltaTotal)}`, share: fmtShare(step.deltaTotal, step.estimatedTotal) } }));
+		if (step)
+			parts.push(
+				t(report.lang, {
+					key: "timeline.peakGrowth",
+					params: {
+						step: step.index + 1,
+						delta: `+${fmtTokens(step.deltaTotal)}`,
+						share: fmtShare(step.deltaTotal, step.estimatedTotal),
+					},
+				}),
+			);
 	}
 	return parts.length === 0 ? "" : `<p class="dim">${parts.join(" · ")}</p>`;
 }

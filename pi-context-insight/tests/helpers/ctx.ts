@@ -25,6 +25,7 @@ export function fakeContext(session: FakeSession, over: Record<string, unknown> 
 			buildSessionProjection: () => ({ messages: [], thinkingLevel: "high", model: null, entries: [] }),
 		},
 		getContextUsage: () => ({ tokens: 1000, contextWindow: 200_000, percent: 0.5 }),
+		waitForIdle: async () => undefined,
 		getSystemPrompt: () => "",
 		getAllTools: () => [],
 		getSettings: () => ({ compaction: { enabled: true, reserveTokens: 16_384 } }),

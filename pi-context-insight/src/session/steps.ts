@@ -1,6 +1,6 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { CATEGORY_ORDER, type CategoryId, type Msg } from "../model";
-import { type Item, extractItems } from "./categorize";
+import { extractItems, type Item } from "./categorize";
 import { type ReplayedSystem, replaySystem } from "./replay";
 
 export interface StepActual {
@@ -250,7 +250,10 @@ export function buildSteps(args: {
 				if (diff > 0 && diff > estimatedTotal * UNATTRIBUTED_MIN_SHARE) snapshot.unattributed = diff;
 			}
 			stepInTurn += 1;
-			const inputs = activeItems.filter((item) => !previousIds.has(item.id)).slice(0, MAX_CHIPS).map(chipOf);
+			const inputs = activeItems
+				.filter((item) => !previousIds.has(item.id))
+				.slice(0, MAX_CHIPS)
+				.map(chipOf);
 			const delta: Partial<Record<CategoryId, number>> = {};
 			for (const id of CATEGORY_ORDER) {
 				const value = (snapshot[id] ?? 0) - (previousSums[id] ?? 0);
@@ -336,7 +339,7 @@ export function buildSteps(args: {
 /** The step a timestamp belongs to: the last request that had already started. */
 export function stepIndexOf(timestamp: number, steps: ReadonlyArray<{ index: number; timestamp: number }>): number {
 	if (steps.length === 0) return 0;
-	let found = steps[0]!.index;
+	let found = steps[0]?.index ?? 0;
 	for (const step of steps) {
 		if (step.timestamp <= timestamp) found = step.index;
 		else break;

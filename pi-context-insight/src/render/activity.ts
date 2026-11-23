@@ -1,8 +1,8 @@
+import type { CommandStatus } from "../activity/commands";
+import type { FileOpKind } from "../activity/files";
 import { fmtClock, fmtCost, fmtDuration, fmtShare, fmtTokens } from "../format";
 import { t } from "../i18n";
 import type { InsightReport } from "../report";
-import type { FileOpKind } from "../activity/files";
-import type { CommandStatus } from "../activity/commands";
 import { esc } from "./escape";
 
 const FILE_KINDS: readonly FileOpKind[] = ["read", "write", "search", "image"];
@@ -16,7 +16,11 @@ function toolsCard(report: InsightReport): string {
 	const rows = report.tools
 		.map((row) => {
 			const spark = row.perStep
-				.map((count, index) => (count > 0 ? `<i style="display:inline-block;width:3px;height:${Math.min(12, 3 + count * 2)}px;background:var(--accent)" title="${esc(`${index + 1}: ${count}`)}"></i>` : ""))
+				.map((count, index) =>
+					count > 0
+						? `<i style="display:inline-block;width:3px;height:${Math.min(12, 3 + count * 2)}px;background:var(--accent)" title="${esc(`${index + 1}: ${count}`)}"></i>`
+						: "",
+				)
 				.join("");
 			return `<tr class="row" data-tool-row="${esc(row.name)}"><td>${esc(row.name)} <span class="tag" data-tool-source="${row.source}">${esc(row.sourceLabel || row.source)}</span></td><td class="num">${row.calls}</td><td class="num">${row.ok}</td><td class="num">${row.errors}</td><td class="num">${row.missing}</td><td class="num">${row.durationMs === 0 && row.durationEstimated ? "—" : `${row.durationEstimated ? "≈" : ""}${fmtDuration(row.durationMs)}`}</td><td class="num">≈${fmtTokens(row.tokens)}</td><td>${spark}</td></tr>`;
 		})

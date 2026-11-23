@@ -3,10 +3,7 @@ import type { InsightReport } from "../report";
 
 /** JSON that is safe to inline inside a <script> element. */
 export function serializePayload(value: unknown): string {
-	return JSON.stringify(value)
-		.replace(/</g, "\\u003c")
-		.replace(/>/g, "\\u003e")
-		.replace(/&/g, "\\u0026");
+	return JSON.stringify(value).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026");
 }
 
 export interface InteractivePayload {

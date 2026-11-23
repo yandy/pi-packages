@@ -78,7 +78,12 @@ export function collectToolExecutions(args: {
 		if (entry.type !== "message") continue;
 		const message = entry.message;
 		if (message.role === "assistant") {
-			for (const block of (message.content ?? []) as Array<{ type?: unknown; id?: unknown; name?: unknown; arguments?: unknown }>) {
+			for (const block of (message.content ?? []) as Array<{
+				type?: unknown;
+				id?: unknown;
+				name?: unknown;
+				arguments?: unknown;
+			}>) {
 				if (block.type !== "toolCall" || typeof block.id !== "string" || typeof block.name !== "string") continue;
 				const execution = make(block.id, block.name, message.timestamp, false);
 				execution.argumentsBytes = jsonLength(block.arguments);
@@ -87,7 +92,8 @@ export function collectToolExecutions(args: {
 			continue;
 		}
 		if (message.role !== "toolResult") continue;
-		const execution = byId.get(message.toolCallId) ?? make(message.toolCallId, message.toolName, message.timestamp, false);
+		const execution =
+			byId.get(message.toolCallId) ?? make(message.toolCallId, message.toolName, message.timestamp, false);
 		execution.status = message.isError ? "error" : "ok";
 		execution.tokens += tokensOf(message.content);
 		if (typeof message.durationMs === "number") {
@@ -101,7 +107,8 @@ export function collectToolExecutions(args: {
 			const nestedExecution = make(`${message.toolCallId}/${nested.id}`, nested.name, message.timestamp, true);
 			nestedExecution.status = nested.status;
 			nestedExecution.argumentsBytes = nested.argumentsBytes ?? jsonLength(nested.arguments);
-			nestedExecution.tokens = estimateTextTokens(nested.name) + estimateTextTokens(JSON.stringify(nested.arguments) ?? "");
+			nestedExecution.tokens =
+				estimateTextTokens(nested.name) + estimateTextTokens(JSON.stringify(nested.arguments) ?? "");
 			if (typeof nested.durationMs === "number") nestedExecution.durationMs = nested.durationMs;
 		}
 	}

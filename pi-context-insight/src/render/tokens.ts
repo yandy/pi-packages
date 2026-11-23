@@ -1,8 +1,8 @@
-import { fmtCost, fmtShare, fmtTokens } from "../format";
+import { fmtCost, fmtTokens } from "../format";
 import { t } from "../i18n";
 import { CATEGORY_ORDER, type CategoryId } from "../model";
 import type { InsightReport } from "../report";
-import { categoryClass, categoryLabel } from "./categories";
+import { categoryLabel } from "./categories";
 import { esc } from "./escape";
 
 const RADIUS = 42;

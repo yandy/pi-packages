@@ -3,6 +3,7 @@ import { estimateTextAndImageContentTokens, estimateTextTokens } from "@earendil
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 
 type SessionMessage = Extract<SessionEntry, { type: "message" }>["message"];
+
 import type { CategoryId } from "../model";
 import { type ReplayedSystem, SYSTEM_SECTION_CATEGORY } from "./replay";
 
@@ -257,5 +258,11 @@ export function extractItems(args: {
 		return [item];
 	}
 	if (entry.type !== "message") return [];
-	return messageItems({ message: entry.message, entry, nextId: args.nextId, putBody: args.putBody, callArgs: args.callArgs });
+	return messageItems({
+		message: entry.message,
+		entry,
+		nextId: args.nextId,
+		putBody: args.putBody,
+		callArgs: args.callArgs,
+	});
 }

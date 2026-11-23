@@ -4,7 +4,7 @@ import type { InsightReport } from "../report";
 import type { BriefChip } from "../session/steps";
 import { esc } from "./escape";
 
-function chip(lang: InsightReport["lang"], brief: BriefChip, locatable: boolean): string {
+function chip(brief: BriefChip, locatable: boolean): string {
 	const attrs = locatable ? ` data-locate-item="${brief.itemId}"` : "";
 	return `<span class="tag"${attrs} title="${esc(brief.preview)}">${esc(brief.tag)}</span>`;
 }
@@ -15,9 +15,15 @@ export function renderStepDetail(report: InsightReport): string {
 	const panels = report.steps
 		.map((step) => {
 			const hidden = step.index === report.steps.length - 1 ? "" : " hidden";
-			const inputs = step.brief.inputs.length > 0 ? step.brief.inputs.map((brief) => chip(lang, brief, step.hasDetails)).join("") : `<span class="dim">${t(lang, { key: "detail.noInputs" })}</span>`;
-			const replies = step.brief.replies.length > 0 ? step.brief.replies.map((brief) => chip(lang, brief, step.hasDetails)).join("") : `<span class="dim">${t(lang, { key: "detail.noReplies" })}</span>`;
-			const user = step.brief.user ? chip(lang, step.brief.user, step.hasDetails) : `<span class="dim">—</span>`;
+			const inputs =
+				step.brief.inputs.length > 0
+					? step.brief.inputs.map((brief) => chip(brief, step.hasDetails)).join("")
+					: `<span class="dim">${t(lang, { key: "detail.noInputs" })}</span>`;
+			const replies =
+				step.brief.replies.length > 0
+					? step.brief.replies.map((brief) => chip(brief, step.hasDetails)).join("")
+					: `<span class="dim">${t(lang, { key: "detail.noReplies" })}</span>`;
+			const user = step.brief.user ? chip(step.brief.user, step.hasDetails) : `<span class="dim">—</span>`;
 			const actual =
 				step.actual === undefined
 					? `<span class="dim">${t(lang, { key: "detail.noUsage" })}</span>`

@@ -87,7 +87,12 @@ function toolCalls(entries: readonly SessionEntry[]): ToolCallRecord[] {
 	for (const entry of entries) {
 		if (entry.type !== "message" || entry.message.role !== "assistant") continue;
 		const timestamp = Date.parse(entry.timestamp);
-		for (const block of (entry.message.content ?? []) as Array<{ type?: unknown; id?: unknown; name?: unknown; arguments?: unknown }>) {
+		for (const block of (entry.message.content ?? []) as Array<{
+			type?: unknown;
+			id?: unknown;
+			name?: unknown;
+			arguments?: unknown;
+		}>) {
 			if (block.type !== "toolCall" || typeof block.id !== "string" || typeof block.name !== "string") continue;
 			calls.push({
 				id: block.id,
@@ -231,7 +236,9 @@ export function collectEvents(args: {
 		}
 	}
 
-	return events.sort((a, b) => a.timestamp - b.timestamp || a.id - b.id).map((event, index) => ({ ...event, id: index }));
+	return events
+		.sort((a, b) => a.timestamp - b.timestamp || a.id - b.id)
+		.map((event, index) => ({ ...event, id: index }));
 }
 
 /** Group events onto their steps and find the two Top-1 peaks. */
@@ -265,9 +272,14 @@ export function buildMilestones(
 			growth = step.index;
 		}
 	}
-	if (longest !== undefined) milestones.push({ stepIndex: longest, kind: "longest", eventIds: [], metric: longestValue });
+	if (longest !== undefined)
+		milestones.push({ stepIndex: longest, kind: "longest", eventIds: [], metric: longestValue });
 	if (growth !== undefined) milestones.push({ stepIndex: growth, kind: "growth", eventIds: [], metric: growthValue });
 
 	milestones.sort((a, b) => a.stepIndex - b.stepIndex);
-	return { milestones, peaks: { ...(longest === undefined ? {} : { longest }), ...(growth === undefined ? {} : { growth }) }, byStep: groups };
+	return {
+		milestones,
+		peaks: { ...(longest === undefined ? {} : { longest }), ...(growth === undefined ? {} : { growth }) },
+		byStep: groups,
+	};
 }

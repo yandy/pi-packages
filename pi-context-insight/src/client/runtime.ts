@@ -1,4 +1,4 @@
-export const CLIENT_RUNTIME = String.raw`
+export const CLIENT_RUNTIME = `
 (function () {
   "use strict";
 

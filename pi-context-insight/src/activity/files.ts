@@ -96,12 +96,18 @@ function searchOps(args: {
 		for (const line of text.split(/\r?\n/)) {
 			const match = GREP_LINE.exec(line);
 			if (match === null) continue;
-			const path = match[1]!;
-			if (path.startsWith("[")) continue;
+			const path = match[1] ?? "";
+			if (path.length === 0 || path.startsWith("[")) continue;
 			hits.set(path, (hits.get(path) ?? 0) + 1);
 		}
 		if (hits.size > 0) {
-			return [...hits].map(([path, count]) => ({ ...base, id: `${id}:${path}`, path, kind: "search" as const, hits: count }));
+			return [...hits].map(([path, count]) => ({
+				...base,
+				id: `${id}:${path}`,
+				path,
+				kind: "search" as const,
+				hits: count,
+			}));
 		}
 		const fallback = target ?? ".";
 		return [{ ...base, id, path: fallback, kind: "search", patternOnly: true }];
@@ -135,7 +141,12 @@ export function collectFileOps(args: {
 		if (entry.type !== "message") continue;
 		const message = entry.message;
 		if (message.role === "assistant") {
-			for (const block of (message.content ?? []) as Array<{ type?: unknown; id?: unknown; name?: unknown; arguments?: unknown }>) {
+			for (const block of (message.content ?? []) as Array<{
+				type?: unknown;
+				id?: unknown;
+				name?: unknown;
+				arguments?: unknown;
+			}>) {
 				if (block.type !== "toolCall" || typeof block.id !== "string" || typeof block.name !== "string") continue;
 				calls.set(block.id, {
 					name: block.name,
@@ -147,7 +158,19 @@ export function collectFileOps(args: {
 		}
 		if (message.role === "user" && hasImage(message.content)) {
 			const timestamp = message.timestamp;
-			push({ id: `user-image:${entry.id}`, path: "(message image)", kind: "image", tool: "user", timestamp, added: 0, removed: 0, isError: false }, timestamp);
+			push(
+				{
+					id: `user-image:${entry.id}`,
+					path: "(message image)",
+					kind: "image",
+					tool: "user",
+					timestamp,
+					added: 0,
+					removed: 0,
+					isError: false,
+				},
+				timestamp,
+			);
 			continue;
 		}
 		if (message.role !== "toolResult") continue;
@@ -155,12 +178,24 @@ export function collectFileOps(args: {
 		const call = calls.get(message.toolCallId);
 		if (call === undefined) continue;
 		const timestamp = message.timestamp;
-		const category = READ_TOOLS.has(call.name) ? "read" : WRITE_TOOLS.has(call.name) ? "write" : SEARCH_TOOLS.has(call.name) ? "search" : undefined;
+		const category = READ_TOOLS.has(call.name)
+			? "read"
+			: WRITE_TOOLS.has(call.name)
+				? "write"
+				: SEARCH_TOOLS.has(call.name)
+					? "search"
+					: undefined;
 		if (category === undefined) continue;
 		const path = pathOf(call.arguments);
 
 		if (category === "search") {
-			for (const op of searchOps({ id: message.toolCallId, call, result: { content: message.content, isError: message.isError, timestamp }, timestamp, stepIndex: 0 })) {
+			for (const op of searchOps({
+				id: message.toolCallId,
+				call,
+				result: { content: message.content, isError: message.isError, timestamp },
+				timestamp,
+				stepIndex: 0,
+			})) {
 				push(op, timestamp);
 			}
 			continue;
@@ -169,7 +204,20 @@ export function collectFileOps(args: {
 		if (path === undefined) continue;
 
 		if (hasImage(message.content) && category === "read") {
-			push({ id: message.toolCallId, path, kind: "image", tool: call.name, timestamp, added: 0, removed: 0, isError: message.isError, toolCallId: message.toolCallId }, timestamp);
+			push(
+				{
+					id: message.toolCallId,
+					path,
+					kind: "image",
+					tool: call.name,
+					timestamp,
+					added: 0,
+					removed: 0,
+					isError: message.isError,
+					toolCallId: message.toolCallId,
+				},
+				timestamp,
+			);
 		}
 
 		if (category === "read") {
@@ -206,7 +254,17 @@ export function collectFileOps(args: {
 			}
 		}
 		push(
-			{ id: message.toolCallId, path, kind: "write", tool: call.name, timestamp, added, removed, isError: message.isError, toolCallId: message.toolCallId },
+			{
+				id: message.toolCallId,
+				path,
+				kind: "write",
+				tool: call.name,
+				timestamp,
+				added,
+				removed,
+				isError: message.isError,
+				toolCallId: message.toolCallId,
+			},
 			timestamp,
 		);
 	}

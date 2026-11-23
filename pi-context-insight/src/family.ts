@@ -1,5 +1,4 @@
-import type { Msg } from "./model";
-import type { UsageAggregate } from "./model";
+import type { Msg, UsageAggregate } from "./model";
 
 export interface SubagentRecord {
 	id: string;

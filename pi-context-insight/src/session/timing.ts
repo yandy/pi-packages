@@ -58,7 +58,10 @@ function idleWithin(
 	let idle = 0;
 	const inside = beats.filter((beat) => beat.start >= window.start && beat.start <= window.end);
 	for (let index = 1; index < inside.length; index++) {
-		const gap = inside[index]!.start - inside[index - 1]!.end;
+		const current = inside[index];
+		const previous = inside[index - 1];
+		if (current === undefined || previous === undefined) continue;
+		const gap = current.start - previous.end;
 		if (gap >= IDLE_GAP_MS) idle += gap;
 	}
 	for (const ask of askWindows) {
@@ -79,7 +82,7 @@ export function computeTiming(args: {
 }): TimingReport {
 	const { entries, steps, executions } = args;
 	const beats = beatsOf(entries);
-	const startMs = beats.length > 0 ? beats[0]!.start : 0;
+	const startMs = beats[0]?.start ?? 0;
 	const endMs = beats.reduce((max, beat) => Math.max(max, beat.end), startMs);
 
 	const durations = new Map<number, number>();
@@ -120,7 +123,8 @@ export function computeTiming(args: {
 	const askWindows: Array<{ start: number; end: number }> = [];
 	for (const execution of executions) {
 		if (execution.name !== ASK_TOOL || execution.durationMs === undefined) continue;
-		const beat = beats.find((candidate) => candidate.end - candidate.start >= execution.durationMs!);
+		const duration = execution.durationMs;
+		const beat = beats.find((candidate) => candidate.end - candidate.start >= duration);
 		if (beat) askWindows.push({ start: beat.end - execution.durationMs, end: beat.end });
 	}
 

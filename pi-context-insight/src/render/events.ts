@@ -30,7 +30,7 @@ export function renderEvents(report: InsightReport): string {
 	const tabs = ["all", ...eventKinds()]
 		.map(
 			(kind) =>
-				`<button type="button" data-event-filter="${kind}" aria-pressed="${kind === "all"}">${esc(t(lang, { key: KIND_TAB_KEY[kind] ?? kind }))} ${kind === "all" ? report.events.length : counts.get(kind) ?? 0}</button>`,
+				`<button type="button" data-event-filter="${kind}" aria-pressed="${kind === "all"}">${esc(t(lang, { key: KIND_TAB_KEY[kind] ?? kind }))} ${kind === "all" ? report.events.length : (counts.get(kind) ?? 0)}</button>`,
 		)
 		.join("");
 

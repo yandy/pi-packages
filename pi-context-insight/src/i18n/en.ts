@@ -23,11 +23,13 @@ export const DICT_EN: Record<string, string> = {
 	"warning.brokenChild": "Child session {id} could not be read.",
 	"warning.depthLimit": "Agent family truncated at depth {depth}.",
 	"warning.memberLimit": "Agent family truncated at {count} members.",
-	"warning.noSystem": "This session never recorded a system prompt; system prompt and tool definitions cannot be rebuilt.",
+	"warning.noSystem":
+		"This session never recorded a system prompt; system prompt and tool definitions cannot be rebuilt.",
 	"doc.title": "Session Insight",
 	"doc.modeFull": "full",
 	"doc.modeShort": "short",
-	"doc.banner": "This report contains raw session content (prompts, tool output, command output). Review it before sharing.",
+	"doc.banner":
+		"This report contains raw session content (prompts, tool output, command output). Review it before sharing.",
 	"doc.footer": "Generated locally by pi-context-insight. Single file, no network.",
 	"doc.noscript": "Interactions need JavaScript; the static content is fully readable without it.",
 	"anchor.overview": "Overview",
@@ -42,8 +44,10 @@ export const DICT_EN: Record<string, string> = {
 	"anchor.notes": "Notes",
 	"warn.more": "{count} more warning(s) not shown.",
 	"notes.title": "Data notes & privacy",
-	"notes.estimate": "Estimation uses the host's own density heuristic (about 4 characters per token); actual values are provider-reported.",
-	"notes.scope": "Usage, activity and events aggregate every session entry; the current composition and per-step rebuild follow the active branch only.",
+	"notes.estimate":
+		"Estimation uses the host's own density heuristic (about 4 characters per token); actual values are provider-reported.",
+	"notes.scope":
+		"Usage, activity and events aggregate every session entry; the current composition and per-step rebuild follow the active branch only.",
 	"notes.truncation": "Truncation applied in this report:",
 	"notes.noTruncation": "nothing was truncated.",
 	"notes.truncation.steps": "Timeline limited to the last {limit} steps ({actual} steps dropped).",
@@ -110,7 +114,8 @@ export const DICT_EN: Record<string, string> = {
 	"tokens.costTip": "Cost allocated by token share (estimate).",
 	"tokens.estimateTotal": "estimated total",
 	"tokens.billed": "billed (provider)",
-	"tokens.note": "Category values are estimates from the same density heuristic the host uses; the billed total comes from provider usage.",
+	"tokens.note":
+		"Category values are estimates from the same density heuristic the host uses; the billed total comes from provider usage.",
 	"table.category": "Category",
 	"table.tokens": "Tokens",
 	"table.share": "Share",
@@ -133,7 +138,8 @@ export const DICT_EN: Record<string, string> = {
 	"context.output": "Max output reserve",
 	"context.free": "Free window",
 	"context.compactionDisabled": "Automatic compaction is disabled for this session.",
-	"context.note": "Occupancy comes from the host; the composition is estimated from the current projection and is not rescaled to it.",
+	"context.note":
+		"Occupancy comes from the host; the composition is estimated from the current projection and is not rescaled to it.",
 	"context.trigger": "Compaction triggers above {tokens} tokens",
 	"timeline.title": "Context timeline",
 	"timeline.turnBlock": "Turn {t} · {steps} step(s)",
@@ -233,7 +239,8 @@ export const DICT_EN: Record<string, string> = {
 	"family.status.stopped": "stopped",
 	"family.status.aborted": "aborted",
 	"family.status.untracked": "untracked",
-	"family.untrackedNote": "Untracked means no completion record exists: the child may be running, foreground, finished without a record, or interrupted.",
+	"family.untrackedNote":
+		"Untracked means no completion record exists: the child may be running, foreground, finished without a record, or interrupted.",
 	"family.childReports": "Child reports",
 	"family.childScope": "This child is analysed from its own transcript and is not added to the parent totals again.",
 	"table.agent": "Agent",

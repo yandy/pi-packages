@@ -1,16 +1,18 @@
 # pi-context-insight
 
-为当前 Pi session 生成独立、离线 HTML 洞察报告，解释当前上下文由什么组成、历史用量如何演进、工具/文件/命令做了什么，以及每个可发现的子 Agent 分别完成了哪些工作。
+为当前 Pi session 生成独立、离线的 HTML 洞察报告：每次请求模型到底看到了什么、上下文怎么涨、工具/文件/命令做了什么，以及委派出去的 Agent 各自完成了什么。
 
 ## 功能
 
-- **一个命令，一个文件** — `/insight` 生成带内联 CSS 和 SVG 的 HTML；无 JavaScript、外部资源、模型调用或网络访问
-- **Session 与模型账本** — prompt/output/cache token、成本、缓存命中率、分模型汇总和实际用量时间线
-- **当前上下文组成** — 系统提示词、工具定义、用户/注入/压缩内容、推理、回答、工具调用与工具结果
-- **活动分析** — 工具结果与耗时、文件操作与估算行数变化、命令状态与退出码
-- **上下文事件与耗时** — compaction、context edit、分支摘要、模型/思考级别切换、墙钟及累计模型/工具耗时
-- **子 Agent 报告** — 每个子 session 都有独立的元数据、用量、上下文、时间线、活动与事件视图
-- **防御性输出** — 内容转义、严格 CSP、不包含原始 prompt/回复/工具结果/命令输出，并限制明细行数
+- **一个命令，一个自包含文件** — `/insight` 写出单个 HTML（内联 CSS、JS、JSON）；无外部资源、模型调用或网络访问
+- **逐请求重建** — 每条 assistant 消息都会重放出模型当时收到的 prompt（系统提示词分段、工具 schema、消息、工具结果），并与上一次请求做差
+- **上下文浏览器** — 从汇总条下钻到任意请求，逐条展开到真实文本、JSON schema 或工具输出；附 DNA（读取顺序）列表
+- **带里程碑的时间线** — 逐步堆叠柱，全量/增量、步骤/轮次，压缩/编辑/模型/技能/委派旗标，以及「耗时最长」「新增最多」两处峰值
+- **Token、耗时与占用卡** — 16 类拆分与缓存命中、计费合计；模型/工具/其他三段耗时（已剔除空闲）；窗口占用与压缩预留
+- **活动** — 工具结果与来源、文件操作与行数估算、命令状态/退出码/程序分布
+- **Agent 家族** — 嵌套委派记录、成员卡与精简子报告，转发用量不重复计入
+- **两种模式** — 默认报告内嵌原文；`--short` 结构完全一致但没有任何正文
+- **中英文界面** — 生成时选择，页面内可切换
 
 ## 安装
 
@@ -22,7 +24,7 @@ pi install npm:@yandy0725/pi-context-insight
 
 ```json
 {
-  "packages": ["npm:@yandy0725/pi-context-insight"]
+  "packages": ["@yandy0725/pi-context-insight"]
 }
 ```
 
@@ -31,60 +33,59 @@ pi install npm:@yandy0725/pi-context-insight
 ## 命令
 
 ```text
-/insight
-/insight path/to/report.html
+/insight                                  # 完整报告，默认文件名
+/insight --short                          # 文件中不含任何原文
+/insight --lang zh                        # 中文界面（默认读 LANG/LC_ALL，否则 en）
+/insight --short --lang zh out/report.html
 ```
 
-无参数时，在当前工作目录写入 `pi-insight-<session-file-basename>.html`；内存 session 使用 `pi-insight-<session-id>.html`。
+无路径时写入当前工作目录的 `pi-insight-<session-file-basename>.html`（内存 session 用 session id）。自定义路径相对工作目录解析，已存在则覆盖，不自动创建父目录，也不自动打开浏览器。未知或重复的参数会报错并打印用法。
 
-自定义路径相对于当前工作目录解析。目标文件已存在时会覆盖，与 `/export` 一致；不会自动创建父目录，也不会自动打开浏览器。
-
-空 session（还没有 user 或 assistant 消息）会被拒绝并报 `Nothing to report yet - start a conversation first`，不写文件，与 `/export` 对未开始 session 的处理一致。
+尚无 user 或 assistant 消息的空 session 会被拒绝（`Nothing to report yet - start a conversation first`），与 `/export` 一致。
 
 ## 报告内容
 
 | 区块 | 内容 |
 |---|---|
-| 总览 | Session 元数据、模型、工作目录、token/成本/缓存 KPI 和警告 |
-| 用量账本 | Session 总量、父直接用量/转发子用量拆分、分模型汇总与逐条 usage 记录 |
-| 当前上下文 | 宿主窗口占用，以及估算组成条与分类表 |
-| 实际用量时间线 | 非缓存 input/cache write/cache read/output 堆叠柱、上下文事件标记与耗时摘要 |
-| 子 Agent | 每个安全发现的子 session 对应一份可展开的完整报告 |
-| 工具 | 按工具和层级统计调用、成功/错误/缺失结果/未完成及执行耗时 |
-| 文件 | 读/写/编辑/搜索活动，以及基于参数估算的新增/删除行数 |
-| 命令 | Shell 命令文本、状态、退出码与耗时，不含 stdout/stderr |
-| 上下文事件 | Compaction、分支摘要、context edit、模型/思考级别切换与子 Agent 完成记录 |
-| 数据说明 | 统计口径与隐私审查提醒 |
-
-所有聚合都覆盖完整记录。每类活动/事件明细最多渲染 200 行，并注明省略数量；命令文本含省略号最多 1000 字符。
+| 总览 | session 元数据、6 个 KPI（token / 成本 / 缓存命中 / 调用 / 活跃时长 / 子 Agent）、分模型账本与逐条 usage |
+| Token | 环形图 + 16 类行：6 个系统提示词分段、工具定义、用户、注入、技能注入、压缩摘要、思考、回复、工具调用、工具结果，以及「请求时注入（未记录）」残差 |
+| 耗时 | 模型 / 工具 / 其他三段环、墙钟、已扣空闲、tok/s 角标、逐步骤活跃时长条 |
+| 当前上下文 | 窗口占用、分类条、压缩预留与最大输出预留、压缩触发线 |
+| 时间线 | 每次请求一根堆叠柱；全量/增量、步骤/轮次、自适应、耗时曲线、总览 ribbon、DNA、里程碑旗标 |
+| 请求详情 | 选中或悬停步骤的「用户 / 输入 / 回复」chip，以及实际 prompt、输出、缓存命中 |
+| 浏览器 | 步骤选择器、分类行（条目数 / token / 占比 / 带符号差）、可展开条目正文、工具来源 chip、DNA 列表 |
+| 事件 | 压缩、上下文编辑、分支摘要、模型/思考切换、技能、注入、委派、子 Agent 完成、提问、待办 |
+| 活动 | 工具（来源与按步骤分布）、文件（读/写/搜索/图片、行数变化、操作日志）、命令（状态、退出码、耗时、程序分布） |
+| Agent | 家族成员卡、委派表（任务简报与最终回报）、精简子报告 |
+| 说明 | 估算规则、聚合范围、本次报告实际触发的截断清单、隐私提醒 |
 
 ## 数据口径
 
-### 全量历史与当前上下文
+### 范围
 
-用量、工具/文件/命令活动、事件和耗时聚合 **session 全量 entries**，包括已压缩历史和其他分支。当前组成只使用应用 compaction 与 context edit 后的 **活动投影**。
+用量、活动与事件聚合 **session 全部 entry**（含已压缩历史与其他分支）；当前组成与逐步骤重建只走 **当前分支**。
 
-### 实际值与估算值
+### 估算与实际
 
-- 时间线与账本来自 provider/usage entries 中的实际记录。Prompt token 为 `input + cacheRead + cacheWrite`，总 token 为 prompt 加 output。
-- 当前组成根据投影内容估算，不会强制缩放到 provider 总量；未知工具定义显示 `—`，不会当成 0。
-- 宿主上下文占用单独展示，因为 provider 序列化、缓存和尾部估算会使它与组成估算不同。
-- 成本使用记录的 `usage.cost.total`，并标明 provider 报告、目录估算或混合口径。
-- 行数变化根据 write/edit 参数估算，不是重新对文件系统做 diff。
+- 估算使用宿主同一套密度启发式（`@earendil-works/pi-ai/utils/estimate`），因此分类数值与 pi 界面里的上下文环一致。
+- 实际值来自 provider usage：prompt = `input + cacheRead + cacheWrite`，缓存命中 = `cacheRead / prompt`。
+- 扩展在请求时注入的内容（例如通过 `context` hook）不落 transcript，因此估算合计可能低于实际 prompt；差值超过估算 2% 时单列为残差行。
+- 成本取 `usage.cost.total`；分类成本按 token 占比分摊并标注为估算；`provider` / `estimate` / `mixed` 三态分别标注。
+- 时长优先取 `durationMs`，由时间差派生的值标 `≈`；≥120 秒的空档与 `ask_user` 等待不计入活跃时长。
 
 ### 父子记账
 
-顶部总量使用父 session 账本，其中已经包含转发的子 Agent 用量。`Parent direct` 排除 `kind: "subagent"` entries，`Subagents forwarded` 只包含这些 entries。
+顶部账本是父 session 的，其中已含转发的子用量；每份子报告由子 session 自己的 transcript 计算，**不会再次加回**。没有完成记录的委派显示为 `untracked`——可能在运行、在前台运行、已完成但无记录或被打断，报告不猜。
 
-每份子 Agent 报告都根据它自己的 JSONL session 计算，**不会再次加回**顶部总量。辅助摘要用量等差异可能使子账本与转发子集不同。
+### 上限
 
-子 Agent 发现会合并完成记录与标准 `tasks/` session 目录，并在加载前校验 fork 血缘、realpath 边界、JSONL 后缀和子 header 的父身份。缺失或损坏的子 session 只产生 warning，不会阻断父报告。
-
-`untracked` 表示没有完成记录：子 Agent 可能仍在运行、在前台运行、已完成但无记录或曾被中断；报告不会猜测具体状态。
+时间线最多 4000 步；逐步骤明细只物化最近 300 步与带事件的步骤；每类每步渲染 200 行；正文裁剪到 8000 字符（工具结果 4000、命令 2000）；payload 上限 16 MB，超出时按顺序降级。所有实际触发的截断都会列在报告的「说明」里。
 
 ## 隐私
 
-HTML 不包含原始 prompt、助手回复、工具结果或命令输出，但仍可能包含工作目录、文件路径、命令文本、模型名和子 Agent 描述。**分享前请审查报告。**
+默认报告 **含原始 prompt、工具输出、命令输出与文件内容预览**：分享前请审查。`--short` 不含任何原文——正文从未写入文件，因此源码里也查不到。
+
+页面完全离线：严格 CSP、无外部请求、无 `eval`，所有 session 文本在生成期转义。
 
 ## UI 能力
 

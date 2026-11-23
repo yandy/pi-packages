@@ -8,7 +8,7 @@ import { esc } from "./escape";
 export function renderCurrentContext(report: InsightReport): string {
 	const lang = report.lang;
 	const context = report.currentContext;
-	const window = context.window > 0 ? context.window : 0;
+	const window = Math.max(0, context.window);
 	const used = context.tokens ?? 0;
 	const scale = Math.max(window, used, 1);
 	const occupied = Math.min(used, scale) / scale;
@@ -21,14 +21,19 @@ export function renderCurrentContext(report: InsightReport): string {
 		})
 		.join("");
 
-	const free = Math.max(0, 1 - occupied - (context.reserveEnabled ? context.reserveTokens / scale : 0) - context.maxTokens / scale);
+	const free = Math.max(
+		0,
+		1 - occupied - (context.reserveEnabled ? context.reserveTokens / scale : 0) - context.maxTokens / scale,
+	);
 	const reserve = context.reserveEnabled
 		? `<i class="hatch" data-reserve="headroom" style="width:${((context.reserveTokens / scale) * 100).toFixed(3)}%" title="${esc(t(lang, { key: "context.headroom", params: { p: ((context.reserveTokens / scale) * 100).toFixed(1) } }))}"></i>`
 		: "";
-	const output = context.maxTokens > 0
-		? `<i class="hatch-out" data-reserve="output" style="width:${((context.maxTokens / scale) * 100).toFixed(3)}%" title="${esc(t(lang, { key: "context.output" }))}"></i>`
-		: "";
-	const freeBar = free > 0 ? `<i style="width:${(free * 100).toFixed(3)}%" title="${esc(t(lang, { key: "context.free" }))}"></i>` : "";
+	const output =
+		context.maxTokens > 0
+			? `<i class="hatch-out" data-reserve="output" style="width:${((context.maxTokens / scale) * 100).toFixed(3)}%" title="${esc(t(lang, { key: "context.output" }))}"></i>`
+			: "";
+	const freeBar =
+		free > 0 ? `<i style="width:${(free * 100).toFixed(3)}%" title="${esc(t(lang, { key: "context.free" }))}"></i>` : "";
 	const triggerAt = context.reserveEnabled ? Math.max(0, 1 - context.reserveTokens / scale) : null;
 	const trigger =
 		triggerAt === null

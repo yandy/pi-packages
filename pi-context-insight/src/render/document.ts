@@ -19,19 +19,20 @@ export const SECTION_IDS = [
 const WARNING_VISIBLE = 8;
 
 function anchors(lang: InsightReport["lang"]): string {
-	return SECTION_IDS.map(
-		(id) => `<a href="#${id}" data-anchor="${id}">${t(lang, { key: `anchor.${id}` })}</a>`,
-	).join("");
+	return SECTION_IDS.map((id) => `<a href="#${id}" data-anchor="${id}">${t(lang, { key: `anchor.${id}` })}</a>`).join(
+		"",
+	);
 }
 
 function warningsPanel(report: InsightReport): string {
 	if (report.warnings.length === 0) return "";
 	const visible = report.warnings.slice(0, WARNING_VISIBLE);
 	const rest = report.warnings.length - visible.length;
-	const items = visible
-		.map((warning) => `<li data-warning="1">${t(report.lang, warning)}</li>`)
-		.join("");
-	const more = rest > 0 ? `<p class="dim" data-warning-more>${t(report.lang, { key: "warn.more", params: { count: rest } })}</p>` : "";
+	const items = visible.map((warning) => `<li data-warning="1">${t(report.lang, warning)}</li>`).join("");
+	const more =
+		rest > 0
+			? `<p class="dim" data-warning-more>${t(report.lang, { key: "warn.more", params: { count: rest } })}</p>`
+			: "";
 	return `<section class="warn-panel" data-card="warnings"><ul>${items}</ul>${more}</section>`;
 }
 
@@ -75,16 +76,9 @@ export function renderDocument(args: {
 			? "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'"
 			: "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'";
 	const banner =
-		report.mode === "full"
-			? `<div class="banner" data-banner="raw-content">${t(lang, { key: "doc.banner" })}</div>`
-			: "";
+		report.mode === "full" ? `<div class="banner" data-banner="raw-content">${t(lang, { key: "doc.banner" })}</div>` : "";
 	const runtime = args.runtime ?? "";
-	const meta = [
-		report.metadata.model ?? "—",
-		report.metadata.thinkingLevel,
-		report.metadata.cwd,
-		report.generatedAt,
-	]
+	const meta = [report.metadata.model ?? "—", report.metadata.thinkingLevel, report.metadata.cwd, report.generatedAt]
 		.filter((value): value is string => typeof value === "string" && value.length > 0)
 		.map((value) => `<span class="dim">${value}</span>`)
 		.join(" · ");

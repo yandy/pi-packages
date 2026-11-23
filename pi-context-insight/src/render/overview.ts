@@ -25,16 +25,14 @@ export function renderOverview(report: InsightReport): string {
 			t(lang, { key: "kpi.tokensSub", params: { prompt: fmtTokens(k.prompt), output: fmtTokens(k.output) } }),
 			"tokens",
 		),
-		kpi(
-			t(lang, { key: "kpi.cost" }),
-			fmtCost(k.cost),
-			t(lang, { key: costBasisKey(report) }),
-			"cost",
-		),
+		kpi(t(lang, { key: "kpi.cost" }), fmtCost(k.cost), t(lang, { key: costBasisKey(report) }), "cost"),
 		kpi(
 			t(lang, { key: "kpi.cacheHit" }),
 			k.cacheHitRate === null ? "—" : `${(k.cacheHitRate * 100).toFixed(2)}%`,
-			t(lang, { key: "kpi.cacheHitSub", params: { read: fmtTokens(usage.total.cacheRead), write: fmtTokens(usage.total.cacheWrite) } }),
+			t(lang, {
+				key: "kpi.cacheHitSub",
+				params: { read: fmtTokens(usage.total.cacheRead), write: fmtTokens(usage.total.cacheWrite) },
+			}),
 			"cache",
 		),
 		kpi(
@@ -53,7 +51,10 @@ export function renderOverview(report: InsightReport): string {
 			t(lang, { key: "kpi.subagents" }),
 			`${k.subagents}`,
 			k.subagents > 0
-				? t(lang, { key: "kpi.subagentsSub", params: { prompt: fmtTokens(k.forwardedPrompt), cost: fmtCost(k.forwardedCost) } })
+				? t(lang, {
+						key: "kpi.subagentsSub",
+						params: { prompt: fmtTokens(k.forwardedPrompt), cost: fmtCost(k.forwardedCost) },
+					})
 				: "",
 			"subagents",
 		),
@@ -73,9 +74,10 @@ export function renderOverview(report: InsightReport): string {
 				`<tr><td>${esc(row.timestamp)}</td><td>${esc(row.source)}</td><td>${esc(row.provider && row.model ? `${row.provider}/${row.model}` : "—")}</td><td class="num">${fmtTokens(row.input + row.cacheRead + row.cacheWrite)}</td><td class="num">${fmtTokens(row.output)}</td><td class="num">${fmtCost(row.cost)}</td></tr>`,
 		)
 		.join("");
-	const omitted = report.usageRows.length > USAGE_ROW_LIMIT
-		? `<p class="dim">${t(lang, { key: "common.omitted", params: { count: report.usageRows.length - USAGE_ROW_LIMIT } })}</p>`
-		: "";
+	const omitted =
+		report.usageRows.length > USAGE_ROW_LIMIT
+			? `<p class="dim">${t(lang, { key: "common.omitted", params: { count: report.usageRows.length - USAGE_ROW_LIMIT } })}</p>`
+			: "";
 
 	return `<section class="card" id="overview" data-card="overview"><h2>${t(lang, { key: "overview.title" })}</h2>
 <div class="kpis">${kpis}</div>
