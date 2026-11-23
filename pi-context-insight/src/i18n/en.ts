@@ -19,4 +19,9 @@ export const DICT_EN: Record<string, string> = {
 	"event.todoAdd": "Added {count} todo item(s)",
 	"event.todoUpdate": "Updated todo items · ×{count}",
 
+	"warning.lineageMismatch": "Child session {id} does not name this session as its parent and was skipped.",
+	"warning.brokenChild": "Child session {id} could not be read.",
+	"warning.depthLimit": "Agent family truncated at depth {depth}.",
+	"warning.memberLimit": "Agent family truncated at {count} members.",
 };
+

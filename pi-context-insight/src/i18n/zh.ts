@@ -19,4 +19,9 @@ export const DICT_ZH: Record<string, string> = {
 	"event.todoAdd": "新增 {count} 项待办",
 	"event.todoUpdate": "更新待办 · ×{count}",
 
+	"warning.lineageMismatch": "子会话 {id} 未声明以本会话为父级，已跳过。",
+	"warning.brokenChild": "子会话 {id} 无法读取。",
+	"warning.depthLimit": "Agent 家族在深度 {depth} 处截断。",
+	"warning.memberLimit": "Agent 家族在 {count} 个成员处截断。",
 };
+
