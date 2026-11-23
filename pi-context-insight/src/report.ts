@@ -248,13 +248,15 @@ export function buildSessionReport(input: SessionInput): SessionReport {
 	const events = collectEvents({
 		entries,
 		steps,
-		subagentRecords: (input.mode === "short" ? records.map((record) => ({ ...record, description: "" })) : records).map((record) => ({
-			id: record.id,
-			description: record.description,
-			status: record.status,
-			startedAt: record.startedAt,
-			...(record.completedAt === undefined ? {} : { completedAt: record.completedAt }),
-		})),
+		subagentRecords: (input.mode === "short" ? records.map((record) => ({ ...record, description: "" })) : records).map(
+			(record) => ({
+				id: record.id,
+				description: record.description,
+				status: record.status,
+				startedAt: record.startedAt,
+				...(record.completedAt === undefined ? {} : { completedAt: record.completedAt }),
+			}),
+		),
 	});
 	const { milestones, peaks, byStep } = buildMilestones(events, steps);
 	for (const [stepIndex, eventIds] of byStep) {
