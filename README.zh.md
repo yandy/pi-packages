@@ -15,10 +15,6 @@
 | [pi-vision-tools](./pi-vision-tools/README.zh.md) | `describe_image` 工具——将图像分析委托给视觉模型 | `@yandy0725/pi-vision-tools` |
 | [pi-web-tools](./pi-web-tools/README.zh.md) | websearch + webfetch 工具 | `@yandy0725/pi-web-tools` |
 
-> `pi-memory` 已迁往 [simple-memory](https://github.com/yandy/simple-memory)。
-> `pi-container-sandbox` 已退役：npm 包标记为 deprecated，源码保留在 git 历史中（`pi-container-sandbox-v1.3.0`）。
-> `pi-superpowers` 已退役：npm 包标记为 deprecated，源码保留在 git 历史中（`pi-superpowers-v0.7.3`）；skills 请改用上游 [obra/superpowers](https://github.com/obra/superpowers)。
-
 ## 开发
 
 ```bash

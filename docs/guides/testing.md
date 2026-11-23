@@ -66,7 +66,7 @@ export default defineConfig({
 `await new Promise((r) => setTimeout(r, 0))` 顶替——那是猜时间，被测链里只要有真实 I/O 就会
 偶发失败，而且只在并行跑整仓时暴露。
 
-实测（pi-memory `/dream`，2026-10-24；该包已迁往 simple-memory）：成功回调在 `notify` 之前 `await SessionManager.list(cwd)`
+实测（2026-10-24，一次真实的 flake 案例）：成功回调在 `notify` 之前 `await SessionManager.list(cwd)`
 （真实磁盘 I/O），测试只等一个 tick。空闲机器上 tick 被 clamp 到 0–4ms，而 `list` 中位 1.4ms、
 最长 6.4ms——300 次里 **5 次 tick 先到（1.7%）**；整仓 26 个 vitest worker 并行时余量进一步被吃掉，
 于是表现为「包内单跑必绿、`npm test` 偶发红」。
