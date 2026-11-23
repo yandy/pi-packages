@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
@@ -88,6 +88,22 @@ describe("insight command", () => {
 
 		const unsafe = contextFor(manager, { sessionManager: { getSessionFile: () => undefined, getSessionId: () => "bad/id\\name" } });
 		expect(defaultInsightPath(unsafe)).toBe(join(root, "pi-insight-bad_id_name.html"));
+	});
+
+	it("refuses an empty session instead of writing a report", async () => {
+		const manager = SessionManager.create(root, join(root, "sessions"));
+		expect(manager.getEntries()).toEqual([]);
+		const ctx = contextFor(manager);
+
+		await expect(runInsight("", ctx)).rejects.toThrow("Nothing to report yet - start a conversation first");
+
+		const handler = captureHandler();
+		await handler("explicit.html", ctx);
+		expect(ctx.ui.notify).toHaveBeenCalledWith(
+			"Failed to generate insight: Nothing to report yet - start a conversation first",
+			"error",
+		);
+		expect(readdirSync(root).filter((name) => name.endsWith(".html"))).toEqual([]);
 	});
 
 	it("resolves custom paths with spaces and overwrites an existing file", async () => {

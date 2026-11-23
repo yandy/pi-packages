@@ -39,6 +39,8 @@ pi install npm:@yandy0725/pi-context-insight
 
 自定义路径相对于当前工作目录解析。目标文件已存在时会覆盖，与 `/export` 一致；不会自动创建父目录，也不会自动打开浏览器。
 
+空 session（还没有 user 或 assistant 消息）会被拒绝并报 `Nothing to report yet - start a conversation first`，不写文件，与 `/export` 对未开始 session 的处理一致。
+
 ## 报告内容
 
 | 区块 | 内容 |

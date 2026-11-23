@@ -39,6 +39,8 @@ Without an argument, the command writes `pi-insight-<session-file-basename>.html
 
 A custom path is resolved against the current working directory. The target is overwritten if it already exists, matching `/export`; parent directories are not created and the browser is not opened automatically.
 
+An empty session (no user or assistant message yet) is refused with `Nothing to report yet - start a conversation first` and writes no file, matching how `/export` treats a session that has not started.
+
 ## Report contents
 
 | Section | What it shows |
