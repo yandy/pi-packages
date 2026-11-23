@@ -14,12 +14,26 @@ export function defaultInsightPath(ctx: ExtensionCommandContext): string {
 	return join(ctx.cwd, `pi-insight-${filenameStem(stem)}.html`);
 }
 
+/**
+ * A session is empty until a user or assistant message is recorded, matching the host's own
+ * "has conversation" rule: setup entries (model, thinking level, system prompt) alone do not
+ * produce a session file, so `/export` refuses them too.
+ */
+function hasConversation(ctx: ExtensionCommandContext): boolean {
+	return ctx.sessionManager
+		.getEntries()
+		.some((entry) => entry.type === "message" && (entry.message.role === "user" || entry.message.role === "assistant"));
+}
+
 export async function runInsight(
 	args: string,
 	ctx: ExtensionCommandContext,
 	options: { generatedAt?: Date } = {},
 ): Promise<string> {
 	await ctx.waitForIdle();
+	if (!hasConversation(ctx)) {
+		throw new Error("Nothing to report yet - start a conversation first");
+	}
 	const customPath = args.trim();
 	const outputPath = customPath ? resolve(ctx.cwd, customPath) : defaultInsightPath(ctx);
 	const report = buildInsightReport(ctx, options);
