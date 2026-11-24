@@ -84,7 +84,7 @@ timeout: 300
 | `run_in_background` | boolean | 不指定 | 每次调用没有 `run_in_background` 时的默认值 |
 | `enabled` | boolean | `true` | `false` 时该类型仍在注册表里，但不可启动、也不出现在类型列表中 |
 
-`inherit_context` / `run_in_background` 只是该类型的**默认值**，显式传参永远优先——所以它们不影响能力，只影响默认策略。
+`inherit_context` / `run_in_background` 决定该类型的策略，写在 frontmatter 里的值会**锁定**它：和 `max_turns`、`timeout` 一样，frontmatter 优先于每次调用传入的参数。两个内置代理刻意不写它们，把决定权留给调用方；不写时默认 `false`。
 
 `max_turns` 与 `timeout`（墙钟秒数，`0` = 无限制）会锁定该代理类型的上限：frontmatter 中的值优先于每次调用传入的参数。
 

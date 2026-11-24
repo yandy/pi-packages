@@ -84,7 +84,7 @@ Agents are discovered from `<cwd>/.pi/agents/<name>.md` (project) and `$PI_CODIN
 | `run_in_background` | boolean | unset | Default when a call omits `run_in_background` |
 | `enabled` | boolean | `true` | `false` keeps the type in the registry but makes it unspawnable and hides it from type lists |
 
-`inherit_context` / `run_in_background` are **defaults only** — an explicit argument always wins, so they set strategy, not capability.
+`inherit_context` / `run_in_background` set this type's strategy, and a value written here **locks** it: like `max_turns` and `timeout`, the frontmatter wins over the per-call argument. The built-in agents deliberately omit both so the caller decides; omitted, they default to `false`.
 
 `max_turns` and `timeout` (wall-clock seconds, `0` = unlimited) lock their limits for the agent type: a frontmatter value wins over the per-call parameter.
 
