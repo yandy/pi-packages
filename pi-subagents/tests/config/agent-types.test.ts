@@ -184,7 +184,7 @@ describe("AgentTypeRegistry", () => {
 		});
 
 		it("returns Explore's explicit allowlist", () => {
-			expect(makeRegistry().getToolNamesForType("Explore")).toEqual(["read", "bash", "grep", "find", "ls"]);
+			expect(makeRegistry().getToolNamesForType("Explore")).toEqual(["read", "grep", "find", "ls"]);
 		});
 
 		it("returns custom tool names for a user agent", () => {

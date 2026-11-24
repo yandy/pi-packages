@@ -47,7 +47,7 @@ Foreground agents block until complete. Background agents return an ID immediate
 | Type | Tools | Model | Description |
 |------|-------|-------|-------------|
 | `general-purpose` | inherit the parent's tools, dispatch tools stripped | inherit | Harness-rendered prompt for the child's own tool set — same conventions, plus the sub-agent bridge |
-| `Explore` | read, bash, grep, find, ls | inherit (overridable per call) | Fast codebase exploration (read-only) |
+| `Explore` | read, grep, find, ls | inherit (overridable per call) | Fast codebase exploration (read-only) |
 
 ## Custom Agents
 
