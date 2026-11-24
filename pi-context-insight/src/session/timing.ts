@@ -60,10 +60,22 @@ function beatsOf(entries: readonly SessionEntry[]): Beat[] {
 		const timestamp = Date.parse(entry.timestamp);
 		if (!Number.isFinite(timestamp)) continue;
 		let end = timestamp;
-		if (entry.type === "message" && entry.message.role === "assistant" && typeof entry.message.durationMs === "number") {
+		if (
+			entry.type === "message" &&
+			entry.message.role === "assistant" &&
+			typeof entry.message.durationMs === "number" &&
+			Number.isFinite(entry.message.durationMs) &&
+			entry.message.durationMs >= 0
+		) {
 			end = timestamp + entry.message.durationMs;
 		}
-		if (entry.type === "message" && entry.message.role === "toolResult" && typeof entry.message.durationMs === "number") {
+		if (
+			entry.type === "message" &&
+			entry.message.role === "toolResult" &&
+			typeof entry.message.durationMs === "number" &&
+			Number.isFinite(entry.message.durationMs) &&
+			entry.message.durationMs >= 0
+		) {
 			end = timestamp + entry.message.durationMs;
 		}
 		beats.push({ start: timestamp, end });
@@ -120,10 +132,15 @@ export function computeTiming(args: {
 	let modelMs = 0;
 	let modelEstimated = false;
 	for (const step of steps) {
-		if (typeof step.durationMs !== "number") step.durationMs = durations.get(step.timestamp);
-		if (typeof step.durationMs === "number") {
+		const existingDuration = step.durationMs;
+		const duration =
+			typeof existingDuration === "number" && Number.isFinite(existingDuration) && existingDuration >= 0
+				? existingDuration
+				: durations.get(step.timestamp);
+		if (duration !== undefined) {
+			step.durationMs = duration;
 			step.durationEstimated = false;
-			modelMs += step.durationMs;
+			modelMs += duration;
 			continue;
 		}
 		modelEstimated = true;

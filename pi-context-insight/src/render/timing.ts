@@ -1,9 +1,15 @@
-import { fmtDuration, fmtShare } from "../format";
+import { fmtDuration, fmtShare, fmtTokens } from "../format";
 import { t } from "../i18n";
 import type { InsightReport } from "../report";
+import { stepOutputTps } from "../session/timing";
 import { donut } from "./charts";
 import { esc } from "./escape";
-import { legendRow, section } from "./layout";
+import { i18nAttrs, legendRow, section } from "./layout";
+
+function formatTps(value: number | null): string {
+	if (value === null || !Number.isFinite(value)) return "—";
+	return `${value >= 10 ? Math.round(value) : value.toFixed(1)} tok/s`;
+}
 
 export function renderTimingCard(report: InsightReport): string {
 	const lang = report.lang;
@@ -37,9 +43,31 @@ export function renderTimingCard(report: InsightReport): string {
 	const meta =
 		timing.tps === null
 			? ""
-			: `<span class="chip" data-tps="1">${esc(
-					t(lang, { key: "timing.tps", params: { tps: timing.tps >= 10 ? Math.round(timing.tps) : timing.tps.toFixed(1) } }),
-				)}</span>`;
+			: `<span class="chip" data-tps="1">${esc(formatTps(timing.tps))}</span>`;
+
+	const metrics: Array<{ key: string; labelKey: string; value: string }> = [
+		{ key: "activeTps", labelKey: "timing.activeTps", value: formatTps(timing.activeTps) },
+		{ key: "latestTps", labelKey: "timing.latestTps", value: formatTps(timing.latestTps) },
+		{ key: "medianTps", labelKey: "timing.medianTps", value: formatTps(timing.medianTps) },
+		{ key: "fastestTps", labelKey: "timing.fastestTps", value: formatTps(timing.fastestTps) },
+		{ key: "slowestTps", labelKey: "timing.slowestTps", value: formatTps(timing.slowestTps) },
+		{
+			key: "averageModelMs",
+			labelKey: "timing.averageModelMs",
+			value: timing.averageModelMs === null ? "—" : fmtDuration(timing.averageModelMs),
+		},
+		{
+			key: "p95ModelMs",
+			labelKey: "timing.p95ModelMs",
+			value: timing.p95ModelMs === null ? "—" : fmtDuration(timing.p95ModelMs),
+		},
+	];
+	const metricGrid = `<div class="throughput-grid">${metrics
+		.map(
+			(metric) =>
+				`<div class="kpi" data-timing-metric="${metric.key}"><div class="kpi-label" ${i18nAttrs(metric.labelKey)}>${esc(t(lang, { key: metric.labelKey }))}</div><div class="kpi-value">${esc(metric.value)}</div></div>`,
+		)
+		.join("")}</div>`;
 
 	const facts = `<div class="timing-facts">
 <div><div class="kpi-label">${t(lang, { key: "timing.wall" })}</div><div class="kpi-value">${fmtDuration(timing.wallMs)}</div></div>
@@ -55,10 +83,31 @@ ${donut({
 })}
 <div class="legend-grid">${rows}${facts}</div>
 </div>
+${metricGrid}
 ${estimated ? `<p class="dim" style="margin:8px 0 0">${t(lang, { key: "timing.estimatedNote" })}</p>` : ""}
-${renderStrip(report)}`;
+${renderStrip(report)}
+${renderRequestThroughput(report)}`;
 
 	return section({ id: "timing", titleKey: "timing.title", lang, span: 6, meta, body });
+}
+
+function renderRequestThroughput(report: InsightReport): string {
+	const lang = report.lang;
+	if (report.steps.length === 0) return "";
+	const rows = report.steps
+		.map((step) => {
+			const output = step.actual === undefined ? "—" : fmtTokens(step.actual.output);
+			const duration =
+				step.durationMs === undefined
+					? "—"
+					: `${step.durationEstimated ? "≈" : ""}${fmtDuration(step.durationMs)}`;
+			const label = `${t(lang, { key: "label.turn", params: { t: step.turn } })} · ${t(lang, { key: "label.step", params: { s: step.stepInTurn } })}`;
+			return `<tr data-request-step="${step.index}"><td>${esc(label)}</td><td class="num">${esc(output)}</td><td class="num">${esc(duration)}</td><td class="num">${esc(formatTps(stepOutputTps(step)))}</td></tr>`;
+		})
+		.join("");
+	return `<details class="request-throughput" data-request-throughput><summary ${i18nAttrs("timing.requests", { count: report.steps.length })}>${esc(t(lang, { key: "timing.requests", params: { count: report.steps.length } }))}</summary>
+<div class="scroll-list request-throughput-scroll"><table><thead><tr><th ${i18nAttrs("timing.requestStep")}>${t(lang, { key: "timing.requestStep" })}</th><th class="num" ${i18nAttrs("timing.requestOutput")}>${t(lang, { key: "timing.requestOutput" })}</th><th class="num" ${i18nAttrs("timing.requestModelMs")}>${t(lang, { key: "timing.requestModelMs" })}</th><th class="num" ${i18nAttrs("timing.requestTps")}>${t(lang, { key: "timing.requestTps" })}</th></tr></thead><tbody>${rows}</tbody></table></div>
+<p class="dim" ${i18nAttrs("timing.requestNote")}>${esc(t(lang, { key: "timing.requestNote" }))}</p></details>`;
 }
 
 function renderStrip(report: InsightReport): string {
