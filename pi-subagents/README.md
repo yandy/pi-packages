@@ -10,7 +10,7 @@ A [pi](https://pi.dev) extension providing a focused, in-process sub-agent core 
 - **Parent-session accounting** — child model usage joins the parent footer, `/session`, and `/usage` totals, including background and resumed agents
 - **Custom agent types** — define agents in `.pi/agents/<name>.md` with YAML frontmatter: system prompts, model, thinking, tools
 - **Mid-run steering** — inject messages into running agents to redirect work without restarting
-- **Session resume** — pick up where an agent left off, preserving full conversation context
+- **Session resume** — re-prompt the same child session before it is released (10 minutes after the agent finishes), keeping its context
 - **Graceful turn limits** — agents get a "wrap up" warning before hard abort
 - **Case-insensitive types** — `"explore"`, `"Explore"`, `"EXPLORE"` all work
 - **Fuzzy model selection** — specify models by name (`"haiku"`, `"sonnet"`) instead of full IDs

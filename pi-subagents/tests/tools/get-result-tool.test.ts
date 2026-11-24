@@ -29,6 +29,20 @@ async function execute(
 	return tool.execute("tc-1", params, new AbortController().signal, undefined, STUB_CTX);
 }
 
+describe("GetResultTool — wait description", () => {
+	it("says wait only applies to a running agent", () => {
+		const tool = new GetResultTool(
+			{ getRecord: () => undefined } as unknown as GetResultToolManager,
+			{} as AgentTypeRegistry,
+			{ markConsumed: vi.fn(), cancelNudge: vi.fn(), sendCompletion: vi.fn() } as unknown as GetResultToolNotifications,
+		);
+		const def = tool.toToolDefinition();
+		const props = (def.parameters as { properties: Record<string, { description?: string }> }).properties;
+		const description = props.wait?.description ?? "";
+		expect(description).toContain("Only applies while it is running");
+	});
+});
+
 describe("GetResultTool", () => {
 	it("returns tool definition with correct name", () => {
 		const tool = new GetResultTool(makeManager(), makeNotifications(), testRegistry);

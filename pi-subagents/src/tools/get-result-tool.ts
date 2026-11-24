@@ -101,7 +101,7 @@ export class GetResultTool {
 				}),
 				wait: Type.Optional(
 					Type.Boolean({
-						description: "If true, wait for the agent to complete before returning. Default: false.",
+						description: "If true, wait for the agent to finish. Only applies while it is running. Default: false.",
 					}),
 				),
 				verbose: Type.Optional(
