@@ -128,6 +128,8 @@ Two behaviors are worth stating because they are choices, not consequences:
 | `general-purpose` | omitted → inherit | Matches the caller; the role is "do what the caller could do, in a fresh context" |
 | `Explore` | `["read", "bash", "grep", "find", "ls"]` | Read-only exploration. The host's `createReadOnlyTools` set is `read`/`grep`/`find`/`ls`; `bash` stays because exploration leans on read-only shell commands (`git log`, `rg`), and the `replace` prompt forbids every write. Named explicitly rather than derived, so the capability is a property of the agent, not of the host version. |
 
+> Superseded 2026-11-24: `bash` was removed from `Explore`. No shell is granted now, because `bash` and `powershell` are a platform pair and either one fails on the other platform. See [2026-11-24-explore-readonly-tools-design.md](./2026-11-24-explore-readonly-tools-design.md).
+
 ### Recursion guard
 
 `create-subagent-session.ts` stops owning its private list and imports `DISPATCH_TOOL_NAMES`. The guard stays unconditional after `bindExtensions`: it is the second line of defense for the inherited case (resolution already stripped the names, but the child's own copy of this extension registers them at bind time).

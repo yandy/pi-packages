@@ -28,9 +28,21 @@ describe("DEFAULT_AGENTS", () => {
 
 		it("is limited to read-only tools", () => {
 			const tools = get("Explore").toolNames ?? [];
-			expect(tools).toEqual(["read", "bash", "grep", "find", "ls"]);
+			expect(tools).toEqual(["read", "grep", "find", "ls"]);
 			expect(tools).not.toContain("edit");
 			expect(tools).not.toContain("write");
+		});
+
+		// `bash` and `powershell` are a platform pair: each throws when run where the
+		// other is the shell, and bash is missing on many Windows installs. Naming
+		// either one hands some hosts a tool that can only fail, so Explore gets none.
+		it("grants no shell, and names no shell in its prompt", () => {
+			const config = get("Explore");
+			expect(config.toolNames).not.toContain("bash");
+			expect(config.toolNames).not.toContain("powershell");
+			expect(config.systemPrompt).not.toMatch(/\bbash\b/i);
+			expect(config.systemPrompt).not.toMatch(/\bpowershell\b/i);
+			expect(config.systemPrompt).toMatch(/no shell/i);
 		});
 	});
 

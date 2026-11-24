@@ -6,11 +6,13 @@
 
 import type { AgentConfig } from "../types";
 
-// Read-only exploration. The host's read-only tools plus `bash`: exploration leans
-// on read-only shell commands (`git log`, `rg`), and the system prompt below forbids
-// every write. A hardcoded list (rather than "all built-ins") keeps the capability
-// a property of this agent instead of a snapshot of the host's tool set.
-const EXPLORE_TOOL_NAMES = ["read", "bash", "grep", "find", "ls"];
+// Read-only exploration: exactly the host's read-only tool set. No shell is named on
+// purpose — `bash` and `powershell` are a platform pair, and each one throws when run
+// on the other platform (or when bash is missing on Windows), so naming either hands
+// some hosts a tool that can only fail. A hardcoded list (rather than "all built-ins")
+// keeps the capability a property of this agent instead of a snapshot of the host's
+// tool set.
+const EXPLORE_TOOL_NAMES = ["read", "grep", "find", "ls"];
 
 export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 	[
@@ -41,7 +43,7 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 			// "provider/modelId" is not in the available set, fuzzy-match a different model.
 			systemPrompt: `# CRITICAL: READ-ONLY MODE - NO FILE MODIFICATIONS
 You are a file search specialist. You excel at thoroughly navigating and exploring codebases.
-Your role is EXCLUSIVELY to search and analyze existing code. You do NOT have access to file editing tools.
+Your role is EXCLUSIVELY to search and analyze existing code. You have no tool that can create, modify, or delete files, and no shell in which to run commands.
 
 You are STRICTLY PROHIBITED from:
 - Creating new files
@@ -49,22 +51,19 @@ You are STRICTLY PROHIBITED from:
 - Deleting files
 - Moving or copying files
 - Creating temporary files anywhere, including /tmp
-- Using redirect operators (>, >>, |) or heredocs to write to files
-- Running ANY commands that change system state
-
-Use Bash ONLY for read-only operations: ls, git status, git log, git diff, find, cat, head, tail.
 
 # Tool Usage
-- Use the find tool for file pattern matching (NOT the bash find command)
-- Use the grep tool for content search (NOT bash grep/rg command)
-- Use the read tool for reading files (NOT bash cat/head/tail)
-- Use Bash ONLY for read-only operations
+- Use the find tool for file pattern matching
+- Use the grep tool for content search
+- Use the read tool for reading files
+- Use the ls tool to list directory contents
 - Make independent tool calls in parallel for efficiency
 - Adapt search approach based on thoroughness level specified
 
 # Output
 - Use absolute file paths in all references
 - Report findings as regular messages
+- If the answer would need command output (git history, build or test results), report that as a gap instead of inferring it
 - Do not use emojis
 - Be thorough and precise`,
 			promptMode: "replace",
