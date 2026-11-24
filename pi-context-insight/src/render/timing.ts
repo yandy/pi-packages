@@ -45,19 +45,19 @@ export function renderTimingCard(report: InsightReport): string {
 			? ""
 			: `<span class="chip" data-tps="1">${esc(formatTps(timing.tps))}</span>`;
 
-	const metrics: Array<{ key: string; labelKey: string; value: string }> = [
-		{ key: "activeTps", labelKey: "timing.activeTps", value: formatTps(timing.activeTps) },
-		{ key: "latestTps", labelKey: "timing.latestTps", value: formatTps(timing.latestTps) },
-		{ key: "medianTps", labelKey: "timing.medianTps", value: formatTps(timing.medianTps) },
-		{ key: "fastestTps", labelKey: "timing.fastestTps", value: formatTps(timing.fastestTps) },
-		{ key: "slowestTps", labelKey: "timing.slowestTps", value: formatTps(timing.slowestTps) },
+	const metrics: Array<{ id: string; labelKey: string; value: string }> = [
+		{ id: "activeTps", labelKey: "timing.activeTps", value: formatTps(timing.activeTps) },
+		{ id: "latestTps", labelKey: "timing.latestTps", value: formatTps(timing.latestTps) },
+		{ id: "medianTps", labelKey: "timing.medianTps", value: formatTps(timing.medianTps) },
+		{ id: "fastestTps", labelKey: "timing.fastestTps", value: formatTps(timing.fastestTps) },
+		{ id: "slowestTps", labelKey: "timing.slowestTps", value: formatTps(timing.slowestTps) },
 		{
-			key: "averageModelMs",
+			id: "averageModelMs",
 			labelKey: "timing.averageModelMs",
 			value: timing.averageModelMs === null ? "—" : fmtDuration(timing.averageModelMs),
 		},
 		{
-			key: "p95ModelMs",
+			id: "p95ModelMs",
 			labelKey: "timing.p95ModelMs",
 			value: timing.p95ModelMs === null ? "—" : fmtDuration(timing.p95ModelMs),
 		},
@@ -65,7 +65,7 @@ export function renderTimingCard(report: InsightReport): string {
 	const metricGrid = `<div class="throughput-grid">${metrics
 		.map(
 			(metric) =>
-				`<div class="kpi" data-timing-metric="${metric.key}"><div class="kpi-label" ${i18nAttrs(metric.labelKey)}>${esc(t(lang, { key: metric.labelKey }))}</div><div class="kpi-value">${esc(metric.value)}</div></div>`,
+				`<div class="kpi" data-timing-metric="${metric.id}"><div class="kpi-label" ${i18nAttrs(metric.labelKey)}>${esc(t(lang, { key: metric.labelKey }))}</div><div class="kpi-value">${esc(metric.value)}</div></div>`,
 		)
 		.join("")}</div>`;
 
