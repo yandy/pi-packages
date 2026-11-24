@@ -26,6 +26,24 @@ function report(over: { reserve?: number; enabled?: boolean; prompt?: number; lo
 	);
 }
 
+function throughputReport(lang: "en" | "zh" = "en") {
+	resetEntryIds();
+	const entries = [
+		userEntry("hello", 0),
+		assistantEntry({ content: [], usage: usage(0, 100, 0, 0, 0), durationMs: 1000, timestamp: 1000 }),
+		assistantEntry({ content: [], usage: usage(0, 50, 0, 0, 0), durationMs: 2000, timestamp: 2000 }),
+	];
+	return buildReport(fakeContext({ entries }), { mode: "full", lang });
+}
+
+function metricValue(html: string, key: string): string | undefined {
+	return html.match(new RegExp(`data-timing-metric="${key}"[\\s\\S]*?<div class="kpi-value">([^<]+)`))?.[1];
+}
+
+function requestRow(html: string, index: number): string {
+	return html.match(new RegExp(`<tr data-request-step="${index}">[\\s\\S]*?</tr>`))?.[0] ?? "";
+}
+
 describe("renderTokens", () => {
 	it("lists categories in the canonical order", () => {
 		const html = renderTokens(report());
@@ -78,12 +96,104 @@ describe("renderTimingCard", () => {
 	it("shows a tps badge", () => {
 		expect(renderTimingCard(report())).toContain('data-tps="1"');
 	});
-	it("has no table once the segments are legend rows", () => {
-		expect(renderTimingCard(report())).not.toContain("<thead>");
-		expect(renderTimingCard(report())).toContain('class="legend-row"');
+	it("uses legend rows rather than a table for the timing segments", () => {
+		const html = renderTimingCard(report());
+		expect(html.split("data-request-throughput")[0]).not.toContain("<thead>");
+		expect(html).toContain('class="legend-row"');
 	});
 	it("keeps the per-step strip full width", () => {
 		expect(renderTimingCard(report())).toContain('class="strip"');
+	});
+	it("shows overall throughput, request throughput distribution, and model latency", () => {
+		const html = renderTimingCard(throughputReport());
+		expect(html).toContain('data-tps="1"');
+		expect(metricValue(html, "activeTps")).toBe("38 tok/s");
+		expect(metricValue(html, "latestTps")).toBe("25 tok/s");
+		expect(metricValue(html, "medianTps")).toBe("63 tok/s");
+		expect(metricValue(html, "fastestTps")).toBe("100 tok/s");
+		expect(metricValue(html, "slowestTps")).toBe("25 tok/s");
+		expect(metricValue(html, "averageModelMs")).toBe("1.5s");
+		expect(metricValue(html, "p95ModelMs")).toBe("2.0s");
+		for (const label of [
+			"Active-time TPS",
+			"Latest request TPS",
+			"Median request TPS",
+			"Fastest request TPS",
+			"Slowest request TPS",
+			"Avg model latency",
+			"P95 model latency",
+		]) {
+			expect(html).toContain(label);
+		}
+	});
+	it("renders per-request output, model time, and tps", () => {
+		const html = renderTimingCard(throughputReport());
+		expect(html).toContain("data-request-throughput");
+		for (const header of ["Step", "Output", "Model time", "TPS"]) expect(html).toContain(header);
+		expect(requestRow(html, 0)).toContain("100 tok/s");
+		expect(requestRow(html, 0)).toContain("1.0s");
+		expect(requestRow(html, 1)).toContain("25 tok/s");
+		expect(requestRow(html, 1)).toContain("2.0s");
+	});
+	it("renders missing request values and marks estimated model time", () => {
+		resetEntryIds();
+		const missing = buildReport(
+			fakeContext({
+				entries: [userEntry("hello", 0), assistantEntry({ content: [], durationMs: 1000, timestamp: 1000 })],
+			}),
+			{ mode: "full", lang: "en" },
+		);
+		expect(requestRow(renderTimingCard(missing), 0).match(/—/g)).toHaveLength(2);
+
+		resetEntryIds();
+		const estimated = buildReport(
+			fakeContext({
+				entries: [
+					userEntry("hello", 0),
+					assistantEntry({ content: [], usage: usage(0, 100, 0, 0, 0), timestamp: 1000 }),
+				],
+			}),
+			{ mode: "full", lang: "en" },
+		);
+		expect(requestRow(renderTimingCard(estimated), 0)).toContain("≈1.0s");
+
+		resetEntryIds();
+		const zero = buildReport(
+			fakeContext({
+				entries: [
+					userEntry("hello", 0),
+					assistantEntry({ content: [], usage: usage(0, 100, 0, 0, 0), durationMs: 0, timestamp: 0 }),
+				],
+			}),
+			{ mode: "full", lang: "en" },
+		);
+		expect(requestRow(renderTimingCard(zero), 0).match(/—/g)).toHaveLength(2);
+	});
+	it("localizes the new throughput metrics", () => {
+		const html = renderTimingCard(throughputReport("zh"));
+		expect(html).toContain("活跃时间 TPS");
+		expect(html).toContain("请求 TPS 中位数");
+		expect(html).toContain("逐请求吞吐");
+	});
+	it("does not render non-finite values for an invalid model duration", () => {
+		resetEntryIds();
+		const invalid = buildReport(
+			fakeContext({
+				entries: [
+					userEntry("hello", 0),
+					assistantEntry({
+						content: [],
+						usage: usage(0, 100, 0, 0, 0),
+						durationMs: Number.NaN,
+						timestamp: 1000,
+					}),
+				],
+			}),
+			{ mode: "full", lang: "en" },
+		);
+		const html = renderTimingCard(invalid);
+		expect(html).not.toContain("NaN");
+		expect(html).not.toContain("Infinity");
 	});
 });
 

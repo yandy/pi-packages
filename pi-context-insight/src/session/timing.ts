@@ -13,6 +13,13 @@ export interface TimingReport {
 	modelCalls: number;
 	toolCalls: number;
 	tps: number | null;
+	activeTps: number | null;
+	latestTps: number | null;
+	medianTps: number | null;
+	fastestTps: number | null;
+	slowestTps: number | null;
+	averageModelMs: number | null;
+	p95ModelMs: number | null;
 	estimated: { model: boolean; tool: boolean };
 }
 
@@ -21,6 +28,21 @@ export interface ExecutionLite {
 	nested: boolean;
 	durationMs?: number;
 	durationEstimated: boolean;
+}
+
+export function stepOutputTps(step: Pick<Step, "actual" | "durationMs">): number | null {
+	const output = step.actual?.output;
+	const durationMs = step.durationMs;
+	if (
+		output === undefined ||
+		durationMs === undefined ||
+		!Number.isFinite(output) ||
+		!Number.isFinite(durationMs) ||
+		output <= 0 ||
+		durationMs <= 0
+	)
+		return null;
+	return output / (durationMs / 1000);
 }
 
 /** A gap this long between two events means the user walked away. */
@@ -38,10 +60,22 @@ function beatsOf(entries: readonly SessionEntry[]): Beat[] {
 		const timestamp = Date.parse(entry.timestamp);
 		if (!Number.isFinite(timestamp)) continue;
 		let end = timestamp;
-		if (entry.type === "message" && entry.message.role === "assistant" && typeof entry.message.durationMs === "number") {
+		if (
+			entry.type === "message" &&
+			entry.message.role === "assistant" &&
+			typeof entry.message.durationMs === "number" &&
+			Number.isFinite(entry.message.durationMs) &&
+			entry.message.durationMs >= 0
+		) {
 			end = timestamp + entry.message.durationMs;
 		}
-		if (entry.type === "message" && entry.message.role === "toolResult" && typeof entry.message.durationMs === "number") {
+		if (
+			entry.type === "message" &&
+			entry.message.role === "toolResult" &&
+			typeof entry.message.durationMs === "number" &&
+			Number.isFinite(entry.message.durationMs) &&
+			entry.message.durationMs >= 0
+		) {
 			end = timestamp + entry.message.durationMs;
 		}
 		beats.push({ start: timestamp, end });
@@ -98,10 +132,17 @@ export function computeTiming(args: {
 	let modelMs = 0;
 	let modelEstimated = false;
 	for (const step of steps) {
-		if (typeof step.durationMs !== "number") step.durationMs = durations.get(step.timestamp);
-		if (typeof step.durationMs === "number") {
+		const existingDuration = step.durationMs;
+		if (existingDuration !== undefined && (!Number.isFinite(existingDuration) || existingDuration < 0)) {
+			delete step.durationMs;
 			step.durationEstimated = false;
-			modelMs += step.durationMs;
+			continue;
+		}
+		const duration = existingDuration ?? durations.get(step.timestamp);
+		if (duration !== undefined) {
+			step.durationMs = duration;
+			step.durationEstimated = false;
+			modelMs += duration;
 			continue;
 		}
 		modelEstimated = true;
@@ -146,6 +187,19 @@ export function computeTiming(args: {
 	const activeMs = Math.max(0, wallMs - idleMs);
 	const otherMs = Math.max(0, activeMs - modelMs - toolMs);
 	const outputTokens = steps.reduce((sum, step) => sum + (step.actual?.output ?? 0), 0);
+	const requestTps = steps.map(stepOutputTps).filter((value): value is number => value !== null);
+	const sortedTps = requestTps.slice().sort((a, b) => a - b);
+	const middle = Math.floor(sortedTps.length / 2);
+	const medianTps =
+		sortedTps.length === 0
+			? null
+			: sortedTps.length % 2 === 1
+				? (sortedTps[middle] ?? null)
+				: ((sortedTps[middle - 1] ?? 0) + (sortedTps[middle] ?? 0)) / 2;
+	const modelDurations = steps
+		.map((step) => step.durationMs)
+		.filter((duration): duration is number => duration !== undefined && Number.isFinite(duration) && duration > 0);
+	const sortedModelDurations = modelDurations.slice().sort((a, b) => a - b);
 
 	return {
 		startMs,
@@ -159,6 +213,17 @@ export function computeTiming(args: {
 		modelCalls: steps.length,
 		toolCalls,
 		tps: modelMs > 0 && outputTokens > 0 ? outputTokens / (modelMs / 1000) : null,
+		activeTps: activeMs > 0 && outputTokens > 0 ? outputTokens / (activeMs / 1000) : null,
+		latestTps: requestTps.at(-1) ?? null,
+		medianTps,
+		fastestTps: sortedTps.length > 0 ? (sortedTps.at(-1) ?? null) : null,
+		slowestTps: sortedTps[0] ?? null,
+		averageModelMs:
+			modelDurations.length > 0 ? modelDurations.reduce((sum, duration) => sum + duration, 0) / modelDurations.length : null,
+		p95ModelMs:
+			sortedModelDurations.length > 0
+				? (sortedModelDurations[Math.ceil(sortedModelDurations.length * 0.95) - 1] ?? null)
+				: null,
 		estimated: { model: modelEstimated, tool: toolEstimated },
 	};
 }

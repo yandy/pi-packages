@@ -25,6 +25,25 @@ function step(index: number, timestamp: number, output = 0): Step {
 	};
 }
 
+function distributionFixture() {
+	const timestamps = [1000, 2000, 4000, 8000];
+	const durations = [1000, 2000, 4000, 8000];
+	const outputs = [100, 100, 400, 200];
+	const entries = [
+		userEntry("a", 0),
+		...timestamps.map((timestamp, index) =>
+			assistantEntry({
+				content: [],
+				usage: usage(0, outputs[index] ?? 0, 0, 0, 0),
+				durationMs: durations[index],
+				timestamp,
+			}),
+		),
+	];
+	const steps = timestamps.map((timestamp, index) => step(index, timestamp, outputs[index] ?? 0));
+	return { entries, steps };
+}
+
 describe("computeTiming", () => {
 	it("prefers durationMs and flags the estimate when it is missing", () => {
 		resetEntryIds();
@@ -92,5 +111,66 @@ describe("computeTiming", () => {
 			executions: [],
 		});
 		expect(timing.tps).toBeCloseTo(500, 5);
+	});
+	it("computes overall throughput, request distribution, and model latency", () => {
+		const { entries, steps } = distributionFixture();
+		const timing = computeTiming({ entries, steps, executions: [] });
+		expect(timing.tps).toBeCloseTo(800 / 15, 5);
+		expect(timing.activeTps).toBeCloseTo(50, 5);
+		expect(timing.latestTps).toBe(25);
+		expect(timing.medianTps).toBe(75);
+		expect(timing.fastestTps).toBe(100);
+		expect(timing.slowestTps).toBe(25);
+		expect(timing.averageModelMs).toBe(3750);
+		expect(timing.p95ModelMs).toBe(8000);
+	});
+	it("keeps the latest valid tps when the last request has no usage", () => {
+		const { entries, steps } = distributionFixture();
+		entries.push(assistantEntry({ content: [], durationMs: 1000, timestamp: 16_000 }));
+		steps.push(step(4, 16_000));
+		const timing = computeTiming({ entries, steps, executions: [] });
+		expect(timing.latestTps).toBe(25);
+	});
+	it.each([-1, Number.NaN, Number.POSITIVE_INFINITY])(
+		"excludes an invalid numeric duration (%s) instead of estimating it",
+		(durationMs) => {
+			const { entries, steps } = distributionFixture();
+			entries.push(assistantEntry({ content: [], usage: usage(0, 1000, 0, 0, 0), durationMs, timestamp: 17_000 }));
+			const invalidStep = step(4, 17_000, 1000);
+			invalidStep.durationMs = durationMs;
+			steps.push(invalidStep);
+			const timing = computeTiming({ entries, steps, executions: [] });
+			expect(timing.latestTps).toBe(25);
+			expect(timing.averageModelMs).toBe(3750);
+			expect(invalidStep.durationMs).toBeUndefined();
+			expect(invalidStep.durationEstimated).toBe(false);
+		},
+	);
+	it("returns null throughput and latency statistics without samples", () => {
+		const timing = computeTiming({ entries: [], steps: [], executions: [] });
+		expect(timing).toMatchObject({
+			activeTps: null,
+			latestTps: null,
+			medianTps: null,
+			fastestTps: null,
+			slowestTps: null,
+			averageModelMs: null,
+			p95ModelMs: null,
+		});
+	});
+	it("rejects invalid per-request throughput samples", async () => {
+		const { stepOutputTps } = await import("../src/session/timing");
+		expect(stepOutputTps).toBeTypeOf("function");
+		const valid = { ...step(0, 0, 100), durationMs: 1000 };
+		expect(stepOutputTps(valid)).toBe(100);
+		expect(stepOutputTps({ ...step(0, 0), durationMs: 1000 })).toBeNull();
+		for (const output of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+			const candidate = { ...step(0, 0, 100), durationMs: 1000 };
+			if (candidate.actual) candidate.actual.output = output;
+			expect(stepOutputTps(candidate)).toBeNull();
+		}
+		for (const durationMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+			expect(stepOutputTps({ ...step(0, 0, 100), durationMs })).toBeNull();
+		}
 	});
 });

@@ -65,6 +65,10 @@ a{color:var(--accent)}
 .strip>i:hover{filter:brightness(1.2)}
 .timing-facts{display:flex;gap:20px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
 .timing-facts .kpi-value{font-size:16px}
+.throughput-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:12px}
+.throughput-grid .kpi-value{font-size:16px}
+.request-throughput{margin-top:12px}
+.request-throughput-scroll{max-height:320px}
 .swatch{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px}
 
 /* bars and chips */
