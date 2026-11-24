@@ -131,6 +131,21 @@ describe("computeTiming", () => {
 		const timing = computeTiming({ entries, steps, executions: [] });
 		expect(timing.latestTps).toBe(25);
 	});
+	it.each([-1, Number.NaN, Number.POSITIVE_INFINITY])(
+		"excludes an invalid numeric duration (%s) instead of estimating it",
+		(durationMs) => {
+			const { entries, steps } = distributionFixture();
+			entries.push(assistantEntry({ content: [], usage: usage(0, 1000, 0, 0, 0), durationMs, timestamp: 17_000 }));
+			const invalidStep = step(4, 17_000, 1000);
+			invalidStep.durationMs = durationMs;
+			steps.push(invalidStep);
+			const timing = computeTiming({ entries, steps, executions: [] });
+			expect(timing.latestTps).toBe(25);
+			expect(timing.averageModelMs).toBe(3750);
+			expect(invalidStep.durationMs).toBeUndefined();
+			expect(invalidStep.durationEstimated).toBe(false);
+		},
+	);
 	it("returns null throughput and latency statistics without samples", () => {
 		const timing = computeTiming({ entries: [], steps: [], executions: [] });
 		expect(timing).toMatchObject({

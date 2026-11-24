@@ -133,10 +133,12 @@ export function computeTiming(args: {
 	let modelEstimated = false;
 	for (const step of steps) {
 		const existingDuration = step.durationMs;
-		const duration =
-			typeof existingDuration === "number" && Number.isFinite(existingDuration) && existingDuration >= 0
-				? existingDuration
-				: durations.get(step.timestamp);
+		if (existingDuration !== undefined && (!Number.isFinite(existingDuration) || existingDuration < 0)) {
+			delete step.durationMs;
+			step.durationEstimated = false;
+			continue;
+		}
+		const duration = existingDuration ?? durations.get(step.timestamp);
 		if (duration !== undefined) {
 			step.durationMs = duration;
 			step.durationEstimated = false;
