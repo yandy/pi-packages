@@ -13,6 +13,13 @@ export interface TimingReport {
 	modelCalls: number;
 	toolCalls: number;
 	tps: number | null;
+	activeTps: number | null;
+	latestTps: number | null;
+	medianTps: number | null;
+	fastestTps: number | null;
+	slowestTps: number | null;
+	averageModelMs: number | null;
+	p95ModelMs: number | null;
 	estimated: { model: boolean; tool: boolean };
 }
 
@@ -21,6 +28,21 @@ export interface ExecutionLite {
 	nested: boolean;
 	durationMs?: number;
 	durationEstimated: boolean;
+}
+
+export function stepOutputTps(step: Pick<Step, "actual" | "durationMs">): number | null {
+	const output = step.actual?.output;
+	const durationMs = step.durationMs;
+	if (
+		output === undefined ||
+		durationMs === undefined ||
+		!Number.isFinite(output) ||
+		!Number.isFinite(durationMs) ||
+		output <= 0 ||
+		durationMs <= 0
+	)
+		return null;
+	return output / (durationMs / 1000);
 }
 
 /** A gap this long between two events means the user walked away. */
@@ -146,6 +168,19 @@ export function computeTiming(args: {
 	const activeMs = Math.max(0, wallMs - idleMs);
 	const otherMs = Math.max(0, activeMs - modelMs - toolMs);
 	const outputTokens = steps.reduce((sum, step) => sum + (step.actual?.output ?? 0), 0);
+	const requestTps = steps.map(stepOutputTps).filter((value): value is number => value !== null);
+	const sortedTps = requestTps.slice().sort((a, b) => a - b);
+	const middle = Math.floor(sortedTps.length / 2);
+	const medianTps =
+		sortedTps.length === 0
+			? null
+			: sortedTps.length % 2 === 1
+				? (sortedTps[middle] ?? null)
+				: ((sortedTps[middle - 1] ?? 0) + (sortedTps[middle] ?? 0)) / 2;
+	const modelDurations = steps
+		.map((step) => step.durationMs)
+		.filter((duration): duration is number => duration !== undefined && Number.isFinite(duration) && duration > 0);
+	const sortedModelDurations = modelDurations.slice().sort((a, b) => a - b);
 
 	return {
 		startMs,
@@ -159,6 +194,17 @@ export function computeTiming(args: {
 		modelCalls: steps.length,
 		toolCalls,
 		tps: modelMs > 0 && outputTokens > 0 ? outputTokens / (modelMs / 1000) : null,
+		activeTps: activeMs > 0 && outputTokens > 0 ? outputTokens / (activeMs / 1000) : null,
+		latestTps: requestTps.at(-1) ?? null,
+		medianTps,
+		fastestTps: sortedTps.length > 0 ? (sortedTps.at(-1) ?? null) : null,
+		slowestTps: sortedTps[0] ?? null,
+		averageModelMs:
+			modelDurations.length > 0 ? modelDurations.reduce((sum, duration) => sum + duration, 0) / modelDurations.length : null,
+		p95ModelMs:
+			sortedModelDurations.length > 0
+				? (sortedModelDurations[Math.ceil(sortedModelDurations.length * 0.95) - 1] ?? null)
+				: null,
 		estimated: { model: modelEstimated, tool: toolEstimated },
 	};
 }
