@@ -11,6 +11,7 @@
  */
 
 import type { AgentConfigLookup } from "../config/agent-types";
+import { resolveToolNames } from "../config/tool-names";
 import type { EnvInfo } from "../session/env";
 import type { AgentPromptConfig, SubagentType, ThinkingLevel } from "../types";
 
@@ -48,6 +49,11 @@ export interface AssemblerContext {
 		find(provider: string, modelId: string): unknown;
 		getAvailable?(): Array<{ provider: string; id: string }>;
 	};
+	/**
+	 * Names of the tools declared to the parent's model, captured at spawn time.
+	 * `undefined` = the host cannot report them, so resolution is left to the host.
+	 */
+	activeToolNames?: string[];
 }
 
 /**
@@ -73,8 +79,15 @@ export interface SessionConfig {
 	promptMode: "replace" | "append";
 	/** Mode-specific text: the complete system prompt for "replace", the appended section for "append". */
 	promptSection: string;
-	/** Built-in tool name allowlist for this agent type. */
-	toolNames: string[];
+	/**
+	 * Resolved tool names for the child session.
+	 * `undefined` = leave resolution to the host (the parent's active set is
+	 * unknown), `[]` = no tools. When the parent's active set is known, a
+	 * non-empty value is the final allowlist (deduped, with this package's
+	 * dispatch tools stripped); when it is unknown, a modifier-only list is
+	 * passed through untouched for the host to apply.
+	 */
+	toolNames: string[] | undefined;
 	/**
 	 * Resolved model instance (undefined → use parent model as passed to SDK).
 	 * Opaque handle — the assembler passes it through without inspection.
@@ -144,7 +157,7 @@ export function assembleSessionConfig(
 ): SessionConfig {
 	const agentConfig = registry.resolveAgentConfig(type);
 
-	const toolNames = registry.getToolNamesForType(type);
+	const toolNames = resolveToolNames(type, registry.getToolNamesForType(type), ctx.activeToolNames);
 
 	// Assemble the prompt text: "replace" owns the whole prompt, "append" only
 	// contributes a section on top of the harness-rendered base prompt.

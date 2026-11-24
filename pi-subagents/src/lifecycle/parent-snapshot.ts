@@ -32,6 +32,12 @@ export interface ParentSnapshot {
 	recordUsage?: (entry: ParentUsageRecord) => void;
 	/** Pre-built parent conversation text (when inheritContext was requested). */
 	parentContext?: string;
+	/**
+	 * Names of the tools declared to the parent's model, captured at spawn time.
+	 * `undefined` = the host cannot report them; `[]` = the active set is known to be empty.
+	 * The snapshot owns its own copy, so later host mutations cannot reach it.
+	 */
+	activeToolNames?: string[];
 }
 
 /**
@@ -54,5 +60,6 @@ export function buildParentSnapshot(ctx: SessionContext, inheritContext?: boolea
 			: undefined,
 		// eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- || intentional: converts empty string to undefined as well as null/undefined
 		parentContext: parentContext || undefined,
+		activeToolNames: ctx.getActiveTools?.()?.slice(),
 	};
 }

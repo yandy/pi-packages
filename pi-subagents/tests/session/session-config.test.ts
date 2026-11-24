@@ -7,7 +7,7 @@ const mockResolveAgentConfig = vi.fn(
 	(): AgentConfig => ({
 		name: "Explore",
 		description: "Fast codebase exploration agent",
-		builtinToolNames: ["read"],
+		toolNames: ["read"],
 		systemPrompt: "You are Explore.",
 		promptMode: "replace",
 	}),
@@ -196,5 +196,44 @@ describe("assembleSessionConfig — thinking level", () => {
 		const result = assembleSessionConfig("Explore", ctx, {}, mockEnv, mockAgentLookup, mockIO);
 
 		expect(result.thinkingLevel).toBe("medium");
+	});
+});
+
+describe("assembleSessionConfig — tools resolution", () => {
+	it("resolves the inherited set from the parent's active tools", () => {
+		mockGetToolNamesForType.mockReturnValueOnce(undefined);
+		const cfg = assembleSessionConfig(
+			"inherit",
+			{ ...ctx, activeToolNames: ["read", "ext_tool", "subagent"] },
+			{},
+			mockEnv,
+			mockAgentLookup,
+			mockIO,
+		);
+		expect(cfg.toolNames).toEqual(["read", "ext_tool"]);
+	});
+
+	it("passes undefined through when the parent's set is unknown", () => {
+		mockGetToolNamesForType.mockReturnValueOnce(undefined);
+		const cfg = assembleSessionConfig("inherit", ctx, {}, mockEnv, mockAgentLookup, mockIO);
+		expect(cfg.toolNames).toBeUndefined();
+	});
+
+	it("applies deltas to the parent's set", () => {
+		mockGetToolNamesForType.mockReturnValueOnce(["-edit", "-write"]);
+		const cfg = assembleSessionConfig(
+			"deltas",
+			{ ...ctx, activeToolNames: ["read", "edit", "write"] },
+			{},
+			mockEnv,
+			mockAgentLookup,
+			mockIO,
+		);
+		expect(cfg.toolNames).toEqual(["read"]);
+	});
+
+	it("surfaces validation errors from the resolver", () => {
+		mockGetToolNamesForType.mockReturnValueOnce(["read", "-edit"]);
+		expect(() => assembleSessionConfig("mixed", ctx, {}, mockEnv, mockAgentLookup, mockIO)).toThrow(/"mixed"/);
 	});
 });

@@ -27,7 +27,7 @@ describe("DEFAULT_AGENTS", () => {
 		});
 
 		it("is limited to read-only tools", () => {
-			const tools = get("Explore").builtinToolNames ?? [];
+			const tools = get("Explore").toolNames ?? [];
 			expect(tools).toEqual(["read", "bash", "grep", "find", "ls"]);
 			expect(tools).not.toContain("edit");
 			expect(tools).not.toContain("write");
@@ -39,8 +39,8 @@ describe("DEFAULT_AGENTS", () => {
 			expect(get("general-purpose").promptMode).toBe("append");
 		});
 
-		it("leaves its tool set open (all available tools)", () => {
-			expect(get("general-purpose").builtinToolNames).toBeUndefined();
+		it("inherits the parent's tools instead of naming a set", () => {
+			expect(get("general-purpose").toolNames).toBeUndefined();
 		});
 	});
 });

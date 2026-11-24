@@ -7,7 +7,7 @@ function makeAgentConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
 	return {
 		name: "test-agent",
 		description: "Test agent",
-		builtinToolNames: ["read", "grep"],
+		toolNames: ["read", "grep"],
 		systemPrompt: "You are a test agent.",
 		promptMode: "replace",
 		inheritContext: false,

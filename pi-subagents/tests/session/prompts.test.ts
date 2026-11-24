@@ -26,7 +26,7 @@ function agent(overrides: Partial<AgentConfig> = {}): AgentConfig {
 	return {
 		name: "test-agent",
 		description: "Test",
-		builtinToolNames: [],
+		toolNames: [],
 		systemPrompt: "You are a test agent.",
 		promptMode: "append",
 		...overrides,

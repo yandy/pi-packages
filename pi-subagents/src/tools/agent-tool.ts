@@ -185,9 +185,7 @@ ${typeListText}`,
 				}),
 				model: Type.Optional(
 					Type.String({
-						description: tierTable
-							? `${MODEL_PARAM_DESCRIPTION} Configured tiers: ${tierTable}.`
-							: MODEL_PARAM_DESCRIPTION,
+						description: tierTable ? `${MODEL_PARAM_DESCRIPTION} Configured tiers: ${tierTable}.` : MODEL_PARAM_DESCRIPTION,
 					}),
 				),
 				thinking: Type.Optional(
@@ -216,12 +214,13 @@ ${typeListText}`,
 				),
 				resume: Type.Optional(
 					Type.String({
-						description: "Optional agent ID to resume from. Continues from previous context.",
+						description:
+							"Optional agent ID: re-prompts that agent's live session (released ~10 min after it finishes); per-call model, thinking and limits do not apply.",
 					}),
 				),
 				inherit_context: Type.Optional(
 					Type.Boolean({
-						description: "If true, fork parent conversation into the agent. Default: false (fresh context).",
+						description: "If true, prepend the parent conversation as text. Default: false (fresh context).",
 					}),
 				),
 			}),

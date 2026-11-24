@@ -16,7 +16,8 @@ import type { AgentConfig } from "../types";
  */
 export interface AgentConfigLookup {
 	resolveAgentConfig(type: string): AgentConfig;
-	getToolNamesForType(type: string): string[];
+	/** Tool allowlist, or `undefined` to inherit the parent session's tools. */
+	getToolNamesForType(type: string): string[] | undefined;
 }
 
 // ── AgentTypeRegistry class ──────────────────────────────────────────────────
@@ -84,13 +85,20 @@ export class AgentTypeRegistry implements AgentConfigLookup {
 		return this.agents.get(key)?.enabled !== false;
 	}
 
-	/** Get built-in tool names for a type (case-insensitive). */
-	getToolNamesForType(type: string): string[] {
+	/**
+	 * Get the tool allowlist for a type (case-insensitive).
+	 *
+	 * `undefined` = inherit: the child gets the parent's captured active set,
+	 * minus this package's dispatch tools. When the parent's active set is
+	 * unknown, resolution falls back to the host's default set plus every loaded
+	 * extension tool. `[]` = explicitly no tools. A non-empty list = exactly
+	 * those names.
+	 */
+	getToolNamesForType(type: string): string[] | undefined {
 		const key = this.resolveKey(type);
 		const raw = key ? this.agents.get(key) : undefined;
 		const config = raw?.enabled !== false ? raw : undefined;
-		const names = config?.builtinToolNames?.length ? config.builtinToolNames : [...BUILTIN_TOOL_NAMES];
-		return names;
+		return config?.toolNames === undefined ? undefined : [...config.toolNames];
 	}
 
 	/** Resolve agent config with guaranteed non-null return. Falls back: unknown → general-purpose → absolute fallback. */
@@ -107,7 +115,6 @@ export class AgentTypeRegistry implements AgentConfigLookup {
 			name: type,
 			displayName: "Agent",
 			description: "General-purpose agent for complex, multi-step tasks",
-			builtinToolNames: BUILTIN_TOOL_NAMES,
 			systemPrompt: "",
 			promptMode: "append",
 		};
@@ -122,6 +129,3 @@ export class AgentTypeRegistry implements AgentConfigLookup {
 		return undefined;
 	}
 }
-
-/** All known built-in tool names. */
-export const BUILTIN_TOOL_NAMES: string[] = ["read", "bash", "edit", "write", "grep", "find", "ls"];

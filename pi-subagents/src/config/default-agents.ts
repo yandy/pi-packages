@@ -6,7 +6,11 @@
 
 import type { AgentConfig } from "../types";
 
-const READ_ONLY_TOOLS = ["read", "bash", "grep", "find", "ls"];
+// Read-only exploration. The host's read-only tools plus `bash`: exploration leans
+// on read-only shell commands (`git log`, `rg`), and the system prompt below forbids
+// every write. A hardcoded list (rather than "all built-ins") keeps the capability
+// a property of this agent instead of a snapshot of the host's tool set.
+const EXPLORE_TOOL_NAMES = ["read", "bash", "grep", "find", "ls"];
 
 export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 	[
@@ -15,7 +19,9 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 			name: "general-purpose",
 			displayName: "Agent",
 			description: "General-purpose agent for complex, multi-step tasks",
-			// builtinToolNames omitted — means "all available tools" (resolved at lookup time)
+			// toolNames omitted — inherit the parent session's tools (the dispatch tools
+			// are stripped after binding by the recursion guard), so the child matches
+			// the caller instead of a package-local snapshot of tool names.
 			// inheritContext / runInBackground omitted — strategy fields, callers decide per-call.
 			// Setting them to false would lock callsite intent (see resolveAgentInvocationConfig in invocation-config.ts).
 			systemPrompt: "",
@@ -29,7 +35,7 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 			name: "Explore",
 			displayName: "Explore",
 			description: "Fast codebase exploration agent (read-only)",
-			builtinToolNames: READ_ONLY_TOOLS,
+			toolNames: EXPLORE_TOOL_NAMES,
 			// model omitted — inherit the parent model, and let callers override it per call.
 			// A hardcoded default would win over the `model` param and, when the exact
 			// "provider/modelId" is not in the available set, fuzzy-match a different model.

@@ -46,7 +46,15 @@ export interface AgentPromptConfig {
 
 /** Unified agent configuration — used for both default and user-defined agents. */
 export interface AgentConfig extends AgentIdentity, AgentPromptConfig {
-	builtinToolNames?: string[];
+	/**
+	 * `tools` for this agent.
+	 * `undefined` = inherit the parent session's captured active set, minus this
+	 * package's dispatch tools; `[]` = explicitly no tools; a plain list =
+	 * exactly those names; a list of only `+name` / `-name` entries = inherit,
+	 * then add/remove. When the parent's active set is unknown, `undefined`
+	 * falls back to the host's default set plus every loaded extension tool.
+	 */
+	toolNames?: string[];
 	model?: string;
 	thinking?: ThinkingLevel;
 	maxTurns?: number;
@@ -94,6 +102,8 @@ export interface SessionContext {
 		/** Persist non-context usage so child LLM calls join footer and session totals. */
 		appendUsage?(kind: string, provider: string, model: string, usage: Usage, note?: string): unknown;
 	};
+	/** Names of the tools currently declared to the parent's model, when the host reports them. */
+	getActiveTools?(): string[];
 }
 
 /**

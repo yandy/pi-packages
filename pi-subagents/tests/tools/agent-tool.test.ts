@@ -131,6 +131,27 @@ describe("AgentTool — 行为纪律的位置（spec 2026-10-30 D1）", () => {
 	});
 });
 
+describe("AgentTool — parameter descriptions match the implementation", () => {
+	function paramDescriptions() {
+		const def = makeTool(createToolDeps()).toToolDefinition();
+		const props = (def.parameters as { properties: Record<string, { description?: string }> }).properties;
+		return props;
+	}
+
+	it("describes inherit_context as a text preamble, not a fork", () => {
+		const description = paramDescriptions().inherit_context?.description ?? "";
+		expect(description).toContain("prepend the parent conversation as text");
+		expect(description).not.toContain("fork");
+	});
+
+	it("states the limits of resume", () => {
+		const description = paramDescriptions().resume?.description ?? "";
+		expect(description).toContain("live session");
+		expect(description).toContain("do not apply");
+	});
+
+});
+
 describe("AgentTool — timeout parameter", () => {
 	it("exposes an optional timeout parameter described as a hard safety net", () => {
 		const def = makeTool(createToolDeps()).toToolDefinition();

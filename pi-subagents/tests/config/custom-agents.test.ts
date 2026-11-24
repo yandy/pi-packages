@@ -2,8 +2,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BUILTIN_TOOL_NAMES } from "../../src/config/agent-types";
+import { AgentTypeRegistry } from "../../src/config/agent-types";
 import { loadCustomAgents } from "../../src/config/custom-agents";
+import { assembleSessionConfig } from "../../src/session/session-config";
 
 describe("loadCustomAgents", () => {
 	let tmpDir: string;
@@ -55,7 +56,7 @@ You are a security auditor.`,
 		const agent = result.get("auditor")!;
 		expect(agent.name).toBe("auditor");
 		expect(agent.description).toBe("Security Auditor");
-		expect(agent.builtinToolNames).toEqual(["read", "grep", "find"]);
+		expect(agent.toolNames).toEqual(["read", "grep", "find"]);
 		expect(agent.model).toBe("anthropic/claude-opus-4-6");
 		expect(agent.thinking).toBe("high");
 		expect(agent.maxTurns).toBe(30);
@@ -95,7 +96,7 @@ Just a prompt.`,
 
 		expect(agent.name).toBe("minimal");
 		expect(agent.description).toBe("minimal"); // defaults to filename
-		expect(agent.builtinToolNames).toEqual(BUILTIN_TOOL_NAMES); // all tools
+		expect(agent.toolNames).toBeUndefined(); // omitted = inherit the parent's tools
 		expect(agent.model).toBeUndefined();
 		expect(agent.thinking).toBeUndefined();
 		expect(agent.maxTurns).toBeUndefined();
@@ -113,7 +114,7 @@ Just a prompt.`,
 
 		expect(agent.name).toBe("bare");
 		expect(agent.description).toBe("bare");
-		expect(agent.builtinToolNames).toEqual(BUILTIN_TOOL_NAMES);
+		expect(agent.toolNames).toBeUndefined(); // omitted = inherit the parent's tools
 		expect(agent.promptMode).toBe("append");
 		expect(agent.systemPrompt).toBe("Just a system prompt, no frontmatter.");
 	});
@@ -151,7 +152,99 @@ No tools.`,
 		);
 
 		const result = loadCustomAgents(tmpDir);
-		expect(result.get("notool")?.builtinToolNames).toEqual([]);
+		expect(result.get("notool")?.toolNames).toEqual([]);
+	});
+
+	it("treats a bare `tools:` line as zero tools, not inherit", () => {
+		writeAgent(
+			"barenotool",
+			`---
+tools:
+---
+
+No tools.`,
+		);
+
+		const result = loadCustomAgents(tmpDir);
+		expect(result.get("barenotool")?.toolNames).toEqual([]);
+	});
+
+	it("keeps a bare `tools:` line as zero tools even with a known parent set", () => {
+		writeAgent("barenotool", `---
+tools:
+---
+
+No tools.`);
+
+		const registry = new AgentTypeRegistry(() => loadCustomAgents(tmpDir));
+		const io = { buildReplacePrompt: () => "", buildAppendSection: () => "" };
+		const env = { isGitRepo: false, branch: "", platform: "linux" as const };
+
+		// The key is present (YAML null) but valueless: zero tools, even though
+		// the parent's active set is known — this is the case that was broken.
+		expect(
+			assembleSessionConfig(
+				"barenotool",
+				{ cwd: tmpDir, modelRegistry: { find: () => undefined }, activeToolNames: ["read", "bash", "subagent"] },
+				{},
+				env,
+				registry,
+				io,
+			).toolNames,
+		).toEqual([]);
+	});
+
+	it("keeps `tools: none` empty all the way into the session config", () => {
+		writeAgent("notool", `---
+tools: none
+---
+
+No tools.`);
+		writeAgent("notools2", `---
+description: omitted tools field
+---
+
+All tools.`);
+
+		const registry = new AgentTypeRegistry(() => loadCustomAgents(tmpDir));
+		const io = { buildReplacePrompt: () => "", buildAppendSection: () => "" };
+		const ctx = { cwd: tmpDir, modelRegistry: { find: () => undefined } };
+		const env = { isGitRepo: false, branch: "", platform: "linux" as const };
+
+		// none/empty → zero tools; omitted → inherit the parent's tools (undefined).
+		expect(assembleSessionConfig("notool", ctx, {}, env, registry, io).toolNames).toEqual([]);
+		expect(assembleSessionConfig("notools2", ctx, {}, env, registry, io).toolNames).toBeUndefined();
+
+		// With a known parent active set, the omitted list resolves to that set minus dispatch tools.
+		const withParent = { ...ctx, activeToolNames: ["read", "bash", "subagent"] };
+		expect(assembleSessionConfig("notools2", withParent, {}, env, registry, io).toolNames).toEqual(["read", "bash"]);
+	});
+
+	it("carries a +name/-name list into the session config and rejects a mixed one", () => {
+		writeAgent("deltas", `---\ntools: -edit, -write\n---\n\nDeltas.`);
+		writeAgent("mixed", `---\ntools: read, -edit\n---\n\nMixed.`);
+
+		const registry = new AgentTypeRegistry(() => loadCustomAgents(tmpDir));
+		const io = { buildReplacePrompt: () => "", buildAppendSection: () => "" };
+		const ctx = { cwd: tmpDir, modelRegistry: { find: () => undefined } };
+		const env = { isGitRepo: false, branch: "", platform: "linux" as const };
+
+		expect(assembleSessionConfig("deltas", ctx, {}, env, registry, io).toolNames).toEqual(["-edit", "-write"]);
+		expect(() => assembleSessionConfig("mixed", ctx, {}, env, registry, io)).toThrow(/"mixed".*cannot be mixed/s);
+	});
+
+	it("passes +name / -name entries through as an inheriting list", () => {
+		writeAgent(
+			"deltas",
+			`---
+tools: -edit, -write, +powershell
+---
+
+Deltas.`,
+		);
+
+		const result = loadCustomAgents(tmpDir);
+		expect(result.get("deltas")?.toolNames).toEqual(["-edit", "-write", "+powershell"]);
 	});
 
 	it("passes through unknown tool names (not filtered)", () => {
@@ -166,7 +259,7 @@ Custom tools.`,
 
 		const result = loadCustomAgents(tmpDir);
 		// Unknown tool names are passed through — filtering happens at tool creation time
-		expect(result.get("custom-tools")?.builtinToolNames).toEqual(["read", "my_custom_tool", "grep"]);
+		expect(result.get("custom-tools")?.toolNames).toEqual(["read", "my_custom_tool", "grep"]);
 	});
 
 	it("passes through thinking level as-is (no validation)", () => {

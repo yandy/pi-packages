@@ -50,7 +50,7 @@ What changes your day is **model tiers**: map `fast` / `standard` / `advanced` t
 }
 ```
 
-There is no extra `model_tier` parameter; unconfigured tiers never appear in the parameter description or the prompt, nothing gets silently substituted, and a model pinned in an agent's frontmatter always wins. The global `~/.pi/agent/subagents.json` and the project `.pi/subagents.json` merge **per tier**, so a project can override one tier without restating the other two.
+There is no extra `model_tier` parameter; unconfigured tiers never appear in the parameter description or the prompt, nothing gets silently substituted, and a model pinned in an agent's frontmatter always wins. The global `$PI_CODING_AGENT_DIR/subagents.json` (default `~/.pi/agent/subagents.json`) and the project `.pi/subagents.json` merge **per tier**, so a project can override one tier without restating the other two.
 
 ![Reading a sub-agent's full transcript read-only via /subagents:sessions](https://yandy.github.io/assets/pi-subagents-session.png)
 

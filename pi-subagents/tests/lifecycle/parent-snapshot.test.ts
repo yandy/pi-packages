@@ -92,4 +92,19 @@ describe("buildParentSnapshot", () => {
 		const snapshot = buildParentSnapshot(makeCtx(), true);
 		expect(snapshot.parentContext).toBeUndefined();
 	});
+
+	it("captures the parent's active tool names", () => {
+		const snapshot = buildParentSnapshot(makeCtx({ getActiveTools: () => ["read", "bash", "ext_tool"] }));
+		expect(snapshot.activeToolNames).toEqual(["read", "bash", "ext_tool"]);
+	});
+
+	it("captures a known-empty active set as an empty array", () => {
+		const snapshot = buildParentSnapshot(makeCtx({ getActiveTools: () => [] }));
+		expect(snapshot.activeToolNames).toEqual([]);
+	});
+
+	it("leaves the tool names unknown when the host cannot report them", () => {
+		const snapshot = buildParentSnapshot(makeCtx({}));
+		expect(snapshot.activeToolNames).toBeUndefined();
+	});
 });
