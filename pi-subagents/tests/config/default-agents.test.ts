@@ -1,3 +1,5 @@
+import { createReadOnlyTools } from "@earendil-works/pi-coding-agent";
+import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_AGENTS } from "../../src/config/default-agents";
 
@@ -33,9 +35,20 @@ describe("DEFAULT_AGENTS", () => {
 			expect(tools).not.toContain("write");
 		});
 
+		it("grants exactly the host's read-only tool set", () => {
+			// The list is written out in the package, not derived at runtime: the capability
+			// is a property of this agent, and a README table, a prompt and an allowlist that
+			// can be read side by side are worth more than saving four names. This test pays
+			// the maintenance cost instead — a host release that changes its read-only set
+			// fails here, so the drift is a diff to review rather than a silent change.
+			const hostNames = createReadOnlyTools(tmpdir()).map((tool) => tool.name);
+			expect(get("Explore").toolNames).toEqual(hostNames);
+		});
+
 		// `bash` and `powershell` are a platform pair: each throws when run where the
 		// other is the shell, and bash is missing on many Windows installs. Naming
-		// either one hands some hosts a tool that can only fail, so Explore gets none.
+		// either one hands some hosts a tool that can only fail, and the host's own
+		// read-only set excludes both for the same reason.
 		it("grants no shell, and names no shell in its prompt", () => {
 			const config = get("Explore");
 			expect(config.toolNames).not.toContain("bash");
