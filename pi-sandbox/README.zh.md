@@ -30,6 +30,25 @@ bash 命令被包装进平台沙箱 runner 后在本地 spawn（**路径透明**
 | Windows | `windows-acl`（内置，`partial` 强制） | 受限令牌沙箱：`WRITE_RESTRICTED` 令牌 + 对工作区与 `%TEMP%` 的能力 SID ACL 授权 + Low 强制完整性标签；**仅 powershell 工具**（受限模式下 `bash` 被拒绝） |
 | 其他 | 无 | **fail-closed**：受约束命令一律拒绝执行，绝不静默裸跑 |
 
+### GPU 访问（Linux 与 WSL）
+
+Linux 与 WSL **自动支持 GPU**：无需配置，也没有 GPU 放行或禁用开关。bwrap 在私有 `/dev` 之后为检测到的设备追加 `--dev-bind-try`，landlock 把同一清单加入读写授权；`read-only` 与 `workspace-write` 都适用，普通文件写边界不变。runner 功能探测仍使用无 GPU 的最小 profile，因此 GPU 是否存在不影响 runner 选型。
+
+每次受限命令都会重新发现设备，不缓存发现结果。自动识别的目录项包括：
+
+| 用途 | `/dev` 目录项 |
+|---|---|
+| NVIDIA 计算卡 | `nvidia0`、`nvidia1` 等 `nvidia<N>` |
+| NVIDIA 驱动 | `nvidiactl`、`nvidia-uvm`、`nvidia-uvm-tools`、`nvidia-modeset` |
+| NVIDIA capabilities | `nvidia-caps` |
+| AMD compute | `kfd` |
+| AMD / Intel DRM | `dri` |
+| WSL GPU 转发 | `dxg` |
+
+没有匹配设备时 argv 与既有行为不变。macOS 的 Seatbelt 不需要额外 GPU 规则；原生 Windows 不做设备命名空间隔离，但其 `WRITE_RESTRICTED` 令牌下的 CUDA / Direct3D 兼容性尚未验证。WSL 使用上述 Linux 支持。
+
+**安全边界：**所有 Linux/WSL 受限命令都能访问检测到的宿主 GPU，并可能影响同设备上的其他工作负载；本功能不提供显存、算力或 GPU 进程间隔离。`read-only` 只描述普通文件系统写权限，不表示 GPU 硬件或驱动状态只读。
+
 ### Windows
 
 `windows-acl` runner 以 `WRITE_RESTRICTED` 受限令牌启动每条受限命令，并把令牌完整性级别降到 Low。`workspace-write` 下令牌还携带能力 SID，获得工作区与宿主 `%TEMP%` 的写授权，并在两个授权根上打可继承的 `NO_WRITE_UP` 标签；`read-only` 不授予任何写能力。强制是 **`partial`** 的——与参考实现相同，存在三处结构性缺口：
@@ -62,7 +81,7 @@ PowerShell 语言模式取决于启动约束，不是 ACL 边界的一部分：`
 
 | 模式 | 文件效果 |
 |---|---|
-| `read-only` | 仅 `/dev/null` 可写 |
+| `read-only` | 普通文件仅 `/dev/null` 可写；Linux/WSL 的 GPU 设备访问按上节独立授权 |
 | `workspace-write`（默认） | 工作目录 + `/tmp` + `os.tmpdir()` + `sandbox-writable.json` 里列出的额外可写根可写，其余只读 |
 | `danger-full-access` | 完全绕过沙箱（显式逃生门） |
 

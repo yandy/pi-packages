@@ -30,6 +30,25 @@ bash commands are wrapped in a platform sandbox runner and spawned locally (**pa
 | Windows | `windows-acl` (built in, `partial` enforcement) | Restricted-token sandbox: `WRITE_RESTRICTED` token + capability-SID ACL grants on the workspace and `%TEMP%` + Low mandatory integrity label; **powershell tool only** (`bash` is refused in confined modes) |
 | Other | none | **fail-closed**: confined commands are always refused, never silently run bare |
 
+### GPU access (Linux and WSL)
+
+Linux and WSL **support GPUs automatically**: no configuration is required, and there is no GPU allow/disable switch. bwrap adds `--dev-bind-try` entries for detected devices after its private `/dev`; landlock adds the same list to its read-write grants. This applies in both `read-only` and `workspace-write`, without changing ordinary filesystem write boundaries. Runner capability probes still use the minimal no-GPU profile, so GPU presence does not affect runner selection.
+
+Devices are rediscovered for every confined command and the result is not cached. The recognized `/dev` entries are:
+
+| Purpose | `/dev` entries |
+|---|---|
+| NVIDIA compute cards | `nvidia0`, `nvidia1`, and other `nvidia<N>` entries |
+| NVIDIA driver | `nvidiactl`, `nvidia-uvm`, `nvidia-uvm-tools`, `nvidia-modeset` |
+| NVIDIA capabilities | `nvidia-caps` |
+| AMD compute | `kfd` |
+| AMD / Intel DRM | `dri` |
+| WSL GPU forwarding | `dxg` |
+
+With no matching devices, argv and existing behavior remain unchanged. Seatbelt on macOS needs no additional GPU rules. Native Windows has no device-namespace masking, but CUDA / Direct3D compatibility under its `WRITE_RESTRICTED` token is unverified. WSL uses the Linux support above.
+
+**Security boundary:** every confined Linux/WSL command can access detected host GPUs and may affect other workloads on the same device. This feature provides no VRAM, compute, or cross-process GPU isolation. `read-only` describes ordinary filesystem writes only; it does not make GPU hardware or driver state read-only.
+
 ### Windows
 
 The `windows-acl` runner starts each confined command from a `WRITE_RESTRICTED` token whose integrity level is lowered to Low. In `workspace-write` the token also carries capability SIDs granted write access to the workspace and the host `%TEMP%`, with an inheritable `NO_WRITE_UP` label on both roots; `read-only` grants no write capability. Enforcement is **`partial`**, with three structural gaps inherited from the reference implementation:
@@ -62,7 +81,7 @@ The bundled `diagnose-windows-sandbox-acl` skill (diagnoses and repairs cases wh
 
 | Mode | File effects |
 |---|---|
-| `read-only` | only `/dev/null` writable |
+| `read-only` | ordinary files: only `/dev/null` writable; Linux/WSL GPU device access is granted independently as described above |
 | `workspace-write` (default) | working directory + `/tmp` + `os.tmpdir()` + the extra roots listed in `sandbox-writable.json` writable, everything else read-only |
 | `danger-full-access` | sandbox bypassed entirely (explicit escape hatch) |
 
