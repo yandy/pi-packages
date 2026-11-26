@@ -48,6 +48,7 @@ function makeDeps(overrides: Partial<Parameters<typeof createSandboxTools>[0]> =
 			// createSandboxBashOps 会在 spawn 前拒绝 bash；win32 覆盖见 tests/win32/* 与下面的
 			// "windows tool wiring"，它们通过 overrides 显式传 platform: "win32"）。
 			platform: "linux" as const,
+			hooks: { discoverGpuDevices: () => [] },
 			getConfig: () => DEFAULT_SANDBOX_CONFIG,
 			permission: createPermissionState(),
 			spawnFn,
@@ -436,6 +437,22 @@ describe("bash tool wiring", () => {
 		child.emit("close", 0, undefined);
 		await p;
 		expect(spawnFn).toHaveBeenCalledWith("bwrap", expect.arrayContaining(["--"]), expect.objectContaining({ cwd: ws }));
+	});
+
+	it("passes discovered GPU devices through to the actual bwrap spawn argv", async () => {
+		const { deps, child, spawnFn } = makeDeps({ hooks: { discoverGpuDevices: () => ["/dev/nvidia0"] } });
+		const { bash } = createSandboxTools(deps);
+		const p = bash.execute("call-gpu", { command: "true" }, undefined, undefined, toolCtx());
+		await vi.waitFor(() => { expect(spawnFn).toHaveBeenCalled(); });
+		child.emit("close", 0, undefined);
+		await p;
+
+		const [program, args] = spawnFn.mock.calls[0] as [string, string[]];
+		const devIndex = args.indexOf("--dev");
+		expect(program).toBe("bwrap");
+		expect(args.slice(devIndex, devIndex + 6)).toEqual([
+			"--dev", "/dev", "--dev-bind-try", "/dev/nvidia0", "/dev/nvidia0", "--unshare-pid",
+		]);
 	});
 });
 

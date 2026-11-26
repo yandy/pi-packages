@@ -24,10 +24,14 @@ export interface RunnerPolicy {
 	workspaceRoot: string;
 	/** workspace-write 下额外授予写权限的根（confine 从配置注入）；其余模式忽略。 */
 	extraRoots?: readonly string[];
+	/** GPU device paths discovered for this invocation; empty preserves the legacy profile. */
+	gpuDevices?: readonly string[];
 }
 
 /** 测试钩子：注入平台/probe/launcher 路径，单测不依赖真实 bwrap/landlock（deepseek 同款）。 */
 export interface RunnerHooks {
+	/** Test-only device discovery override; production reads the host /dev. */
+	discoverGpuDevices?: () => readonly string[];
 	platform?: string;
 	probeBwrap?: (timeoutMs: number) => boolean;
 	probeLandlock?: (launcher: string, timeoutMs: number) => SandboxEnforcement | "unusable";
@@ -49,7 +53,9 @@ export interface RunnerHooks {
  * 两者都原路径透明：沙箱内的 /tmp 就是宿主 /tmp（跨命令、跨 read/write 工具语义一致）。
  */
 export function bwrapProfileArgs(policy: RunnerPolicy): string[] {
-	const args = ["--ro-bind", "/", "/", "--dev", "/dev", "--unshare-pid", "--proc", "/proc", "--die-with-parent"];
+	const args = ["--ro-bind", "/", "/", "--dev", "/dev"];
+	for (const path of policy.gpuDevices ?? []) args.push("--dev-bind-try", path, path);
+	args.push("--unshare-pid", "--proc", "/proc", "--die-with-parent");
 	if (policy.mode === "workspace-write") {
 		args.push("--bind", "/tmp", "/tmp");
 		args.push("--bind", policy.workspaceRoot, policy.workspaceRoot);
@@ -60,7 +66,7 @@ export function bwrapProfileArgs(policy: RunnerPolicy): string[] {
 
 /** Landlock 允许清单：readOnly / + readWrite /dev/null（workspace-write 追加 /tmp 与工作区）。 */
 export function landlockProfileArgs(policy: RunnerPolicy): string[] {
-	const readWrite = ["/dev/null"];
+	const readWrite = ["/dev/null", ...(policy.gpuDevices ?? [])];
 	if (policy.mode === "workspace-write") {
 		readWrite.push("/tmp", policy.workspaceRoot, ...(policy.extraRoots ?? []));
 	}
@@ -159,7 +165,7 @@ export function windowsAclAvailability(hooks: RunnerHooks = {}): { node: string;
 }
 
 export function defaultProbeBwrap(timeoutMs: number): boolean {
-	const probe = spawnSync("bwrap", [...bwrapProfileArgs({ mode: "read-only", workspaceRoot: "/" }), "--", "true"], {
+	const probe = spawnSync("bwrap", [...bwrapProfileArgs({ mode: "read-only", workspaceRoot: "/", gpuDevices: ["/dev/null"] }), "--", "true"], {
 		timeout: timeoutMs,
 		stdio: "ignore",
 	});

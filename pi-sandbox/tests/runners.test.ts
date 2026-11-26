@@ -24,6 +24,15 @@ describe("bwrapProfileArgs", () => {
 			"--ro-bind", "/", "/", "--dev", "/dev", "--unshare-pid", "--proc", "/proc", "--die-with-parent",
 		]);
 	});
+	it("binds GPU devices immediately after the private dev mount", () => {
+		const gpuDevices = ["/dev/nvidia0", "/dev/dri"];
+		expect(bwrapProfileArgs({ ...ro, gpuDevices })).toEqual([
+			"--ro-bind", "/", "/", "--dev", "/dev",
+			"--dev-bind-try", "/dev/nvidia0", "/dev/nvidia0",
+			"--dev-bind-try", "/dev/dri", "/dev/dri",
+			"--unshare-pid", "--proc", "/proc", "--die-with-parent",
+		]);
+	});
 	it("workspace-write binds the host /tmp rw plus the workspace, verbatim", () => {
 		expect(bwrapProfileArgs(wsWrite)).toEqual([
 			"--ro-bind", "/", "/", "--dev", "/dev", "--unshare-pid", "--proc", "/proc", "--die-with-parent",
@@ -43,6 +52,15 @@ describe("landlockProfileArgs", () => {
 	});
 	it("workspace-write adds /tmp and workspace to rw", () => {
 		expect(landlockProfileArgs(wsWrite)).toEqual(["--ro", "/", "--rw", "/dev/null", "--rw", "/tmp", "--rw", WS]);
+	});
+	it("grants GPU devices read-write in both confined modes", () => {
+		const gpuDevices = ["/dev/nvidia0", "/dev/dri"];
+		expect(landlockProfileArgs({ ...ro, gpuDevices })).toEqual([
+			"--ro", "/", "--rw", "/dev/null", "--rw", "/dev/nvidia0", "--rw", "/dev/dri",
+		]);
+		expect(landlockProfileArgs({ ...wsWrite, gpuDevices })).toEqual([
+			"--ro", "/", "--rw", "/dev/null", "--rw", "/dev/nvidia0", "--rw", "/dev/dri", "--rw", "/tmp", "--rw", WS,
+		]);
 	});
 });
 
