@@ -1,3 +1,4 @@
+import { discoverGpuDevices } from "./gpu";
 import { canonicalPath, canonicalRoots, type ConfinedSandboxMode, type SandboxMode } from "./policy";
 import {
 	bwrapProfileArgs,
@@ -121,8 +122,10 @@ export function confine(
 		workspaceRoot: canonicalPath(workspaceRoot),
 		extraRoots: canonicalRoots(opts.extraRoots ?? []),
 	};
+	const discoverDevices = opts.hooks?.discoverGpuDevices ?? discoverGpuDevices;
 
 	if (opts.runnerCommand && opts.runnerCommand.length > 0) {
+		policy.gpuDevices = discoverDevices();
 		return {
 			argv: [...opts.runnerCommand, ...bwrapProfileArgs(policy), "--", ...argv],
 			enforcement: "full",
@@ -133,6 +136,7 @@ export function confine(
 
 	const selected = opts.selected ?? selectRunner(opts.probeTimeoutMs ?? 5000, opts.hooks);
 	if (selected.runner === "unavailable") throw new SandboxUnavailableError(mode);
+	if (selected.runner === "bwrap" || selected.runner === "landlock") policy.gpuDevices = discoverDevices();
 
 	// win32 的可用性只解析一次并透传给 runnerInvocation（Task 9 约定）；
 	// 注入即权威：hook 存在时其返回值就是结论（含显式 undefined），绝不回退真实探测。

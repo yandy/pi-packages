@@ -8,6 +8,7 @@ import type { ConfinedSandboxMode } from "../src/policy";
 
 resetRunnerCache();
 const selected = selectRunner(5000);
+const hooks = { discoverGpuDevices: () => [] };
 
 // On win32 `createSandboxBashOps` refuses bash in every confined mode
 // (Ruling 2), so these four cases cannot pass there by design; the real Windows
@@ -28,7 +29,7 @@ describe.skipIf(skipConfinedBashCases)(`real confinement via ${selected.runner}`
 	});
 
 	async function run(mode: ConfinedSandboxMode, command: string) {
-		const ops = createSandboxBashOps({ mode, workspaceRoot: ws });
+		const ops = createSandboxBashOps({ mode, workspaceRoot: ws, hooks });
 		const chunks: Buffer[] = [];
 		const result = await ops.exec(command, ws, { onData: (b) => chunks.push(b) });
 		return { ...result, text: chunks.map((c) => c.toString()).join("") };
@@ -74,7 +75,7 @@ describe.skipIf(skipConfinedBashCases)(`real confinement via ${selected.runner}`
 		const outside = `/etc/sbx-int-extra-escape-${process.pid}`;
 		try {
 			// 分辨力锚点：同一目录、同一命令，不传 extraRoots 必须先被拒……
-			const bare = createSandboxBashOps({ mode: "workspace-write", workspaceRoot: ws });
+			const bare = createSandboxBashOps({ mode: "workspace-write", workspaceRoot: ws, hooks });
 			const bareChunks: Buffer[] = [];
 			const bareDenied = await bare.exec(`touch ${extra}/ok.txt`, ws, { onData: (b) => bareChunks.push(b) });
 			expect(bareDenied.exitCode).not.toBe(0);
@@ -83,7 +84,7 @@ describe.skipIf(skipConfinedBashCases)(`real confinement via ${selected.runner}`
 			);
 
 			// ……经 extraRoots 授予后同一条命令成功：翻转结果的正是这次 grant。
-			const ops = createSandboxBashOps({ mode: "workspace-write", workspaceRoot: ws, extraRoots: [extra] });
+			const ops = createSandboxBashOps({ mode: "workspace-write", workspaceRoot: ws, extraRoots: [extra], hooks });
 			const chunks: Buffer[] = [];
 			const ok = await ops.exec(`touch ${extra}/ok.txt && echo ok`, ws, { onData: (b) => chunks.push(b) });
 			expect(ok.exitCode).toBe(0);
@@ -104,7 +105,7 @@ describe.skipIf(skipConfinedBashCases)(`real confinement via ${selected.runner}`
 	it("read-only: 额外可写根也不可写", async () => {
 		const extra = repoTreeExtraDir();
 		try {
-			const ops = createSandboxBashOps({ mode: "read-only", workspaceRoot: ws, extraRoots: [extra] });
+			const ops = createSandboxBashOps({ mode: "read-only", workspaceRoot: ws, extraRoots: [extra], hooks });
 			const chunks: Buffer[] = [];
 			const denied = await ops.exec(`touch ${extra}/ro.txt`, ws, { onData: (b) => chunks.push(b) });
 			expect(denied.exitCode).not.toBe(0);

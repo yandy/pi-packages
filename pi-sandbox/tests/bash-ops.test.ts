@@ -37,7 +37,8 @@ const bwrapSelected = { selected: { runner: "bwrap" as const, enforcement: "full
  * 注入 `platform: "linux"` 让它们在任何宿主上都执行；win32 的 bash 拒绝由本文件末尾的 win32 用例、
  * `tests/confine.test.ts` 与 `tests/win32/*`（`e2e.test.ts`）覆盖。
  */
-const posix = { platform: "linux" as const };
+const noGpuDevices = () => [] as const;
+const posix = { platform: "linux" as const, hooks: { discoverGpuDevices: noGpuDevices } };
 
 // M4：exec 会预检 cwd 存在性——测试用的 exec cwd 必须是真实目录（workspaceRoot 仍可用虚构路径）。
 const cwd = mkdtempSync(join(tmpdir(), "bash-ops-cwd-"));
@@ -55,6 +56,21 @@ describe("createSandboxBashOps", () => {
 		await settle(child, 0);
 		await p;
 		expect(spawnFn).toHaveBeenCalledWith("bash", ["-c", "echo hi"], expect.objectContaining({ cwd }));
+	});
+	it("danger-full-access does not discover GPU devices", async () => {
+		const child = fakeChild();
+		const spawnFn = vi.fn(() => child) as never;
+		const discoverGpuDevices = vi.fn(() => ["/dev/nvidia0"]);
+		const ops = createSandboxBashOps({
+			...posix, mode: "danger-full-access", workspaceRoot: "/ws", spawnFn,
+			hooks: { discoverGpuDevices },
+		});
+		const p = ops.exec("true", cwd, { onData: () => {} });
+		await settle(child, 0);
+		await p;
+
+		expect(discoverGpuDevices).not.toHaveBeenCalled();
+		expect(spawnFn).toHaveBeenCalledWith("bash", ["-c", "true"], expect.objectContaining({ cwd }));
 	});
 	it("workspace-write spawns the confined argv (bwrap profile + -- + bash)", async () => {
 		const child = fakeChild();
@@ -134,7 +150,7 @@ describe("createSandboxBashOps", () => {
 		const ops = createSandboxBashOps({
 			...posix, mode: "workspace-write", workspaceRoot: "/ws", spawnFn, onDenial,
 			selected: { runner: "landlock", enforcement: "full" },
-			hooks: { launcherPath: () => "/opt/landlock-run" },
+			hooks: { launcherPath: () => "/opt/landlock-run", discoverGpuDevices: noGpuDevices },
 		});
 		const p = ops.exec("true", cwd, { onData: () => {} });
 		child.stderr.write("landlock-run: ruleset creation failed");

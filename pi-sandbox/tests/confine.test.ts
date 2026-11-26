@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	assertShellAllowed,
 	classifyDenial,
@@ -13,12 +13,14 @@ import {
 	UnsupportedWindowsShellError,
 } from "../src/confine";
 
-const hooks = { launcherPath: () => "/opt/landlock-run" };
+const noGpuDevices = () => [] as const;
+const hooks = { launcherPath: () => "/opt/landlock-run", discoverGpuDevices: noGpuDevices };
 
 describe("confine", () => {
 	it("bwrap: runner + profile + '--' + original argv", () => {
 		const result = confine(["bash", "-c", "true"], "workspace-write", "/ws", {
 			selected: { runner: "bwrap", enforcement: "full" },
+			hooks: { discoverGpuDevices: noGpuDevices },
 		});
 		expect(result.argv).toEqual([
 			"bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--unshare-pid", "--proc", "/proc", "--die-with-parent",
@@ -46,6 +48,7 @@ describe("confine", () => {
 		const result = confine(["true"], "workspace-write", "/ws", {
 			runnerCommand: ["myrunner", "--flag"],
 			runnerFailureSignatures: ["myrunner: "],
+			hooks: { discoverGpuDevices: noGpuDevices },
 		});
 		expect(result.argv).toEqual([
 			"myrunner", "--flag",
@@ -56,6 +59,74 @@ describe("confine", () => {
 		expect(result.denialSignatures).toEqual(["read-only file system", "permission denied"]);
 		expect(result.runnerFailureRules).toEqual([{ fatalSignatures: ["myrunner: "] }]);
 	});
+	it("discovers bwrap GPU devices afresh for every invocation", () => {
+		const discoverGpuDevices = vi.fn()
+			.mockReturnValueOnce(["/dev/nvidia0"])
+			.mockReturnValueOnce(["/dev/dri"]);
+		const opts = {
+			selected: { runner: "bwrap" as const, enforcement: "full" as const },
+			hooks: { discoverGpuDevices },
+		};
+		const first = confine(["true"], "read-only", "/ws", opts);
+		const second = confine(["true"], "read-only", "/ws", opts);
+
+		expect(discoverGpuDevices).toHaveBeenCalledTimes(2);
+		expect(first.argv).toEqual([
+			"bwrap", "--ro-bind", "/", "/", "--dev", "/dev",
+			"--dev-bind-try", "/dev/nvidia0", "/dev/nvidia0",
+			"--unshare-pid", "--proc", "/proc", "--die-with-parent", "--", "true",
+		]);
+		expect(second.argv).toEqual([
+			"bwrap", "--ro-bind", "/", "/", "--dev", "/dev",
+			"--dev-bind-try", "/dev/dri", "/dev/dri",
+			"--unshare-pid", "--proc", "/proc", "--die-with-parent", "--", "true",
+		]);
+	});
+
+	it("shares discovered devices with a custom bwrap runner", () => {
+		const result = confine(["true"], "read-only", "/ws", {
+			runnerCommand: ["myrunner"],
+			runnerFailureSignatures: ["myrunner: "],
+			hooks: { discoverGpuDevices: () => ["/dev/nvidia0"] },
+		});
+
+		expect(result.argv).toEqual([
+			"myrunner", "--ro-bind", "/", "/", "--dev", "/dev",
+			"--dev-bind-try", "/dev/nvidia0", "/dev/nvidia0",
+			"--unshare-pid", "--proc", "/proc", "--die-with-parent", "--", "true",
+		]);
+	});
+
+	it("passes the same discovered devices to landlock", () => {
+		const result = confine(["true"], "read-only", "/ws", {
+			selected: { runner: "landlock", enforcement: "full" },
+			hooks: { launcherPath: () => "/opt/landlock-run", discoverGpuDevices: () => ["/dev/nvidia0"] },
+		});
+
+		expect(result.argv).toEqual([
+			"/opt/landlock-run", "--ro", "/", "--rw", "/dev/null", "--rw", "/dev/nvidia0", "--", "true",
+		]);
+	});
+
+	it("does not discover GPU devices for seatbelt or windows-acl", () => {
+		const discoverGpuDevices = vi.fn(() => ["/dev/nvidia0"]);
+		const seatbelt = confine(["true"], "read-only", "/ws", {
+			selected: { runner: "seatbelt", enforcement: "full" },
+			hooks: { discoverGpuDevices, seatbeltExec: "/usr/bin/sbx" },
+		});
+		const windows = confine(["true"], "read-only", "C:\\work\\demo", {
+			selected: { runner: "windows-acl", enforcement: "partial" },
+			hooks: {
+				discoverGpuDevices,
+				windowsAclRung: () => ({ node: "C:\\node.exe", runner: "C:\\runner.js" }),
+			},
+		});
+
+		expect(discoverGpuDevices).not.toHaveBeenCalled();
+		expect(seatbelt.argv).not.toContain("/dev/nvidia0");
+		expect(windows.argv).not.toContain("/dev/nvidia0");
+	});
+
 	it.skipIf(process.platform === "win32")("canonicalizes the workspace root before building the profile", () => {
 		// mkdtemp 真实目录 + symlink 根（dir/real 与 dir/link→real）：旧版传 /tmp 在多数系统上
 		// 已是 canonical，去掉 canonicalPath 的变异照样绿；symlink 根让断言真正承重。
@@ -68,6 +139,7 @@ describe("confine", () => {
 			const realRoot = realpathSync.native(join(dir, "real"));
 			const result = confine(["true"], "workspace-write", join(dir, "link"), {
 				selected: { runner: "bwrap", enforcement: "full" },
+				hooks: { discoverGpuDevices: noGpuDevices },
 			});
 			// bwrap 的 workspace bind 是「源=目标」对（--bind <root> <root>）：两处都必须是
 			// realpath，symlink 拼写不得残留在 argv（去掉 canonicalPath 的变异下两断言皆红）。
