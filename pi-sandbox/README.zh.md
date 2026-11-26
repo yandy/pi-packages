@@ -12,7 +12,7 @@ pi install npm:@yandy0725/pi-sandbox
 pi install .
 ```
 
-需要 pi >= 1.5.0。Linux 的 bwrap 后端需要 bubblewrap >= 0.3.1；更旧版本无法通过能力探测，并会在 `landlock-run` 可用时回退到它。
+需要 pi >= 1.5.0。
 
 低于 1.5.0 的宿主不受支持，且 pi 安装扩展时**不会校验或告警这个 peer 下限**。在这类宿主上，本扩展可能在 ESM 链接期加载失败，`bash` / `write` / `edit`（Windows 上还有 `powershell`）会回落到**未受限**的内建实现。请先升级 pi，再通过 `/permission` 与扩展加载状态确认 pi-sandbox 确实生效。
 
@@ -29,25 +29,6 @@ bash 命令被包装进平台沙箱 runner 后在本地 spawn（**路径透明**
 | macOS | `sandbox-exec`（系统内置） | Seatbelt SBPL：`deny file-write*` + 工作区/临时区例外 |
 | Windows | `windows-acl`（内置，`partial` 强制） | 受限令牌沙箱：`WRITE_RESTRICTED` 令牌 + 对工作区与 `%TEMP%` 的能力 SID ACL 授权 + Low 强制完整性标签；**仅 powershell 工具**（受限模式下 `bash` 被拒绝） |
 | 其他 | 无 | **fail-closed**：受约束命令一律拒绝执行，绝不静默裸跑 |
-
-### GPU 访问（Linux 与 WSL）
-
-Linux 与 WSL **自动支持 GPU**：无需配置，也没有 GPU 放行或禁用开关。bwrap 在私有 `/dev` 之后为检测到的设备追加 `--dev-bind-try`，landlock 把同一清单加入读写授权；`read-only` 与 `workspace-write` 都适用，普通文件写边界不变。runner 功能探测固定使用 `/dev/null` 验证 `--dev-bind-try` 支持，不依赖实际发现的 GPU。
-
-每次受限命令都会重新发现设备，不缓存发现结果。自动识别的目录项包括：
-
-| 用途 | `/dev` 目录项 |
-|---|---|
-| NVIDIA 计算卡 | `nvidia0`、`nvidia1` 等 `nvidia<N>` |
-| NVIDIA 驱动 | `nvidiactl`、`nvidia-uvm`、`nvidia-uvm-tools`、`nvidia-modeset` |
-| NVIDIA capabilities | `nvidia-caps` |
-| AMD compute | `kfd` |
-| AMD / Intel DRM | `dri` |
-| WSL GPU 转发 | `dxg` |
-
-没有匹配设备时 argv 与既有行为不变。macOS 的 Seatbelt 不需要额外 GPU 规则；原生 Windows 不做设备命名空间隔离，但其 `WRITE_RESTRICTED` 令牌下的 CUDA / Direct3D 兼容性尚未验证。WSL 使用上述 Linux 支持。
-
-**安全边界：**所有 Linux/WSL 受限命令都能访问检测到的宿主 GPU，并可能影响同设备上的其他工作负载；本功能不提供显存、算力或 GPU 进程间隔离。`read-only` 只描述普通文件系统写权限，不表示 GPU 硬件或驱动状态只读。
 
 ### Windows
 
@@ -81,7 +62,7 @@ PowerShell 语言模式取决于启动约束，不是 ACL 边界的一部分：`
 
 | 模式 | 文件效果 |
 |---|---|
-| `read-only` | 普通文件仅 `/dev/null` 可写；Linux/WSL 的 GPU 设备访问按上节独立授权 |
+| `read-only` | 仅 `/dev/null` 可写 |
 | `workspace-write`（默认） | 工作目录 + `/tmp` + `os.tmpdir()` + `sandbox-writable.json` 里列出的额外可写根可写，其余只读 |
 | `danger-full-access` | 完全绕过沙箱（显式逃生门） |
 
@@ -128,7 +109,7 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 | 字段 | 默认 | 说明 |
 |---|---|---|
 | `mode` | `workspace-write` | 默认权限模式；非法值回落默认并告警 |
-| `runnerCommand` | `null` | 兼容 bwrap >= 0.3.1（含 `--dev-bind-try`）的自定义 runner argv（须与下一项成对） |
+| `runnerCommand` | `null` | 自定义 bwrap 兼容 runner argv（须与下一项成对） |
 | `runnerFailureSignatures` | `null` | 自定义 runner 的失败诊断签名（非空单行） |
 | `probeTimeoutMs` | `5000` | runner 功能探测超时（正数） |
 

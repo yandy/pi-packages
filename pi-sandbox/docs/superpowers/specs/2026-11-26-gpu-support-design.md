@@ -99,4 +99,4 @@ Linux 与 WSL 的受限命令自动获得检测到的宿主 GPU 访问能力，�
 - `confine()`：每次调用重新发现，自定义 runner 同享设备清单，非 Linux runner 不发现，测试注入不依赖真实宿主 GPU。
 - shell / 工具接线：默认测试夹具注入空设备发现器；生产路径能把发现设备送入实际 spawn argv；`danger-full-access` 不发现。
 - 运行完整单元、集成、类型检查与 lint；有真实 GPU 的环境额外执行 `nvidia-smi` 或对应厂商工具做端到端验收。
-- 更新 `README.md` 与 `README.zh.md`：自动支持行为、设备集合、双 runner、`read-only` 语义、安全代价与平台差异；配置示例不增加字段。
+- 不修改 `README.md` / `README.zh.md`：本次不新增配置项，用户侧无需新的操作；bwrap 0.3.1 下限由功能探测承担。

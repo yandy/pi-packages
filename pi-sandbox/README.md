@@ -12,7 +12,7 @@ pi install npm:@yandy0725/pi-sandbox
 pi install .
 ```
 
-Requires pi >= 1.5.0. The Linux bwrap backend requires bubblewrap >= 0.3.1; older versions fail the capability probe and fall back to `landlock-run` when it is usable.
+Requires pi >= 1.5.0.
 
 Hosts older than 1.5.0 are unsupported, and pi does not check or warn about this peer floor when installing the extension. On such a host the extension may fail during ESM linking; pi then falls back to the **unconfined** built-in `bash`, `write`, and `edit` tools (and `powershell` on Windows). Upgrade pi first, then use `/permission` and the extension load status to confirm that pi-sandbox is active.
 
@@ -29,25 +29,6 @@ bash commands are wrapped in a platform sandbox runner and spawned locally (**pa
 | macOS | `sandbox-exec` (built in) | Seatbelt SBPL: `deny file-write*` + workspace/temp exceptions |
 | Windows | `windows-acl` (built in, `partial` enforcement) | Restricted-token sandbox: `WRITE_RESTRICTED` token + capability-SID ACL grants on the workspace and `%TEMP%` + Low mandatory integrity label; **powershell tool only** (`bash` is refused in confined modes) |
 | Other | none | **fail-closed**: confined commands are always refused, never silently run bare |
-
-### GPU access (Linux and WSL)
-
-Linux and WSL **support GPUs automatically**: no configuration is required, and there is no GPU allow/disable switch. bwrap adds `--dev-bind-try` entries for detected devices after its private `/dev`; landlock adds the same list to its read-write grants. This applies in both `read-only` and `workspace-write`, without changing ordinary filesystem write boundaries. Runner capability probes verify `--dev-bind-try` support with the fixed `/dev/null` device, so they do not depend on discovered GPUs.
-
-Devices are rediscovered for every confined command and the result is not cached. The recognized `/dev` entries are:
-
-| Purpose | `/dev` entries |
-|---|---|
-| NVIDIA compute cards | `nvidia0`, `nvidia1`, and other `nvidia<N>` entries |
-| NVIDIA driver | `nvidiactl`, `nvidia-uvm`, `nvidia-uvm-tools`, `nvidia-modeset` |
-| NVIDIA capabilities | `nvidia-caps` |
-| AMD compute | `kfd` |
-| AMD / Intel DRM | `dri` |
-| WSL GPU forwarding | `dxg` |
-
-With no matching devices, argv and existing behavior remain unchanged. Seatbelt on macOS needs no additional GPU rules. Native Windows has no device-namespace masking, but CUDA / Direct3D compatibility under its `WRITE_RESTRICTED` token is unverified. WSL uses the Linux support above.
-
-**Security boundary:** every confined Linux/WSL command can access detected host GPUs and may affect other workloads on the same device. This feature provides no VRAM, compute, or cross-process GPU isolation. `read-only` describes ordinary filesystem writes only; it does not make GPU hardware or driver state read-only.
 
 ### Windows
 
@@ -81,7 +62,7 @@ The bundled `diagnose-windows-sandbox-acl` skill (diagnoses and repairs cases wh
 
 | Mode | File effects |
 |---|---|
-| `read-only` | ordinary files: only `/dev/null` writable; Linux/WSL GPU device access is granted independently as described above |
+| `read-only` | only `/dev/null` writable |
 | `workspace-write` (default) | working directory + `/tmp` + `os.tmpdir()` + the extra roots listed in `sandbox-writable.json` writable, everything else read-only |
 | `danger-full-access` | sandbox bypassed entirely (explicit escape hatch) |
 
@@ -128,7 +109,7 @@ Two files are read from the agent dir (`~/.pi/agent/`): `sandbox.json` for the s
 | Field | Default | Notes |
 |---|---|---|
 | `mode` | `workspace-write` | default permission mode; invalid values fall back to the default with a warning |
-| `runnerCommand` | `null` | custom runner argv compatible with bwrap >= 0.3.1, including `--dev-bind-try` (must be paired with the next field) |
+| `runnerCommand` | `null` | custom bwrap-compatible runner argv (must be paired with the next field) |
 | `runnerFailureSignatures` | `null` | fatal diagnostic signatures for the custom runner (non-empty single lines) |
 | `probeTimeoutMs` | `5000` | runner capability probe timeout (positive) |
 
