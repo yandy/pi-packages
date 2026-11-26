@@ -68,7 +68,7 @@ Linux 与 WSL 的受限命令自动获得检测到的宿主 GPU 访问能力，�
 --dev-bind-try <path> <path>
 ```
 
-设备 bind 必须位于 `--dev /dev` 之后，否则会被私有设备视图覆盖；必须使用允许设备访问的 `--dev-bind-try`，而不是普通 `--bind`。runner 功能探测继续使用无 GPU 的最小 profile，GPU 是否存在不影响 bwrap/landlock 选型。
+设备 bind 必须位于 `--dev /dev` 之后，否则会被私有设备视图覆盖；必须使用允许设备访问的 `--dev-bind-try`，而不是普通 `--bind`。runner 功能探测不读取 GPU 发现结果，而是固定用 `/dev/null` 验证 `--dev-bind-try`；不支持该选项的 bwrap（< 0.3.1）进入既有 landlock/unavailable 链。
 
 ### landlock
 

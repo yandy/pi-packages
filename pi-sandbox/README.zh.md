@@ -12,7 +12,7 @@ pi install npm:@yandy0725/pi-sandbox
 pi install .
 ```
 
-需要 pi >= 1.5.0。
+需要 pi >= 1.5.0。Linux 的 bwrap 后端需要 bubblewrap >= 0.3.1；更旧版本无法通过能力探测，并会在 `landlock-run` 可用时回退到它。
 
 低于 1.5.0 的宿主不受支持，且 pi 安装扩展时**不会校验或告警这个 peer 下限**。在这类宿主上，本扩展可能在 ESM 链接期加载失败，`bash` / `write` / `edit`（Windows 上还有 `powershell`）会回落到**未受限**的内建实现。请先升级 pi，再通过 `/permission` 与扩展加载状态确认 pi-sandbox 确实生效。
 
@@ -32,7 +32,7 @@ bash 命令被包装进平台沙箱 runner 后在本地 spawn（**路径透明**
 
 ### GPU 访问（Linux 与 WSL）
 
-Linux 与 WSL **自动支持 GPU**：无需配置，也没有 GPU 放行或禁用开关。bwrap 在私有 `/dev` 之后为检测到的设备追加 `--dev-bind-try`，landlock 把同一清单加入读写授权；`read-only` 与 `workspace-write` 都适用，普通文件写边界不变。runner 功能探测仍使用无 GPU 的最小 profile，因此 GPU 是否存在不影响 runner 选型。
+Linux 与 WSL **自动支持 GPU**：无需配置，也没有 GPU 放行或禁用开关。bwrap 在私有 `/dev` 之后为检测到的设备追加 `--dev-bind-try`，landlock 把同一清单加入读写授权；`read-only` 与 `workspace-write` 都适用，普通文件写边界不变。runner 功能探测固定使用 `/dev/null` 验证 `--dev-bind-try` 支持，不依赖实际发现的 GPU。
 
 每次受限命令都会重新发现设备，不缓存发现结果。自动识别的目录项包括：
 
@@ -128,7 +128,7 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 | 字段 | 默认 | 说明 |
 |---|---|---|
 | `mode` | `workspace-write` | 默认权限模式；非法值回落默认并告警 |
-| `runnerCommand` | `null` | 自定义 bwrap 兼容 runner argv（须与下一项成对） |
+| `runnerCommand` | `null` | 兼容 bwrap >= 0.3.1（含 `--dev-bind-try`）的自定义 runner argv（须与下一项成对） |
 | `runnerFailureSignatures` | `null` | 自定义 runner 的失败诊断签名（非空单行） |
 | `probeTimeoutMs` | `5000` | runner 功能探测超时（正数） |
 

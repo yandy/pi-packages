@@ -165,7 +165,7 @@ export function windowsAclAvailability(hooks: RunnerHooks = {}): { node: string;
 }
 
 export function defaultProbeBwrap(timeoutMs: number): boolean {
-	const probe = spawnSync("bwrap", [...bwrapProfileArgs({ mode: "read-only", workspaceRoot: "/" }), "--", "true"], {
+	const probe = spawnSync("bwrap", [...bwrapProfileArgs({ mode: "read-only", workspaceRoot: "/", gpuDevices: ["/dev/null"] }), "--", "true"], {
 		timeout: timeoutMs,
 		stdio: "ignore",
 	});
