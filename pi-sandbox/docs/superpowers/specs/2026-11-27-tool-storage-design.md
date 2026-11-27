@@ -1,7 +1,7 @@
 # pi-sandbox：内置常用工具存储目录设计
 
 日期：2026-11-27
-状态：待批准
+状态：已批准
 前置设计：`2026-10-14-extra-writable-dirs-design.md`、`2026-10-24-writable-dirs-file-design.md`、`2026-10-14-env-redirect-guideline-design.md`
 
 ## 1. 背景与意图
@@ -61,7 +61,7 @@ denial-first 仍是所有未覆盖写入的默认协议：不开放任意命令�
 
 ## 4. 核心模型
 
-新增 `src/tool-storage.ts`，将职责分为三层：
+新增 `src/tool-storage/`，将职责分为三层：
 
 ```ts
 type ToolStorageProfile = {
@@ -231,7 +231,10 @@ tool storage: off
 ## 9. 现有代码接线
 
 - `src/config.ts`：`SandboxConfig` / `DEFAULT_SANDBOX_CONFIG` 增加 `toolStorage` 并校验。
-- `src/tool-storage.ts`（新增）：档案、路径解析、PATH/wrapper 检测、安全校验、物化与缓存。
+- `src/tool-storage/catalog.ts`（新增）：档案与纯路径解析。
+- `src/tool-storage/detect.ts`（新增）：PATH/wrapper 检测与 plan 缓存。
+- `src/tool-storage/materialize.ts`（新增）：安全校验、目录物化与逐次复检。
+- `src/tool-storage/index.ts`（新增）：供工具与状态命令使用的编排入口。
 - `src/tools.ts`：bash/powershell/write/edit 在解析当次 mode 后调用同一 helper，得到 `config.extraWritableDirs + materializedToolRoots`。
 - 测试注入拆成两个独立缝：`_extraRoots` 只替换手工配置根，`_toolStorageRoots` 只替换内置物化根；两者都存在时才做并集断言。既有无关用例显式注入 `_toolStorageRoots: []`（或 `toolStorage:false`），包括直接调用 `createSandboxTools` 的 smoke/forwarding/prompt 测试，绝不回退真实 PATH/HOME。只有专门的真实集成用例启用生产检测。
 - `index.ts`：`/permission` 使用只检测、不物化的 plan 显示档案；相关单测通过临时 PATH/HOME 与显式关闭配置隔离宿主。
