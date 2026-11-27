@@ -94,11 +94,19 @@ describe("tool storage detection", () => {
 	});
 
 	it("detects Windows virtualenv Playwright executables without a host Windows filesystem", () => {
-		const expected = win32.join(workspace, "venv", "Scripts", "playwright.exe");
-		expect(detect(
+		// Windows canonicalization may change the drive-letter case and NTFS paths are
+		// case-insensitive, so the injected probe compares case-insensitively.
+		const expected = win32.join(workspace, "venv", "Scripts", "playwright.exe").toLowerCase();
+		const plan = detect(
 			{ PATH: "" },
-			{ platform: "win32", home: "C:\\Users\\Alice", agentDir: "C:\\Users\\Alice\\.pi\\agent", isFile: (path) => path === expected },
-		).profiles).toEqual(["playwright"]);
+			{
+				platform: "win32",
+				home: "C:\\Users\\Alice",
+				agentDir: "C:\\Users\\Alice\\.pi\\agent",
+				isFile: (path) => path.toLowerCase() === expected,
+			},
+		);
+		expect(plan.profiles).toEqual(["playwright"]);
 	});
 
 	it("detects pip through a Python launcher", () => {
