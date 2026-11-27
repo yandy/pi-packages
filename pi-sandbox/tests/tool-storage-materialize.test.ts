@@ -30,7 +30,8 @@ afterEach(() => {
 
 function plan(paths: string[], overrides: Partial<ToolStoragePlan> = {}): ToolStoragePlan {
 	return {
-		platform: "linux",
+		// Fixture paths come from the host's path module, so the platform must match the host.
+		platform: process.platform === "win32" ? "win32" : "linux",
 		home,
 		agentDir,
 		workspaceRoot: workspace,

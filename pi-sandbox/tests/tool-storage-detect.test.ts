@@ -83,11 +83,13 @@ describe("tool storage detection", () => {
 		expect(plan.profiles).toEqual(["pip", "uv"]);
 		expect(plan.roots.map((root) => root.path)).toEqual([
 			shared,
-			join(home, ".local", "share", "uv", "python"),
+			process.platform === "win32"
+				? join(home, "AppData", "Roaming", "uv", "data", "python")
+				: join(home, ".local", "share", "uv", "python"),
 		]);
 	});
 
-	it("does not treat a non-executable POSIX file as a PATH entry", () => {
+	it.skipIf(process.platform === "win32")("does not treat a non-executable POSIX file as a PATH entry", () => {
 		const path = join(bin, "uv");
 		writeFileSync(path, "");
 		chmodSync(path, 0o644);
