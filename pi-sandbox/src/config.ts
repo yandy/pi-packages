@@ -13,6 +13,8 @@ export interface SandboxConfig {
 	runnerFailureSignatures: string[] | null;
 	/** 每个功能探测的超时；必须为正有限数（0 对 Node 意味着无超时）。 */
 	probeTimeoutMs: number;
+	/** Whether built-in storage profiles are enabled for detected tools in workspace-write mode. */
+	toolStorage: boolean;
 	/** workspace-write 下额外可写目录；来源是独立的 `sandbox-writable.json`（已 ~ 展开 + realpath 规范化 + 去重）。 */
 	extraWritableDirs: string[];
 }
@@ -22,6 +24,7 @@ export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
 	runnerCommand: null,
 	runnerFailureSignatures: null,
 	probeTimeoutMs: 5000,
+	toolStorage: true,
 	extraWritableDirs: [],
 };
 
@@ -77,11 +80,21 @@ export function validateSandboxConfig(raw: Record<string, unknown>, source: stri
 		throw new Error(`sandbox: ${source}: probeTimeoutMs must be a positive finite number`);
 	}
 
+	let toolStorage = DEFAULT_SANDBOX_CONFIG.toolStorage;
+	if (raw.toolStorage !== undefined) {
+		if (typeof raw.toolStorage === "boolean") toolStorage = raw.toolStorage;
+		else
+			reportConfigWarning(
+				`sandbox: invalid toolStorage ${JSON.stringify(raw.toolStorage)} in ${source}, falling back to ${DEFAULT_SANDBOX_CONFIG.toolStorage}`,
+			);
+	}
+
 	return {
 		mode,
 		runnerCommand: runnerCommand as string[] | null,
 		runnerFailureSignatures: runnerFailureSignatures as string[] | null,
 		probeTimeoutMs,
+		toolStorage,
 		// 该字段已迁出 sandbox.json，由 loadWritableDirs() 另行提供（loadSandboxConfig 里合并）
 		extraWritableDirs: [],
 	};

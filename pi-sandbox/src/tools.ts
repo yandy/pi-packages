@@ -33,6 +33,7 @@ import type { PermissionState } from "./permission";
 import { canonicalPath, resolveEffectiveMode, type SandboxMode } from "./policy";
 import { createSandboxPowerShellOps } from "./powershell-ops";
 import { selectRunner, type RunnerHooks } from "./runners";
+import { toolStorageRoots } from "./tool-storage/index";
 
 /**
  * I2 fail-safe：宿主 builder 在**构造期**抛错时降级为“无 pwsh 覆盖”（undefined）。
@@ -76,6 +77,8 @@ export interface SandboxToolDeps {
 	_tmpRoots?: readonly string[];
 	/** 测试注入：替换配置的 extraWritableDirs（额外可写根）；生产缺省用配置值。 */
 	_extraRoots?: readonly string[];
+	/** Test-only replacement for detected/materialized built-in storage roots; [] disables production detection. */
+	_toolStorageRoots?: readonly string[];
 }
 
 const workspaceRootCache = new Map<string, string>();
@@ -94,6 +97,21 @@ function workspaceRootFor(rawCwd: string): string {
 /** 配置解析（2026-10-14 起只有全局层）：测试注入优先，否则 getSandboxConfig（进程内缓存）。 */
 function configForCall(deps: SandboxToolDeps): SandboxConfig {
 	return deps.getConfig?.() ?? getSandboxConfig();
+}
+
+/** Manual and built-in roots share one call-level view; non-workspace modes never touch detection. */
+function extraRootsForCall(
+	deps: SandboxToolDeps,
+	workspaceRoot: string,
+	config: SandboxConfig,
+	mode: SandboxMode,
+): readonly string[] {
+	const manual = deps._extraRoots ?? config.extraWritableDirs;
+	if (mode !== "workspace-write") return manual;
+	const builtin = deps._toolStorageRoots !== undefined
+		? deps._toolStorageRoots
+		: config.toolStorage ? toolStorageRoots(workspaceRoot) : [];
+	return [...manual, ...builtin];
 }
 
 /** 提权参数对（三个工具共用）。
@@ -416,7 +434,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 				operations: buildBashOps({
 					mode,
 					workspaceRoot,
-					extraRoots: deps._extraRoots ?? config.extraWritableDirs,
+					extraRoots: extraRootsForCall(deps, workspaceRoot, config, mode),
 					selected,
 					platform,
 					runnerCommand: config.runnerCommand,
@@ -451,7 +469,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 			//（withFileMutationQueue 不吞错）——pi 的 agent 循环会转成 error result。
 			const tool = createWriteToolDefinition(sessionCwd, {
 				operations: createFencedWriteOps(
-					{ mode, workspaceRoot, _tmpRoots: deps._tmpRoots, extraRoots: deps._extraRoots ?? config.extraWritableDirs },
+					{ mode, workspaceRoot, _tmpRoots: deps._tmpRoots, extraRoots: extraRootsForCall(deps, workspaceRoot, config, mode) },
 					sessionId === null ? undefined : () => getDenialLedger().record(sessionId, "operation"),
 				),
 			});
@@ -476,7 +494,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 			const { mode, escalated, ignoredEscalation } = await resolveCall(params as EscalationParams, ctx, deps, "operation", () => String(params.path ?? ""), signal);
 			const tool = createEditToolDefinition(sessionCwd, {
 				operations: createFencedEditOps(
-					{ mode, workspaceRoot, _tmpRoots: deps._tmpRoots, extraRoots: deps._extraRoots ?? config.extraWritableDirs },
+					{ mode, workspaceRoot, _tmpRoots: deps._tmpRoots, extraRoots: extraRootsForCall(deps, workspaceRoot, config, mode) },
 					sessionId === null ? undefined : () => getDenialLedger().record(sessionId, "operation"),
 				),
 			});
@@ -509,7 +527,7 @@ export function createSandboxTools(deps: SandboxToolDeps) {
 				operations: createSandboxPowerShellOps({
 					mode,
 					workspaceRoot,
-					extraRoots: deps._extraRoots ?? config.extraWritableDirs,
+					extraRoots: extraRootsForCall(deps, workspaceRoot, config, mode),
 					selected,
 					platform,
 					runnerCommand: config.runnerCommand,

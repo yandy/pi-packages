@@ -103,6 +103,32 @@ describe("loadSandboxConfig", () => {
 	});
 });
 
+describe("toolStorage", () => {
+	it("enables built-in tool storage by default", () => {
+		expect(loadSandboxConfig().toolStorage).toBe(true);
+	});
+	it.each([true, false])("preserves explicit %s", (enabled) => {
+		writeGlobal({ toolStorage: enabled });
+		expect(loadSandboxConfig().toolStorage).toBe(enabled);
+	});
+	it("warns and falls back to enabled for a non-boolean value", () => {
+		writeGlobal({ toolStorage: "false" });
+		expect(loadSandboxConfig().toolStorage).toBe(true);
+		expect(warned()).toMatch(/invalid toolStorage/u);
+	});
+	it("ignores the project-level field silently", () => {
+		writeProject({ toolStorage: false });
+		expect(loadSandboxConfig().toolStorage).toBe(true);
+		expect(warnings).toEqual([]);
+	});
+	it("keeps the field independent from a corrupt sandbox-writable.json", () => {
+		writeGlobal({ toolStorage: false });
+		writeWritable("{broken");
+		expect(loadSandboxConfig().toolStorage).toBe(false);
+		expect(warned()).toMatch(/not valid JSON/u);
+	});
+});
+
 describe("getSandboxConfig (fail-safe + cache)", () => {
 	afterEach(() => { resetSandboxConfigCache(); });
 	it("pairing-violation global config falls back to DEFAULT with a warn, never throws (I2)", () => {

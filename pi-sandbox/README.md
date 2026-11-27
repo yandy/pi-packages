@@ -1,6 +1,6 @@
 # pi-sandbox
 
-pi coding-agent extension: process-level sandbox (bwrap / landlock / seatbelt / windows-acl) — workspace writable, everything else readable, fail-closed.
+pi coding-agent extension: process-level sandbox (bwrap / landlock / seatbelt / windows-acl) — workspace and detected tool storage writable, everything else readable, fail-closed.
 
 ## Install
 
@@ -48,7 +48,7 @@ PowerShell language mode follows startup constraints, not the ACL boundary: unde
 
 **`NUL` is writable in both modes** — an environment property of the device (its DACL grants Everyone read/write/execute), not a capability grant, so it holds regardless of which roots the token was granted. It is reachable only through the device spellings: `cmd`'s `> NUL` and Node's `\\.\NUL`. A *relative* `NUL` is not the device: libuv builds NT paths and does not apply the Win32 device-name mapping, so `writeFileSync('NUL', …)` is an ordinary file named `NUL` in the child's cwd — allowed inside the workspace, denied outside it, exactly like any other name.
 
-**Standing security-descriptor changes.** Granting is idempotent but never revoked: after pi exits, the ACEs, the world `FILE_DELETE_CHILD` deny and the Low mandatory label on the workspace and `%TEMP%` remain. Each directory listed in `~/.pi/agent/sandbox-writable.json` gets the same standing changes in `workspace-write` (a per-directory capability ACE, the world `FILE_DELETE_CHILD` deny and a Low label); a directory that cannot be granted (you cannot change its ACL — no WRITE_DAC/WRITE_OWNER) makes the confined command **fail closed** — it is never run unconfined. This relaxes those trees for **any** Low-integrity process running as the same user, and clearing an inheritable label later does not walk back what already propagated to child objects. Switching back to `read-only` makes the capability ACEs inert (that token carries no capability SID) but does not remove them. The first grant eagerly propagates across the whole `%TEMP%` tree (seconds on a large tree); later calls hit the exact-match fast path. `%TEMP%` and `TMP` themselves are **not** rewritten — the sandbox's writable temp root is the host `%TEMP%`.
+**Standing security-descriptor changes.** Granting is idempotent but never revoked: after pi exits, the ACEs, the world `FILE_DELETE_CHILD` deny and the Low mandatory label on the workspace and `%TEMP%` remain. Directories listed in `~/.pi/agent/sandbox-writable.json` and detected built-in tool storage roots get the same standing changes in `workspace-write` (a per-directory capability ACE, the world `FILE_DELETE_CHILD` deny and a Low label); a directory that cannot be granted (you cannot change its ACL — no WRITE_DAC/WRITE_OWNER) makes the confined command **fail closed** — it is never run unconfined. The first grant to a large existing store recursively propagates descriptors and can lengthen that command substantially; propagation runs in the standalone runner, and later calls hit the exact-match fast path. This relaxes those trees for **any** Low-integrity process running as the same user, and clearing an inheritable label later does not walk back what already propagated to child objects. Switching back to `read-only` makes the capability ACEs inert (that token carries no capability SID) but does not remove them. The first grant eagerly propagates across the whole `%TEMP%` tree (seconds on a large tree); later calls hit the exact-match fast path. `%TEMP%` and `TMP` themselves are **not** rewritten — the sandbox's writable temp root is the host `%TEMP%`.
 
 **The `%TEMP%` cost.** `%TEMP%` is a shared user tree: its subdirectories inherit the deny ACE, so a third party that opens its own temp subdirectory with `GENERIC_ALL`/`FullControl` is refused. DELETE-based deletes, `MAXIMUM_ALLOWED` and ordinary read/write opens are unaffected.
 
@@ -63,14 +63,14 @@ The bundled `diagnose-windows-sandbox-acl` skill (diagnoses and repairs cases wh
 | Mode | File effects |
 |---|---|
 | `read-only` | only `/dev/null` writable |
-| `workspace-write` (default) | working directory + `/tmp` + `os.tmpdir()` + the extra roots listed in `sandbox-writable.json` writable, everything else read-only |
+| `workspace-write` (default) | working directory + `/tmp` + `os.tmpdir()` + detected built-in tool storage + the extra roots listed in `sandbox-writable.json` writable, everything else read-only |
 | `danger-full-access` | sandbox bypassed entirely (explicit escape hatch) |
 
 Network is always allowed (no network isolation).
 
 ## /permission command
 
-- `/permission` — show the current status (mode and source, selected runner and enforcement, workspace; when `sandbox-writable.json` lists extra roots, an `extra writable:` line, suffixed `(inactive: <mode>)` when the current mode does not apply them)
+- `/permission` — show the current status (mode/source, runner, workspace, and `tool storage: auto (...)` / `off`; custom roots appear as `extra writable:`, with `(inactive: <mode>)` when not applicable)
 - `/permission <read-only|workspace-write|danger-full-access>` — switch mode, **process-wide**: the next tool call in the parent session and in every subagent child session adopts it immediately
 
 ## Escalation approval (model-initiated, denial-first)
@@ -89,7 +89,7 @@ When approvals overlap, the host manages their dialogs. In the TUI, the newest d
 
 Immediately before the initial approval selection, the visible UI's instance emits `notify:request` with `{ title: "Approval required", body: <approval title>, urgency: "critical" }`. Brokered approvals use the parent instance's event bus, never the requesting child's. The optional denial-reason step emits nothing further. Delivery is fire-and-forget, and an announcement failure does not change approval control flow.
 
-**Cache/data relocation is out of policy.** The tools' rules instruct the model never to work around the sandbox by relocating global cache/data directories into the workspace — via environment-variable overrides (`XDG_CACHE_HOME`, `HOME`, `UV_CACHE_DIR`, `npm_config_cache`, `PNPM_HOME`, …), cache-relocating flags (`--cache-dir`, `--store-dir`, …), or config files — and to run tools unmodified instead, including on the escalated retry: a relocation is silent, it suppresses the denial that would have armed escalation. This is a prompt-level policy only: pi-sandbox does not detect or refuse such commands, and an explicit user request to relocate stays legitimate. The legitimate way to let a tool write outside the workspace in `workspace-write` mode is for the **user** to add that directory to `~/.pi/agent/sandbox-writable.json`; the model still must not relocate cache/data directories itself.
+**Cache/data relocation is out of policy.** The tools' rules instruct the model never to work around the sandbox by relocating global cache/data directories into the workspace — via environment-variable overrides (`XDG_CACHE_HOME`, `HOME`, `UV_CACHE_DIR`, `npm_config_cache`, `PNPM_HOME`, …), cache-relocating flags (`--cache-dir`, `--store-dir`, …), or config files — and to run tools unmodified instead, including on the escalated retry: a relocation is silent, it suppresses the denial that would have armed escalation. This is a prompt-level policy only: pi-sandbox does not detect or refuse such commands, and an explicit user request to relocate stays legitimate. Common tools are covered by built-in storage profiles; other custom paths are added by the **user** in `~/.pi/agent/sandbox-writable.json`. The model still must not relocate cache/data directories itself.
 
 ## Configuration
 
@@ -102,7 +102,8 @@ Two files are read from the agent dir (`~/.pi/agent/`): `sandbox.json` for the s
   "mode": "workspace-write",
   "runnerCommand": null,
   "runnerFailureSignatures": null,
-  "probeTimeoutMs": 5000
+  "probeTimeoutMs": 5000,
+  "toolStorage": true
 }
 ```
 
@@ -112,6 +113,7 @@ Two files are read from the agent dir (`~/.pi/agent/`): `sandbox.json` for the s
 | `runnerCommand` | `null` | custom bwrap-compatible runner argv (must be paired with the next field) |
 | `runnerFailureSignatures` | `null` | fatal diagnostic signatures for the custom runner (non-empty single lines) |
 | `probeTimeoutMs` | `5000` | runner capability probe timeout (positive) |
+| `toolStorage` | `true` | detect and grant built-in tool storage; `false` disables all profiles, invalid values warn and use the default |
 
 `~/.pi/agent/sandbox-writable.json` is a bare JSON array of directory paths — no root key — so adding a root is a one-line edit:
 
@@ -123,54 +125,35 @@ Extra writable roots apply in `workspace-write` mode only, beyond the workspace 
 
 Config warnings never go straight to the terminal: the config is read before any UI context exists, so warnings are buffered and then delivered by the first session with a UI — in the TUI they show up in the chat as a `Warning: …` line (rather than being painted over by the interface), while `-p` / JSON mode writes them to stderr.
 
-### Example: writable cache directories for common tools
+### Built-in tool storage
 
-Tools that keep a global cache or store outside the workspace fail (or re-download every time) in `workspace-write` mode. Listing those directories in `~/.pi/agent/sandbox-writable.json` is the intended fix: the user authorizes the storage directories once, and the model then runs the tools unmodified — no `UV_CACHE_DIR` / `PNPM_HOME` / `npm_config_cache` relocation (see "Cache/data relocation is out of policy" above).
+`workspace-write` detects and grants persistent storage for common tools by default, so ordinary `uv sync`, `uv pip install`, `pnpm install`, and similar commands need neither environment relocation nor escalation. Detection inspects PATH entries and the project root's `mvnw` / `gradlew` only; it never runs the tools or parses shell commands. A Corepack entry activates the Corepack, pnpm, and Yarn profiles.
 
-Entries must already exist (missing directories are warned about and ignored), so create them first:
+| Profile | Storage included | Main path overrides |
+|---|---|---|
+| pip | HTTP and wheel cache | `PIP_CACHE_DIR`, `XDG_CACHE_HOME` |
+| uv | dependency cache + managed Python `python/` | `UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR`, XDG |
+| npm | cache, logs, and npx content | `npm_config_cache` / `NPM_CONFIG_CACHE` |
+| Corepack | package-manager downloads and cache | `COREPACK_HOME` |
+| pnpm | **store + cache + state + named lock directories** | `PNPM_HOME`, XDG cache/data/state |
+| Yarn | Classic cache + Berry global cache/metadata | `YARN_CACHE_FOLDER`, `YARN_GLOBAL_FOLDER` |
+| Bun | global package cache (including optional links store) | `BUN_INSTALL_CACHE_DIR` |
+| Go | module cache + build cache | `GOMODCACHE`, `GOCACHE`, `GOPATH` |
+| Maven | local repository + Wrapper distributions | `MAVEN_USER_HOME` affects the wrapper only |
+| Gradle | `caches/`, `daemon/`, `jdks/`, `wrapper/dists/` | `GRADLE_USER_HOME` |
 
-```bash
-mkdir -p ~/.cache/uv ~/.local/share/pnpm/store ~/.cache/pnpm ~/.npm ~/.cache/pip ~/.cache/huggingface
-```
+Paths follow Linux, macOS, and Windows conventions plus the parent process's environment. Examples on Linux: uv cache is `~/.cache/uv` and the pnpm store is `~/.local/share/pnpm/store`. On macOS, pip uses `~/Library/Caches/pip` and the pnpm store uses `~/Library/pnpm/store`. On Windows, uv cache is `%LOCALAPPDATA%\uv\cache`, managed Python is `%APPDATA%\uv\data\python`, and the pnpm store is `%LOCALAPPDATA%\pnpm\store`. pnpm locks grant only named children under the XDG runtime root or `%LOCALAPPDATA%`, never either shared base itself.
 
-Put this in `~/.pi/agent/sandbox-writable.json`:
+Missing built-in storage roots are created before an actual `workspace-write` call. Read-only, danger-full-access, and `/permission` queries create nothing. Every call revalidates the roots, so a deleted directory can be recreated on the next call. A root that cannot be created or validated is warned about and omitted without disabling confinement for unrelated commands. PATH, environment, and tool installation state are cached per process; restart pi after changing them.
 
-```json
-[
-  "~/.cache/uv",
-  "~/.local/share/pnpm/store",
-  "~/.cache/pnpm",
-  "~/.npm",
-  "~/.cache/pip",
-  "~/.cache/huggingface"
-]
-```
+**Global installs stay blocked.** `uv tool install`, `uv pip install --system`, `pnpm add -g`, global self-updates, PATH bin/shim directories, user configuration, and credentials gain no automatic write access. Creating global executable entries with an explicit `uv python install` is outside the storage grant; PEP 514 registry writes on Windows are not directory grants. A pnpm store selected on another volume, and custom paths set through config files or CLI flags, still require explicit user authorization.
 
-| Tool | Directory (Linux defaults) | Override | Query the path on your machine |
-|---|---|---|---|
-| uv cache (`uv sync`, `uv pip install`) | `~/.cache/uv` | `UV_CACHE_DIR` | `uv cache dir` |
-| pnpm store — package contents; installs write it | `~/.local/share/pnpm/store` | `storeDir` | `pnpm store path` |
-| pnpm metadata / `pnpm dlx` cache | `~/.cache/pnpm` | `cacheDir` | `pnpm cache path` |
-| npm cache | `~/.npm` | `npm_config_cache` | `npm config get cache` |
-| pip cache | `~/.cache/pip` | `PIP_CACHE_DIR` | `pip cache dir` |
-| Hugging Face cache | `~/.cache/huggingface` | `HF_HOME` | — |
-
-**pnpm store vs cache.** The *store* holds the package contents that `pnpm install` downloads — projects hard-link from it, so it must be writable for installs to work (the grant above is the parent `store/`; `pnpm store path` prints the versioned subdirectory inside it, e.g. `store/v11`). The *cache* holds registry metadata and the `pnpm dlx` cache and only speeds things up. Neither contains globally installed packages or executables: those live in `~/.local/share/pnpm/global` and `~/.local/share/pnpm/bin`, outside the grants above.
-
-**Global installs stay blocked.** With only storage/cache directories granted, `uv tool install` (writes `~/.local/share/uv/tools` and `~/.local/bin`) and `pnpm add -g` (writes `~/.local/share/pnpm/global` and `bin`) still hit a denial and can only proceed through an explicit escalation. Do **not** grant installation prefixes or `bin` directories that are on `PATH` (`~/.local/bin`, `~/.cargo/bin`, `~/go/bin`, …): that would let the confined model leave persistent executables behind for unconfined runs.
-
-Platform notes: the table lists Linux defaults. macOS: pnpm store `~/Library/pnpm/store`, pnpm cache `~/Library/Caches/pnpm`, pip `~/Library/Caches/pip`. Windows: uv cache `%LOCALAPPDATA%\uv\cache`, pnpm store `%LOCALAPPDATA%\pnpm\store`, pnpm cache `%LOCALAPPDATA%\pnpm-cache`, npm cache `%LocalAppData%\npm-cache`, pip `%LocalAppData%\pip\Cache`. Use each tool's query command for the exact path.
-
-Optional grants and their trade-offs:
-
-- **Go**: grant `~/go/pkg` plus `~/.cache/go-build` (macOS `~/Library/Caches/go-build`, Windows `%LocalAppData%\go-build`) to keep `go build` working while `go install` (writes `~/go/bin`) stays denied.
-- **Cargo**: `cargo build` writes `~/.cargo/.package-cache` and the registry/git caches, so the whole `~/.cargo` must be granted; that also unblocks `cargo install` into `~/.cargo/bin` (on `PATH`). Grant it only if you accept that, or leave Cargo un-granted and escalate per use.
-- **uv managed interpreters**: if the project's Python is not installed yet, `uv sync` downloads it into `~/.local/share/uv/python` (and may link executables into `~/.local/bin`). Prefer installing interpreters once outside the sandbox (`uv python install <version>`); granting `~/.local/share/uv/python` alone allows the download in-sandbox while `uv tool install` stays blocked.
-- **pnpm machine state**: `~/.local/state/pnpm` is not granted above; if you hit a denial from it and confirm it is state writing, add it — it contains no global installations.
+Use `~/.pi/agent/sandbox-writable.json` for those custom paths and tools without a built-in profile. Unlike built-in roots, manual entries **must already exist**; the extension does not create them. Cargo has no first-version profile: its `CARGO_HOME/.package-cache` lives at the root, so granting the whole directory with the current directory-only pipeline would also grant `bin/`. Add it manually only if you accept that trade-off. Normal CMake builds need no global dependency cache; projects explicitly using the user package registry can grant POSIX `~/.cmake/packages` manually.
 
 ## Security notes
 
 - Confined processes can **read** everything you can read on the host (including `~/.ssh` and the like) — that is this sandbox's design semantics (same as the deepseek harness); root-only files stay protected by file permissions
+- Built-in stores/caches/managed runtimes are part of the same-user trust domain: content written by a confined process may be reused by later unconfined tools. pnpm store integrity checks do not make an untrusted writer safe. Set `toolStorage:false` to disable all built-in grants
 - **Do not** put your home directory, `~/.pi`, or any ancestor of pi's agent dir into `sandbox-writable.json`: the confined model could then rewrite the global sandbox config, `AGENTS.md`, or extensions — which run unconfined on the next start; such entries are warned about at load time, but still kept (warn-only)
 - Under bwrap, bash's `/tmp` **is the host `/tmp`** (rw bind, matching the write/edit fence and the landlock/macOS runners): confined commands can modify or delete the host's temporary files — including live session sockets and pi's own temp files — and the host's `/tmp` permissions apply as-is. If the host `/tmp` is not writable, neither is the sandbox's
 - On Windows the sandbox's temp root is the host `%TEMP%` (the `windows-acl` runner grants the real path and does not rewrite `TMP`/`TEMP`): confined commands can modify or delete the host's temporary files there — the same "the host tmp is the host tmp" semantics as the bwrap bind above
