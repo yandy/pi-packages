@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { homedir, tmpdir } from "node:os";
@@ -14,6 +14,7 @@ import { PLACEHOLDER_KEYS } from "../src/escalation";
 import { getEscalationBroker, resetEscalationBrokerForTests } from "../src/escalation-broker";
 import { NON_TUI_APPROVAL_DEADLINE_MS } from "../src/approval-dialog";
 import { getDenialLedger, resetDenialLedgerForTests } from "../src/denial-ledger";
+import { resetToolStoragePlanCache } from "../src/tool-storage/detect";
 
 // T14 修订（Fix 2）：把受限 pwsh ops 工厂替换成一个可识别的哨兵，使“builder 收到的 operations 是否
 // 来自沙箱工厂”成为可断言的身份问题。若实现误接了宿主的本地（未受限）ops 或任何别的对象，断言必红。
@@ -56,6 +57,7 @@ function makeDeps(overrides: Partial<Parameters<typeof createSandboxTools>[0]> =
 			// 测试注入（testing.md 参数注入）：把 tmp 可写根钉在测试目录内，
 			// 于是 dir/outside 成为真·围栏外——判例无需触碰真实 HOME 或 /etc。
 			_tmpRoots: [fakeTmpDir],
+			_toolStorageRoots: [],
 			...overrides,
 		},
 		child,
@@ -112,6 +114,8 @@ afterEach(() => {
 	vi.useRealTimers();
 	resetEscalationBrokerForTests();
 	resetDenialLedgerForTests();
+	resetToolStoragePlanCache();
+	vi.unstubAllEnvs();
 	rmSync(dir, { recursive: true, force: true });
 });
 
@@ -878,7 +882,7 @@ describe("windows tool wiring", () => {
 	}
 
 	it("builds the tool set on win32 and exposes a powershell tool", () => {
-		const tools = createSandboxTools({ cwd: process.cwd(), permission: processPermissionState, platform: "win32" });
+		const tools = createSandboxTools({ cwd: process.cwd(), permission: processPermissionState, platform: "win32", _toolStorageRoots: [] });
 		for (const name of ["bash", "write", "edit"] as const) expect(tools[name]).toBeDefined();
 		expect(tools.powershell?.label).toBe("powershell (sandboxed)");
 	});
@@ -888,10 +892,10 @@ describe("windows tool wiring", () => {
 		// 覆盖内建定义；`defaultActive: false` 仍允许命名激活，挡不住默认列表。因此改用 `exposure: "hidden"`：
 		// _applyToolLoadout 丢弃 hidden、命名激活也不生效（registered but unreachable）。
 		// 但绝不能跳过注册（那会露出 pi 内置的未受限 bash，显式启用即 fail-open），所以是“注册 + hidden”。
-		const win32 = createSandboxTools({ cwd: process.cwd(), permission: processPermissionState, platform: "win32" });
+		const win32 = createSandboxTools({ cwd: process.cwd(), permission: processPermissionState, platform: "win32", _toolStorageRoots: [] });
 		expect((win32.bash as { exposure?: string }).exposure).toBe("hidden");
 		// 非 win32 不设该键（既有行为不变：bash 必须默认激活）——按自有属性判定，避免真值判断漏掉 undefined。
-		const linux = createSandboxTools({ cwd: process.cwd(), permission: processPermissionState, platform: "linux" });
+		const linux = createSandboxTools({ cwd: process.cwd(), permission: processPermissionState, platform: "linux", _toolStorageRoots: [] });
 		expect(Object.prototype.hasOwnProperty.call(linux.bash, "exposure")).toBe(false);
 		expect((linux.bash as { exposure?: string }).exposure).toBeUndefined();
 	});
@@ -903,6 +907,7 @@ describe("windows tool wiring", () => {
 			permission: processPermissionState,
 			platform: "linux",
 			_hostCreatePowerShellToolDefinition: build,
+			_toolStorageRoots: [],
 		});
 		expect(tools.powershell).toBeUndefined();
 		// 平台门控先于 builder 构造：非 win32 上连注入的 spy 都不该被调用。
@@ -993,13 +998,15 @@ describe("windows tool wiring", () => {
 		expect(escalated.content.map((c) => c.text).join("\n")).toContain('one-shot escalation to "danger-full-access"');
 	});
 
-	it("powershell carries the injected extra roots into the sandbox ops factory", async () => {
+	it("powershell carries manual and built-in roots into the sandbox ops factory", async () => {
 		const extra = realpathSync.native(mkdtempSync(join(tmpdir(), "tools-extra-")));
+		const builtin = realpathSync.native(mkdtempSync(join(tmpdir(), "tools-builtin-")));
 		try {
 			const { deps } = makeDeps({
 				platform: "win32",
 				_hostCreatePowerShellToolDefinition: fakePowerShellBuilder(),
 				_extraRoots: [extra],
+				_toolStorageRoots: [builtin],
 			});
 			const { powershell } = createSandboxTools(deps);
 			await powershell!.execute("pwsh-extra", { command: "Get-ChildItem" }, undefined, undefined, toolCtx());
@@ -1007,9 +1014,12 @@ describe("windows tool wiring", () => {
 			//（platform 注入与既有用例同口径），否则 pwsh 在额外根上是 fail-closed 的哑拒。
 			expect(createSandboxPowerShellOpsMock).toHaveBeenLastCalledWith(expect.objectContaining({
 				platform: "win32",
-				extraRoots: [extra],
+				extraRoots: [extra, builtin],
 			}));
-		} finally { rmSync(extra, { recursive: true, force: true }); }
+		} finally {
+			rmSync(extra, { recursive: true, force: true });
+			rmSync(builtin, { recursive: true, force: true });
+		}
 	});
 });
 
@@ -1050,6 +1060,94 @@ describe("extraWritableDirs 接线", () => {
 			const { readFile } = await import("node:fs/promises");
 			expect(await readFile(target, "utf-8")).toBe("goodbye world");
 		} finally { rmSync(extra, { recursive: true, force: true }); }
+	});
+});
+
+describe("toolStorage 接线", () => {
+	it.each([false, true])("bash receives manual + built-in roots (custom runner: %s)", async (customRunner) => {
+		const manual = join(dir, "manual");
+		const builtin = join(dir, "builtin");
+		mkdirSync(manual);
+		mkdirSync(builtin);
+		const { deps, child, spawnFn } = makeDeps({
+			_extraRoots: [manual],
+			_toolStorageRoots: [builtin],
+			getConfig: () => ({
+				...DEFAULT_SANDBOX_CONFIG,
+				...(customRunner ? { runnerCommand: ["custom-runner"], runnerFailureSignatures: ["custom: "] } : {}),
+			}),
+		});
+		const { bash } = createSandboxTools(deps);
+		const pending = bash.execute("b-tool-storage", { command: "true" }, undefined, undefined, toolCtx() as never);
+		await vi.waitFor(() => { expect(spawnFn).toHaveBeenCalled(); });
+		child.emit("close", 0, undefined);
+		await pending;
+		const [program, args] = (spawnFn as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [string, string[]];
+		expect(program).toBe(customRunner ? "custom-runner" : "bwrap");
+		const binds: string[][] = [];
+		for (let index = 0; index < args.length; index++) {
+			if (args[index] === "--bind") binds.push([args[index + 1], args[index + 2]]);
+		}
+		expect(binds).toEqual(expect.arrayContaining([[manual, manual], [builtin, builtin]]));
+	});
+
+	it("write accepts both manual and built-in roots", async () => {
+		const manual = join(dir, "manual");
+		const builtin = join(dir, "builtin");
+		mkdirSync(manual);
+		mkdirSync(builtin);
+		const { deps } = makeDeps({ _extraRoots: [manual], _toolStorageRoots: [builtin] });
+		const { write } = createSandboxTools(deps);
+		await write.execute("w-manual", { path: join(manual, "ok.txt"), content: "manual" }, undefined, undefined, toolCtx() as never);
+		await write.execute("w-builtin", { path: join(builtin, "ok.txt"), content: "builtin" }, undefined, undefined, toolCtx() as never);
+		const { readFile } = await import("node:fs/promises");
+		expect(await readFile(join(manual, "ok.txt"), "utf-8")).toBe("manual");
+		expect(await readFile(join(builtin, "ok.txt"), "utf-8")).toBe("builtin");
+	});
+
+	it("edit accepts both manual and built-in roots", async () => {
+		const manual = join(dir, "manual");
+		const builtin = join(dir, "builtin");
+		mkdirSync(manual);
+		mkdirSync(builtin);
+		const { deps } = makeDeps({ _extraRoots: [manual], _toolStorageRoots: [builtin] });
+		const { edit } = createSandboxTools(deps);
+		for (const [root, content] of [[manual, "manual"], [builtin, "builtin"]] as const) {
+			const target = join(root, "edit.txt");
+			writeFileSync(target, "before");
+			await edit.execute(`e-${content}`, { path: target, edits: [{ oldText: "before", newText: content }] }, undefined, undefined, toolCtx() as never);
+			const { readFile } = await import("node:fs/promises");
+			expect(await readFile(target, "utf-8")).toBe(content);
+		}
+	});
+
+	it.each(["read-only", "danger-full-access"] as const)("%s does not consume built-in roots", async (mode) => {
+		const { deps, child, spawnFn } = makeDeps({ getConfig: () => ({ ...DEFAULT_SANDBOX_CONFIG, mode }) });
+		Object.defineProperty(deps, "_toolStorageRoots", {
+			get() { throw new Error("built-in roots must not be consumed outside workspace-write"); },
+		});
+		const { bash } = createSandboxTools(deps);
+		const pending = bash.execute(`b-${mode}`, { command: "true" }, undefined, undefined, toolCtx() as never);
+		await vi.waitFor(() => { expect(spawnFn).toHaveBeenCalled(); });
+		child.emit("close", 0, undefined);
+		await expect(pending).resolves.toBeDefined();
+	});
+
+	it("an explicit empty injection never falls back to production detection", async () => {
+		const home = join(dir, "home");
+		const bin = join(dir, "bin");
+		mkdirSync(home);
+		mkdirSync(bin);
+		writeFileSync(join(bin, "uv"), "");
+		chmodSync(join(bin, "uv"), 0o755);
+		vi.stubEnv("HOME", home);
+		vi.stubEnv("USERPROFILE", home);
+		vi.stubEnv("PI_CODING_AGENT_DIR", join(dir, "agent"));
+		vi.stubEnv("PATH", bin);
+		const { deps } = makeDeps({ _toolStorageRoots: [] });
+		const { write } = createSandboxTools(deps);
+		await write.execute("w-no-detection", { path: join(ws, "ok.txt"), content: "ok" }, undefined, undefined, toolCtx() as never);
+		expect(existsSync(join(home, ".cache", "uv"))).toBe(false);
 	});
 });
 

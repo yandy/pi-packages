@@ -91,6 +91,7 @@ describe("端到端（包内）：子会话提权 → 父会话弹窗 → 一次
 			selected: { runner: "bwrap" as const, enforcement: "full" as const },
 			// testing.md 参数注入：把 tmp 可写根钉在测试目录内，于是 dir/outside 成为真·围栏外
 			_tmpRoots: [fakeTmpDir],
+			_toolStorageRoots: [],
 		};
 		const { write } = createSandboxTools(deps);
 

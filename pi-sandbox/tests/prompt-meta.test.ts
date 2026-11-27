@@ -7,6 +7,7 @@ function deps(): SandboxToolDeps {
 		cwd: "/tmp",
 		permission: { override: undefined } as never,
 		platform: "linux",
+		_toolStorageRoots: [],
 	};
 }
 
