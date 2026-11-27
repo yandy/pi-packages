@@ -1088,7 +1088,10 @@ describe("toolStorage 接线", () => {
 		for (let index = 0; index < args.length; index++) {
 			if (args[index] === "--bind") binds.push([args[index + 1], args[index + 2]]);
 		}
-		expect(binds).toEqual(expect.arrayContaining([[manual, manual], [builtin, builtin]]));
+		expect(binds).toEqual(expect.arrayContaining([
+			[realpathSync.native(manual), realpathSync.native(manual)],
+			[realpathSync.native(builtin), realpathSync.native(builtin)],
+		]));
 	});
 
 	it("write accepts both manual and built-in roots", async () => {
