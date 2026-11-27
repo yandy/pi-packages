@@ -10,6 +10,12 @@
 import type { Model } from "@earendil-works/pi-ai";
 import type { AgentTypeRegistry } from "../config/agent-types";
 import { resolveAgentInvocationConfig } from "../config/invocation-config";
+import {
+	type ModelTier,
+	type ModelTierMap,
+	normalizeModelTier,
+	resolveModelTier,
+} from "../config/model-tiers";
 import { normalizeMaxTurns, normalizeTimeoutSeconds } from "../lifecycle/turn-limits";
 import { resolveInvocationModel } from "../session/model-resolver";
 import type { AgentInvocation, SubagentType, ThinkingLevel } from "../types";
@@ -82,7 +88,11 @@ export function resolveSpawnConfig(
 	params: Record<string, unknown>,
 	registry: AgentTypeRegistry,
 	modelInfo: ModelInfo,
-	settings: { readonly defaultMaxTurns: number | undefined; readonly defaultTimeoutSeconds: number | undefined },
+	settings: {
+		readonly defaultMaxTurns: number | undefined;
+		readonly defaultTimeoutSeconds: number | undefined;
+		readonly modelTiers?: ModelTierMap;
+	},
 ): ResolvedSpawnConfig | SpawnConfigError {
 	const rawType = params.subagent_type as SubagentType;
 	const resolved = registry.resolveType(rawType);
@@ -101,14 +111,34 @@ export function resolveSpawnConfig(
 	const customConfig = registry.resolveAgentConfig(subagentType);
 	const resolvedConfig = resolveAgentInvocationConfig(customConfig, params);
 
-	// Resolve model
+	// Only tool-call model strings may be tier aliases. A frontmatter-pinned model
+	// keeps its existing precedence and continues to denote a real model reference.
+	let tier: ModelTier | undefined;
+	let tierModel: string | undefined;
+	if (resolvedConfig.modelFromParams) {
+		tier = normalizeModelTier(resolvedConfig.modelInput);
+		if (tier) {
+			const tierResolution = resolveModelTier(tier, settings.modelTiers);
+			if (tierResolution.error) return { error: tierResolution.error };
+			tierModel = tierResolution.model;
+		}
+	}
+
+	// Resolve the mapped reference once; tier names never recursively alias other tiers.
 	const resolution = resolveInvocationModel(
 		modelInfo.parentModel,
-		resolvedConfig.modelInput,
+		tierModel ?? resolvedConfig.modelInput,
 		resolvedConfig.modelFromParams,
 		modelInfo.modelRegistry as any,
 	);
-	if (resolution.error) return { error: resolution.error };
+	if (resolution.error) {
+		if (tier && tierModel) {
+			return {
+				error: `Model tier "${tier}" maps to "${tierModel}", but that model could not be resolved.\n\n${resolution.error}`,
+			};
+		}
+		return { error: resolution.error };
+	}
 	const model = resolution.model;
 
 	const thinking = resolvedConfig.thinking;

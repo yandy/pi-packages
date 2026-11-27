@@ -5,7 +5,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { AgentTypeRegistry } from "../config/agent-types";
-import { MODEL_TIERS, MODEL_TIER_INTENTS, type ModelTierMap } from "../config/model-tiers";
+import { MODEL_TIERS, MODEL_TIER_INTENTS, MODEL_TIER_USE_FOR, type ModelTierMap } from "../config/model-tiers";
 import type { ParentSnapshot } from "../lifecycle/parent-snapshot";
 import type { AgentSpawnConfig } from "../lifecycle/subagent-manager";
 import { spawnBackground } from "../tools/background-spawner";
@@ -46,34 +46,44 @@ export type AgentToolSettings = {
 	readonly modelTiers?: ModelTierMap;
 };
 
-/**
- * `model` 参数描述的事实部分；配置了 tiers 时再追加档位表。
- *
- * 档位表是 `model` 的**允许值**（R1「允许值」+ R2「参数级细节放参数」），所以落在这里；
- * 之前整段（表 + 纪律）写在 `promptGuidelines` 里有两个问题：自定义 system prompt 时
- * guidelines 被整体丢弃（用户配的 tier 随之静默失效，README 承诺的映射无处可查），
- * 且把配置数据混进了行为纪律列表。纪律侧现在只留 TIER_GUIDELINE。
- */
+/** Model selector description when no tier alias is configured. */
 const MODEL_PARAM_DESCRIPTION =
-	'Optional model override. Accepts "provider/modelId" or fuzzy name (e.g. "haiku", "sonnet"). Omit to use the agent type\'s default.';
+	'Optional model selector: "provider/modelId" or fuzzy name (e.g. "haiku"). Default: agent type.';
 
-/** Tier → model table for the `model` parameter description, or undefined when none configured. */
+/** Model selector description when tier aliases exist — names the extra accepted input. */
+const MODEL_PARAM_TIER_DESCRIPTION =
+	'Optional model selector: "provider/modelId", fuzzy name (e.g. "haiku"), or configured tier name. Default: agent type.';
+
+/** Configured tier aliases for the `model` parameter description, or undefined when none are configured. */
 function buildTierTable(tiers: ModelTierMap | undefined): string | undefined {
 	const configured = MODEL_TIERS.filter((tier) => tiers?.[tier]).map(
-		(tier) => `${tier} → ${tiers?.[tier]} (${MODEL_TIER_INTENTS[tier]})`,
+		(tier) => `model: "${tier}" → ${tiers?.[tier]} (${MODEL_TIER_INTENTS[tier]})`,
 	);
 	if (configured.length === 0) return undefined;
 	return configured.join(", ");
 }
 
 /**
- * 纪律侧只点名「按配置档位选模型」，映射表本身在 `model` 参数描述里。
+ * Tier-selection guidance, generated only from the tiers that are configured.
  *
- * 这条同时覆盖了 guidelines 通道的可用性风险：即便自定义 system prompt 让 guidelines 消失，
- * 参数描述里的档位表仍在，模型仍能查到映射（只是少了这条主动提示）。
+ * Three parts: when to reach for a tier at all, one line per configured tier
+ * (intent + trigger + the exact value to pass), and where the real model behind
+ * each tier is documented. The mapped model values stay out of guidelines — they
+ * are the parameter description's job — so this text never leaks config data,
+ * and a tier added or removed in `subagents.json` cannot leave stale advice here.
  */
-const TIER_GUIDELINE =
-	"When a subagent task needs a specific cost or capability level, use the matching configured tier's model rather than the agent type's default.";
+function buildTierGuidelines(tiers: ModelTierMap | undefined): string[] {
+	const configured = MODEL_TIERS.filter((tier) => tiers?.[tier]);
+	if (configured.length === 0) return [];
+	return [
+		"Choose a subagent's model by cost or capability when a task has a clear level: prefer a configured tier alias over a raw model name, and pass the tier name itself as model.",
+		...configured.map(
+			(tier) =>
+				`model: "${tier}" — ${MODEL_TIER_INTENTS[tier]}: ${MODEL_TIER_USE_FOR[tier]}.`,
+		),
+		"The model parameter description shows which real model backs each configured tier.",
+	];
+}
 
 /**
  * 行为纪律（进 system prompt 的 Guidelines，不进 description）。
@@ -162,13 +172,14 @@ export class AgentTool {
 		const typeListText = this.typeListText;
 		const availableTypesText = this.availableTypesText;
 		const tierTable = buildTierTable(this.settings.modelTiers);
+		const tierGuidelines = buildTierGuidelines(this.settings.modelTiers);
 		const registry = this.registry;
 
 		return defineTool({
 			name: "subagent" as const,
 			label: "Subagent",
 			promptSnippet: "Launch a specialized agent for complex, multi-step tasks",
-			promptGuidelines: tierTable ? [...PROMPT_GUIDELINES, TIER_GUIDELINE] : [...PROMPT_GUIDELINES],
+			promptGuidelines: [...PROMPT_GUIDELINES, ...tierGuidelines],
 			description: `Launch a subagent that works autonomously on a task.
 
 Available agent types:
@@ -185,7 +196,9 @@ ${typeListText}`,
 				}),
 				model: Type.Optional(
 					Type.String({
-						description: tierTable ? `${MODEL_PARAM_DESCRIPTION} Configured tiers: ${tierTable}.` : MODEL_PARAM_DESCRIPTION,
+						description: tierTable
+							? `${MODEL_PARAM_TIER_DESCRIPTION} Configured tier aliases: ${tierTable}.`
+							: MODEL_PARAM_DESCRIPTION,
 					}),
 				),
 				thinking: Type.Optional(

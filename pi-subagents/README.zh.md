@@ -14,7 +14,7 @@
 - **优雅轮次限制** — 代理在硬中止前收到"收尾"警告
 - **大小写不敏感** — `"explore"`、`"Explore"`、`"EXPLORE"` 均可
 - **模糊模型选择** — 按名称（`"haiku"`、`"sonnet"`）而非完整 ID 指定模型
-- **模型分层** — 在配置里把 `fast` / `standard` / `advanced` 档位映射到真实模型，代理按提示选择对应模型
+- **模型分层** — 在配置里把 `fast` / `standard` / `advanced` 映射到真实模型，并把档位名直接传给 `model`
 - **上下文继承** — 可选择把父对话摘要以文本形式前置到子代理的提示词
 - **风格化通知** — 后台结果渲染为主题化通知框
 - **事件总线** — 通过 `pi.events` 发出父级与子级生命周期事件（见[事件](#事件)）
@@ -75,7 +75,7 @@ timeout: 300
 | `description` | string | 文件名 | 一句话描述，出现在 `subagent` 工具的可用类型列表里 |
 | `display_name` | string | 类型名 | widget、通知与结果里显示的短名字 |
 | `tools` | CSV / `+name` / `-name` / `none` | 继承父会话 | 工具集，见下方 |
-| `model` | string | 继承父级 | `provider/modelId` 或模糊名称；写死时优先于每次调用的 `model` |
+| `model` | string | 继承父级 | 真实模型引用（`provider/modelId` 或模糊名称，不是 tier 别名）；写死时优先于每次调用的 `model` |
 | `thinking` | string | 继承父级 | off / minimal / low / medium / high / xhigh |
 | `max_turns` | integer | 无限制 | 该类型的轮次上限，优先于每次调用的 `max_turns` |
 | `timeout` | integer | 无限制 | 墙钟秒数上限（`0` = 无限制），优先于每次调用的 `timeout` |
@@ -139,7 +139,7 @@ tools: -edit, -write, -bash     # 只读调研：继承一切，去掉会写文�
 | `prompt` | string | 是 | 代理要执行的任务 |
 | `description` | string | 是 | 3-5 词简短描述（UI 中显示） |
 | `subagent_type` | string | 是 | 代理类型（内置或自定义） |
-| `model` | string | 否 | 模型覆盖（`provider/modelId` 或模糊名称） |
+| `model` | string | 否 | 模型选择器（`provider/modelId`、模糊名称或已配置的 tier 别名） |
 | `thinking` | string | 否 | off / minimal / low / medium / high / xhigh |
 | `max_turns` | number | 否 | 最大代理轮次（默认无限制） |
 | `timeout` | number | 否 | 墙钟硬性时限（秒）；到点即终止代理并返回已产出的部分输出（默认无限制） |
@@ -168,15 +168,17 @@ tools: -edit, -write, -bash     # 只读调研：继承一切，去掉会写文�
 
 ## 模型分层
 
-除了直接写模型 ID，还可以在 `subagents.json` 中把能力档位映射到真实模型。映射表会列在
-`subagent` 工具的 `model` 参数描述里，同时有一条 prompt guideline 提醒代理在任务需要
-特定成本/能力档位时选用对应配置模型——不存在 `model_tier` 工具参数。
+可以在 `subagents.json` 中把能力档位映射到真实模型，并把已配置档位名直接传给 `subagent`
+工具每次调用的 `model` 参数。参数描述会列出已配置别名，与精确 `provider/modelId`、模糊名称
+共同构成模型选择方式；只要配置了至少一个档位，工具纪律就会为每个已配置档位追加一条指引
+（定位、何时选用、该传的确切值），并另加一条“成本或能力决定选型时优先用档位别名而非裸模型名”
+的规则。每个档位背后的真实模型只出现在参数描述里。
 
-| 档位 | 定位 |
-|------|------|
-| `fast` | 最便宜、最快，能力最弱（flash / mini / haiku 级） |
-| `standard` | 均衡的默认档（sonnet 级） |
-| `advanced` | 能力最强、最贵（opus 级） |
+| 档位 | 定位 | 适用任务 |
+|------|------|----------|
+| `fast` | 最便宜、最快，能力最弱（flash / mini / haiku 级） | 机械型、高吞吐子任务（搜索、批量扫描、简单修改），小模型足够 |
+| `standard` | 均衡的默认档（sonnet 级） | 不需要最强模型的日常任务 |
+| `advanced` | 能力最强、最贵（opus 级） | 困难推理、大幅重构，或弱模型会失败的任务 |
 
 映射写在 `subagents.json`：全局 `$PI_CODING_AGENT_DIR/subagents.json`（默认 `~/.pi/agent/subagents.json`），项目 `<cwd>/.pi/subagents.json`。
 两层**按档位合并**，项目只改一档时无需重复其余档位：
@@ -191,9 +193,17 @@ tools: -edit, -write, -bash     # 只读调研：继承一切，去掉会写文�
 }
 ```
 
-代理会把映射值复制到 `model`，因此与普通 `model` 值走同一套解析：`provider/modelId` 与
-模糊名称（如 `"haiku"`）都可以。未配置的档位不会出现在参数描述与提示里——不会有其他
-模型被静默顶替。若代理类型的 frontmatter 固定了 `model`，该模型始终优先。
+使用这份配置时，`model: "fast"` 会选择 `deepseek-flash`。档位名按完整输入匹配，忽略大小写
+和首尾空白。映射值只通过现有真实模型解析器解析**一次**，因此 `provider/modelId` 和模糊名称
+（如 `"haiku"`）都可以；如果映射值恰好是另一个档位名，也只把它当真实模型引用，不会二次
+展开别名。
+
+未配置档位会返回配置错误；映射值无法解析时，错误会同时指出档位和映射值。两种情况都不会
+对原始档位名做 fuzzy fallback，也不会静默继承父模型。未配置档位不会出现在参数描述里。
+
+三个裸档位名保留给这套契约。若真实模型 ID 恰好叫 `fast`，必须写完整 ID（例如
+`custom/fast`）消歧。tier 别名只适用于工具的每次调用参数：frontmatter 的 `model` 始终是
+真实模型引用；其中固定的模型始终优先于调用参数。
 
 ## 命令
 
@@ -301,7 +311,8 @@ const id = svc?.spawn("Explore", "Check for stale TODOs", { description: "Find s
 | `hasRunning()` | 是否有代理仍在运行或排队 |
 
 `SpawnOptions`：`description`、`model`、`maxTurns`、`timeoutSeconds`（`0`/省略 = 无限制，在 API 边界归一化）、
-`thinkingLevel`、`inheritContext`、`foreground`、`bypassQueue`。两个队列相关选项语义不同：
+`thinkingLevel`、`inheritContext`、`foreground`、`bypassQueue`。`SpawnOptions.model` 只接受真实模型引用，
+不解释工具的 tier 别名。两个队列相关选项语义不同：
 `bypassQueue` 只跳过并发限流；`foreground` 同时表示“非后台”（不发 `created` / `completed` / `failed` 事件，也不推完成通知），
 但 `spawn` 仍然立即返回 ID，结果通过 `getRecord` 获取。
 

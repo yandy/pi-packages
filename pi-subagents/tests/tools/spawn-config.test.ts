@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AgentTypeRegistry } from "../../src/config/agent-types";
+import type { ModelTierMap } from "../../src/config/model-tiers";
 import { resolveModelName, resolveSpawnConfig } from "../../src/tools/spawn-config";
 import type { AgentConfig } from "../../src/types";
 
@@ -39,6 +40,39 @@ const defaultSettings = {
 	defaultMaxTurns: undefined as number | undefined,
 	defaultTimeoutSeconds: undefined as number | undefined,
 };
+
+const deepseekFlash = { id: "deepseek-flash", name: "DeepSeek Flash", provider: "ark" };
+const haiku = { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", provider: "anthropic" };
+const concreteFast = { id: "fast", name: "Concrete Fast", provider: "custom" };
+const concreteStandard = { id: "standard", name: "Concrete Standard", provider: "custom" };
+const concreteAdvanced = { id: "advanced", name: "Concrete Advanced", provider: "custom" };
+const tierModels = [deepseekFlash, haiku, concreteFast, concreteStandard, concreteAdvanced];
+
+function makeTierModelInfo() {
+	return makeModelInfo({
+		modelRegistry: {
+			find(provider: string, modelId: string) {
+				return tierModels.find((model) => model.provider === provider && model.id === modelId);
+			},
+			getAll: () => tierModels,
+			getAvailable: () => tierModels,
+		},
+	});
+}
+
+function resolveToolModel(
+	model: string,
+	modelTiers: ModelTierMap,
+	registry: AgentTypeRegistry = testRegistry,
+	subagentType = "general-purpose",
+) {
+	return resolveSpawnConfig(
+		{ subagent_type: subagentType, prompt: "test", description: "d", model },
+		registry,
+		makeTierModelInfo(),
+		{ ...defaultSettings, modelTiers },
+	);
+}
 
 /** Registry whose single agent locks timeout: 300 (frontmatter-style). */
 function makeTimeoutRegistry(): AgentTypeRegistry {
@@ -162,6 +196,66 @@ describe("resolveSpawnConfig — model resolution", () => {
 			defaultSettings,
 		);
 		expect("error" in result && result.error).toBeTruthy();
+	});
+
+	it("resolves a normalized tool tier name through its exact model mapping", () => {
+		const result = resolveToolModel(" FAST ", { fast: "ark/deepseek-flash" });
+		if ("error" in result) throw new Error(result.error);
+		expect(result.execution.model).toBe(deepseekFlash);
+	});
+
+	it("resolves a tier mapping value with the existing fuzzy matcher", () => {
+		const result = resolveToolModel("fast", { fast: "haiku" });
+		if ("error" in result) throw new Error(result.error);
+		expect(result.execution.model).toBe(haiku);
+	});
+
+	it("rejects an unconfigured reserved tier instead of fuzzy-matching a same-named model", () => {
+		const result = resolveToolModel("advanced", { fast: "haiku" });
+		expect("error" in result).toBe(true);
+		if ("error" in result) expect(result.error).toContain('Model tier "advanced" is not configured');
+	});
+
+	it("adds tier context when the configured model reference cannot be resolved", () => {
+		const result = resolveToolModel("fast", { fast: "missing-model" });
+		expect("error" in result).toBe(true);
+		if ("error" in result) {
+			expect(result.error).toContain('Model tier "fast" maps to "missing-model"');
+			expect(result.error).toContain('Model not found: "missing-model"');
+		}
+	});
+
+	it("resolves a tier mapping only once when its value names another tier", () => {
+		const result = resolveToolModel("fast", { fast: "standard", standard: "haiku" });
+		if ("error" in result) throw new Error(result.error);
+		expect(result.execution.model).toBe(concreteStandard);
+	});
+
+	it("uses a full provider/modelId to disambiguate a real model from a tier", () => {
+		const result = resolveToolModel("custom/fast", { fast: "ark/deepseek-flash" });
+		if ("error" in result) throw new Error(result.error);
+		expect(result.execution.model).toBe(concreteFast);
+	});
+
+	it("keeps ordinary fuzzy model selection unchanged", () => {
+		const result = resolveToolModel("haiku", { fast: "ark/deepseek-flash" });
+		if ("error" in result) throw new Error(result.error);
+		expect(result.execution.model).toBe(haiku);
+	});
+
+	it("keeps a frontmatter-pinned model ahead of a tool tier alias", () => {
+		const registry = new AgentTypeRegistry(
+			() =>
+				new Map([
+					[
+						"pinned-agent",
+						makeAgentConfig({ name: "pinned-agent", model: "anthropic/claude-haiku-4-5" }),
+					],
+				]),
+		);
+		const result = resolveToolModel("fast", { fast: "ark/deepseek-flash" }, registry, "pinned-agent");
+		if ("error" in result) throw new Error(result.error);
+		expect(result.execution.model).toBe(haiku);
 	});
 });
 
