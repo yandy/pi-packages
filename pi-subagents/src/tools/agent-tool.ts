@@ -46,8 +46,12 @@ export type AgentToolSettings = {
 	readonly modelTiers?: ModelTierMap;
 };
 
-/** Base description for the unified model selector. */
+/** Model selector description when no tier alias is configured. */
 const MODEL_PARAM_DESCRIPTION =
+	'Optional model selector: "provider/modelId" or fuzzy name (e.g. "haiku"). Default: agent type.';
+
+/** Model selector description when tier aliases exist — names the extra accepted input. */
+const MODEL_PARAM_TIER_DESCRIPTION =
 	'Optional model selector: "provider/modelId", fuzzy name (e.g. "haiku"), or configured tier name. Default: agent type.';
 
 /** Configured tier aliases for the `model` parameter description, or undefined when none are configured. */
@@ -174,7 +178,7 @@ ${typeListText}`,
 				model: Type.Optional(
 					Type.String({
 						description: tierTable
-							? `${MODEL_PARAM_DESCRIPTION} Configured tier aliases: ${tierTable}.`
+							? `${MODEL_PARAM_TIER_DESCRIPTION} Configured tier aliases: ${tierTable}.`
 							: MODEL_PARAM_DESCRIPTION,
 					}),
 				),

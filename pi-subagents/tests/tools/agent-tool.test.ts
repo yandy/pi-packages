@@ -102,6 +102,8 @@ describe("AgentTool — model tier guidance", () => {
 		expect(guidelines).toContain("Use subagent for work that needs its own context");
 		const props = (def.parameters as { properties: Record<string, { description?: string }> }).properties;
 		expect(props.model?.description).not.toContain("Configured tier aliases");
+		// 没有可用的 tier 别名时，参数描述不该提“tier name”，否则会把调用方引向必然报错的输入。
+		expect(props.model?.description ?? "").not.toMatch(/tier/i);
 	});
 });
 
