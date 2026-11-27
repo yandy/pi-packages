@@ -23,25 +23,6 @@ denial-first 仍是所有未覆盖写入的默认协议：不开放任意命令�
 - 保留全局关闭开关、状态可见性和自定义 `sandbox-writable.json`。
 - 单个目录初始化失败只收窄授权，不让无关命令失去沙箱或全部无法执行。
 
-### 命令级覆盖契约
-
-在工具已被检测到、使用默认存储路径、项目环境/依赖目录位于 workspace 内且目录可正常物化的前提下，下列普通命令不需要提权：
-
-| 命令 | 覆盖的写入 |
-|---|---|
-| `uv sync` | workspace 内项目 `.venv`、uv cache；缺少匹配解释器时的 managed Python 存储 |
-| `uv pip install` | workspace 内目标环境、uv cache |
-| `pnpm install` | workspace 内 `node_modules`、pnpm store/cache/state、跨进程锁目录 |
-| `npm install` / `npx` | workspace 内依赖树、npm cache（含日志与 npx 内容） |
-| `pip install` | workspace 内目标环境、pip cache |
-| `yarn install` / `bun install` | workspace 内依赖树及各自全局包缓存 |
-| `go build` / `go test` | Go module cache 与 build cache；项目输出仍在 workspace |
-| `mvn` / `mvnw`、`gradle` / `gradlew` | 本地依赖 repository/cache、wrapper distribution；Gradle daemon/JDK 子目录 |
-
-这是文件系统授权契约，不承诺网络、签名验证、进程权限或其它系统副作用必然成功。uv 在 Windows 安装 managed Python 时的 PEP 514 注册表写入不属于目录授权；若宿主拒绝该副作用，仍按工具错误处理。
-
-下列操作不属于普通项目安装，仍可能被拒并走 denial-first：`uv tool install`、`uv pip install --system`、显式 `uv python install` 创建 PATH 可执行入口、`pnpm add -g`、其它全局安装/自更新、写全局配置或凭据。目标环境在 workspace 外、存储由配置文件改到其它位置、pnpm 使用其它卷宗的 store 等自定义布局也不因本功能自动放行。
-
 ### 非目标
 
 - 不解析 shell 命令，不按每条命令动态收缩权限；检测只决定档案是否进入会话级静态并集。
