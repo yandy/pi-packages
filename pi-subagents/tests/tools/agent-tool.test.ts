@@ -77,7 +77,7 @@ describe("AgentTool — model tier guidance", () => {
 		expect(modelDescription).not.toContain("model parameter");
 	});
 
-	it("keeps only the tier-selection rule in promptGuidelines, without the mapping table", () => {
+	it("guides tier selection with one line per configured tier and no mapping values", () => {
 		const deps = createToolDeps({
 			settings: {
 				defaultMaxTurns: undefined,
@@ -86,19 +86,32 @@ describe("AgentTool — model tier guidance", () => {
 				modelTiers: { fast: "deepseek-flash", advanced: "qwen3.8-max" },
 			},
 		});
-		const guidelines = (makeTool(deps).toToolDefinition().promptGuidelines ?? []).join("\n");
-		expect(guidelines).toContain("capability level");
-		expect(guidelines).toContain("tier name itself");
-		// R4/R5：纪律不承载配置数据，也不复制参数描述的映射。
-		expect(guidelines).not.toContain('model: "fast" → deepseek-flash');
-		expect(guidelines).not.toContain("cheapest, fastest");
+		const guidelines = makeTool(deps).toToolDefinition().promptGuidelines ?? [];
+		const text = guidelines.join("\n");
+
+		// 偏好规则：优先档位别名、把档位名本身传给 model。
+		expect(text).toContain("prefer a configured tier alias");
+		expect(text).toContain("tier name itself");
+
+		// 每个已配置档位一条，含调用形式与使用场景。
+		expect(text).toContain('model: "fast" — cheapest, fastest, least capable: mechanical, high-volume subtasks');
+		expect(text).toContain('model: "advanced" — most capable, most expensive: hard reasoning');
+		expect(text).not.toContain('model: "standard"');
+
+		// 映射值属于配置数据，只出现在参数描述里。
+		expect(text).not.toContain("deepseek-flash");
+		expect(text).not.toContain("qwen3.8-max");
+		expect(text).not.toContain("→");
+
+		// 每个已配置档位单独一条 guideline，便于 pi 按精确字符串去重。
+		expect(guidelines.filter((g) => g.startsWith('model: "')).length).toBe(2);
 	});
 
 	it("omits the tier mapping and guideline when no tiers are configured", () => {
 		const def = makeTool(createToolDeps()).toToolDefinition();
 		// 行为纪律现在恒在 promptGuidelines 里（spec 2026-10-30 D1），只要求不出现 tier 映射。
 		const guidelines = (def.promptGuidelines ?? []).join("\n");
-		expect(guidelines).not.toContain("capability level");
+		expect(guidelines).not.toMatch(/tier/i);
 		expect(guidelines).toContain("Use subagent for work that needs its own context");
 		const props = (def.parameters as { properties: Record<string, { description?: string }> }).properties;
 		expect(props.model?.description).not.toContain("Configured tier aliases");

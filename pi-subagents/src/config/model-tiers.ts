@@ -63,3 +63,14 @@ export const MODEL_TIER_INTENTS: Record<ModelTier, string> = {
 	standard: "balanced default",
 	advanced: "most capable, most expensive",
 };
+
+/**
+ * When a tier is the right choice — the trigger condition, paired with
+ * `MODEL_TIER_INTENTS` in the subagent tool's guidelines. Static vocabulary:
+ * it names no configured model, so it stays out of the parameter description.
+ */
+export const MODEL_TIER_USE_FOR: Record<ModelTier, string> = {
+	fast: "mechanical, high-volume subtasks (searches, sweeps, simple edits) where a small model suffices",
+	standard: "everyday work that does not need the strongest model",
+	advanced: "hard reasoning, large refactors, or work where a weaker model would fail",
+};

@@ -68,8 +68,17 @@
 model: "fast" → deepseek-flash (cheapest, fastest, least capable)
 ```
 
-prompt guideline 只保留行为规则：按成本或能力选择时，把已配置 tier 名本身传给 `model`。
-工具定义仍不暴露 `model_tier`。
+只要配置了至少一个档位，工具纪律按**已配置档位**生成选择指引：
+
+1. 一条偏好规则：成本或能力决定选型时，优先用档位别名而非裸模型名，并把档位名本身传给 `model`。
+2. 每个已配置档位一条，形如 `model: "fast" — cheapest, fastest, least capable: <使用场景>.`，
+   含调用形式、定位与触发条件（`MODEL_TIER_INTENTS` / `MODEL_TIER_USE_FOR`）。
+3. 一条指针：真实模型映射见 `model` 参数描述。
+
+映射值（真实模型名）不得进入纪律：纪律在自定义 system prompt 下会被整体丢弃，配置数据的
+
+唯一稳定落点是参数描述；同一要素写在两处也会把两处绑死。未配置任何档位时，纪律与参数描述
+都不出现任何 tier 字样。工具定义仍不暴露 `model_tier`。
 
 ## 解析契约
 
@@ -155,9 +164,12 @@ Available models:
 ### 工具定义与文档
 
 - `model` 参数描述明确接受 configured tier name，并展示 `model: "fast" → …` 形式。
-- guideline 明确传 tier 名本身；未配置任何 tier 时不出现 tier 指引。
+- 纪律为每个已配置档位生成一条指引（调用形式 + 定位 + 使用场景），未配置的档位不出现。
+- 纪律含“优先档位别名”规则与“映射见参数描述”指针；纪律中不得出现映射值或 `→` 形式。
+- 未配置任何 tier 时，纪律与参数描述都不出现 tier 字样。
 - schema 仍无 `model_tier`。
-- 中英文 README 的工具参数表、模型分层说明、错误与消歧规则一致。
+- 三通道预算：无配置场景沿用 3600；三档全配场景单设 4900 上限，防止档位文案无上限增长。
+- 中英文 README 的工具参数表、档位定位/适用任务、错误与消歧规则一致。
 
 ## 验收
 

@@ -5,7 +5,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { AgentTypeRegistry } from "../config/agent-types";
-import { MODEL_TIERS, MODEL_TIER_INTENTS, type ModelTierMap } from "../config/model-tiers";
+import { MODEL_TIERS, MODEL_TIER_INTENTS, MODEL_TIER_USE_FOR, type ModelTierMap } from "../config/model-tiers";
 import type { ParentSnapshot } from "../lifecycle/parent-snapshot";
 import type { AgentSpawnConfig } from "../lifecycle/subagent-manager";
 import { spawnBackground } from "../tools/background-spawner";
@@ -63,9 +63,27 @@ function buildTierTable(tiers: ModelTierMap | undefined): string | undefined {
 	return configured.join(", ");
 }
 
-/** Tier-selection behavior; the configured mappings stay in the parameter description. */
-const TIER_GUIDELINE =
-	"When a subagent task needs a specific cost or capability level, pass the matching configured tier name itself via model.";
+/**
+ * Tier-selection guidance, generated only from the tiers that are configured.
+ *
+ * Three parts: when to reach for a tier at all, one line per configured tier
+ * (intent + trigger + the exact value to pass), and where the real model behind
+ * each tier is documented. The mapped model values stay out of guidelines — they
+ * are the parameter description's job — so this text never leaks config data,
+ * and a tier added or removed in `subagents.json` cannot leave stale advice here.
+ */
+function buildTierGuidelines(tiers: ModelTierMap | undefined): string[] {
+	const configured = MODEL_TIERS.filter((tier) => tiers?.[tier]);
+	if (configured.length === 0) return [];
+	return [
+		"Choose a subagent's model by cost or capability when a task has a clear level: prefer a configured tier alias over a raw model name, and pass the tier name itself as model.",
+		...configured.map(
+			(tier) =>
+				`model: "${tier}" — ${MODEL_TIER_INTENTS[tier]}: ${MODEL_TIER_USE_FOR[tier]}.`,
+		),
+		"The model parameter description shows which real model backs each configured tier.",
+	];
+}
 
 /**
  * 行为纪律（进 system prompt 的 Guidelines，不进 description）。
@@ -154,13 +172,14 @@ export class AgentTool {
 		const typeListText = this.typeListText;
 		const availableTypesText = this.availableTypesText;
 		const tierTable = buildTierTable(this.settings.modelTiers);
+		const tierGuidelines = buildTierGuidelines(this.settings.modelTiers);
 		const registry = this.registry;
 
 		return defineTool({
 			name: "subagent" as const,
 			label: "Subagent",
 			promptSnippet: "Launch a specialized agent for complex, multi-step tasks",
-			promptGuidelines: tierTable ? [...PROMPT_GUIDELINES, TIER_GUIDELINE] : [...PROMPT_GUIDELINES],
+			promptGuidelines: [...PROMPT_GUIDELINES, ...tierGuidelines],
 			description: `Launch a subagent that works autonomously on a task.
 
 Available agent types:

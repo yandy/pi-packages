@@ -171,13 +171,16 @@ Send a steering message to a running agent.
 You can map capability tiers to concrete models in `subagents.json` and pass a configured
 tier name directly through the `subagent` tool's per-call `model` parameter. The parameter
 description lists the configured aliases alongside exact `provider/modelId` and fuzzy-name
-selection.
+selection, and when at least one tier is configured the tool's guidelines add one line per
+configured tier — its intent, when to reach for it, and the exact value to pass — plus a rule to
+prefer a tier alias over a raw model name when cost or capability decides the choice. The real
+model behind each tier stays in the parameter description only.
 
-| Tier | Intent |
-|------|--------|
-| `fast` | Cheapest and fastest, least capable (flash / mini / haiku class) |
-| `standard` | Balanced default (sonnet class) |
-| `advanced` | Most capable, most expensive (opus class) |
+| Tier | Intent | Use for |
+|------|--------|---------|
+| `fast` | Cheapest and fastest, least capable (flash / mini / haiku class) | Mechanical, high-volume subtasks (searches, sweeps, simple edits) where a small model suffices |
+| `standard` | Balanced default (sonnet class) | Everyday work that does not need the strongest model |
+| `advanced` | Most capable, most expensive (opus class) | Hard reasoning, large refactors, or work where a weaker model would fail |
 
 The mapping lives in `subagents.json` — `$PI_CODING_AGENT_DIR/subagents.json` (global, default `~/.pi/agent/subagents.json`) and
 `<cwd>/.pi/subagents.json` (project). The two layers merge **per tier**, so a project can
