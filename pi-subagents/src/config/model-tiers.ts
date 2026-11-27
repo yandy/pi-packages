@@ -1,12 +1,10 @@
 /**
  * model-tiers.ts — Capability/cost tier vocabulary for subagent model selection.
  *
- * A tier is a user-facing class of model (`fast` | `standard` | `advanced`).
- * Users map each tier to a real model in `subagents.json` (`modelTiers`); the
- * mapping is surfaced to the agent in the `subagent` tool's `model` parameter
- * description (a fact about that parameter's allowed values), plus one prompt
- * guideline telling it to pick the matching tier when a task warrants it.
- * There is no `model_tier` tool parameter. See README for tier semantics.
+ * Users map tiers to real model references in `subagents.json` (`modelTiers`).
+ * The subagent tool's per-call `model` parameter accepts those tier names as
+ * aliases; spawn configuration resolves one mapping before real model resolution.
+ * Frontmatter and cross-extension service model values remain real model references.
  */
 
 export const MODEL_TIERS = ["fast", "standard", "advanced"] as const;

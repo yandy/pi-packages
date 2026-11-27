@@ -14,7 +14,7 @@ A [pi](https://pi.dev) extension providing a focused, in-process sub-agent core 
 - **Graceful turn limits** — agents get a "wrap up" warning before hard abort
 - **Case-insensitive types** — `"explore"`, `"Explore"`, `"EXPLORE"` all work
 - **Fuzzy model selection** — specify models by name (`"haiku"`, `"sonnet"`) instead of full IDs
-- **Model tiers** — map `fast` / `standard` / `advanced` to real models in config; the agent is guided to pick the configured model per task
+- **Model tiers** — map `fast` / `standard` / `advanced` to real models in config and pass the tier name directly as `model`
 - **Context inheritance** — optionally prepend the parent conversation, rendered as text, to the sub-agent's prompt
 - **Styled notifications** — background results render as themed notification boxes
 - **Event bus** — parent-level and child-session lifecycle events via `pi.events` (see [Events](#events))
@@ -75,7 +75,7 @@ Agents are discovered from `<cwd>/.pi/agents/<name>.md` (project) and `$PI_CODIN
 | `description` | string | file name | One-line description shown in the `subagent` tool's type list |
 | `display_name` | string | type name | Short name used in the widget, notifications, and results |
 | `tools` | CSV / `+name` / `-name` / `none` | inherit parent | Tool set — see below |
-| `model` | string | inherit parent | `provider/modelId` or fuzzy name; when pinned, wins over the per-call `model` |
+| `model` | string | inherit parent | Real model reference (`provider/modelId` or fuzzy name, not a tier alias); when pinned, wins over the per-call `model` |
 | `thinking` | string | inherit parent | off / minimal / low / medium / high / xhigh |
 | `max_turns` | integer | unlimited | Cap for this type; wins over the per-call `max_turns` |
 | `timeout` | integer | unlimited | Wall-clock seconds cap (`0` = unlimited); wins over the per-call `timeout` |
@@ -139,7 +139,7 @@ Launch a sub-agent.
 | `prompt` | string | yes | The task for the agent |
 | `description` | string | yes | Short 3-5 word summary (shown in UI) |
 | `subagent_type` | string | yes | Agent type (built-in or custom) |
-| `model` | string | no | Model override (`provider/modelId` or fuzzy name) |
+| `model` | string | no | Model selector (`provider/modelId`, fuzzy name, or configured tier alias) |
 | `thinking` | string | no | off / minimal / low / medium / high / xhigh |
 | `max_turns` | number | no | Max agentic turns (unlimited by default) |
 | `timeout` | number | no | Hard wall-clock limit in seconds; the agent is killed at the deadline and partial output is returned (unlimited by default) |
@@ -168,11 +168,10 @@ Send a steering message to a running agent.
 
 ## Model Tiers
 
-Instead of hardcoding model IDs, you can map capability tiers to concrete models in
-`subagents.json`. The mapping is listed in the `subagent` tool's `model` parameter
-description, alongside a prompt guideline telling the agent to pick the configured
-tier when a task calls for a specific cost or capability level — there is no
-`model_tier` tool parameter.
+You can map capability tiers to concrete models in `subagents.json` and pass a configured
+tier name directly through the `subagent` tool's per-call `model` parameter. The parameter
+description lists the configured aliases alongside exact `provider/modelId` and fuzzy-name
+selection.
 
 | Tier | Intent |
 |------|--------|
@@ -194,10 +193,21 @@ override one tier without restating the others:
 }
 ```
 
-Because the agent copies the mapped value into `model`, it goes through the same resolver as
-any other model value: `provider/modelId` and fuzzy names (e.g. `"haiku"`) both work. Tiers
-without a mapping are omitted from the description and its guideline — nothing is silently
-substituted for them. If an agent type pins `model` in its frontmatter, that model always wins.
+With this configuration, `model: "fast"` selects `deepseek-flash`. Tier names match the
+whole trimmed input case-insensitively. The mapped reference is resolved **once** through the
+same resolver as any other model value, so both `provider/modelId` and fuzzy names such as
+`"haiku"` work; a mapped value that names another tier is treated as a real model reference,
+not as a second alias.
+
+An unconfigured tier returns a configuration error, and an unresolvable mapped value returns
+an error naming both the tier and its mapping. Neither case falls back to fuzzy-matching the
+tier name or inheriting the parent model. Unconfigured tiers are omitted from the parameter
+description.
+
+The three bare tier names are reserved for this contract. Use a full ID such as
+`custom/fast` to select a real model whose ID is `fast`. Tier aliases apply only to the tool's
+per-call parameter: frontmatter `model` remains a real model reference, and a frontmatter-pinned
+model always wins over the call.
 
 ## Commands
 
@@ -312,7 +322,8 @@ const id = svc?.spawn("Explore", "Check for stale TODOs", { description: "Find s
 | `hasRunning()` | Whether any agents are running or queued |
 
 `SpawnOptions`: `description`, `model`, `maxTurns`, `timeoutSeconds` (`0`/omitted = unlimited, normalized at the API
-boundary), `thinkingLevel`, `inheritContext`, `foreground`, `bypassQueue`. The two queue-related options differ:
+boundary), `thinkingLevel`, `inheritContext`, `foreground`, `bypassQueue`. `SpawnOptions.model` accepts real model
+references only; it does not interpret the tool's tier aliases. The two queue-related options differ:
 `bypassQueue` only skips the concurrency limiter, while `foreground` also means "not background" (no
 `created` / `completed` / `failed` events and no completion notification). `spawn` still returns the ID immediately
 in both cases; read results through `getRecord`.

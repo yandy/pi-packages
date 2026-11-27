@@ -58,7 +58,7 @@ describe("AgentTool — model tier guidance", () => {
 		expect(def.description).not.toContain("model_tier");
 	});
 
-	it("renders configured tier → model mappings in the model parameter description", () => {
+	it("renders configured tier aliases in the model parameter description", () => {
 		const deps = createToolDeps({
 			settings: {
 				defaultMaxTurns: undefined,
@@ -70,11 +70,10 @@ describe("AgentTool — model tier guidance", () => {
 		const def = makeTool(deps).toToolDefinition();
 		const props = (def.parameters as { properties: Record<string, { description?: string }> }).properties;
 		const modelDescription = props.model?.description ?? "";
-		// 映射表是 model 的允许值（R1/R2），随 tools[] 发送：自定义 system prompt 下也不丢。
-		expect(modelDescription).toContain("fast → deepseek-flash");
-		expect(modelDescription).toContain("advanced → qwen3.8-max");
-		expect(modelDescription).not.toContain("standard →");
-		// 不再重复一遍“如何用 model 参数”。
+		expect(modelDescription).toContain("configured tier name");
+		expect(modelDescription).toContain('model: "fast" → deepseek-flash');
+		expect(modelDescription).toContain('model: "advanced" → qwen3.8-max');
+		expect(modelDescription).not.toContain('model: "standard" →');
 		expect(modelDescription).not.toContain("model parameter");
 	});
 
@@ -89,8 +88,9 @@ describe("AgentTool — model tier guidance", () => {
 		});
 		const guidelines = (makeTool(deps).toToolDefinition().promptGuidelines ?? []).join("\n");
 		expect(guidelines).toContain("capability level");
+		expect(guidelines).toContain("tier name itself");
 		// R4/R5：纪律不承载配置数据，也不复制参数描述的映射。
-		expect(guidelines).not.toContain("fast → deepseek-flash");
+		expect(guidelines).not.toContain('model: "fast" → deepseek-flash');
 		expect(guidelines).not.toContain("cheapest, fastest");
 	});
 
@@ -101,7 +101,7 @@ describe("AgentTool — model tier guidance", () => {
 		expect(guidelines).not.toContain("capability level");
 		expect(guidelines).toContain("Use subagent for work that needs its own context");
 		const props = (def.parameters as { properties: Record<string, { description?: string }> }).properties;
-		expect(props.model?.description).not.toContain("Configured tiers");
+		expect(props.model?.description).not.toContain("Configured tier aliases");
 	});
 });
 

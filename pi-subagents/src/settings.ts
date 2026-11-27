@@ -18,9 +18,8 @@ export interface SubagentsSettings {
 	defaultTimeoutSeconds?: number;
 	graceTurns?: number;
 	/**
-	 * Capability/cost tier → real model mapping. Used only to generate the
-	 * `subagent` tool's prompt guidelines, which tell the agent which model to
-	 * pass via `model` for each capability level. Tier names are fixed
+	 * Capability/cost tier → real model mapping for the subagent tool's per-call
+	 * `model` aliases and parameter descriptions. Tier names are fixed
 	 * (`fast` | `standard` | `advanced`); values accept anything `resolveModel`
 	 * understands (e.g. "provider/modelId" or a fuzzy name like "haiku").
 	 */
@@ -104,7 +103,7 @@ export class SettingsManager {
 		this._maxConcurrent = Math.max(1, n);
 	}
 
-	// ── modelTiers: tier → model map used to generate the subagent prompt guidelines ──
+	// ── modelTiers: tier → real model map for tool alias resolution and descriptions ──
 
 	get modelTiers(): ModelTierMap {
 		return this._modelTiers;
