@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, isAbsolute, join, relative } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createSandboxBashOps } from "../src/bash-ops";
 import { resetRunnerCache, selectRunner } from "../src/runners";
@@ -8,7 +8,7 @@ import type { ConfinedSandboxMode } from "../src/policy";
 import { DEFAULT_SANDBOX_CONFIG } from "../src/config";
 import { createPermissionState } from "../src/permission";
 import { createSandboxTools } from "../src/tools";
-import { resetToolStoragePlanCache } from "../src/tool-storage/detect";
+import { getToolStoragePlan, resetToolStoragePlanCache } from "../src/tool-storage/detect";
 import { resetToolStorageWarnings } from "../src/tool-storage/materialize";
 
 resetRunnerCache();
@@ -126,11 +126,20 @@ describe.skipIf(skipConfinedBashCases)(`real confinement via ${selected.runner}`
 		for (const path of [workspace, home, agent, bin]) mkdirSync(path, { recursive: true });
 		writeFileSync(join(bin, "uv"), "");
 		chmodSync(join(bin, "uv"), 0o755);
+		writeFileSync(join(bin, "pnpm"), "");
+		chmodSync(join(bin, "pnpm"), 0o755);
 		vi.stubEnv("HOME", home);
 		vi.stubEnv("USERPROFILE", home);
 		vi.stubEnv("PI_CODING_AGENT_DIR", agent);
 		// The fake uv entry is first, but the real runner and node must remain resolvable.
 		vi.stubEnv("PATH", `${bin}${delimiter}${process.env.PATH ?? ""}`);
+		// No inherited override may move detection/materialization into the host's real stores.
+		for (const name of [
+			"UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR", "PIP_CACHE_DIR", "npm_config_cache", "NPM_CONFIG_CACHE",
+			"COREPACK_HOME", "PNPM_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR",
+			"YARN_CACHE_FOLDER", "YARN_GLOBAL_FOLDER", "BUN_INSTALL_CACHE_DIR", "GOPATH", "GOMODCACHE", "GOCACHE",
+			"MAVEN_USER_HOME", "GRADLE_USER_HOME",
+		]) vi.stubEnv(name, "");
 		resetToolStoragePlanCache();
 		const tools = createSandboxTools({
 			cwd: workspace,
@@ -157,6 +166,9 @@ describe.skipIf(skipConfinedBashCases)(`real confinement via ${selected.runner}`
 	}
 
 	it("tool storage: creates and writes detected uv cache/python roots while preserving the outside boundary", async () => {
+		const inheritedRuntime = realpathSync.native(mkdtempSync(join(process.cwd(), ".sbx-int-inherited-runtime-")));
+		chmodSync(inheritedRuntime, 0o700);
+		vi.stubEnv("XDG_RUNTIME_DIR", inheritedRuntime);
 		const fixture = toolStorageFixture();
 		try {
 			const cache = join(fixture.home, ".cache", "uv");
@@ -178,8 +190,14 @@ describe.skipIf(skipConfinedBashCases)(`real confinement via ${selected.runner}`
 			mkdirSync(outside);
 			const denied = await write(join(outside, "probe.txt"));
 			expect(toolText(denied)).toContain("[sandbox: file access denied under workspace-write mode]");
+			// No inherited cache/runtime override may move a generated root outside the fixture.
+			for (const root of getToolStoragePlan(fixture.workspace).roots) {
+				const rel = relative(fixture.root, root.path);
+				expect(rel === "" || (!rel.startsWith("..") && !isAbsolute(rel)), root.path).toBe(true);
+			}
 		} finally {
 			cleanupToolStorageFixture(fixture.root);
+			rmSync(inheritedRuntime, { recursive: true, force: true });
 		}
 	}, 60_000);
 

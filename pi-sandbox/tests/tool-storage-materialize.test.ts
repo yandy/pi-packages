@@ -114,6 +114,28 @@ describe("materializeToolStorageRoots", () => {
 		expect(materializeToolStorageRoots(plan([link]), { warn: () => {} })).toEqual([]);
 	});
 
+	it.skipIf(process.platform === "win32")("rejects a dangerous symlink ancestor before creating a missing leaf", () => {
+		const target = join(home, ".ssh");
+		const link = join(dir, "credential-link");
+		const missingLeaf = join(link, "cache");
+		mkdirSync(target);
+		symlinkSync(target, link);
+		const mkdir = vi.fn((path: string) => mkdirSync(path, { recursive: true }));
+		expect(materializeToolStorageRoots(plan([missingLeaf]), {
+			mkdir: mkdir as unknown as typeof mkdirSync,
+			warn: () => {},
+		})).toEqual([]);
+		expect(mkdir).not.toHaveBeenCalled();
+		expect(exists(join(target, "cache"))).toBe(false);
+	});
+
+	it.skipIf(process.platform === "win32")("rejects the real target of a credential directory that is itself a symlink", () => {
+		const realCredentials = join(dir, "real-credentials");
+		mkdirSync(realCredentials);
+		symlinkSync(realCredentials, join(home, ".ssh"));
+		expect(materializeToolStorageRoots(plan([realCredentials]), { warn: () => {} })).toEqual([]);
+	});
+
 	it.skipIf(process.platform === "win32")("checks real targets against a symlinked home and agent directory", () => {
 		const realHome = join(dir, "real-home");
 		const realAgent = join(dir, "real-agent");

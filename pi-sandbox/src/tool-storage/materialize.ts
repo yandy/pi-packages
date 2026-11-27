@@ -1,6 +1,7 @@
 import { mkdirSync, realpathSync, statSync } from "node:fs";
 import { posix, win32 } from "node:path";
 import { reportConfigWarning } from "../config-warnings";
+import { canonicalizeTarget } from "../fence";
 import type { ToolStoragePlan } from "./detect";
 
 export interface ToolStorageMaterializeDeps {
@@ -31,8 +32,14 @@ function isSameOrUnder(child: string, root: string, plan: ToolStoragePlan): bool
 	return normalizedChild.startsWith(prefix);
 }
 
-/** A non-null reason means the candidate must not be created or granted. */
-export function unsafeToolStorageRoot(path: string, plan: ToolStoragePlan): string | null {
+function protectedRoots(plan: ToolStoragePlan): string[] {
+	return [
+		plan.agentDir,
+		...[".ssh", ".aws", ".gnupg", ".docker", ".kube", ".config", ".pi"].map((name) => pathApi(plan).join(plan.home, name)),
+	];
+}
+
+function unsafeWithProtectedRoots(path: string, plan: ToolStoragePlan, protectedRoots: readonly string[]): string | null {
 	const pathImpl = pathApi(plan);
 	if (!pathImpl.isAbsolute(path)) return "path is not absolute";
 	const normalized = pathImpl.normalize(path);
@@ -42,16 +49,17 @@ export function unsafeToolStorageRoot(path: string, plan: ToolStoragePlan): stri
 	for (const shared of plan.sharedRoots) {
 		if (samePath(normalized, shared, plan)) return "path is a shared base directory";
 	}
-	const protectedRoots = [
-		plan.agentDir,
-		...[".ssh", ".aws", ".gnupg", ".docker", ".kube", ".config", ".pi"].map((name) => pathImpl.join(plan.home, name)),
-	];
 	for (const protectedRoot of protectedRoots) {
 		if (isSameOrUnder(normalized, protectedRoot, plan) || isSameOrUnder(protectedRoot, normalized, plan)) {
 			return "path overlaps a configuration, credential, or pi agent directory";
 		}
 	}
 	return null;
+}
+
+/** Pure lexical check used before any filesystem resolution is available. */
+export function unsafeToolStorageRoot(path: string, plan: ToolStoragePlan): string | null {
+	return unsafeWithProtectedRoots(path, plan, protectedRoots(plan));
 }
 
 let warnedRoots = new Set<string>();
@@ -82,6 +90,11 @@ export function materializeToolStorageRoots(
 		agentDir: canonicalExisting(plan.agentDir),
 		sharedRoots: plan.sharedRoots.map(canonicalExisting),
 	};
+	// Keep both spellings of protected roots. In particular, ~/.ssh itself may be
+	// a symlink and an override may name its real target directly.
+	const canonicalProtectedRoots = protectedRoots(safetyPlan)
+		.flatMap((path) => [path, canonicalExisting(path)])
+		.filter((path, index, all) => all.indexOf(path) === index);
 	const result: string[] = [];
 	const seen = new Set<string>();
 	const reject = (path: string, reason: string): void => {
@@ -91,16 +104,24 @@ export function materializeToolStorageRoots(
 		warn(`sandbox: ignoring built-in tool storage root ${path}: ${reason}`);
 	};
 	for (const root of plan.roots) {
-		const lexicalReason = unsafeToolStorageRoot(root.path, safetyPlan);
+		const lexicalReason = unsafeWithProtectedRoots(root.path, safetyPlan, canonicalProtectedRoots);
 		if (lexicalReason !== null) {
 			reject(root.path, lexicalReason);
 			continue;
 		}
 		try {
+			// Resolve the deepest existing ancestor before recursive mkdir. Otherwise a
+			// safe-looking link could create a missing leaf inside a protected target.
+			const beforeWrite = canonicalizeTarget(root.path);
+			const beforeWriteReason = unsafeWithProtectedRoots(beforeWrite, safetyPlan, canonicalProtectedRoots);
+			if (beforeWriteReason !== null) {
+				reject(root.path, `existing target ${beforeWrite}: ${beforeWriteReason}`);
+				continue;
+			}
 			mkdir(root.path, { recursive: true });
 			if (!statSync(root.path).isDirectory()) throw new Error("not a directory");
 			const canonical = realpathSync.native(root.path);
-			const canonicalReason = unsafeToolStorageRoot(canonical, safetyPlan);
+			const canonicalReason = unsafeWithProtectedRoots(canonical, safetyPlan, canonicalProtectedRoots);
 			if (canonicalReason !== null) {
 				reject(root.path, `real path ${canonical}: ${canonicalReason}`);
 				continue;
