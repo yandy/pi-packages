@@ -1,10 +1,15 @@
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { delimiter, join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createSandboxBashOps } from "../src/bash-ops";
 import { resetRunnerCache, selectRunner } from "../src/runners";
 import type { ConfinedSandboxMode } from "../src/policy";
+import { DEFAULT_SANDBOX_CONFIG } from "../src/config";
+import { createPermissionState } from "../src/permission";
+import { createSandboxTools } from "../src/tools";
+import { resetToolStoragePlanCache } from "../src/tool-storage/detect";
+import { resetToolStorageWarnings } from "../src/tool-storage/materialize";
 
 resetRunnerCache();
 const selected = selectRunner(5000);
@@ -101,6 +106,93 @@ describe.skipIf(skipConfinedBashCases)(`real confinement via ${selected.runner}`
 			rmSync(extra, { recursive: true, force: true });
 		}
 	});
+
+	function shellQuote(value: string): string {
+		return `'${value.replaceAll("'", `'\\''`)}'`;
+	}
+
+	function toolText(result: unknown): string {
+		return (result as { content: Array<{ text?: string }> }).content.map((item) => item.text ?? "").join("\n");
+	}
+
+	function toolStorageFixture(mode: "workspace-write" | "read-only" = "workspace-write") {
+		// HOME must be outside both the workspace and the default tmp roots; otherwise this
+		// integration test would pass without the new grant.
+		const root = realpathSync.native(mkdtempSync(join(process.cwd(), ".sbx-int-tool-storage-")));
+		const workspace = join(root, "workspace");
+		const home = join(root, "home");
+		const agent = join(root, "agent");
+		const bin = join(root, "bin");
+		for (const path of [workspace, home, agent, bin]) mkdirSync(path, { recursive: true });
+		writeFileSync(join(bin, "uv"), "");
+		chmodSync(join(bin, "uv"), 0o755);
+		vi.stubEnv("HOME", home);
+		vi.stubEnv("USERPROFILE", home);
+		vi.stubEnv("PI_CODING_AGENT_DIR", agent);
+		// The fake uv entry is first, but the real runner and node must remain resolvable.
+		vi.stubEnv("PATH", `${bin}${delimiter}${process.env.PATH ?? ""}`);
+		resetToolStoragePlanCache();
+		const tools = createSandboxTools({
+			cwd: workspace,
+			permission: createPermissionState(),
+			platform: process.platform,
+			selected,
+			hooks,
+			getConfig: () => ({ ...DEFAULT_SANDBOX_CONFIG, mode, toolStorage: true }),
+		});
+		const ctx = {
+			cwd: workspace,
+			hasUI: false,
+			sessionManager: { getSessionId: () => "tool-storage-integration", getSessionFile: () => join(root, "session.jsonl") },
+			ui: { select: vi.fn(async () => undefined), input: vi.fn(async () => undefined), notify: vi.fn() },
+		};
+		return { root, workspace, home, tools, ctx };
+	}
+
+	function cleanupToolStorageFixture(root: string): void {
+		resetToolStoragePlanCache();
+		resetToolStorageWarnings();
+		vi.unstubAllEnvs();
+		rmSync(root, { recursive: true, force: true });
+	}
+
+	it("tool storage: creates and writes detected uv cache/python roots while preserving the outside boundary", async () => {
+		const fixture = toolStorageFixture();
+		try {
+			const cache = join(fixture.home, ".cache", "uv");
+			const python = join(fixture.home, ".local", "share", "uv", "python");
+			expect(existsSync(cache)).toBe(false);
+			expect(existsSync(python)).toBe(false);
+			const write = (path: string) => {
+				const script = 'require("node:fs").writeFileSync(process.argv[1], "ok")';
+				return fixture.tools.bash.execute("tool-storage-write", {
+					command: `${shellQuote(process.execPath)} -e ${shellQuote(script)} ${shellQuote(path)}`,
+				}, undefined, undefined, fixture.ctx as never);
+			};
+			await write(join(cache, "probe.txt"));
+			await write(join(python, "probe.txt"));
+			expect(readFileSync(join(cache, "probe.txt"), "utf-8")).toBe("ok");
+			expect(readFileSync(join(python, "probe.txt"), "utf-8")).toBe("ok");
+
+			const outside = join(fixture.root, "outside");
+			mkdirSync(outside);
+			const denied = await write(join(outside, "probe.txt"));
+			expect(toolText(denied)).toContain("[sandbox: file access denied under workspace-write mode]");
+		} finally {
+			cleanupToolStorageFixture(fixture.root);
+		}
+	}, 60_000);
+
+	it("tool storage: read-only execution does not create detected roots", async () => {
+		const fixture = toolStorageFixture("read-only");
+		try {
+			await fixture.tools.bash.execute("tool-storage-ro", { command: "true" }, undefined, undefined, fixture.ctx as never);
+			expect(existsSync(join(fixture.home, ".cache", "uv"))).toBe(false);
+			expect(existsSync(join(fixture.home, ".local", "share", "uv", "python"))).toBe(false);
+		} finally {
+			cleanupToolStorageFixture(fixture.root);
+		}
+	}, 60_000);
 
 	it("read-only: 额外可写根也不可写", async () => {
 		const extra = repoTreeExtraDir();

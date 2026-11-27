@@ -23,7 +23,6 @@ function samePath(left: string, right: string, plan: ToolStoragePlan): boolean {
 
 /** Whether `child` is the same directory as `root` or below it. */
 function isSameOrUnder(child: string, root: string, plan: ToolStoragePlan): boolean {
-	const path = pathApi(plan);
 	const normalizedChild = comparable(child, plan);
 	const normalizedRoot = comparable(root, plan);
 	if (normalizedChild === normalizedRoot) return true;

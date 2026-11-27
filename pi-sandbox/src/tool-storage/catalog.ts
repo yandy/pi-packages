@@ -85,7 +85,6 @@ function pipRoots(context: ToolStorageContext): ToolStorageRoot[] {
 }
 
 function uvRoots(context: ToolStorageContext): ToolStorageRoot[] {
-	const path = pathApi(context.platform);
 	let cache = overrideEnv(context, "UV_CACHE_DIR");
 	if (cache === undefined) {
 		if (context.platform === "win32") cache = win32.join(localAppData(context), "uv", "cache");

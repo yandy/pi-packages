@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,6 +11,7 @@ import { processHasUI, resetConfigWarningStateForTests, takeConfigWarnings } fro
 import { getEscalationBroker, resetEscalationBrokerForTests } from "../src/escalation-broker";
 import { processPermissionState, type PermissionState } from "../src/permission";
 import { aclSkillPaths } from "../src/win32/skill-paths";
+import { resetToolStoragePlanCache } from "../src/tool-storage/detect";
 
 /**
  * 注册面：win32 上本包额外覆盖注册受限的 powershell（平台门控见 src/tools.ts 的 win32 装配与
@@ -31,6 +32,10 @@ beforeEach(() => {
 	dir = mkdtempSync(join(tmpdir(), "idx-"));
 	mkdirSync(join(dir, "agent"), { recursive: true });
 	vi.stubEnv("PI_CODING_AGENT_DIR", join(dir, "agent"));
+	vi.stubEnv("PATH", "");
+	vi.stubEnv("HOME", join(dir, "home"));
+	vi.stubEnv("USERPROFILE", join(dir, "home"));
+	resetToolStoragePlanCache();
 	resetConfigWarningStateForTests(); // 配置告警的缓冲/出口/进程级 UI 标志都是进程状态
 });
 afterEach(() => {
@@ -39,6 +44,7 @@ afterEach(() => {
 	resetEscalationBrokerForTests(); // 审批通道注册表同为进程级单例，必须复位
 	resetDenialLedgerForTests();
 	resetSandboxConfigCache();
+	resetToolStoragePlanCache();
 	resetConfigWarningStateForTests();
 	vi.unstubAllEnvs();
 	rmSync(dir, { recursive: true, force: true });
@@ -100,6 +106,15 @@ function makeFakePi() {
 		},
 	};
 	return { fakePi, tools, commands, commandHandlers, hooks, channels };
+}
+
+async function readPermissionStatus(cwd: string): Promise<string> {
+	const { fakePi, commandHandlers } = makeFakePi();
+	const activate = (await import("../index")).default;
+	activate(fakePi as never);
+	const notify = vi.fn();
+	await commandHandlers.permission.handler("", { ui: { notify }, cwd });
+	return String(notify.mock.calls[0]?.[0]);
 }
 
 function parentCtx(sessionId: string, hasUI = true) {
@@ -198,6 +213,62 @@ describe("extension activate", () => {
 			text = String(notify.mock.calls[1]?.[0]);
 			expect(text).toContain(`extra writable: ${realpathSync.native(extra)} (inactive: read-only)`);
 		} finally { rmSync(extra, { recursive: true, force: true }); }
+	});
+});
+
+describe("tool storage status", () => {
+	let project: string;
+	let home: string;
+	let bin: string;
+	beforeEach(() => {
+		project = join(dir, "project");
+		home = join(dir, "home");
+		bin = join(dir, "bin");
+		mkdirSync(project);
+		mkdirSync(home);
+		mkdirSync(bin);
+		writeFileSync(join(dir, "agent", "sandbox.json"), JSON.stringify({
+			runnerCommand: ["runner"],
+			runnerFailureSignatures: ["runner: "],
+		}));
+	});
+
+	it("reports auto with detected profile names without creating storage", async () => {
+		writeFileSync(join(bin, "uv"), "");
+		chmodSync(join(bin, "uv"), 0o755);
+		vi.stubEnv("PATH", bin);
+		const status = await readPermissionStatus(project);
+		expect(status).toContain("tool storage: auto (uv)");
+		expect(existsSync(join(home, ".cache", "uv"))).toBe(false);
+		expect(existsSync(join(home, ".local", "share", "uv", "python"))).toBe(false);
+	});
+
+	it("reports none detected for an empty PATH", async () => {
+		expect(await readPermissionStatus(project)).toContain("tool storage: auto (none detected)");
+	});
+
+	it("reports off without detecting or creating storage", async () => {
+		writeFileSync(join(dir, "agent", "sandbox.json"), JSON.stringify({
+			toolStorage: false,
+			runnerCommand: ["runner"],
+			runnerFailureSignatures: ["runner: "],
+		}));
+		writeFileSync(join(bin, "uv"), "");
+		chmodSync(join(bin, "uv"), 0o755);
+		vi.stubEnv("PATH", bin);
+		const status = await readPermissionStatus(project);
+		expect(status).toContain("tool storage: off");
+		expect(status).not.toContain("auto (uv)");
+		expect(existsSync(join(home, ".cache", "uv"))).toBe(false);
+	});
+
+	it("marks detected storage inactive outside workspace-write", async () => {
+		writeFileSync(join(dir, "agent", "sandbox.json"), JSON.stringify({
+			mode: "read-only",
+			runnerCommand: ["runner"],
+			runnerFailureSignatures: ["runner: "],
+		}));
+		expect(await readPermissionStatus(project)).toContain("tool storage: auto (none detected) (inactive: read-only)");
 	});
 });
 

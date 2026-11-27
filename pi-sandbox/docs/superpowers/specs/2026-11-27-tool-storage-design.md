@@ -1,7 +1,7 @@
 # pi-sandbox：内置常用工具存储目录设计
 
 日期：2026-11-27
-状态：已批准
+状态：已实现
 前置设计：`2026-10-14-extra-writable-dirs-design.md`、`2026-10-24-writable-dirs-file-design.md`、`2026-10-14-env-redirect-guideline-design.md`
 
 ## 1. 背景与意图

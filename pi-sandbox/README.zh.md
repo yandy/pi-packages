@@ -1,6 +1,6 @@
 # pi-sandbox
 
-pi coding-agent 扩展：**进程级沙箱**（bwrap / landlock / seatbelt / windows-acl）——默认**工作目录可写、其余宿主文件可读**，fail-closed。
+pi coding-agent 扩展：**进程级沙箱**（bwrap / landlock / seatbelt / windows-acl）——默认**工作目录与检测到的工具存储可写、其余宿主文件可读**，fail-closed。
 
 ## 安装
 
@@ -48,7 +48,7 @@ PowerShell 语言模式取决于启动约束，不是 ACL 边界的一部分：`
 
 **`NUL` 在两种模式下都可写**——这是**设备自身的环境属性**（设备 DACL 授予 Everyone 读/写/执行），不是沙箱的能力授予，因此与令牌拿到哪些授权根无关。它只能通过设备拼法到达：`cmd` 的 `> NUL`，以及 Node 的 `\\.\NUL`。**相对路径** `NUL` 不是设备：libuv 构造 NT 路径时不做 Win32 设备名映射，因此 `writeFileSync('NUL', …)` 是子进程 cwd 下一个名为 `NUL` 的**普通文件**——在工作区内允许、在工作区外被拒，与其他文件名完全同等。
 
-**常驻的安全描述符改动。** 授权幂等但**不回收**：pi 退出后，工作区与 `%TEMP%` 上的 ACE、world `FILE_DELETE_CHILD` 拒绝项与 Low 强制标签仍然保留。`workspace-write` 下 `~/.pi/agent/sandbox-writable.json` 里列出的每个目录同样留下常驻改动（按目录派生的 capability ACE、world `FILE_DELETE_CHILD` 拒绝项与 Low 标签）；若目录不可授予（你无法改 ACL——没有 WRITE_DAC/WRITE_OWNER），受限命令 **fail-closed**，绝不降级裸跑。这会向**任何**以同一用户身份运行在 Low 完整性的进程放宽该目录树；事后再清除可继承标签也不会回退已传播到子对象的标签。切回 `read-only` 会让能力 ACE 失效（该令牌不携带能力 SID），但不会移除它们。首次授权会在整棵 `%TEMP%` 树上做急切传播（大树可能耗时数秒），之后每次调用命中精确匹配的快路径。`%TEMP%` 与 `TMP` 本身**不**被重写——沙箱的可写临时根就是宿主 `%TEMP%`。
+**常驻的安全描述符改动。** 授权幂等但**不回收**：pi 退出后，工作区与 `%TEMP%` 上的 ACE、world `FILE_DELETE_CHILD` 拒绝项与 Low 强制标签仍然保留。`workspace-write` 下 `~/.pi/agent/sandbox-writable.json` 里列出的目录与检测到的内置工具存储根同样留下常驻改动（按目录派生的 capability ACE、world `FILE_DELETE_CHILD` 拒绝项与 Low 标签）；若目录不可授予（你无法改 ACL——没有 WRITE_DAC/WRITE_OWNER），受限命令 **fail-closed**，绝不降级裸跑。已有大缓存的首次授权会递归传播描述符，可能明显延长当次命令；传播在独立 runner 进程中执行，后续命中精确匹配快路径。这会向**任何**以同一用户身份运行在 Low 完整性的进程放宽该目录树；事后再清除可继承标签也不会回退已传播到子对象的标签。切回 `read-only` 会让能力 ACE 失效（该令牌不携带能力 SID），但不会移除它们。首次授权会在整棵 `%TEMP%` 树上做急切传播（大树可能耗时数秒），之后每次调用命中精确匹配的快路径。`%TEMP%` 与 `TMP` 本身**不**被重写——沙箱的可写临时根就是宿主 `%TEMP%`。
 
 **`%TEMP%` 的代价。** `%TEMP%` 是用户共享树：其子目录会继承拒绝项，因此第三方程序用 `GENERIC_ALL`/`FullControl` 打开自己的 temp 子目录会被拒。基于 DELETE 的删除、`MAXIMUM_ALLOWED` 与常规读写打开不受影响。
 
@@ -63,14 +63,14 @@ PowerShell 语言模式取决于启动约束，不是 ACL 边界的一部分：`
 | 模式 | 文件效果 |
 |---|---|
 | `read-only` | 仅 `/dev/null` 可写 |
-| `workspace-write`（默认） | 工作目录 + `/tmp` + `os.tmpdir()` + `sandbox-writable.json` 里列出的额外可写根可写，其余只读 |
+| `workspace-write`（默认） | 工作目录 + `/tmp` + `os.tmpdir()` + 检测到的内置工具存储 + `sandbox-writable.json` 里的额外根可写，其余只读 |
 | `danger-full-access` | 完全绕过沙箱（显式逃生门） |
 
 网络始终放行（不做网络隔离）。
 
 ## /permission 命令
 
-- `/permission` —— 显示当前状态（模式及来源、选中 runner 与 enforcement、工作区；`sandbox-writable.json` 列出额外可写根时还显示 `extra writable:` 行，当前模式不适用时后缀 `(inactive: <模式>)`）
+- `/permission` —— 显示当前状态（模式及来源、runner、工作区、内置工具存储的 `tool storage: auto (...)` / `off` 行；自定义额外根显示 `extra writable:`，当前模式不适用时后缀 `(inactive: <模式>)`）
 - `/permission <read-only|workspace-write|danger-full-access>` —— 切换模式，**进程级**生效：父会话与所有 subagent 子会话的下一次工具调用立即采用
 
 ## 提权审批（模型发起，denial-first）
@@ -89,7 +89,7 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 
 在初始审批选择前，实际显示 UI 的实例发出 `notify:request`，payload 为 `{ title: "Approval required", body: <审批标题>, urgency: "critical" }`。转发审批使用父实例的事件总线，不使用发起请求的子实例总线。可选的拒绝理由步骤不再发送。投递是 fire-and-forget，公告失败不改变审批控制流。
 
-**缓存/数据目录搬迁属于越界行为。** 工具的常驻规则要求模型不得为了绕开沙箱把全局缓存/数据目录搬进 workspace——无论是环境变量覆盖（`XDG_CACHE_HOME`、`HOME`、`UV_CACHE_DIR`、`npm_config_cache`、`PNPM_HOME` 等）、改缓存的 flag（`--cache-dir`、`--store-dir` 等）还是配置文件——正确做法是原样运行工具，包括提权重试也不得夹带搬迁：搬迁是无声的，它会消掉本可上膛提权的那次拒绝。这条政策目前仅停留在提示词层：pi-sandbox 不检测、也不拒绝这类命令，用户显式要求搬迁时仍然成立。在 `workspace-write` 模式下，让工具在工作区外写入的合法途径是**用户**把该目录加入 `~/.pi/agent/sandbox-writable.json`；模型仍不得自行迁移缓存/数据目录。
+**缓存/数据目录搬迁属于越界行为。** 工具的常驻规则要求模型不得为了绕开沙箱把全局缓存/数据目录搬进 workspace——无论是环境变量覆盖（`XDG_CACHE_HOME`、`HOME`、`UV_CACHE_DIR`、`npm_config_cache`、`PNPM_HOME` 等）、改缓存的 flag（`--cache-dir`、`--store-dir` 等）还是配置文件——正确做法是原样运行工具，包括提权重试也不得夹带搬迁：搬迁是无声的，它会消掉本可上膛提权的那次拒绝。这条政策目前仅停留在提示词层：pi-sandbox 不检测、也不拒绝这类命令，用户显式要求搬迁时仍然成立。常用工具由内置存储档案默认覆盖；其它自定义路径由**用户**加入 `~/.pi/agent/sandbox-writable.json`。模型仍不得自行迁移缓存/数据目录。
 
 ## 配置
 
@@ -102,7 +102,8 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
   "mode": "workspace-write",
   "runnerCommand": null,
   "runnerFailureSignatures": null,
-  "probeTimeoutMs": 5000
+  "probeTimeoutMs": 5000,
+  "toolStorage": true
 }
 ```
 
@@ -112,6 +113,7 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 | `runnerCommand` | `null` | 自定义 bwrap 兼容 runner argv（须与下一项成对） |
 | `runnerFailureSignatures` | `null` | 自定义 runner 的失败诊断签名（非空单行） |
 | `probeTimeoutMs` | `5000` | runner 功能探测超时（正数） |
+| `toolStorage` | `true` | 是否检测并开放内置工具存储；`false` 全部关闭，非法值告警并回落默认 |
 
 `~/.pi/agent/sandbox-writable.json` 是裸的目录路径 JSON 数组——没有根 key——加一个根就是改一行：
 
@@ -123,54 +125,35 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 
 配置告警不会直接写终端：配置在任何 UI 上下文出现之前就被读取，所以告警先入缓冲，由第一个带 UI 的会话送出——TUI 里它作为 `Warning: …` 行出现在对话区（而不是被界面盖掉），`-p` / JSON 模式则写到 stderr。
 
-### 示例：为常见工具开放缓存目录
+### 内置工具存储
 
-把全局缓存/包存储放在工作区外的工具，在 `workspace-write` 下会失败或反复重新下载。把这些目录列进 `~/.pi/agent/sandbox-writable.json` 正是为此准备的：用户一次性授权存储目录，模型随后原样运行工具——不需要 `UV_CACHE_DIR` / `PNPM_HOME` / `npm_config_cache` 之类的搬迁（见上文「缓存/数据目录搬迁属于越界行为」）。
+`workspace-write` 默认检测并开放常用工具的持久化存储，普通的 `uv sync`、`uv pip install`、`pnpm install` 等无需修改环境变量或提权。检测只看 PATH 中的入口和项目根的 `mvnw` / `gradlew`，不执行工具、不解析 shell 命令；Corepack 入口会同时启用 Corepack、pnpm、Yarn 档案。
 
-条目必须是已存在目录（缺失目录会在加载时告警并忽略），先创建：
+| 档案 | 纳入的存储 | 主要路径覆盖变量 |
+|---|---|---|
+| pip | HTTP/wheel cache | `PIP_CACHE_DIR`、`XDG_CACHE_HOME` |
+| uv | 依赖 cache + managed Python 的 `python/` | `UV_CACHE_DIR`、`UV_PYTHON_INSTALL_DIR`、XDG |
+| npm | cache、日志与 npx 内容 | `npm_config_cache` / `NPM_CONFIG_CACHE` |
+| Corepack | 包管理器下载与 cache | `COREPACK_HOME` |
+| pnpm | **store + cache + state + 具名锁目录** | `PNPM_HOME`、XDG cache/data/state |
+| Yarn | Classic cache + Berry 全局 cache/metadata | `YARN_CACHE_FOLDER`、`YARN_GLOBAL_FOLDER` |
+| Bun | 全局包 cache（含可选 links store） | `BUN_INSTALL_CACHE_DIR` |
+| Go | module cache + build cache | `GOMODCACHE`、`GOCACHE`、`GOPATH` |
+| Maven | local repository + Wrapper distributions | `MAVEN_USER_HOME` 只影响 wrapper |
+| Gradle | `caches/`、`daemon/`、`jdks/`、`wrapper/dists/` | `GRADLE_USER_HOME` |
 
-```bash
-mkdir -p ~/.cache/uv ~/.local/share/pnpm/store ~/.cache/pnpm ~/.npm ~/.cache/pip ~/.cache/huggingface
-```
+路径按 Linux、macOS、Windows 的平台约定和父进程环境变量解析。例如 Linux 的 uv cache 是 `~/.cache/uv`、pnpm store 是 `~/.local/share/pnpm/store`；macOS 的 pip 是 `~/Library/Caches/pip`、pnpm store 是 `~/Library/pnpm/store`；Windows 的 uv cache 是 `%LOCALAPPDATA%\uv\cache`、managed Python 是 `%APPDATA%\uv\data\python`、pnpm store 是 `%LOCALAPPDATA%\pnpm\store`。pnpm 锁只开放 XDG runtime 或 `%LOCALAPPDATA%` 下的具名子目录，不开放共享根目录。
 
-写入 `~/.pi/agent/sandbox-writable.json`：
+缺失的内置存储根会在实际 `workspace-write` 调用前自动创建；read-only、danger-full-access 和 `/permission` 查询不会创建。每次调用都会复检，目录被删除后可在下次调用重建。单根创建或校验失败会告警并跳过该根，不让无关命令失去沙箱。PATH、环境变量与工具安装状态在进程内缓存，改动后重启 pi 生效。
 
-```json
-[
-  "~/.cache/uv",
-  "~/.local/share/pnpm/store",
-  "~/.cache/pnpm",
-  "~/.npm",
-  "~/.cache/pip",
-  "~/.cache/huggingface"
-]
-```
+**全局安装仍会被拦截。** `uv tool install`、`uv pip install --system`、`pnpm add -g`、全局自更新、PATH 上的 bin/shim、用户配置与凭据均不因存储档案自动开放。显式 `uv python install` 创建全局可执行入口也不属于存储授权；Windows 的 PEP 514 注册表写入不是目录授权。pnpm 因项目位于其它卷宗而选择的 store，以及配置文件或 CLI 参数指定的自定义路径，仍需用户显式授权。
 
-| 工具 | 目录（Linux 默认） | 覆盖变量 | 查询本机真实路径 |
-|---|---|---|---|
-| uv 缓存（`uv sync`、`uv pip install`） | `~/.cache/uv` | `UV_CACHE_DIR` | `uv cache dir` |
-| pnpm store——包内容实体；安装会写它 | `~/.local/share/pnpm/store` | `storeDir` | `pnpm store path` |
-| pnpm 元数据 / `pnpm dlx` 缓存 | `~/.cache/pnpm` | `cacheDir` | `pnpm cache path` |
-| npm 缓存 | `~/.npm` | `npm_config_cache` | `npm config get cache` |
-| pip 缓存 | `~/.cache/pip` | `PIP_CACHE_DIR` | `pip cache dir` |
-| Hugging Face 缓存 | `~/.cache/huggingface` | `HF_HOME` | — |
-
-**pnpm store 与 cache 的区别。** *store* 存放 `pnpm install` 下载的包内容实体——项目从它 hard link，因此安装必须能写它（上面的授权是父目录 `store/`；`pnpm store path` 打印的是它内部的版本子目录，如 `store/v11`）；*cache* 存放 registry 元数据与 `pnpm dlx` 缓存，只影响速度。二者都不包含全局安装的包或可执行文件——那些在 `~/.local/share/pnpm/global` 与 `~/.local/share/pnpm/bin`，不在上面的授权范围内。
-
-**全局安装仍会被拦截。** 只授予存储/缓存目录后，`uv tool install`（写 `~/.local/share/uv/tools` 与 `~/.local/bin`）与 `pnpm add -g`（写 `~/.local/share/pnpm/global` 与 `bin`）依旧会被沙箱拒绝，只能走显式提权。**不要**授予安装前缀或 `PATH` 上的 bin 目录（`~/.local/bin`、`~/.cargo/bin`、`~/go/bin` 等）：那等于让受限模型留下持久可执行文件，供未来不受限运行使用。
-
-平台差异：表中是 Linux 默认值。macOS：pnpm store `~/Library/pnpm/store`、pnpm cache `~/Library/Caches/pnpm`、pip `~/Library/Caches/pip`。Windows：uv cache `%LOCALAPPDATA%\uv\cache`、pnpm store `%LOCALAPPDATA%\pnpm\store`、pnpm cache `%LOCALAPPDATA%\pnpm-cache`、npm cache `%LocalAppData%\npm-cache`、pip `%LocalAppData%\pip\Cache`。精确路径请用各工具的查询命令。
-
-可选授权及权衡：
-
-- **Go**：授予 `~/go/pkg` 与 `~/.cache/go-build`（macOS `~/Library/Caches/go-build`、Windows `%LocalAppData%\go-build`），`go build` 可跑，而 `go install`（写 `~/go/bin`）仍被拒。
-- **Cargo**：`cargo build` 会写 `~/.cargo/.package-cache` 与 registry/git 缓存，因此必须整个授予 `~/.cargo`；代价是 `cargo install`（写 `PATH` 上的 `~/.cargo/bin`）也会放行。接受这一点才授予，否则不给 Cargo 授权、按需提权。
-- **uv 管理的解释器**：项目指定的 Python 未安装时，`uv sync` 会下载到 `~/.local/share/uv/python`（并可能在 `~/.local/bin` 建可执行链接）。建议先在沙箱外 `uv python install <版本>` 装好；若确需在沙箱内下载，可单独授予 `~/.local/share/uv/python`（`uv tool install` 仍被拦）。
-- **pnpm 机器级状态**：`~/.local/state/pnpm` 不在上面的授予集内；若遇到来自它的拒绝并确认是状态写入，可单独加入——它不含任何全局安装内容。
+`~/.pi/agent/sandbox-writable.json` 继续用于这些自定义路径和尚未内置的工具。与内置档案不同，手工条目**必须是已存在目录**，扩展不会自动创建它们。Cargo 首版没有内置档案：其 `CARGO_HOME/.package-cache` 位于根目录，现有目录级管线若开放整个 `CARGO_HOME` 会连带开放 `bin/`；只有接受这一代价时才手工授予。CMake 常规构建不需要全局依赖 cache；显式启用用户 package registry 时可手工授权 POSIX `~/.cmake/packages`。
 
 ## 安全说明
 
 - 受约束进程可**读取**宿主上你有权读的一切（包括 `~/.ssh` 等）——这是本沙箱的设计语义（与 deepseek harness 一致）；root 专属文件受文件权限保护
+- 内置 store/cache/managed runtime 属于同用户信任域：受限进程写入的内容可能被后续非受限工具复用；pnpm store 的完整性检查不能让不可信写者变安全。设置 `toolStorage:false` 可关闭全部内置授权
 - **不要**把家目录、`~/.pi` 或 pi agent 目录的任何祖先目录放进 `sandbox-writable.json`：否则受限模型可改写全局沙箱配置、`AGENTS.md` 或扩展——它们会在下次启动时不受限运行；此类条目会在加载时告警，但仍会保留（warn-only）
 - bwrap 下 bash 的 `/tmp` **就是宿主 /tmp**（rw bind，与 write/edit 围栏及 landlock/macOS 一致）：沙箱内命令可以直接修改/删除宿主的临时文件（含会话 socket 与 pi 自己的临时文件），宿主 `/tmp` 的权限原样生效；宿主 `/tmp` 不可写时沙箱内也随之不可写
 - Windows 下沙箱的临时根就是宿主 `%TEMP%`（`windows-acl` runner 授权真实路径、不重写 `TMP`/`TEMP`）：受限命令可以修改/删除宿主临时文件，与上面 bwrap 的 `/tmp` 同属“宿主 tmp 就是宿主 tmp”的语义

@@ -41,7 +41,7 @@ import { createRequire } from "node:module";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	assertShellAllowed,
 	classifyDenial,
@@ -52,6 +52,11 @@ import {
 } from "../../src/confine";
 import { canonicalPath, writableRoots } from "../../src/policy";
 import { windowsAclRunnerArgv } from "../../src/runners";
+import { DEFAULT_SANDBOX_CONFIG } from "../../src/config";
+import { createPermissionState } from "../../src/permission";
+import { createSandboxTools } from "../../src/tools";
+import { resetToolStoragePlanCache } from "../../src/tool-storage/detect";
+import { resetToolStorageWarnings } from "../../src/tool-storage/materialize";
 
 const RUNNER = fileURLToPath(new URL("../../src/win32/runner.js", import.meta.url));
 const RUNNER_SIGNATURE = "windows-acl-run: ";
@@ -299,6 +304,9 @@ describe.skipIf(process.platform !== "win32")("windows-acl end-to-end (real runn
 	});
 
 	afterEach(() => {
+		resetToolStoragePlanCache();
+		resetToolStorageWarnings();
+		vi.unstubAllEnvs();
 		// Grants may have left Low labels and deny ACEs behind; the owning user
 		// still holds DELETE on every object, so recursive cleanup is safe.
 		rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -361,6 +369,82 @@ describe.skipIf(process.platform !== "win32")("windows-acl end-to-end (real runn
 			// the suite's afterEach does for `root`.
 			rmSync(extra, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 		}
+	});
+
+	function toolStoragePowerShell(enabled: boolean) {
+		const home = join(root, "storage-home");
+		const local = join(root, "storage-local");
+		const roaming = join(root, "storage-roaming");
+		const agent = join(root, "storage-agent");
+		const bin = join(root, "storage-bin");
+		for (const path of [home, local, roaming, agent, bin]) mkdirSync(path, { recursive: true });
+		writeFileSync(join(bin, "pnpm.cmd"), "@echo off\r\n");
+		vi.stubEnv("HOME", home);
+		vi.stubEnv("USERPROFILE", home);
+		vi.stubEnv("LOCALAPPDATA", local);
+		vi.stubEnv("APPDATA", roaming);
+		vi.stubEnv("PI_CODING_AGENT_DIR", agent);
+		vi.stubEnv("PATH", `${bin}${delimiter}${process.env.PATH ?? ""}`);
+		// Inherited overrides must never redirect an e2e grant into the host's real stores.
+		for (const name of [
+			"UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR", "PIP_CACHE_DIR", "npm_config_cache", "NPM_CONFIG_CACHE",
+			"COREPACK_HOME", "PNPM_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR",
+			"YARN_CACHE_FOLDER", "YARN_GLOBAL_FOLDER", "BUN_INSTALL_CACHE_DIR", "GOPATH", "GOMODCACHE", "GOCACHE",
+			"MAVEN_USER_HOME", "GRADLE_USER_HOME",
+		]) vi.stubEnv(name, "");
+		resetToolStoragePlanCache();
+		const tools = createSandboxTools({
+			cwd: workspace,
+			permission: createPermissionState(),
+			platform: "win32",
+			selected: { runner: "windows-acl", enforcement: "partial" },
+			hooks: { windowsAclRung: () => ({ node: process.execPath, runner: RUNNER }) },
+			getConfig: () => ({ ...DEFAULT_SANDBOX_CONFIG, toolStorage: enabled }),
+		});
+		if (tools.powershell === undefined) throw new Error("PowerShell tool was not assembled on win32");
+		const ctx = {
+			cwd: workspace,
+			hasUI: false,
+			sessionManager: { getSessionId: () => "tool-storage-e2e", getSessionFile: () => join(root, "session.jsonl") },
+			ui: { select: vi.fn(async () => undefined), input: vi.fn(async () => undefined), notify: vi.fn() },
+		};
+		const write = async (path: string) => tools.powershell!.execute(
+			`tool-storage-${enabled}`,
+			{ command: `try { Set-Content -LiteralPath ${psLiteral(path)} -Value ok -NoNewline -ErrorAction Stop } catch { exit 1 }` },
+			undefined,
+			undefined,
+			ctx as never,
+		);
+		return { local, write };
+	}
+
+	it("tool storage: pnpm store and named locks are writable without opening LocalAppData", { timeout: E2E_TIMEOUT }, async () => {
+		const fixture = toolStoragePowerShell(true);
+		const roots = [
+			join(fixture.local, "pnpm", "store"),
+			...["pnpm-store-operation-locks", "pnpm-dir-locks", "pnpm-verify-deps-install-locks", "pnpm-modules-swaps", "pnpm-wasm-sqlite"]
+				.map((name) => join(fixture.local, name)),
+		];
+		for (const storage of roots) {
+			const target = join(storage, "probe.txt");
+			await fixture.write(target);
+			expect(readFileSync(target, "utf8")).toBe("ok");
+		}
+		const outside = join(fixture.local, "not-pnpm");
+		mkdirSync(outside);
+		const target = join(outside, "denied.txt");
+		await fixture.write(target);
+		expectHostFileNotCreated(target);
+	});
+
+	it("tool storage: toolStorage=false keeps the same store write denied", { timeout: E2E_TIMEOUT }, async () => {
+		const fixture = toolStoragePowerShell(false);
+		const store = join(fixture.local, "pnpm", "store");
+		// Keep the parent present so this is an ACL denial, not an ENOENT classification gap.
+		mkdirSync(store, { recursive: true });
+		const target = join(store, "denied.txt");
+		await fixture.write(target);
+		expectHostFileNotCreated(target);
 	});
 
 	/** `dialect: "localized"` cases carry OS/CLR message text; only `node` text is English on every locale. */

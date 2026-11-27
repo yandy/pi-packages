@@ -7,6 +7,7 @@ import { announceApproval } from "./src/notification";
 import { createPermissionCommand, processPermissionState } from "./src/permission";
 import { canonicalPath } from "./src/policy";
 import { selectRunner } from "./src/runners";
+import { detectedToolStorageProfiles } from "./src/tool-storage/index";
 import { createSandboxTools } from "./src/tools";
 import { aclSkillPaths } from "./src/win32/skill-paths";
 
@@ -137,14 +138,21 @@ export default function (pi: ExtensionAPI) {
 					? "unavailable (fail-closed: confined commands will be refused)"
 					: `${selected.runner} (${selected.enforcement} enforcement)`;
 			}
+			const canonicalWorkspace = canonicalPath(effectiveCwd);
 			const lines = [
 				`sandbox mode: ${effective} (${source})`,
 				`runner: ${runnerText}`,
-				`workspace: ${canonicalPath(effectiveCwd)}`,
+				`workspace: ${canonicalWorkspace}`,
 			];
+			const suffix = effective === "workspace-write" ? "" : ` (inactive: ${effective})`;
 			if (cfg.extraWritableDirs.length > 0) {
-				const suffix = effective === "workspace-write" ? "" : ` (inactive: ${effective})`;
 				lines.push(`extra writable: ${cfg.extraWritableDirs.join(", ")}${suffix}`);
+			}
+			if (cfg.toolStorage) {
+				const profiles = detectedToolStorageProfiles(canonicalWorkspace);
+				lines.push(`tool storage: auto (${profiles.length > 0 ? profiles.join(", ") : "none detected"})${suffix}`);
+			} else {
+				lines.push("tool storage: off");
 			}
 			const shellLine = win32ShellStatusLine(pi);
 			if (shellLine !== null) lines.push(shellLine);
