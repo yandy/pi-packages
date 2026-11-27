@@ -1,7 +1,7 @@
 import { posix, win32 } from "node:path";
 
 export type ToolStoragePlatform = "linux" | "darwin" | "win32";
-export type ToolStorageProfileId = "pip" | "uv" | "npm" | "corepack" | "pnpm" | "yarn" | "bun" | "go" | "maven" | "gradle";
+export type ToolStorageProfileId = "pip" | "uv" | "npm" | "corepack" | "pnpm" | "yarn" | "bun" | "go" | "maven" | "gradle" | "vcpkg" | "playwright";
 
 export interface ToolStorageContext {
 	platform: ToolStoragePlatform;
@@ -221,6 +221,42 @@ function gradleRoots(context: ToolStorageContext): ToolStorageRoot[] {
 	]);
 }
 
+function vcpkgRoots(context: ToolStorageContext): ToolStorageRoot[] {
+	const path = pathApi(context.platform);
+	const cache = context.platform === "win32"
+		? win32.join(localAppData(context), "vcpkg")
+		: posix.join(xdg(context, "XDG_CACHE_HOME") ?? posix.join(context.home, ".cache"), "vcpkg");
+	const root = overrideEnv(context, "VCPKG_ROOT");
+	const binary = overrideEnv(context, "VCPKG_DEFAULT_BINARY_CACHE") ?? path.join(cache, "archives");
+	const registries = overrideEnv(context, "X_VCPKG_REGISTRIES_CACHE") ?? path.join(cache, "registries");
+	const downloads = overrideEnv(context, "VCPKG_DOWNLOADS") ?? path.join(root ?? cache, "downloads");
+	return roots("vcpkg", [
+		binary,
+		registries,
+		downloads,
+		root === undefined ? undefined : path.join(root, "buildtrees"),
+		root === undefined ? undefined : path.join(root, "packages"),
+	]);
+}
+
+function playwrightRoots(context: ToolStorageContext): ToolStorageRoot[] {
+	const overridden = env(context, "PLAYWRIGHT_BROWSERS_PATH");
+	if (overridden === "0") return [];
+	const path = pathApi(context.platform);
+	if (overridden !== undefined) {
+		const initCwd = overrideEnv(context, "INIT_CWD");
+		return roots("playwright", [path.resolve(initCwd ?? context.workspaceRoot, overridden)]);
+	}
+	let browsers: string;
+	if (context.platform === "win32") browsers = win32.join(localAppData(context), "ms-playwright");
+	else if (context.platform === "darwin") browsers = posix.join(context.home, "Library", "Caches", "ms-playwright");
+	else {
+		const cache = xdg(context, "XDG_CACHE_HOME") ?? posix.join(context.home, ".cache");
+		browsers = posix.join(cache, "ms-playwright");
+	}
+	return roots("playwright", [browsers]);
+}
+
 export const TOOL_STORAGE_PROFILES: readonly ToolStorageProfileDefinition[] = [
 	{ id: "pip", commands: ["pip", "pip3", "python", "python3", "py"], roots: pipRoots },
 	{ id: "uv", commands: ["uv"], roots: uvRoots },
@@ -232,4 +268,22 @@ export const TOOL_STORAGE_PROFILES: readonly ToolStorageProfileDefinition[] = [
 	{ id: "go", commands: ["go"], roots: goRoots },
 	{ id: "maven", commands: ["mvn"], wrappers: ["mvnw", "mvnw.cmd"], roots: mavenRoots },
 	{ id: "gradle", commands: ["gradle"], wrappers: ["gradlew", "gradlew.bat"], roots: gradleRoots },
+	{ id: "vcpkg", commands: ["vcpkg"], roots: vcpkgRoots },
+	{
+		id: "playwright",
+		commands: ["playwright", "playwright-cli"],
+		wrappers: [
+			"node_modules/.bin/playwright",
+			"node_modules/.bin/playwright.cmd",
+			"node_modules/.bin/playwright.ps1",
+			"node_modules/.bin/playwright-cli",
+			"node_modules/.bin/playwright-cli.cmd",
+			"node_modules/.bin/playwright-cli.ps1",
+			".venv/bin/playwright",
+			"venv/bin/playwright",
+			".venv/Scripts/playwright.exe",
+			"venv/Scripts/playwright.exe",
+		],
+		roots: playwrightRoots,
+	},
 ];

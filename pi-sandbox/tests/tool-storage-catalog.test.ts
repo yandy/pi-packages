@@ -79,6 +79,12 @@ const DEFAULTS: Array<{
 	{ id: "gradle", platform: "linux", expected: [at("linux", ".gradle", "caches"), at("linux", ".gradle", "daemon"), at("linux", ".gradle", "jdks"), at("linux", ".gradle", "wrapper", "dists")] },
 	{ id: "gradle", platform: "darwin", expected: [at("darwin", ".gradle", "caches"), at("darwin", ".gradle", "daemon"), at("darwin", ".gradle", "jdks"), at("darwin", ".gradle", "wrapper", "dists")] },
 	{ id: "gradle", platform: "win32", expected: [at("win32", ".gradle", "caches"), at("win32", ".gradle", "daemon"), at("win32", ".gradle", "jdks"), at("win32", ".gradle", "wrapper", "dists")] },
+	{ id: "vcpkg", platform: "linux", expected: [at("linux", ".cache", "vcpkg", "archives"), at("linux", ".cache", "vcpkg", "registries"), at("linux", ".cache", "vcpkg", "downloads")] },
+	{ id: "vcpkg", platform: "darwin", expected: [at("darwin", ".cache", "vcpkg", "archives"), at("darwin", ".cache", "vcpkg", "registries"), at("darwin", ".cache", "vcpkg", "downloads")] },
+	{ id: "vcpkg", platform: "win32", expected: [at("win32", "AppData", "Local", "vcpkg", "archives"), at("win32", "AppData", "Local", "vcpkg", "registries"), at("win32", "AppData", "Local", "vcpkg", "downloads")] },
+	{ id: "playwright", platform: "linux", expected: [at("linux", ".cache", "ms-playwright")] },
+	{ id: "playwright", platform: "darwin", expected: [at("darwin", "Library", "Caches", "ms-playwright")] },
+	{ id: "playwright", platform: "win32", expected: [at("win32", "AppData", "Local", "ms-playwright")] },
 ];
 
 describe("tool storage catalog defaults", () => {
@@ -154,6 +160,89 @@ describe("tool storage path overrides", () => {
 
 	it("ignores a relative XDG path", () => {
 		expect(paths("pip", "linux", { XDG_CACHE_HOME: "relative-cache" })).toEqual([at("linux", ".cache", "pip")]);
+	});
+});
+
+describe("vcpkg and Playwright storage", () => {
+	it("adds only manifest working roots below VCPKG_ROOT", () => {
+		const root = at("linux", "vcpkg-instance");
+		expect(paths("vcpkg", "linux", { VCPKG_ROOT: root })).toEqual([
+			at("linux", ".cache", "vcpkg", "archives"),
+			at("linux", ".cache", "vcpkg", "registries"),
+			posix.join(root, "downloads"),
+			posix.join(root, "buildtrees"),
+			posix.join(root, "packages"),
+		]);
+	});
+
+	it("honors independent vcpkg cache and download overrides", () => {
+		const root = at("win32", "vcpkg-instance");
+		const binary = at("win32", "custom-binary");
+		const registries = at("win32", "custom-registries");
+		const downloads = at("win32", "custom-downloads");
+		expect(paths("vcpkg", "win32", {
+			VCPKG_ROOT: root,
+			VCPKG_DEFAULT_BINARY_CACHE: binary,
+			X_VCPKG_REGISTRIES_CACHE: registries,
+			VCPKG_DOWNLOADS: downloads,
+		})).toEqual([
+			binary,
+			registries,
+			downloads,
+			win32.join(root, "buildtrees"),
+			win32.join(root, "packages"),
+		]);
+	});
+
+	it("honors an absolute PLAYWRIGHT_BROWSERS_PATH", () => {
+		const browsers = at("win32", "custom-browsers");
+		expect(paths("playwright", "win32", { PLAYWRIGHT_BROWSERS_PATH: browsers })).toEqual([browsers]);
+	});
+
+	it("resolves a relative Playwright override from INIT_CWD", () => {
+		const initCwd = at("linux", "launcher-cwd");
+		expect(paths("playwright", "linux", {
+			INIT_CWD: initCwd,
+			PLAYWRIGHT_BROWSERS_PATH: "relative-browsers",
+		})).toEqual([posix.join(initCwd, "relative-browsers")]);
+	});
+
+	it("resolves a relative Playwright override from the workspace without INIT_CWD", () => {
+		expect(paths("playwright", "linux", { PLAYWRIGHT_BROWSERS_PATH: "relative-browsers" }))
+			.toEqual([posix.join(WORKSPACES.linux, "relative-browsers")]);
+	});
+
+	it("does not turn PLAYWRIGHT_BROWSERS_PATH=0 into a writable root", () => {
+		expect(paths("playwright", "linux", { PLAYWRIGHT_BROWSERS_PATH: "0" })).toEqual([]);
+	});
+
+	it("applies XDG to Linux vcpkg and Playwright caches", () => {
+		const cache = at("linux", "xdg-cache");
+		expect(paths("vcpkg", "linux", { XDG_CACHE_HOME: cache })).toEqual([
+			posix.join(cache, "vcpkg", "archives"),
+			posix.join(cache, "vcpkg", "registries"),
+			posix.join(cache, "vcpkg", "downloads"),
+		]);
+		expect(paths("playwright", "linux", { XDG_CACHE_HOME: cache })).toEqual([posix.join(cache, "ms-playwright")]);
+	});
+
+	it("keeps vcpkg and Playwright macOS cache conventions distinct", () => {
+		const cache = at("darwin", "xdg-cache");
+		expect(paths("vcpkg", "darwin", { XDG_CACHE_HOME: cache })).toEqual([
+			posix.join(cache, "vcpkg", "archives"),
+			posix.join(cache, "vcpkg", "registries"),
+			posix.join(cache, "vcpkg", "downloads"),
+		]);
+		expect(paths("playwright", "darwin", { XDG_CACHE_HOME: cache })).toEqual([
+			at("darwin", "Library", "Caches", "ms-playwright"),
+		]);
+	});
+
+	it.each(["vcpkg", "playwright"] as const)("ignores a relative XDG path for %s", (id) => {
+		const expected = id === "vcpkg"
+			? [at("linux", ".cache", "vcpkg", "archives"), at("linux", ".cache", "vcpkg", "registries"), at("linux", ".cache", "vcpkg", "downloads")]
+			: [at("linux", ".cache", "ms-playwright")];
+		expect(paths(id, "linux", { XDG_CACHE_HOME: "relative-cache" })).toEqual(expected);
 	});
 });
 

@@ -59,6 +59,40 @@ describe("tool storage detection", () => {
 		expect(existsSync(marker)).toBe(false);
 	});
 
+	it("detects vcpkg and Playwright without executing the candidates", () => {
+		const marker = join(dir, "executed");
+		executable("vcpkg", marker);
+		executable("playwright", marker);
+		expect(detect({ PATH: bin }).profiles).toEqual(["vcpkg", "playwright"]);
+		expect(existsSync(marker)).toBe(false);
+	});
+
+	it.each(["playwright", "playwright-cli"])('detects the standalone %s CLI on PATH', (name) => {
+		executable(name);
+		expect(detect({ PATH: bin }).profiles).toEqual(["playwright"]);
+	});
+
+	it.each([
+		"playwright", "playwright.cmd", "playwright.ps1",
+		"playwright-cli", "playwright-cli.cmd", "playwright-cli.ps1",
+	])("distinguishes local %s from a generic npx launcher", (name) => {
+		executable("npx");
+		expect(detect({ PATH: bin }).profiles).toEqual(["npm"]);
+		const localBin = join(workspace, "node_modules", ".bin");
+		mkdirSync(localBin, { recursive: true });
+		writeFileSync(join(localBin, name), "");
+		expect(detect({ PATH: bin }).profiles).toEqual(["npm", "playwright"]);
+	});
+
+	it.each([".venv", "venv"])("detects the Python Playwright script in a local %s without an activated PATH", (venv) => {
+		executable("python");
+		expect(detect({ PATH: bin }).profiles).toEqual(["pip"]);
+		const scripts = process.platform === "win32" ? join(workspace, venv, "Scripts") : join(workspace, venv, "bin");
+		mkdirSync(scripts, { recursive: true });
+		writeFileSync(join(scripts, process.platform === "win32" ? "playwright.exe" : "playwright"), "");
+		expect(detect({ PATH: bin }).profiles).toEqual(["pip", "playwright"]);
+	});
+
 	it("detects pip through a Python launcher", () => {
 		executable("python");
 		expect(detect({ PATH: bin }).profiles).toEqual(["pip"]);
