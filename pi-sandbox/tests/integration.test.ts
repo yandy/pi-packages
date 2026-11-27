@@ -139,6 +139,8 @@ describe.skipIf(skipConfinedBashCases)(`real confinement via ${selected.runner}`
 			"COREPACK_HOME", "PNPM_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR",
 			"YARN_CACHE_FOLDER", "YARN_GLOBAL_FOLDER", "BUN_INSTALL_CACHE_DIR", "GOPATH", "GOMODCACHE", "GOCACHE",
 			"MAVEN_USER_HOME", "GRADLE_USER_HOME",
+			"VCPKG_DEFAULT_BINARY_CACHE", "X_VCPKG_REGISTRIES_CACHE", "VCPKG_DOWNLOADS", "VCPKG_ROOT",
+			"PLAYWRIGHT_BROWSERS_PATH", "INIT_CWD",
 		]) vi.stubEnv(name, "");
 		resetToolStoragePlanCache();
 		const tools = createSandboxTools({

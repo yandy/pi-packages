@@ -59,6 +59,23 @@ describe("tool storage detection", () => {
 		expect(existsSync(marker)).toBe(false);
 	});
 
+	it("detects vcpkg and Playwright without executing the candidates", () => {
+		const marker = join(dir, "executed");
+		executable("vcpkg", marker);
+		executable("playwright", marker);
+		expect(detect({ PATH: bin }).profiles).toEqual(["vcpkg", "playwright"]);
+		expect(existsSync(marker)).toBe(false);
+	});
+
+	it.each(["playwright", "playwright.cmd", "playwright.ps1"])("distinguishes local %s from a generic npx launcher", (name) => {
+		executable("npx");
+		expect(detect({ PATH: bin }).profiles).toEqual(["npm"]);
+		const localBin = join(workspace, "node_modules", ".bin");
+		mkdirSync(localBin, { recursive: true });
+		writeFileSync(join(localBin, name), "");
+		expect(detect({ PATH: bin }).profiles).toEqual(["npm", "playwright"]);
+	});
+
 	it("detects pip through a Python launcher", () => {
 		executable("python");
 		expect(detect({ PATH: bin }).profiles).toEqual(["pip"]);

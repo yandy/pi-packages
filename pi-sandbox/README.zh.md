@@ -127,7 +127,7 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 
 ### 内置工具存储
 
-`workspace-write` 默认检测并开放常用工具的持久化存储，普通的 `uv sync`、`uv pip install`、`pnpm install` 等无需修改环境变量或提权。检测只看 PATH 中的入口和项目根的 `mvnw` / `gradlew`，不执行工具、不解析 shell 命令；Corepack 入口会同时启用 Corepack、pnpm、Yarn 档案。
+`workspace-write` 默认检测并开放常用工具的持久化存储，普通的 `uv sync`、`uv pip install`、`pnpm install` 等无需修改环境变量或提权。检测只看 PATH 入口和固定项目入口：`mvnw` / `gradlew` 以及 `node_modules/.bin/playwright`（含 `.cmd` / `.ps1`）；不执行工具、不解析 shell 命令或依赖清单。Corepack 入口会同时启用 Corepack、pnpm、Yarn 档案。`npx` 等通用启动器本身不会激活 Playwright，必须另有 PATH 或固定本地 Playwright 入口。
 
 | 档案 | 纳入的存储 | 主要路径覆盖变量 |
 |---|---|---|
@@ -141,12 +141,16 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 | Go | module cache + build cache | `GOMODCACHE`、`GOCACHE`、`GOPATH` |
 | Maven | local repository + Wrapper distributions | `MAVEN_USER_HOME` 只影响 wrapper |
 | Gradle | `caches/`、`daemon/`、`jdks/`、`wrapper/dists/` | `GRADLE_USER_HOME` |
+| vcpkg | binary/registries cache + manifest 的 `downloads/`、`buildtrees/`、`packages/` | `VCPKG_DEFAULT_BINARY_CACHE`、`X_VCPKG_REGISTRIES_CACHE`、`VCPKG_DOWNLOADS`、`VCPKG_ROOT`、XDG cache |
+| Playwright | 下载的浏览器二进制 | `PLAYWRIGHT_BROWSERS_PATH`、`INIT_CWD`、Linux XDG cache |
 
 路径按 Linux、macOS、Windows 的平台约定和父进程环境变量解析。例如 Linux 的 uv cache 是 `~/.cache/uv`、pnpm store 是 `~/.local/share/pnpm/store`；macOS 的 pip 是 `~/Library/Caches/pip`、pnpm store 是 `~/Library/pnpm/store`；Windows 的 uv cache 是 `%LOCALAPPDATA%\uv\cache`、managed Python 是 `%APPDATA%\uv\data\python`、pnpm store 是 `%LOCALAPPDATA%\pnpm\store`。pnpm 锁只开放 XDG runtime 或 `%LOCALAPPDATA%` 下的具名子目录，不开放共享根目录。
 
+vcpkg cache 在 Windows 使用 `%LOCALAPPDATA%\vcpkg`，在 Linux/macOS 使用 `$XDG_CACHE_HOME/vcpkg` 或 `~/.cache/vcpkg`；设置 `VCPKG_ROOT` 时只额外开放其 `downloads/`、`buildtrees/`、`packages/` 子目录。Playwright 在 Windows 使用 `%LOCALAPPDATA%\ms-playwright`，macOS 使用 `~/Library/Caches/ms-playwright`，Linux 使用 `$XDG_CACHE_HOME/ms-playwright` 或 `~/.cache/ms-playwright`。相对 `PLAYWRIGHT_BROWSERS_PATH` 以 `INIT_CWD` 为基准，未设置时以 workspace 为基准。
+
 缺失的内置存储根会在实际 `workspace-write` 调用前自动创建；read-only、danger-full-access 和 `/permission` 查询不会创建。每次调用都会复检，目录被删除后可在下次调用重建。单根创建或校验失败会告警并跳过该根，不让无关命令失去沙箱。PATH、环境变量与工具安装状态在进程内缓存，改动后重启 pi 生效。
 
-**全局安装仍会被拦截。** `uv tool install`、`uv pip install --system`、`pnpm add -g`、全局自更新、PATH 上的 bin/shim、用户配置与凭据均不因存储档案自动开放。显式 `uv python install` 创建全局可执行入口也不属于存储授权；Windows 的 PEP 514 注册表写入不是目录授权。pnpm 因项目位于其它卷宗而选择的 store，以及配置文件或 CLI 参数指定的自定义路径，仍需用户显式授权。
+**全局安装仍会被拦截。** `uv tool install`、`uv pip install --system`、`pnpm add -g`、全局自更新、PATH 上的 bin/shim、用户配置与凭据均不因存储档案自动开放。显式 `uv python install` 创建全局可执行入口也不属于存储授权；Windows 的 PEP 514 注册表写入不是目录授权。pnpm 因项目位于其它卷宗而选择的 store，以及配置文件或 CLI 参数指定的自定义路径，仍需用户显式授权。vcpkg classic 的 `installed/` 和 Playwright 的系统 Chrome/Edge 安装目录不在自动授权内。`PLAYWRIGHT_BROWSERS_PATH=0` 选择包内 `.local-browsers`：workspace 内的包已被覆盖，workspace 外的包位置仍需显式授权。
 
 `~/.pi/agent/sandbox-writable.json` 继续用于这些自定义路径和尚未内置的工具。与内置档案不同，手工条目**必须是已存在目录**，扩展不会自动创建它们。Cargo 首版没有内置档案：其 `CARGO_HOME/.package-cache` 位于根目录，现有目录级管线若开放整个 `CARGO_HOME` 会连带开放 `bin/`；只有接受这一代价时才手工授予。CMake 常规构建不需要全局依赖 cache；显式启用用户 package registry 时可手工授权 POSIX `~/.cmake/packages`。
 
