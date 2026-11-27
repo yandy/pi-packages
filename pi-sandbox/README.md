@@ -127,7 +127,7 @@ Config warnings never go straight to the terminal: the config is read before any
 
 ### Built-in tool storage
 
-`workspace-write` detects and grants persistent storage for common tools by default, so ordinary `uv sync`, `uv pip install`, `pnpm install`, and similar commands need neither environment relocation nor escalation. Detection inspects PATH entries and fixed project entry points: `mvnw` / `gradlew` and `node_modules/.bin/playwright` (including `.cmd` / `.ps1`). It never runs the tools, parses shell commands, or reads dependency manifests. A Corepack entry activates the Corepack, pnpm, and Yarn profiles. Generic launchers such as `npx` do not activate Playwright unless a PATH or fixed local Playwright entry exists.
+`workspace-write` detects and grants persistent storage for common tools by default, so ordinary `uv sync`, `uv pip install`, `pnpm install`, and similar commands need neither environment relocation nor escalation. Detection inspects PATH entries (`playwright` or `playwright-cli`) and fixed project entry points: `mvnw` / `gradlew` and `node_modules/.bin/playwright` / `playwright-cli` (including `.cmd` / `.ps1`). It never runs the tools, parses shell commands, or reads dependency manifests. A Corepack entry activates the Corepack, pnpm, and Yarn profiles. Generic launchers such as `npx` do not activate Playwright unless a PATH or fixed local Playwright entry exists.
 
 | Profile | Storage included | Main path overrides |
 |---|---|---|

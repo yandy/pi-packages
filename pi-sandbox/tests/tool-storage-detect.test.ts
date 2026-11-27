@@ -67,7 +67,15 @@ describe("tool storage detection", () => {
 		expect(existsSync(marker)).toBe(false);
 	});
 
-	it.each(["playwright", "playwright.cmd", "playwright.ps1"])("distinguishes local %s from a generic npx launcher", (name) => {
+	it.each(["playwright", "playwright-cli"])('detects the standalone %s CLI on PATH', (name) => {
+		executable(name);
+		expect(detect({ PATH: bin }).profiles).toEqual(["playwright"]);
+	});
+
+	it.each([
+		"playwright", "playwright.cmd", "playwright.ps1",
+		"playwright-cli", "playwright-cli.cmd", "playwright-cli.ps1",
+	])("distinguishes local %s from a generic npx launcher", (name) => {
 		executable("npx");
 		expect(detect({ PATH: bin }).profiles).toEqual(["npm"]);
 		const localBin = join(workspace, "node_modules", ".bin");

@@ -271,11 +271,14 @@ export const TOOL_STORAGE_PROFILES: readonly ToolStorageProfileDefinition[] = [
 	{ id: "vcpkg", commands: ["vcpkg"], roots: vcpkgRoots },
 	{
 		id: "playwright",
-		commands: ["playwright"],
+		commands: ["playwright", "playwright-cli"],
 		wrappers: [
 			"node_modules/.bin/playwright",
 			"node_modules/.bin/playwright.cmd",
 			"node_modules/.bin/playwright.ps1",
+			"node_modules/.bin/playwright-cli",
+			"node_modules/.bin/playwright-cli.cmd",
+			"node_modules/.bin/playwright-cli.ps1",
 		],
 		roots: playwrightRoots,
 	},
