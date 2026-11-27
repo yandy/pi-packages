@@ -127,7 +127,7 @@ bash/write/edit 带两个可选参数：`sandbox_permissions`（`workspace-write
 
 ### 内置工具存储
 
-`workspace-write` 默认检测并开放常用工具的持久化存储，普通的 `uv sync`、`uv pip install`、`pnpm install` 等无需修改环境变量或提权。检测只看 PATH 入口（`playwright` 或 `playwright-cli`）和固定项目入口：`mvnw` / `gradlew` 以及 `node_modules/.bin/playwright`、`playwright-cli`（含 `.cmd` / `.ps1`）；不执行工具、不解析 shell 命令或依赖清单。Corepack 入口会同时启用 Corepack、pnpm、Yarn 档案。`npx` 等通用启动器本身不会激活 Playwright，必须另有 PATH 或固定本地 Playwright 入口。
+`workspace-write` 默认检测并开放常用工具的持久化存储，普通的 `uv sync`、`uv pip install`、`pnpm install` 等无需修改环境变量或提权。检测只看 PATH 入口（`playwright` 或 `playwright-cli`）和固定项目入口：`mvnw` / `gradlew`、`node_modules/.bin/playwright`、`playwright-cli`（含 `.cmd` / `.ps1`），以及项目内虚拟环境的 `playwright` 脚本（`.venv` 或 `venv` 下的 `bin/` / `Scripts/`）；不执行工具、不解析 shell 命令或依赖清单。Python 版 Playwright 与 Node 版写同一份浏览器存储，因此共用一个档案；venv 入口覆盖未激活环境时的 `python -m playwright install`，pipx、`uv tool` 与 `pip --user` 安装则由 PATH 入口覆盖。Corepack 入口会同时启用 Corepack、pnpm、Yarn 档案。`npx` 等通用启动器本身不会激活 Playwright，必须另有 PATH 或固定本地 Playwright 入口。
 
 | 档案 | 纳入的存储 | 主要路径覆盖变量 |
 |---|---|---|
